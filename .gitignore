@@ -218,3 +218,12 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Serena
+.serena/
+
+# Superpowers
+.superpowers/
+*/superpowers/
+!docs/superpowers/
+!docs/superpowers/**
