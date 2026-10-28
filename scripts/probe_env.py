@@ -42,7 +42,7 @@ def classify_wheel_tags(filenames: list[str]) -> set[str]:
 def parse_pinned_packages(pyproject_path: Path) -> list[tuple[str, str | None]]:
     """Read [project.dependencies] and [dependency-groups].dev from a
     pyproject.toml, returning (name, version_or_none) pairs."""
-    data = tomllib.loads(pyproject_path.read_text())
+    data = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
     specs = list(data.get("project", {}).get("dependencies", []))
     specs += list(data.get("dependency-groups", {}).get("dev", []))
     results: list[tuple[str, str | None]] = []
