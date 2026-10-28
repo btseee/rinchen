@@ -314,7 +314,7 @@ git commit -m "docs: add STATE.md and DECISIONS.md tracking phase status and pin
 
 **Interfaces:**
 - Consumes: nothing from earlier tasks.
-- Produces: ignore rules that keep `data/` content, `runs/` training output, and generated `manifests/*.parquet` files out of git, while the `.gitkeep` files from Task 2 stay tracked (they were added with `git add -f`, which overrides these new ignore rules for those specific paths).
+- Produces: ignore rules that keep `data/` subdirectory contents (except `.gitkeep` placeholders, which stay tracked) and `/runs/` training output and `/models/` checkpoint output out of git. `manifests/*.parquet` is tracked, not ignored, per the project's hard constraint to record state in `manifests/`.
 
 - [ ] **Step 1: Append to `.gitignore`**
 
