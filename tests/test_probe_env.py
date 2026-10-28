@@ -166,3 +166,37 @@ def test_run_uv_lock_on_real_pyproject(tmp_path):
     result = run_uv_lock(repo_root)
     assert "success" in result
     assert "stderr_tail" in result
+
+
+import json
+
+
+@pytest.mark.network
+@pytest.mark.subprocess
+def test_main_writes_manifest_and_report(tmp_path, monkeypatch):
+    import probe_env
+
+    repo_root = Path(__file__).resolve().parent.parent
+    monkeypatch.setattr(probe_env, "REPO_ROOT", repo_root)
+    exit_code = probe_env.main()
+    assert exit_code == 0
+
+    manifest_path = repo_root / "manifests" / "phase0_env_probe.json"
+    report_path = repo_root / "reports" / "phase_0.md"
+    assert manifest_path.exists()
+    assert report_path.exists()
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["python_version"].startswith("3.14")
+    assert "packages" in manifest
+
+    report = report_path.read_text(encoding="utf-8")
+    assert "# Phase 0 Report: Environment Probe" in report
+
+
+def test_main_fails_fast_on_wrong_python_version(monkeypatch):
+    import probe_env
+
+    monkeypatch.setattr(probe_env.sys, "version_info", (3, 13, 0, "final", 0))
+    exit_code = probe_env.main()
+    assert exit_code == 1

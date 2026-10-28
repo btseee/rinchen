@@ -4,8 +4,12 @@ availability on cp314."""
 
 from __future__ import annotations
 
+import json
+import os
+import platform as platform_module
 import shutil
 import subprocess
+import sys
 import tempfile
 import tomllib
 from pathlib import Path
@@ -203,7 +207,101 @@ def render_report(manifest: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
-if __name__ == "__main__":
-    import sys
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
-    sys.exit(0)
+
+def main() -> int:
+    if sys.version_info[:2] != (3, 14):
+        print(
+            f"ERROR: Rinchen requires Python 3.14.x, found "
+            f"{sys.version_info[0]}.{sys.version_info[1]}",
+            file=sys.stderr,
+        )
+        return 1
+
+    repo_root = REPO_ROOT
+    python_version = platform_module.python_version()
+    plat = sys.platform
+    cpu_count = os.cpu_count() or 0
+    gpu = detect_gpu()
+
+    uv_version_result = subprocess.run(
+        ["uv", "--version"], capture_output=True, text=True
+    )
+    uv_version = uv_version_result.stdout.strip()
+
+    uv_lock_result = run_uv_lock(repo_root)
+
+    packages: dict = {}
+    for name, version in parse_pinned_packages(repo_root / "pyproject.toml"):
+        if name == "torch":
+            pypi_data = fetch_pypi_json(name, version)
+            pypi_filenames = (
+                [f["filename"] for f in pypi_data.get("urls", [])]
+                if pypi_data
+                else []
+            )
+            pypi_tags = classify_wheel_tags(pypi_filenames)
+            cu130_filenames = fetch_torch_cu130_index()
+            if version:
+                cu130_filenames = [
+                    f for f in cu130_filenames if f.startswith(f"torch-{version}")
+                ]
+            cu130_tags = classify_wheel_tags(cu130_filenames)
+            real_tags = cu130_tags - {"sdist", "none"}
+            packages[name] = {
+                "requested": version,
+                "torch_pypi": sorted(pypi_tags),
+                "torch_cu130_index": sorted(cu130_tags),
+                "status": "ok" if real_tags else "needs-review",
+            }
+            continue
+
+        data = fetch_pypi_json(name, version)
+        if data is None:
+            packages[name] = {
+                "requested": version,
+                "wheel_tags": ["none"],
+                "status": "version-not-found",
+            }
+            continue
+        filenames = [f["filename"] for f in data.get("urls", [])]
+        tags = classify_wheel_tags(filenames)
+        real_tags = tags - {"sdist", "none"}
+        if real_tags:
+            status = "ok"
+        elif "sdist" in tags:
+            status = "sdist-only"
+        else:
+            status = "no-wheel-found"
+        packages[name] = {
+            "requested": version,
+            "wheel_tags": sorted(tags),
+            "status": status,
+        }
+
+    manifest = build_manifest(
+        python_version=python_version,
+        platform=plat,
+        cpu_count=cpu_count,
+        gpu=gpu,
+        uv_version=uv_version,
+        uv_lock_result=uv_lock_result,
+        packages=packages,
+    )
+    report = render_report(manifest)
+
+    manifests_dir = repo_root / "manifests"
+    reports_dir = repo_root / "reports"
+    manifests_dir.mkdir(exist_ok=True)
+    reports_dir.mkdir(exist_ok=True)
+    (manifests_dir / "phase0_env_probe.json").write_text(
+        json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
+    )
+    (reports_dir / "phase_0.md").write_text(report, encoding="utf-8")
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
