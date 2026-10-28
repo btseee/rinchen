@@ -229,7 +229,7 @@ __marimo__/
 !docs/superpowers/**
 
 # Rinchen data/training artifacts
-data/*
+data/*/*
 !data/*/.gitkeep
 runs/
 manifests/*.parquet

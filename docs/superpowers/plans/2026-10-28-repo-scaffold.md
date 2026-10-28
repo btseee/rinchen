@@ -322,7 +322,7 @@ git commit -m "docs: add STATE.md and DECISIONS.md tracking phase status and pin
 ```gitignore
 
 # Rinchen data/training artifacts
-data/*
+data/*/*
 !data/*/.gitkeep
 runs/
 manifests/*.parquet
