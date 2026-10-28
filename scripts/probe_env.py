@@ -225,10 +225,13 @@ def main() -> int:
     cpu_count = os.cpu_count() or 0
     gpu = detect_gpu()
 
-    uv_version_result = subprocess.run(
-        ["uv", "--version"], capture_output=True, text=True
-    )
-    uv_version = uv_version_result.stdout.strip()
+    try:
+        uv_version_result = subprocess.run(
+            ["uv", "--version"], capture_output=True, text=True, timeout=30
+        )
+        uv_version = uv_version_result.stdout.strip()
+    except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+        uv_version = f"unavailable: {exc}"
 
     uv_lock_result = run_uv_lock(repo_root)
 
