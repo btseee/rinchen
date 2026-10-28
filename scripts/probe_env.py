@@ -55,13 +55,16 @@ def run_uv_lock(repo_root: Path) -> dict:
         src_dir = repo_root / "src"
         if src_dir.exists():
             shutil.copytree(src_dir, tmp_path / "src")
-        result = subprocess.run(
-            ["uv", "lock"],
-            cwd=tmp_path,
-            capture_output=True,
-            text=True,
-            timeout=300,
-        )
+        try:
+            result = subprocess.run(
+                ["uv", "lock"],
+                cwd=tmp_path,
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+            return {"success": False, "stderr_tail": f"uv lock failed to run: {exc}"}
         return {
             "success": result.returncode == 0,
             "stderr_tail": None if result.returncode == 0 else result.stderr[-4000:],
@@ -81,7 +84,7 @@ def detect_gpu() -> dict | None:
             text=True,
             timeout=10,
         )
-    except FileNotFoundError:
+    except (FileNotFoundError, subprocess.TimeoutExpired):
         return None
     if result.returncode != 0 or not result.stdout.strip():
         return None
