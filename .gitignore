@@ -227,3 +227,10 @@ __marimo__/
 */superpowers/
 !docs/superpowers/
 !docs/superpowers/**
+
+# Rinchen data/training artifacts
+data/*
+!data/*/.gitkeep
+runs/
+manifests/*.parquet
+!manifests/.gitkeep
