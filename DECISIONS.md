@@ -30,3 +30,11 @@ Each entry is tagged `[EVIDENCE: source]` (verified fact) or `[DESIGN: rationale
   constraints require recording resolved versions and checkpoint hashes in
   manifests/, and later phases (release.json) depend on those hashes being
   present in a fresh clone].
+- Confirmed: pyonmttok has no cp314 wheel as of 2026-10-28. [EVIDENCE: Phase 0
+  P0.1 probe, see reports/phase_0.md]. `uv lock` fails outright because
+  `eole==0.6.4` requires `pyonmttok>=1.38.1`, and `pyonmttok` only ships wheels
+  for cp310/cp311/cp312. Follow-up (P0.1's STATE.md blocker) needed before
+  eole can be installed on this machine. Secondary note: `warcio` is
+  sdist-only (no wheel for any Python version) [EVIDENCE: Phase 0 P0.1 probe,
+  see reports/phase_0.md]; this does not block installation but adds a build
+  step.

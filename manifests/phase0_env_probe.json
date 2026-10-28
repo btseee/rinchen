@@ -1,0 +1,267 @@
+{
+  "python_version": "3.14.7",
+  "platform": "win32",
+  "cpu_count": 12,
+  "gpu": null,
+  "uv_version": "uv 0.13.5 (46776a95d 2026-10-21 x86_64-pc-windows-msvc)",
+  "uv_lock": {
+    "success": false,
+    "stderr_tail": "Using CPython 3.14.7 interpreter at: C:\\Users\\BBadral\\AppData\\Local\\Programs\\Python\\Python314\\python.exe\nerror: No solution found when resolving dependencies for split (markers: sys_platform == 'win32')\n  cause: Because pyonmttok==1.38.1 has no wheels with a matching Python version tag (e.g., `cp314`) and only pyonmttok<=1.38.1 is available, we can conclude that pyonmttok>=1.38.1 cannot be used.\n         And because eole==0.6.4 depends on pyonmttok>=1.38.1 and your project depends on eole==0.6.4, we can conclude that your project's requirements are unsatisfiable.\n\nhint: Wheels are available for `pyonmttok` (v1.38.1) with the following Python ABI tags: `cp310`, `cp311`, `cp312`\n"
+  },
+  "packages": {
+    "torch": {
+      "requested": "2.14.1",
+      "torch_pypi": [
+        "cp314",
+        "cp314t"
+      ],
+      "torch_cu130_index": [
+        "cp314",
+        "cp314t"
+      ],
+      "status": "ok"
+    },
+    "eole": {
+      "requested": "0.6.4",
+      "wheel_tags": [
+        "py3-none",
+        "sdist"
+      ],
+      "status": "ok"
+    },
+    "ctranslate2": {
+      "requested": "4.8.4",
+      "wheel_tags": [
+        "cp314",
+        "cp314t"
+      ],
+      "status": "ok"
+    },
+    "transformers": {
+      "requested": "5.21.0",
+      "wheel_tags": [
+        "py3-none",
+        "sdist"
+      ],
+      "status": "ok"
+    },
+    "tokenizers": {
+      "requested": "0.23.3",
+      "wheel_tags": [
+        "abi3",
+        "cp314t",
+        "sdist"
+      ],
+      "status": "ok"
+    },
+    "sentencepiece": {
+      "requested": "0.2.1",
+      "wheel_tags": [
+        "cp314",
+        "cp314t",
+        "sdist"
+      ],
+      "status": "ok"
+    },
+    "sacrebleu": {
+      "requested": "2.6.0",
+      "wheel_tags": [
+        "py3-none",
+        "sdist"
+      ],
+      "status": "ok"
+    },
+    "kiwipiepy": {
+      "requested": "0.24.0",
+      "wheel_tags": [
+        "abi3",
+        "cp314t",
+        "sdist"
+      ],
+      "status": "ok"
+    },
+    "fasttext-new": {
+      "requested": "0.1.0",
+      "wheel_tags": [
+        "abi3",
+        "cp314t",
+        "sdist"
+      ],
+      "status": "ok"
+    },
+    "datasketch": {
+      "requested": "2.0.0",
+      "wheel_tags": [
+        "py3-none",
+        "sdist"
+      ],
+      "status": "ok"
+    },
+    "datasets": {
+      "requested": null,
+      "wheel_tags": [
+        "py3-none",
+        "sdist"
+      ],
+      "status": "ok"
+    },
+    "huggingface_hub": {
+      "requested": null,
+      "wheel_tags": [
+        "py3-none",
+        "sdist"
+      ],
+      "status": "ok"
+    },
+    "pyarrow": {
+      "requested": null,
+      "wheel_tags": [
+        "cp314",
+        "cp314t",
+        "sdist"
+      ],
+      "status": "ok"
+    },
+    "polars": {
+      "requested": null,
+      "wheel_tags": [
+        "py3-none",
+        "sdist"
+      ],
+      "status": "ok"
+    },
+    "duckdb": {
+      "requested": null,
+      "wheel_tags": [
+        "abi3",
+        "sdist"
+      ],
+      "status": "ok"
+    },
+    "numpy": {
+      "requested": null,
+      "wheel_tags": [
+        "cp314",
+        "cp314t",
+        "sdist"
+      ],
+      "status": "ok"
+    },
+    "pandas": {
+      "requested": null,
+      "wheel_tags": [
+        "cp314",
+        "cp314t",
+        "sdist"
+      ],
+      "status": "ok"
+    },
+    "scipy": {
+      "requested": null,
+      "wheel_tags": [
+        "cp314",
+        "cp314t",
+        "sdist"
+      ],
+      "status": "ok"
+    },
+    "trafilatura": {
+      "requested": null,
+      "wheel_tags": [
+        "py3-none",
+        "sdist"
+      ],
+      "status": "ok"
+    },
+    "warcio": {
+      "requested": null,
+      "wheel_tags": [
+        "sdist"
+      ],
+      "status": "sdist-only"
+    },
+    "httpx": {
+      "requested": null,
+      "wheel_tags": [
+        "py3-none",
+        "sdist"
+      ],
+      "status": "ok"
+    },
+    "selectolax": {
+      "requested": null,
+      "wheel_tags": [
+        "cp314",
+        "cp314t",
+        "sdist"
+      ],
+      "status": "ok"
+    },
+    "beautifulsoup4": {
+      "requested": null,
+      "wheel_tags": [
+        "py3-none",
+        "sdist"
+      ],
+      "status": "ok"
+    },
+    "sentence-transformers": {
+      "requested": null,
+      "wheel_tags": [
+        "py3-none",
+        "sdist"
+      ],
+      "status": "ok"
+    },
+    "fastapi": {
+      "requested": null,
+      "wheel_tags": [
+        "py3-none",
+        "sdist"
+      ],
+      "status": "ok"
+    },
+    "uvicorn": {
+      "requested": null,
+      "wheel_tags": [
+        "py3-none",
+        "sdist"
+      ],
+      "status": "ok"
+    },
+    "pydantic": {
+      "requested": null,
+      "wheel_tags": [
+        "py3-none",
+        "sdist"
+      ],
+      "status": "ok"
+    },
+    "pytest": {
+      "requested": null,
+      "wheel_tags": [
+        "py3-none",
+        "sdist"
+      ],
+      "status": "ok"
+    },
+    "ruff": {
+      "requested": null,
+      "wheel_tags": [
+        "py3-none",
+        "sdist"
+      ],
+      "status": "ok"
+    },
+    "mypy": {
+      "requested": null,
+      "wheel_tags": [
+        "cp314",
+        "cp314t",
+        "py3-none",
+        "sdist"
+      ],
+      "status": "ok"
+    }
+  }
+}
