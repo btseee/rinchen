@@ -124,3 +124,45 @@ def test_render_report_flags_uv_lock_failure():
     report = render_report(manifest)
     assert "FAILED" in report
     assert "error: no solution found" in report
+
+
+import pytest
+
+from probe_env import detect_gpu, fetch_pypi_json, fetch_torch_cu130_index, run_uv_lock
+
+
+@pytest.mark.network
+def test_fetch_pypi_json_known_package():
+    data = fetch_pypi_json("packaging", None)
+    assert data is not None
+    assert "info" in data
+
+
+@pytest.mark.network
+def test_fetch_pypi_json_unknown_package_returns_none():
+    data = fetch_pypi_json("this-package-definitely-does-not-exist-rinchen-probe", None)
+    assert data is None
+
+
+@pytest.mark.network
+def test_fetch_torch_cu130_index_returns_filenames():
+    filenames = fetch_torch_cu130_index()
+    assert isinstance(filenames, list)
+    assert any("torch" in f for f in filenames)
+
+
+@pytest.mark.subprocess
+def test_detect_gpu_returns_none_or_dict():
+    result = detect_gpu()
+    assert result is None or {"name", "driver_version", "memory_total"} <= result.keys()
+
+
+@pytest.mark.network
+@pytest.mark.subprocess
+def test_run_uv_lock_on_real_pyproject(tmp_path):
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parent.parent
+    result = run_uv_lock(repo_root)
+    assert "success" in result
+    assert "stderr_tail" in result

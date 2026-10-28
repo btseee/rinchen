@@ -4,8 +4,92 @@ availability on cp314."""
 
 from __future__ import annotations
 
+import shutil
+import subprocess
+import tempfile
 import tomllib
 from pathlib import Path
+
+import httpx
+from bs4 import BeautifulSoup
+
+
+def fetch_pypi_json(name: str, version: str | None) -> dict | None:
+    """Fetch a package's PyPI JSON metadata. Returns None if not found."""
+    url = (
+        f"https://pypi.org/pypi/{name}/{version}/json"
+        if version
+        else f"https://pypi.org/pypi/{name}/json"
+    )
+    try:
+        resp = httpx.get(url, timeout=30, follow_redirects=True)
+    except httpx.HTTPError:
+        return None
+    if resp.status_code == 404:
+        return None
+    resp.raise_for_status()
+    return resp.json()
+
+
+def fetch_torch_cu130_index() -> list[str]:
+    """Fetch the filenames listed on PyTorch's cu130 wheel index for torch."""
+    url = "https://download.pytorch.org/whl/cu130/torch/"
+    resp = httpx.get(url, timeout=30, follow_redirects=True)
+    resp.raise_for_status()
+    soup = BeautifulSoup(resp.text, "html.parser")
+    filenames = []
+    for a in soup.find_all("a"):
+        href = a.get("href", "")
+        filename = href.split("/")[-1].split("#")[0]
+        if filename:
+            filenames.append(filename)
+    return filenames
+
+
+def run_uv_lock(repo_root: Path) -> dict:
+    """Dry-resolve the pinned stack via `uv lock`, in a temp copy of the repo
+    so the real uv.lock is never created or mutated by this probe."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        shutil.copy2(repo_root / "pyproject.toml", tmp_path / "pyproject.toml")
+        src_dir = repo_root / "src"
+        if src_dir.exists():
+            shutil.copytree(src_dir, tmp_path / "src")
+        result = subprocess.run(
+            ["uv", "lock"],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        return {
+            "success": result.returncode == 0,
+            "stderr_tail": None if result.returncode == 0 else result.stderr[-4000:],
+        }
+
+
+def detect_gpu() -> dict | None:
+    """Detect an NVIDIA GPU via nvidia-smi. Returns None if absent."""
+    try:
+        result = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=name,driver_version,memory.total",
+                "--format=csv,noheader",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except FileNotFoundError:
+        return None
+    if result.returncode != 0 or not result.stdout.strip():
+        return None
+    line = result.stdout.strip().splitlines()[0]
+    parts = [p.strip() for p in line.split(",")]
+    if len(parts) < 3:
+        return None
+    return {"name": parts[0], "driver_version": parts[1], "memory_total": parts[2]}
 
 
 def classify_wheel_tags(filenames: list[str]) -> set[str]:
