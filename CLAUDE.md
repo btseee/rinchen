@@ -46,7 +46,7 @@ Phase 0 (environment and benchmark) — not started. See `STATE.md`.
 
 ## Evidence and full phase plan
 
-The complete package evidence, version decisions, and all 14 phase specs live in
+The complete package evidence, version decisions, and all 15 phase specs (ids 0-14) live in
 `docs/research/2026-10-28-python314-stack-and-prompt.md`. This file only carries
 the hard constraints and pointers; consult the research doc before pinning or
 changing any dependency.

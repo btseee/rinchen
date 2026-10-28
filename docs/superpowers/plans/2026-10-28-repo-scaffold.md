@@ -67,7 +67,6 @@ dependencies = [
 
 [dependency-groups]
 dev = ["pytest", "ruff", "mypy"]
-gen = ["vllm==0.32.0"]
 
 [tool.uv]
 
@@ -322,11 +321,12 @@ git commit -m "docs: add STATE.md and DECISIONS.md tracking phase status and pin
 ```gitignore
 
 # Rinchen data/training artifacts
+data/*
+!data/*/
 data/*/*
 !data/*/.gitkeep
-runs/
-manifests/*.parquet
-!manifests/.gitkeep
+/runs/
+/models/
 ```
 
 - [ ] **Step 2: Verify `.gitkeep` files are still tracked and new data files are ignored**

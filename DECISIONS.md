@@ -19,7 +19,14 @@ Each entry is tagged `[EVIDENCE: source]` (verified fact) or `[DESIGN: rationale
   Relative/rotary/ALiBi. [EVIDENCE: CTranslate2 issue #2134 (open as of
   2026-10-27) shows the Eole→CT2 converter mis-scales relative position keys;
   CT2 also rejects rotary for encoder-decoder].
-- Keep vLLM in a separate `gen` dependency group, installed only if its torch
-  pin conflicts with Eole's `torch>=2.10,<2.15`. [DESIGN: vLLM 0.32.0 declares
-  3.11-3.14 support but its own CI/Docker run on Python 3.12, so treat the
-  3.14 install as a runtime risk, not a certainty].
+- Do not include vLLM in the main uv workspace. [EVIDENCE: vllm==0.32.0 requires
+  torch==2.13.0 and transformers<5.20.0, which conflicts with the base
+  torch==2.14.1/transformers==5.21.0 pins; uv shares one lockfile across all
+  dependency groups, so an in-workspace group cannot isolate this]. If a
+  generator model is needed (Phase 6), use a separate non-workspace uv project
+  with its own lockfile, or the llama.cpp path the research doc calls
+  3.14-safe.
+- Track manifests/*.parquet in git rather than ignoring it. [DESIGN: the hard
+  constraints require recording resolved versions and checkpoint hashes in
+  manifests/, and later phases (release.json) depend on those hashes being
+  present in a fresh clone].
