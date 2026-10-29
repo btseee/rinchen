@@ -26,8 +26,9 @@ wheel-tag status "ok" on Python 3.14.7 (an earlier run falsely flagged
 — `warcio`'s real tag is the compressed `py2.py3-none-any`, which does carry
 a wheel).
 
-CI is expected to stay red (`uv sync --dev` fails) until the pyonmttok/eole
-gap below is resolved.
+CI is expected to stay red (`uv sync --dev` fails): the pyonmttok/eole gap
+below is now resolved, but `uv sync` next hits the fasttext-wheel gap
+documented below, which is not yet resolved.
 
 Known blockers for Phase 0 to resolve (see DECISIONS.md for the vLLM entry):
 
