@@ -31,7 +31,7 @@ CMAKE_PIP_VERSION="4.4.4"
 # `_ext` extension module as up to date and silently skips recompiling it
 # -- only the separately-built libOpenNMTTokenizer.so would actually be
 # fresh. git is present in this image, confirmed separately.
-git -C "$SRC_DIR" clean -xfd
+git -c safe.directory="$SRC_DIR" -C "$SRC_DIR" clean -xfd
 
 # pytest-runner/pytest are required because the bindings' setup.py declares
 # `setup_requires=["pytest-runner"]` and nothing else in this sequence pulls
