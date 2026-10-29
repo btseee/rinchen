@@ -12,6 +12,7 @@ WORK_DIR=/root/pyonmttok-build
 ICU_VERSION="73.2"
 ICU_SRC_SHA256="818a80712ed3caacd9b652305e01afc7fa167e6f2e94996da44b90c2ab604ce1"
 PYBIND11_VERSION="3.1.0"
+PIP_VERSION="26.2.2"
 SETUPTOOLS_VERSION="84.2.1"
 WHEEL_VERSION="0.48.0"
 BUILD_PKG_VERSION="1.6.1"
@@ -22,10 +23,21 @@ CMAKE_PIP_VERSION="4.4.4"
 
 "$PY_BIN" --version
 
+# Wipe any stale build artifacts left in the (host-side, bind-mounted)
+# pinned source checkout by a previous container run (or by
+# build_windows.sh against the same shared checkout). setuptools' own
+# build cache (bindings/python/build/, bindings/python/pyonmttok.egg-info/)
+# is untracked, so without this `python -m build` sees the already-compiled
+# `_ext` extension module as up to date and silently skips recompiling it
+# -- only the separately-built libOpenNMTTokenizer.so would actually be
+# fresh. git is present in this image, confirmed separately.
+git -C "$SRC_DIR" clean -xfd
+
 # pytest-runner/pytest are required because the bindings' setup.py declares
 # `setup_requires=["pytest-runner"]` and nothing else in this sequence pulls
 # it in without build isolation (same fix as Task 2's Windows build).
-"$PY_BIN" -m pip install --quiet --upgrade pip \
+"$PY_BIN" -m pip install --quiet \
+  "pip==${PIP_VERSION}" \
   "cmake==${CMAKE_PIP_VERSION}" \
   "setuptools==${SETUPTOOLS_VERSION}" \
   "wheel==${WHEEL_VERSION}" \
@@ -89,12 +101,19 @@ ls "$OUT_DIR"
 cpython_version="$("$PY_BIN" -c "import platform; print(platform.python_version())")"
 cmake_version="$(cmake --version | head -1 | sed -E 's/^cmake version //')"
 auditwheel_version="$("$PY_BIN" -m auditwheel --version 2>&1 | head -1 | awk '{print $2}')"
+# Since pip/setuptools/wheel/build are installed above with exact `==`
+# pins, the pinned version *is* the resolved version (pip install would
+# have failed under `set -e` otherwise) -- no need for a separate query.
 {
   echo "cpython_version=${cpython_version}"
   echo "cmake_version=${cmake_version}"
   echo "auditwheel_version=${auditwheel_version}"
   echo "pybind11_version=${PYBIND11_VERSION}"
   echo "icu_version=${ICU_VERSION}"
+  echo "pip_version=${PIP_VERSION}"
+  echo "setuptools_version=${SETUPTOOLS_VERSION}"
+  echo "wheel_version=${WHEEL_VERSION}"
+  echo "build_version=${BUILD_PKG_VERSION}"
 } > "$OUT_DIR/provenance.env"
 echo "Build provenance:"
 cat "$OUT_DIR/provenance.env"

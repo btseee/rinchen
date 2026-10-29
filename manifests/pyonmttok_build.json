@@ -10,25 +10,33 @@
     {
       "platform": "manylinux_2_28_x86_64",
       "wheel": "vendor/wheels/pyonmttok-1.38.1-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
-      "sha256": "fae8b93691fe395e6742474c1205a4a971ddd3ecd4923c41b57736835dbf13e8",
-      "built_at": "2026-10-29T13:23:05+00:00",
+      "sha256": "6e03c32a48076b57550483d3d0fb5eb283e2023e2d62aa3d00ab16ba07ede945",
+      "built_at": "2026-10-29T14:10:19+00:00",
       "cpython_version": "3.14.10",
       "cmake_version": "4.4.4",
       "auditwheel_version": "6.8.2",
       "pybind11_version": "3.1.0",
       "icu_version": "73.2",
+      "pip_version": "26.2.2",
+      "setuptools_version": "84.2.1",
+      "wheel_version": "0.48.0",
+      "build_version": "1.6.1",
       "manylinux_image": "quay.io/pypa/manylinux_2_28_x86_64@sha256:e0adf18521ad35192df733a6c62d35df7801957d24e0470238aacecfab2188a3"
     },
     {
       "platform": "win_amd64",
       "wheel": "vendor/wheels/pyonmttok-1.38.1-cp314-cp314-win_amd64.whl",
-      "sha256": "d4dc34740d0cb460f31206017ee0ae2142d414fd47412b6e0f75daaac605ecb1",
-      "built_at": "2026-10-29T13:29:46+00:00",
+      "sha256": "34f426f2425026745b95f88d19f153878b43e46ba1322e54f19987e3e061ce89",
+      "built_at": "2026-10-29T14:14:37+00:00",
       "cpython_version": "3.14.7",
       "cmake_version": "4.4.4",
       "pybind11_version": "3.1.0",
       "icu_version": "73.2",
-      "msvc_toolset_version": "19.51.36260.0"
+      "msvc_compiler_version": "19.51.36260.0",
+      "pip_version": "26.2.2",
+      "setuptools_version": "84.2.1",
+      "wheel_version": "0.48.0",
+      "build_version": "1.6.1"
     }
   ]
 }

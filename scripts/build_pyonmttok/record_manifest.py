@@ -9,6 +9,11 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 MANIFEST_PATH = REPO_ROOT / "manifests" / "pyonmttok_build.json"
 
+# Core fields main() itself computes; a `key=value` extra field may not
+# override any of these (e.g. `sha256=anything` on the CLI must not replace
+# the real computed hash).
+RESERVED_FIELDS = frozenset({"platform", "wheel", "sha256", "built_at"})
+
 
 def sha256_of(path: Path) -> str:
     digest = hashlib.sha256()
@@ -23,6 +28,19 @@ def main(platform: str, wheel_path_str: str, extra: dict[str, str] | None = None
     if not wheel_path.is_file():
         print(f"wheel not found: {wheel_path}", file=sys.stderr)
         return 1
+
+    if extra:
+        for key in extra:
+            if not key:
+                print("invalid extra field: empty key", file=sys.stderr)
+                return 1
+            if key in RESERVED_FIELDS:
+                print(
+                    f"invalid extra field: {key!r} is a reserved core field "
+                    "and cannot be overridden",
+                    file=sys.stderr,
+                )
+                return 1
 
     manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
     try:

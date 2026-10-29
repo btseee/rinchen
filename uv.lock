@@ -1715,7 +1715,7 @@ resolution-markers = [
     "sys_platform == 'linux'",
 ]
 wheels = [
-    { filename = "pyonmttok-1.38.1-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:fae8b93691fe395e6742474c1205a4a971ddd3ecd4923c41b57736835dbf13e8" },
+    { filename = "pyonmttok-1.38.1-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:6e03c32a48076b57550483d3d0fb5eb283e2023e2d62aa3d00ab16ba07ede945" },
 ]
 
 [[package]]
@@ -1726,7 +1726,7 @@ resolution-markers = [
     "sys_platform == 'win32'",
 ]
 wheels = [
-    { filename = "pyonmttok-1.38.1-cp314-cp314-win_amd64.whl", hash = "sha256:d4dc34740d0cb460f31206017ee0ae2142d414fd47412b6e0f75daaac605ecb1" },
+    { filename = "pyonmttok-1.38.1-cp314-cp314-win_amd64.whl", hash = "sha256:34f426f2425026745b95f88d19f153878b43e46ba1322e54f19987e3e061ce89" },
 ]
 
 [[package]]

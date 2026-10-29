@@ -91,9 +91,12 @@ if [ -f "$PROVENANCE_FILE" ]; then
     [ -n "$line" ] && PROVENANCE_ARGS+=("$line")
   done < "$PROVENANCE_FILE"
   PROVENANCE_ARGS+=("manylinux_image=$IMAGE")
-  echo "Suggested record_manifest.py invocation:"
   REPAIRED_WHEEL="$(ls "$OUT_DIR"/*.whl)"
-  echo "python \"$REPO_ROOT/scripts/build_pyonmttok/record_manifest.py\" manylinux_2_28_x86_64 \"$REPAIRED_WHEEL\" ${PROVENANCE_ARGS[*]}"
+  WHEEL_NAME="$(basename "$REPAIRED_WHEEL")"
+  echo "Suggested commands (vendor/wheels/ is the real destination -- the"
+  echo "build output above lives under the gitignored build/ directory):"
+  echo "  cp \"$REPAIRED_WHEEL\" \"$REPO_ROOT/vendor/wheels/\""
+  echo "  python \"$REPO_ROOT/scripts/build_pyonmttok/record_manifest.py\" manylinux_2_28_x86_64 \"$REPO_ROOT/vendor/wheels/$WHEEL_NAME\" ${PROVENANCE_ARGS[*]}"
 else
   echo "WARNING: no $PROVENANCE_FILE found; build_linux_inner.sh did not record provenance." >&2
 fi
