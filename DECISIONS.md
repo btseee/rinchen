@@ -31,10 +31,17 @@ Each entry is tagged `[EVIDENCE: source]` (verified fact) or `[DESIGN: rationale
   manifests/, and later phases (release.json) depend on those hashes being
   present in a fresh clone].
 - Confirmed: pyonmttok has no cp314 wheel as of 2026-10-28. [EVIDENCE: Phase 0
-  P0.1 probe, see reports/phase_0.md]. `uv lock` fails outright because
-  `eole==0.6.4` requires `pyonmttok>=1.38.1`, and `pyonmttok` only ships wheels
-  for cp310/cp311/cp312. Follow-up (P0.1's STATE.md blocker) needed before
-  eole can be installed on this machine. Secondary note: `warcio` is
-  sdist-only (no wheel for any Python version) [EVIDENCE: Phase 0 P0.1 probe,
-  see reports/phase_0.md]; this does not block installation but adds a build
-  step.
+  P0.1 probe, see reports/phase_0_env_probe.md]. `uv lock` fails outright
+  because `eole==0.6.4` requires `pyonmttok>=1.38.1`, and `pyonmttok` only
+  ships wheels for cp310/cp311/cp312. Fallback to try first: `eole --no-deps`
+  plus only the dependencies `import eole.bin.main` and `eole train --help`
+  actually need (see STATE.md). Never work around this by running any part
+  of the project on cp310/cp311/cp312 — the hard constraints forbid any
+  fallback interpreter.
+- All 29 direct dependencies resolve to wheel-tag status "ok" on Python
+  3.14.7, including `warcio`. [EVIDENCE: Phase 0 P0.1 probe, 2026-10-29, see
+  reports/phase_0_env_probe.md]. An earlier run of the probe had a
+  wheel-tag-classifier bug that didn't recognize compressed tags like
+  `py2.py3` (warcio's real tag), so it was wrongly reported as sdist-only
+  with no wheel at all; the classifier is fixed and this bullet replaces
+  that earlier, incorrect finding.

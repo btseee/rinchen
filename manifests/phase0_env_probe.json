@@ -1,4 +1,5 @@
 {
+  "probed_at": "2026-10-29T08:37:16.599211+00:00",
   "python_version": "3.14.7",
   "platform": "win32",
   "cpu_count": 12,
@@ -6,11 +7,12 @@
   "uv_version": "uv 0.13.5 (46776a95d 2026-10-21 x86_64-pc-windows-msvc)",
   "uv_lock": {
     "success": false,
-    "stderr_tail": "Using CPython 3.14.7 interpreter at: C:\\Users\\BBadral\\AppData\\Local\\Programs\\Python\\Python314\\python.exe\nerror: No solution found when resolving dependencies for split (markers: sys_platform == 'win32')\n  cause: Because pyonmttok==1.38.1 has no wheels with a matching Python version tag (e.g., `cp314`) and only pyonmttok<=1.38.1 is available, we can conclude that pyonmttok>=1.38.1 cannot be used.\n         And because eole==0.6.4 depends on pyonmttok>=1.38.1 and your project depends on eole==0.6.4, we can conclude that your project's requirements are unsatisfiable.\n\nhint: Wheels are available for `pyonmttok` (v1.38.1) with the following Python ABI tags: `cp310`, `cp311`, `cp312`\n"
+    "stderr_tail": "Using CPython 3.14.7 interpreter at: ~\\AppData\\Local\\Programs\\Python\\Python314\\python.exe\nerror: No solution found when resolving dependencies for split (markers: sys_platform == 'win32')\n  cause: Because pyonmttok==1.38.1 has no wheels with a matching Python version tag (e.g., `cp314`) and only pyonmttok<=1.38.1 is available, we can conclude that pyonmttok>=1.38.1 cannot be used.\n         And because eole==0.6.4 depends on pyonmttok>=1.38.1 and your project depends on eole==0.6.4, we can conclude that your project's requirements are unsatisfiable.\n\nhint: Wheels are available for `pyonmttok` (v1.38.1) with the following Python ABI tags: `cp310`, `cp311`, `cp312`\n"
   },
   "packages": {
     "torch": {
       "requested": "2.14.1",
+      "checked_version": "2.14.1",
       "torch_pypi": [
         "cp314",
         "cp314t"
@@ -23,6 +25,7 @@
     },
     "eole": {
       "requested": "0.6.4",
+      "checked_version": "0.6.4",
       "wheel_tags": [
         "py3-none",
         "sdist"
@@ -31,6 +34,7 @@
     },
     "ctranslate2": {
       "requested": "4.8.4",
+      "checked_version": "4.8.4",
       "wheel_tags": [
         "cp314",
         "cp314t"
@@ -39,6 +43,7 @@
     },
     "transformers": {
       "requested": "5.21.0",
+      "checked_version": "5.21.0",
       "wheel_tags": [
         "py3-none",
         "sdist"
@@ -47,6 +52,7 @@
     },
     "tokenizers": {
       "requested": "0.23.3",
+      "checked_version": "0.23.3",
       "wheel_tags": [
         "abi3",
         "cp314t",
@@ -56,6 +62,7 @@
     },
     "sentencepiece": {
       "requested": "0.2.1",
+      "checked_version": "0.2.1",
       "wheel_tags": [
         "cp314",
         "cp314t",
@@ -65,6 +72,7 @@
     },
     "sacrebleu": {
       "requested": "2.6.0",
+      "checked_version": "2.6.0",
       "wheel_tags": [
         "py3-none",
         "sdist"
@@ -73,6 +81,7 @@
     },
     "kiwipiepy": {
       "requested": "0.24.0",
+      "checked_version": "0.24.0",
       "wheel_tags": [
         "abi3",
         "cp314t",
@@ -82,6 +91,7 @@
     },
     "fasttext-new": {
       "requested": "0.1.0",
+      "checked_version": "0.1.0",
       "wheel_tags": [
         "abi3",
         "cp314t",
@@ -91,6 +101,7 @@
     },
     "datasketch": {
       "requested": "2.0.0",
+      "checked_version": "2.0.0",
       "wheel_tags": [
         "py3-none",
         "sdist"
@@ -99,6 +110,7 @@
     },
     "datasets": {
       "requested": null,
+      "checked_version": "5.1.0",
       "wheel_tags": [
         "py3-none",
         "sdist"
@@ -107,6 +119,7 @@
     },
     "huggingface_hub": {
       "requested": null,
+      "checked_version": "2.3.0",
       "wheel_tags": [
         "py3-none",
         "sdist"
@@ -115,6 +128,7 @@
     },
     "pyarrow": {
       "requested": null,
+      "checked_version": "26.0.0",
       "wheel_tags": [
         "cp314",
         "cp314t",
@@ -124,6 +138,7 @@
     },
     "polars": {
       "requested": null,
+      "checked_version": "2.1.0",
       "wheel_tags": [
         "py3-none",
         "sdist"
@@ -132,6 +147,7 @@
     },
     "duckdb": {
       "requested": null,
+      "checked_version": "2.0.0",
       "wheel_tags": [
         "abi3",
         "sdist"
@@ -140,6 +156,7 @@
     },
     "numpy": {
       "requested": null,
+      "checked_version": "2.5.4",
       "wheel_tags": [
         "cp314",
         "cp314t",
@@ -149,6 +166,7 @@
     },
     "pandas": {
       "requested": null,
+      "checked_version": "3.1.0",
       "wheel_tags": [
         "cp314",
         "cp314t",
@@ -158,6 +176,7 @@
     },
     "scipy": {
       "requested": null,
+      "checked_version": "1.18.1",
       "wheel_tags": [
         "cp314",
         "cp314t",
@@ -167,6 +186,7 @@
     },
     "trafilatura": {
       "requested": null,
+      "checked_version": "2.3.1",
       "wheel_tags": [
         "py3-none",
         "sdist"
@@ -175,13 +195,16 @@
     },
     "warcio": {
       "requested": null,
+      "checked_version": "1.8.2",
       "wheel_tags": [
+        "py3-none",
         "sdist"
       ],
-      "status": "sdist-only"
+      "status": "ok"
     },
     "httpx": {
       "requested": null,
+      "checked_version": "0.28.1",
       "wheel_tags": [
         "py3-none",
         "sdist"
@@ -190,6 +213,7 @@
     },
     "selectolax": {
       "requested": null,
+      "checked_version": "1.0.2",
       "wheel_tags": [
         "cp314",
         "cp314t",
@@ -199,6 +223,7 @@
     },
     "beautifulsoup4": {
       "requested": null,
+      "checked_version": "4.15.0",
       "wheel_tags": [
         "py3-none",
         "sdist"
@@ -207,6 +232,7 @@
     },
     "sentence-transformers": {
       "requested": null,
+      "checked_version": "6.2.0",
       "wheel_tags": [
         "py3-none",
         "sdist"
@@ -215,6 +241,7 @@
     },
     "fastapi": {
       "requested": null,
+      "checked_version": "0.162.0",
       "wheel_tags": [
         "py3-none",
         "sdist"
@@ -223,6 +250,7 @@
     },
     "uvicorn": {
       "requested": null,
+      "checked_version": "0.54.0",
       "wheel_tags": [
         "py3-none",
         "sdist"
@@ -231,6 +259,7 @@
     },
     "pydantic": {
       "requested": null,
+      "checked_version": "2.14.1",
       "wheel_tags": [
         "py3-none",
         "sdist"
@@ -239,6 +268,7 @@
     },
     "pytest": {
       "requested": null,
+      "checked_version": "9.2.0",
       "wheel_tags": [
         "py3-none",
         "sdist"
@@ -247,6 +277,7 @@
     },
     "ruff": {
       "requested": null,
+      "checked_version": "0.17.3",
       "wheel_tags": [
         "py3-none",
         "sdist"
@@ -255,6 +286,7 @@
     },
     "mypy": {
       "requested": null,
+      "checked_version": "2.4.1",
       "wheel_tags": [
         "cp314",
         "cp314t",

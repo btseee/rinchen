@@ -1,4 +1,21 @@
-from probe_env import classify_wheel_tags
+from __future__ import annotations
+
+import json
+import tempfile
+from pathlib import Path
+
+import pytest
+from probe_env import (
+    build_manifest,
+    classify_wheel_tags,
+    derive_status,
+    detect_gpu,
+    fetch_pypi_json,
+    fetch_torch_cu130_index,
+    parse_pinned_packages,
+    render_report,
+    run_uv_lock,
+)
 
 
 def test_classify_cp314_wheel():
@@ -46,11 +63,30 @@ def test_classify_mixed_files_combine_tags():
     assert tags == {"cp314", "cp314t", "sdist"}
 
 
-import json
-import tempfile
-from pathlib import Path
+def test_classify_compressed_py2_py3_tag_counts_as_py3():
+    tags = classify_wheel_tags(
+        ["warcio-1.8.1-py2.py3-none-any.whl", "warcio-1.8.1.tar.gz"]
+    )
+    assert tags == {"py3-none", "sdist"}
 
-from probe_env import build_manifest, parse_pinned_packages, render_report
+
+def test_classify_py2_only_tag_does_not_count_as_py3():
+    tags = classify_wheel_tags(["sixexample-1.0-py2-none-any.whl"])
+    assert tags == {"none"}
+
+
+def test_derive_status_ok_when_real_tag_present():
+    assert derive_status({"cp314"}) == "ok"
+    assert derive_status({"py3-none"}) == "ok"
+    assert derive_status({"abi3", "sdist"}) == "ok"
+
+
+def test_derive_status_sdist_only():
+    assert derive_status({"sdist"}) == "sdist-only"
+
+
+def test_derive_status_no_wheel_found():
+    assert derive_status({"none"}) == "no-wheel-found"
 
 
 def test_parse_pinned_packages_reads_pinned_and_unpinned():
@@ -66,7 +102,7 @@ dev = ["pytest", "ruff==0.1.0"]
 """
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "pyproject.toml"
-        path.write_text(content)
+        path.write_text(content, encoding="utf-8")
         packages = parse_pinned_packages(path)
     assert ("torch", "2.14.1") in packages
     assert ("numpy", None) in packages
@@ -91,6 +127,20 @@ def test_build_manifest_assembles_expected_structure():
     json.dumps(manifest)  # must be JSON-serializable
 
 
+def test_build_manifest_includes_probed_at_when_given():
+    manifest = build_manifest(
+        python_version="3.14.7",
+        platform="win32",
+        cpu_count=8,
+        gpu=None,
+        uv_version="0.13.5",
+        uv_lock_result={"success": True, "stderr_tail": None},
+        packages={},
+        probed_at="2026-10-28T00:00:00+00:00",
+    )
+    assert manifest["probed_at"] == "2026-10-28T00:00:00+00:00"
+
+
 def test_render_report_includes_python_and_package_table():
     manifest = build_manifest(
         python_version="3.14.7",
@@ -109,6 +159,8 @@ def test_render_report_includes_python_and_package_table():
     assert "torch" in report
     assert "pyonmttok" in report
     assert "⚠️" in report  # the flagged pyonmttok row
+    assert "## Blockers" in report
+    assert "## Open questions" in report
 
 
 def test_render_report_flags_uv_lock_failure():
@@ -124,11 +176,7 @@ def test_render_report_flags_uv_lock_failure():
     report = render_report(manifest)
     assert "FAILED" in report
     assert "error: no solution found" in report
-
-
-import pytest
-
-from probe_env import detect_gpu, fetch_pypi_json, fetch_torch_cu130_index, run_uv_lock
+    assert "## Blockers" in report
 
 
 @pytest.mark.network
@@ -159,30 +207,23 @@ def test_detect_gpu_returns_none_or_dict():
 
 @pytest.mark.network
 @pytest.mark.subprocess
-def test_run_uv_lock_on_real_pyproject(tmp_path):
-    from pathlib import Path
-
+def test_run_uv_lock_on_real_pyproject():
     repo_root = Path(__file__).resolve().parent.parent
     result = run_uv_lock(repo_root)
     assert "success" in result
     assert "stderr_tail" in result
 
 
-import json
-
-
 @pytest.mark.network
 @pytest.mark.subprocess
-def test_main_writes_manifest_and_report(tmp_path, monkeypatch):
+def test_main_writes_manifest_and_report(tmp_path):
     import probe_env
 
-    repo_root = Path(__file__).resolve().parent.parent
-    monkeypatch.setattr(probe_env, "REPO_ROOT", repo_root)
-    exit_code = probe_env.main()
+    exit_code = probe_env.main(out_root=tmp_path)
     assert exit_code == 0
 
-    manifest_path = repo_root / "manifests" / "phase0_env_probe.json"
-    report_path = repo_root / "reports" / "phase_0.md"
+    manifest_path = tmp_path / "manifests" / "phase0_env_probe.json"
+    report_path = tmp_path / "reports" / "phase_0_env_probe.md"
     assert manifest_path.exists()
     assert report_path.exists()
 
@@ -191,7 +232,7 @@ def test_main_writes_manifest_and_report(tmp_path, monkeypatch):
     assert "packages" in manifest
 
     report = report_path.read_text(encoding="utf-8")
-    assert "# Phase 0 Report: Environment Probe" in report
+    assert "# Phase 0 Report: Environment Probe (P0.1)" in report
 
 
 def test_main_fails_fast_on_wrong_python_version(monkeypatch):
