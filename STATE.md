@@ -9,8 +9,10 @@ below remains valid; it maps onto the new plan's D0 milestone, which has not
 started. Sequencing decision: the pyonmttok/eole blocker (below) must be
 resolved before D0, since D0's own doctor checks (`D-EOLE-PY`, `D-EOLE-CLI`)
 and CI step (`uv sync --frozen --group dev`) require a working `eole`.
-Current next step: resolve pyonmttok (likely building it from source for
-cp314) — not yet started.
+Current next step: resolve the `fasttext-wheel` cp314 build gap (below) —
+the pyonmttok/eole blocker is resolved, but verifying it surfaced this new,
+separate blocker that must be resolved before D0 can proceed; not yet
+started.
 
 Repo scaffold is complete: uv workspace, directory tree, CLAUDE.md, STATE.md,
 DECISIONS.md, .gitignore, and CI stub. No package has been installed or
@@ -29,35 +31,53 @@ gap below is resolved.
 
 Known blockers for Phase 0 to resolve (see DECISIONS.md for the vLLM entry):
 
-- Confirmed (refined): `pyonmttok` is imported eagerly on the `eole` CLI import
-  path. `eole/bin/__init__.py` unconditionally auto-imports every `.py` file
-  under `eole/bin/convert/`, `eole/bin/run/` and `eole/bin/tools/` via
-  `importlib.import_module`, with no try/except and no disable switch. This runs
-  as the first executed statement of `eole/bin/main.py` (line 4,
-  `from eole.bin import AVAILABLE_BINS`), before `ArgumentParser()` is built, so
-  it is reached before any argument parsing, including `--help`. Unguarded
-  top-level `import pyonmttok` statements at `eole/bin/run/build_vocab.py:6`,
-  `eole/bin/convert/convert_HF.py:17`, `eole/bin/convert/convert_MetricX.py:6`
-  and `eole/bin/convert/convert_T5.py:4` are therefore executed by every `eole`
-  invocation. Separately, `eole/inputters/inputter.py:5` imports `pyonmttok` on
-  the core training path, independent of the CLI. Only
-  `eole/bin/convert/convert_gguf.py` guards its import (try/except). Because
-  Python always runs a package's `__init__.py` before any submodule, `eole.bin`,
-  `eole.bin.main` and `eole train --help` cannot be imported without raising
-  `ModuleNotFoundError: No module named 'pyonmttok'`, since pyonmttok has no
-  cp314 wheel (only cp310/cp311/cp312; `uv lock` reports
-  "pyonmttok (v1.38.1) ... Python ABI tags: cp310, cp311, cp312").
-  [EVIDENCE: static source analysis of eole 0.6.4's wheel, 2026-10-29, confirmed
-  by a second independent investigation with zero discrepancies.] This means
-  `uv`'s `override-dependencies` trick would only convert the `uv lock` failure
-  into a guaranteed import-time crash on the first `eole` command — not applied.
-  `uv lock` still fails on this machine (Python 3.14.7, uv 0.13.5, error
-  "No solution found when resolving dependencies for split (markers:
-  sys_platform == 'win32')"); the project cannot install the full pinned stack
-  on Python 3.14 yet. The earlier `eole --no-deps` fallback is ruled out for the
-  same reason: importing any `eole` module still runs `eole/bin/__init__.py`.
-  Next option to evaluate (not started): building `pyonmttok` from source for
-  cp314, or finding an eole version/fork that makes this import optional.
+- Resolved: `pyonmttok` has no cp314 wheel upstream, so it was built from
+  source — `OpenNMT/Tokenizer` tag `v1.38.1`
+  (commit `ae4b83b0b2af2172ed306c372835e84b51d5d77e`), ICU 73.2, pybind11
+  3.1.0 — for both win_amd64 and manylinux_2_28_x86_64. Both wheels are
+  committed under `vendor/wheels/`, recorded with build provenance and
+  sha256 in `manifests/pyonmttok_build.json`, pass the tokenize/detokenize
+  round-trip smoke test, and are wired in via `[tool.uv.sources]` path
+  overrides keyed on `sys_platform`. Closing this also required two more
+  changes beyond the source override itself: adding `pyonmttok==1.38.1`
+  directly to `[project.dependencies]` (`[tool.uv.sources]` path overrides
+  only apply to direct project/workspace dependencies, not to a package
+  that's only pulled in transitively via `eole`, so without this the
+  override was silently ignored and `uv lock` failed with the exact same
+  "no cp314 wheel" error as before), and adding
+  `[tool.uv] environments = ["sys_platform == 'win32'", "sys_platform ==
+  'linux'"]` (by default `uv lock` resolves universally across all
+  platforms, and the project has no macOS target anywhere in its docs or
+  plan — dev machine is Windows, CI/GPU box is Linux — so without this
+  restriction `uv lock` tried to also solve a split for other platforms
+  and failed there instead). With all three changes in place, `uv lock`
+  succeeds on this machine as of this change, for the first time. [EVIDENCE:
+  `docs/superpowers/plans/2026-10-29-pyonmttok-cp314-build.md`,
+  `manifests/pyonmttok_build.json`, 2026-10-29.] This does not by itself mean
+  D0 is unblocked or that `eole`'s doctor checks (`D-EOLE-PY`, `D-EOLE-CLI`)
+  will pass: the first real `uv sync` attempt against this lockfile (run
+  while verifying this fix) surfaced a new, separate, previously-unreached
+  blocker — see the next bullet.
+- New blocker found while verifying the pyonmttok fix, not yet investigated
+  or fixed: `uv sync` (and therefore `uv run pytest -q` / `uv run ruff
+  check` / CI's `uv sync --frozen --group dev`) now fails building
+  `fasttext-wheel==0.9.2` — a transitive dependency of `eole==0.6.4`,
+  distinct from the `fasttext-new` package already pinned directly in
+  `[project.dependencies]`. It has no
+  cp314 wheel on PyPI, so `uv` tries to build it from source, and its C++
+  extension fails to compile under MSVC on cp314:
+  `fasttext_pybind.cc(171): error C2065: 'ssize_t': undeclared identifier`,
+  cascading into pybind11 overload-resolution errors (`C2672`) at every
+  `.def(...)` call site in that file. This is the same category of problem
+  as the pyonmttok gap above (a native extension with no cp314 wheel
+  upstream), but it was never reached before now because `uv lock` always
+  failed earlier, on `pyonmttok`, before `uv sync` ever attempted to build
+  `fasttext-wheel`. [EVIDENCE: live `uv run pytest -q` run, 2026-10-29; git
+  log confirms no file touched by the pyonmttok fix relates to
+  `fasttext-wheel`.] Next option to evaluate (not started): building
+  `fasttext-wheel` from source for cp314, mirroring the pyonmttok approach,
+  or finding an eole version/fork that drops or makes this dependency
+  optional.
 - A generator model (vLLM, or an alternative) for Phase 6 synthetic data has
   been deliberately left out of the main workspace; Phase 0 or Phase 6 must
   decide between a separate non-workspace uv project and the llama.cpp path.

@@ -45,3 +45,36 @@ Each entry is tagged `[EVIDENCE: source]` (verified fact) or `[DESIGN: rationale
   `py2.py3` (warcio's real tag), so it was wrongly reported as sdist-only
   with no wheel at all; the classifier is fixed and this bullet replaces
   that earlier, incorrect finding.
+
+## 2026-10-29: Build pyonmttok from source for cp314
+
+[EVIDENCE: live build, `manifests/pyonmttok_build.json`, tag `v1.38.1`
+commit `ae4b83b0b2af2172ed306c372835e84b51d5d77e`.] No cp314 wheel or sdist
+exists for `pyonmttok` 1.38.1 on PyPI (only cp310/cp311/cp312). Built it
+from source for both win_amd64 and manylinux_2_28_x86_64 using ICU 73.2 and
+pybind11 3.1.0 (pyonmttok's own `pyproject.toml` requires `pybind11>=2.10.4`
+with no upper bound; pybind11 3.1.0 explicitly classifies Python 3.14
+support). Wheels committed under `vendor/wheels/`, wired in via
+`[tool.uv.sources]` path overrides. Wiring the override in required two
+more `pyproject.toml` changes, confirmed by direct experiment rather than
+assumed: (1) `pyonmttok==1.38.1` added to `[project.dependencies]` directly
+— `[tool.uv.sources]` path overrides only apply to a project's direct or
+workspace dependencies, and `pyonmttok` is otherwise only a transitive
+dependency of `eole`, so without this the override had no effect and
+`uv lock` failed identically to before; (2) `[tool.uv] environments =
+["sys_platform == 'win32'", "sys_platform == 'linux'"]` added — `uv lock`
+resolves universally across all platforms by default, and this project
+targets only Windows (dev) and Linux (CI/GPU) with no macOS target
+anywhere in its docs or plan, so without restricting the locked
+environments `uv lock` tried to also solve for other platforms and failed
+there since no wheel or source exists for them. This unblocks `uv lock`,
+which now succeeds for the first time. It does not by itself unblock D0:
+the first real `uv sync` against this lockfile surfaced a new, separate,
+previously-unreached blocker in `fasttext-wheel==0.9.2` (a transitive
+`eole` dependency, distinct from the already-pinned `fasttext-new`
+package) — no cp314 wheel upstream, and its C++ extension fails to build
+from source under MSVC (`fasttext_pybind.cc(171): error C2065: 'ssize_t':
+undeclared identifier`, cascading into pybind11 `C2672` overload-resolution
+errors). Same category of problem as this pyonmttok gap (native extension,
+no cp314 wheel), but not yet investigated or fixed; see STATE.md's current
+next step.

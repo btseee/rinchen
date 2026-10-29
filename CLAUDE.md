@@ -37,14 +37,18 @@ docs/research/  docs/superpowers/{specs,plans}/
 src/rinchen/{data,text,align,filter,synth,metrics,eval,convert,serve,cli}/
 tests/ scripts/ plans/ reports/ manifests/ annotation_app/
 data/{raw,clean,mined,synth,test}/ (gitignored content, tracked dirs)
+vendor/wheels/ (committed binary wheels with no cp314 upstream release)
 .github/workflows/ci.yml
 ```
 
 ## Current phase
 
-Master plan switched 2026-10-29 to milestones D0-D15 (see below). Next up:
-resolve the pyonmttok/eole blocker (D0's doctor checks require a working
-`eole`); D0 itself has not started. See `STATE.md`.
+Master plan switched 2026-10-29 to milestones D0-D15 (see below). The
+pyonmttok/cp314 blocker is resolved (`uv lock` succeeds), but verifying it
+surfaced a new, separate `fasttext-wheel` cp314 build gap that must be
+resolved next, before D0 (D0's doctor checks require a working `eole`,
+which needs a full `uv sync` to succeed); D0 itself has not started. See
+`STATE.md`.
 
 ## Evidence and full plan
 

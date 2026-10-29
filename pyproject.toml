@@ -6,6 +6,7 @@ requires-python = "==3.14.*"
 dependencies = [
     "torch==2.14.1",
     "eole==0.6.4",
+    "pyonmttok==1.38.1",
     "ctranslate2==4.8.4",
     "transformers==5.21.0",
     "tokenizers==0.23.3",
@@ -37,6 +38,10 @@ dependencies = [
 dev = ["pytest", "ruff", "mypy"]
 
 [tool.uv]
+environments = [
+    "sys_platform == 'win32'",
+    "sys_platform == 'linux'",
+]
 
 [[tool.uv.index]]
 name = "pytorch-cu130"
@@ -45,6 +50,10 @@ explicit = true
 
 [tool.uv.sources]
 torch = [{ index = "pytorch-cu130" }]
+pyonmttok = [
+    { path = "vendor/wheels/pyonmttok-1.38.1-cp314-cp314-win_amd64.whl", marker = "sys_platform == 'win32'" },
+    { path = "vendor/wheels/pyonmttok-1.38.1-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", marker = "sys_platform == 'linux'" },
+]
 
 [build-system]
 requires = ["hatchling"]
