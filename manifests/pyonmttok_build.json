@@ -6,5 +6,12 @@
   },
   "icu_version": "73.2",
   "pybind11_version": "3.1.0",
-  "builds": []
+  "builds": [
+    {
+      "platform": "win_amd64",
+      "wheel": "vendor/wheels/pyonmttok-1.38.1-cp314-cp314-win_amd64.whl",
+      "sha256": "1f5365da4ab150f176ce2d36c13575d566e50ff37ceb61ba5686901f5d795515",
+      "built_at": "2026-10-29T12:02:22+00:00"
+    }
+  ]
 }
