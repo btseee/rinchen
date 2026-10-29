@@ -42,7 +42,7 @@ data/{raw,clean,mined,synth,test}/ (gitignored content, tracked dirs)
 
 ## Current phase
 
-Phase 0 (environment and benchmark) — not started. See `STATE.md`.
+Phase 0 (environment and benchmark) — in progress (P0.1 complete). See `STATE.md`.
 
 ## Evidence and full phase plan
 

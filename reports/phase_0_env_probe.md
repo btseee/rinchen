@@ -7,7 +7,7 @@
 **CPU count:** 12
 **GPU:** none detected
 **uv version:** uv 0.13.5 (46776a95d 2026-10-21 x86_64-pc-windows-msvc)
-**Probed at:** 2026-10-29T08:37:16.599211+00:00
+**Probed at:** 2026-10-29T08:45:37.584942+00:00
 **uv lock:** FAILED
 
 ## Blockers

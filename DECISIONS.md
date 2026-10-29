@@ -38,7 +38,7 @@ Each entry is tagged `[EVIDENCE: source]` (verified fact) or `[DESIGN: rationale
   actually need (see STATE.md). Never work around this by running any part
   of the project on cp310/cp311/cp312 — the hard constraints forbid any
   fallback interpreter.
-- All 29 direct dependencies resolve to wheel-tag status "ok" on Python
+- All 30 direct dependencies resolve to wheel-tag status "ok" on Python
   3.14.7, including `warcio`. [EVIDENCE: Phase 0 P0.1 probe, 2026-10-29, see
   reports/phase_0_env_probe.md]. An earlier run of the probe had a
   wheel-tag-classifier bug that didn't recognize compressed tags like

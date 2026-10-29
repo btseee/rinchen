@@ -5,6 +5,7 @@ availability on cp314."""
 from __future__ import annotations
 
 import datetime
+import http.client
 import json
 import os
 import platform as platform_module
@@ -168,9 +169,11 @@ def render_report(manifest: dict) -> str:
     }
     if non_ok:
         for name, pkg in sorted(non_ok.items()):
-            blockers.append(
-                f"`{name}`: status `{pkg['status']}` (non-blocking for install, but flagged)."
-            )
+            if pkg["status"] == "sdist-only":
+                note = "non-blocking for install (pure sdist build, just slower)"
+            else:
+                note = "may block installation — investigate"
+            blockers.append(f"`{name}`: status `{pkg['status']}` ({note}).")
     if blockers:
         for b in blockers:
             lines.append(f"- {b}")
@@ -234,7 +237,7 @@ def fetch_pypi_json(name: str, version: str | None) -> dict | None:
         if exc.code == 404:
             return None
         raise ProbeFetchError(f"{name}: HTTP {exc.code}") from exc
-    except (urllib.error.URLError, TimeoutError) as exc:
+    except (OSError, http.client.HTTPException, UnicodeDecodeError) as exc:
         raise ProbeFetchError(f"{name}: {exc}") from exc
     try:
         return json.loads(body)
@@ -251,7 +254,7 @@ def fetch_torch_cu130_index() -> list[str]:
     try:
         with urllib.request.urlopen(url, timeout=30) as resp:
             html = resp.read().decode("utf-8", errors="replace")
-    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as exc:
+    except (OSError, http.client.HTTPException, UnicodeDecodeError) as exc:
         raise ProbeFetchError(f"torch cu130 index: {exc}") from exc
     parser = _LinkExtractor()
     parser.feed(html)
