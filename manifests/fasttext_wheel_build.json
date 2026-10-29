@@ -1,0 +1,11 @@
+{
+  "source": "vendor/fasttext-wheel-shim/",
+  "builds": [
+    {
+      "platform": "universal",
+      "wheel": "vendor/wheels/fasttext_wheel-0.9.2-py3-none-any.whl",
+      "sha256": "6ab6141fa344c15f9b4b73dfec68c5d389ea22c8de62dd32dbefc3193ea80782",
+      "built_at": "2026-10-29T15:37:13+00:00"
+    }
+  ]
+}
