@@ -19,26 +19,35 @@ gap below is resolved.
 
 Known blockers for Phase 0 to resolve (see DECISIONS.md for the vLLM entry):
 
-- Confirmed: `uv lock` fails on this machine (Python 3.14.7, uv 0.13.5).
-  `eole==0.6.4` depends on `pyonmttok>=1.38.1`, and `pyonmttok` has no cp314
-  wheel (only cp310/cp311/cp312), so the full pinned stack does not resolve.
-  Exact error from `uv lock`:
-
-  ```text
-  error: No solution found when resolving dependencies for split (markers: sys_platform == 'win32')
-    cause: Because pyonmttok==1.38.1 has no wheels with a matching Python version tag (e.g., `cp314`) and only pyonmttok<=1.38.1 is available, we can conclude that pyonmttok>=1.38.1 cannot be used.
-           And because eole==0.6.4 depends on pyonmttok>=1.38.1 and your project depends on eole==0.6.4, we can conclude that your project's requirements are unsatisfiable.
-
-  hint: Wheels are available for `pyonmttok` (v1.38.1) with the following Python ABI tags: `cp310`, `cp311`, `cp312`
-  ```
-
-  Per the research doc's stack note, the fallback to try first is: install
-  `eole --no-deps` and add only the dependencies that
-  `python -c "import eole.bin.main"` and `eole train --help` actually
-  require (not pyonmttok, if it isn't eagerly imported) — never pin
-  pyonmttok to a cp31x-compatible interpreter path, since that would mean
-  running part of the project on a non-3.14 Python, which the hard
-  constraints forbid outright.
+- Confirmed (refined): `pyonmttok` is imported eagerly on the `eole` CLI import
+  path. `eole/bin/__init__.py` unconditionally auto-imports every `.py` file
+  under `eole/bin/convert/`, `eole/bin/run/` and `eole/bin/tools/` via
+  `importlib.import_module`, with no try/except and no disable switch. This runs
+  as the first executed statement of `eole/bin/main.py` (line 4,
+  `from eole.bin import AVAILABLE_BINS`), before `ArgumentParser()` is built, so
+  it is reached before any argument parsing, including `--help`. Unguarded
+  top-level `import pyonmttok` statements at `eole/bin/run/build_vocab.py:6`,
+  `eole/bin/convert/convert_HF.py:17`, `eole/bin/convert/convert_MetricX.py:6`
+  and `eole/bin/convert/convert_T5.py:4` are therefore executed by every `eole`
+  invocation. Separately, `eole/inputters/inputter.py:5` imports `pyonmttok` on
+  the core training path, independent of the CLI. Only
+  `eole/bin/convert/convert_gguf.py` guards its import (try/except). Because
+  Python always runs a package's `__init__.py` before any submodule, `eole.bin`,
+  `eole.bin.main` and `eole train --help` cannot be imported without raising
+  `ModuleNotFoundError: No module named 'pyonmttok'`, since pyonmttok has no
+  cp314 wheel (only cp310/cp311/cp312; `uv lock` reports
+  "pyonmttok (v1.38.1) ... Python ABI tags: cp310, cp311, cp312").
+  [EVIDENCE: static source analysis of eole 0.6.4's wheel, 2026-10-29, confirmed
+  by a second independent investigation with zero discrepancies.] This means
+  `uv`'s `override-dependencies` trick would only convert the `uv lock` failure
+  into a guaranteed import-time crash on the first `eole` command — not applied.
+  `uv lock` still fails on this machine (Python 3.14.7, uv 0.13.5, error
+  "No solution found when resolving dependencies for split (markers:
+  sys_platform == 'win32')"); the project cannot install the full pinned stack
+  on Python 3.14 yet. The earlier `eole --no-deps` fallback is ruled out for the
+  same reason: importing any `eole` module still runs `eole/bin/__init__.py`.
+  Next option to evaluate (not started): building `pyonmttok` from source for
+  cp314, or finding an eole version/fork that makes this import optional.
 - A generator model (vLLM, or an alternative) for Phase 6 synthetic data has
   been deliberately left out of the main workspace; Phase 0 or Phase 6 must
   decide between a separate non-workspace uv project and the llama.cpp path.
