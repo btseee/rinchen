@@ -150,3 +150,52 @@ def test_main_rejects_empty_extra_field_key(tmp_path, monkeypatch):
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["builds"] == []
+
+
+def test_main_writes_to_custom_manifest_path(tmp_path, monkeypatch):
+    default_manifest_path = tmp_path / "pyonmttok_build.json"
+    _write_manifest(default_manifest_path)
+    monkeypatch.setattr(record_manifest, "MANIFEST_PATH", default_manifest_path)
+    monkeypatch.setattr(record_manifest, "REPO_ROOT", tmp_path)
+
+    custom_manifest_path = tmp_path / "fasttext_wheel_build.json"
+    _write_manifest(custom_manifest_path)
+
+    wheel = tmp_path / "fasttext_wheel-0.9.2-py3-none-any.whl"
+    wheel.write_bytes(b"fake shim wheel")
+
+    assert (
+        record_manifest.main(
+            "universal", str(wheel), manifest_path=custom_manifest_path
+        )
+        == 0
+    )
+
+    # The custom manifest got the record...
+    custom_manifest = json.loads(custom_manifest_path.read_text(encoding="utf-8"))
+    assert len(custom_manifest["builds"]) == 1
+    assert custom_manifest["builds"][0]["platform"] == "universal"
+
+    # ...and the default manifest was left untouched.
+    default_manifest = json.loads(default_manifest_path.read_text(encoding="utf-8"))
+    assert default_manifest["builds"] == []
+
+
+def test_parse_cli_extracts_manifest_flag(tmp_path):
+    manifest_path, platform, wheel, extra = record_manifest._parse_cli(
+        ["--manifest", str(tmp_path / "custom.json"), "universal", "x.whl", "k=v"]
+    )
+    assert manifest_path == tmp_path / "custom.json"
+    assert platform == "universal"
+    assert wheel == "x.whl"
+    assert extra == {"k": "v"}
+
+
+def test_parse_cli_without_manifest_flag_defaults_to_none():
+    manifest_path, platform, wheel, extra = record_manifest._parse_cli(
+        ["win_amd64", "x.whl"]
+    )
+    assert manifest_path is None
+    assert platform == "win_amd64"
+    assert wheel == "x.whl"
+    assert extra == {}
