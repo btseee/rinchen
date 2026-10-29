@@ -38,17 +38,19 @@ src/rinchen/{data,text,align,filter,synth,metrics,eval,convert,serve,cli}/
 tests/ scripts/ plans/ reports/ manifests/ annotation_app/
 data/{raw,clean,mined,synth,test}/ (gitignored content, tracked dirs)
 vendor/wheels/ (committed binary wheels with no cp314 upstream release)
+vendor/fasttext-wheel-shim/ (pure-Python shim package, see DECISIONS.md)
 .github/workflows/ci.yml
 ```
 
 ## Current phase
 
-Master plan switched 2026-10-29 to milestones D0-D15 (see below). The
-pyonmttok/cp314 blocker is resolved (`uv lock` succeeds), but verifying it
-surfaced a new, separate `fasttext-wheel` cp314 build gap that must be
-resolved next, before D0 (D0's doctor checks require a working `eole`,
-which needs a full `uv sync` to succeed); D0 itself has not started. See
-`STATE.md`.
+Master plan switched 2026-10-29 to milestones D0-D15 (see below). Both the
+pyonmttok and fasttext-wheel cp314 blockers are resolved: `uv sync --dev`
+succeeds for the first time on this project. Verifying it with the real
+test/lint suite surfaced a separate, non-build finding (pre-existing
+`pytest`/`ruff` findings in the vendor-wheel integrity test and the
+fasttext-wheel-shim package) that keeps CI from being fully green yet; D0
+itself has not started. See `STATE.md`.
 
 ## Evidence and full plan
 

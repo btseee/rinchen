@@ -83,6 +83,48 @@ errors). Same category of problem as this pyonmttok gap (native extension,
 no cp314 wheel), but not yet investigated or fixed; see STATE.md's current
 next step.
 
+## 2026-10-29: fasttext-wheel cp314 shim via fasttext-new
+
+[EVIDENCE: live verification against the real `lid.176.ftz` model,
+`tests/test_fasttext_wheel_shim.py`, 2026-10-29.] `fasttext-wheel==0.9.2`
+(a transitive, unversioned `eole` dependency) has no cp314 wheel. Building
+it from source was investigated and validated as feasible (three confirmed
+C++/Python portability bugs, all fixed and build-tested live on both
+Windows and Linux during brainstorming), but not applied. [DESIGN: chose
+instead to ship a first-party pure-Python shim package
+(`vendor/fasttext-wheel-shim/`, distributed as `fasttext-wheel` to satisfy
+`eole`'s dependency name) that re-exports the already-pinned, maintained,
+cp314-native `fasttext-new==0.1.0`. `eole` only uses `fasttext` for
+`load_model`/`predict` in its optional language-ID `clean` transform, which
+`fasttext-new` is independently documented and here independently verified
+to handle correctly for the `lid.176` models eole actually downloads. This
+avoids native compilation entirely and needs no per-platform maintenance,
+at the accepted cost of depending on a smaller, alpha-status third-party
+package instead of the archived original.]
+
+Wiring this in (`pyproject.toml`'s `[project.dependencies]` plus a
+`[tool.uv.sources]` path override to the committed
+`vendor/wheels/fasttext_wheel-0.9.2-py3-none-any.whl`, mirroring the
+pyonmttok pattern above) let `uv lock` and then `uv sync --dev` succeed for
+the first time ever on this project — the actual milestone both the
+pyonmttok and fasttext-wheel cp314 gaps existed to reach. [EVIDENCE: live
+`uv lock` / `uv sync --dev` run, 2026-10-29; confirmed
+`vendor/fasttext-wheel-shim` was not pulled in as a `uv` workspace member —
+`uv.lock`'s `fasttext-wheel` package entry has `source = { path =
+"vendor/wheels/fasttext_wheel-0.9.2-py3-none-any.whl" }`, an ordinary path
+dependency on the built wheel file, not an editable/workspace source, and
+`pyproject.toml` has no `[tool.uv.workspace]` table at all.] Running the
+real `uv run pytest -q` / `uv run ruff check` / `uv run mypy src` for the
+first time against this synced environment surfaced one more, separate,
+non-build finding: `tests/test_vendor_wheel_integrity.py` (2 tests) and one
+`ruff` `N999` finding on `vendor/fasttext-wheel-shim/src/fasttext/
+FastText.py` both pre-date this change (from the prior fasttext-wheel-shim
+task) and had simply never been executed before, since `uv sync` had never
+succeeded; see STATE.md for the detailed finding and its own, not-yet-made,
+follow-up decision. `tests/test_fasttext_wheel_shim.py`'s network test
+(real download of `lid.176.ftz`, real `predict()` calls) passes against the
+real synced environment.
+
 **Note on the direct `pyonmttok` dependency vs. the master plan.** The
 master plan (`docs/research/2026-10-29-rinchen-dev-agent-prompt.md`) lists
 `pyonmttok` under "Do NOT depend on: ... (we replace them)" — that line is

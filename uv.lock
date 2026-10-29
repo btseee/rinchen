@@ -633,13 +633,16 @@ wheels = [
 [[package]]
 name = "fasttext-wheel"
 version = "0.9.2"
-source = { registry = "https://pypi.org/simple" }
+source = { path = "vendor/wheels/fasttext_wheel-0.9.2-py3-none-any.whl" }
 dependencies = [
-    { name = "numpy" },
-    { name = "pybind11" },
-    { name = "setuptools" },
+    { name = "fasttext-new" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c8/51/022e84b23ec435248a39f727dae94240321ebe2fdc104800de80410e1550/fasttext-wheel-0.9.2.tar.gz", hash = "sha256:056e088318ef0e0cc690c4cb18637320eaa3cdb986b62d67bb50d6a7a82e4051", size = 71384, upload-time = "2023-05-05T12:02:55.501Z" }
+wheels = [
+    { filename = "fasttext_wheel-0.9.2-py3-none-any.whl", hash = "sha256:6ab6141fa344c15f9b4b73dfec68c5d389ea22c8de62dd32dbefc3193ea80782" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "fasttext-new", specifier = "==0.1.0" }]
 
 [[package]]
 name = "filelock"
@@ -1637,15 +1640,6 @@ wheels = [
 ]
 
 [[package]]
-name = "pybind11"
-version = "3.1.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/76/f3/95b0f40b31df41dbfe6bb0857419c9442c15839cbac4796f1c26ae0b6081/pybind11-3.1.0.tar.gz", hash = "sha256:a1cc06b524ab3edca51f8ad3895f9c4fa20b8b19283173dff4ae781449dc9639", size = 603746, upload-time = "2026-08-06T23:33:00.675Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/33/fd/8762f7ee3e4e4be6d1d846cffb4916dd9bb02b2f800d3603718a0efe494c/pybind11-3.1.0-py3-none-any.whl", hash = "sha256:b8488090f8acffbcb6b5d6a85571a6827a0a2981ffb75e5a0b27b87c4a6b7dd0", size = 319402, upload-time = "2026-08-06T23:32:59.047Z" },
-]
-
-[[package]]
 name = "pydantic"
 version = "2.14.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1898,6 +1892,7 @@ dependencies = [
     { name = "eole" },
     { name = "fastapi" },
     { name = "fasttext-new" },
+    { name = "fasttext-wheel" },
     { name = "httpx" },
     { name = "huggingface-hub" },
     { name = "kiwipiepy" },
@@ -1938,6 +1933,7 @@ requires-dist = [
     { name = "eole", specifier = "==0.6.4" },
     { name = "fastapi" },
     { name = "fasttext-new", specifier = "==0.1.0" },
+    { name = "fasttext-wheel", path = "vendor/wheels/fasttext_wheel-0.9.2-py3-none-any.whl" },
     { name = "httpx" },
     { name = "huggingface-hub" },
     { name = "kiwipiepy", specifier = "==0.24.0" },
