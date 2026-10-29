@@ -3,7 +3,7 @@
 import hashlib
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -18,7 +18,7 @@ def sha256_of(path: Path) -> str:
     return digest.hexdigest()
 
 
-def main(platform: str, wheel_path_str: str) -> int:
+def main(platform: str, wheel_path_str: str, extra: dict[str, str] | None = None) -> int:
     wheel_path = Path(wheel_path_str).resolve()
     if not wheel_path.is_file():
         print(f"wheel not found: {wheel_path}", file=sys.stderr)
@@ -33,8 +33,10 @@ def main(platform: str, wheel_path_str: str) -> int:
         "platform": platform,
         "wheel": rel_wheel,
         "sha256": sha256_of(wheel_path),
-        "built_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "built_at": datetime.now(UTC).isoformat(timespec="seconds"),
     }
+    if extra:
+        record.update(extra)
     builds = [b for b in manifest.get("builds", []) if b["platform"] != platform]
     builds.append(record)
     manifest["builds"] = builds
@@ -43,8 +45,20 @@ def main(platform: str, wheel_path_str: str) -> int:
     return 0
 
 
+def _parse_extra(args: list[str]) -> dict[str, str]:
+    extra: dict[str, str] = {}
+    for arg in args:
+        if "=" not in arg:
+            print(f"invalid extra field (expected key=value): {arg}", file=sys.stderr)
+            raise SystemExit(2)
+        key, _, value = arg.partition("=")
+        extra[key] = value
+    return extra
+
+
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        print("usage: record_manifest.py <platform> <wheel_path>", file=sys.stderr)
+    assert sys.version_info[:2] == (3, 14), sys.version
+    if len(sys.argv) < 3:
+        print("usage: record_manifest.py <platform> <wheel_path> [key=value ...]", file=sys.stderr)
         raise SystemExit(2)
-    raise SystemExit(main(sys.argv[1], sys.argv[2]))
+    raise SystemExit(main(sys.argv[1], sys.argv[2], _parse_extra(sys.argv[3:])))

@@ -748,3 +748,32 @@ Expected: no new findings.
 git add pyproject.toml uv.lock STATE.md DECISIONS.md CLAUDE.md
 git commit -m "build: wire pyonmttok cp314 wheels into pyproject, close blocker"
 ```
+
+---
+
+**Note added after execution, not part of the original plan:**
+
+A few points below the per-task per-review checkpoints, surfaced only by
+the final whole-branch review, are worth recording here for anyone reading
+this plan after the fact:
+
+- The real Linux wheel built by Task 3 is dual-tagged:
+  `pyonmttok-1.38.1-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl`,
+  not the plain `manylinux_2_28_x86_64` filename assumed throughout this
+  plan's text (Task 3's own "adjust the wheel filename if it differs"
+  caveats covered this, but it's worth stating plainly: the dual tag is
+  `auditwheel`'s doing, declaring compatibility with both manylinux
+  policies, and every reference to the wheel elsewhere in the repo uses the
+  real, dual-tagged filename).
+- The real wiring that closed the blocker needed `pyonmttok` added as a
+  direct `[project.dependencies]` entry *and* `[tool.uv] environments` set
+  — `[tool.uv.sources]` path overrides alone do not override a transitive
+  dependency's resolution; see the "Build pyonmttok from source for cp314"
+  entry in `DECISIONS.md` for the confirmed (not assumed) mechanism.
+- Task 4's own in-body claims that "D0 is no longer blocked on this" and
+  "This unblocks `uv lock` and, in turn, D0" turned out to be incomplete.
+  `uv lock` succeeding was real, but it surfaced a new, separate blocker —
+  `fasttext-wheel==0.9.2` has no cp314 wheel and fails to build from source
+  on both Windows/MSVC and Linux/gcc14 — that still stands between this
+  plan's result and D0. See `STATE.md` for the current status of that
+  blocker.

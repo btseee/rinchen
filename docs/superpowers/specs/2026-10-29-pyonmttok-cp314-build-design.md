@@ -15,7 +15,7 @@ building `pyonmttok` from source for cp314.
 `pyonmttok` is `OpenNMT/Tokenizer`'s Python binding: C++11, CMake, ICU
 dependency, single-file pybind11 binding (`bindings/python/pyonmttok/Python.cc`).
 Its `pyproject.toml` pins `pybind11>=2.10.4` with no upper bound, so a modern
-pybind11 (2.13.6) should bind against cp314 without upstream code changes.
+pybind11 (3.1.0) should bind against cp314 without upstream code changes.
 Upstream's own CI (`cibuildwheel`) builds `cp310-* cp311-* cp312-*` only;
 cp314 requires running their build scripts manually with no upstream
 precedent, so this is building a new target, not reproducing a known-good one.
@@ -36,7 +36,7 @@ In:
 - **Windows build:** download prebuilt ICU4C 73.2 (MSVC2019 build, matching
   upstream's own `prepare_build_environment_windows.sh` pin), CMake-build the
   Tokenizer C++ library and DLLs with MSVC, build the Python wheel with this
-  machine's CPython 3.14.7 and pybind11 2.13.6 via `python -m build --wheel`.
+  machine's CPython 3.14.7 and pybind11 3.1.0 via `python -m build --wheel`.
   Output: `pyonmttok-1.38.1-cp314-cp314-win_amd64.whl`.
 - **Linux build:** start Docker Desktop if not running; run the build inside
   `quay.io/pypa/manylinux_2_28_x86_64`. First runtime check: does that image
@@ -95,7 +95,7 @@ plan can treat "run script, assert exit 0" as a normal TDD-style step.
   running during brainstorming). The plan's first Linux step must check this
   and treat "no cp314 interpreter" as a stop-and-report condition, not a
   silent fallback.
-- ICU version pin (73.2) and pybind11 version pin (2.13.6) are taken from
+- ICU version pin (73.2) and pybind11 version pin (3.1.0) are taken from
   upstream's current build scripts / this project's own prior cp314
   validation elsewhere; if either fails to build against cp314, the plan
   should surface the actual compiler/linker error rather than guessing at a

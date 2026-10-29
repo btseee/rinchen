@@ -30,7 +30,11 @@ Each entry is tagged `[EVIDENCE: source]` (verified fact) or `[DESIGN: rationale
   constraints require recording resolved versions and checkpoint hashes in
   manifests/, and later phases (release.json) depend on those hashes being
   present in a fresh clone].
-- Confirmed: pyonmttok has no cp314 wheel as of 2026-10-28. [EVIDENCE: Phase 0
+- **[SUPERSEDED 2026-10-29 — see the "Build pyonmttok from source for cp314"
+  entry below, which resolves this directly; the `eole --no-deps` fallback
+  described below was never attempted. Kept as-is, unedited, as the
+  historical record of the original finding.]** Confirmed: pyonmttok has no
+  cp314 wheel as of 2026-10-28. [EVIDENCE: Phase 0
   P0.1 probe, see reports/phase_0_env_probe.md]. `uv lock` fails outright
   because `eole==0.6.4` requires `pyonmttok>=1.38.1`, and `pyonmttok` only
   ships wheels for cp310/cp311/cp312. Fallback to try first: `eole --no-deps`
@@ -78,3 +82,19 @@ undeclared identifier`, cascading into pybind11 `C2672` overload-resolution
 errors). Same category of problem as this pyonmttok gap (native extension,
 no cp314 wheel), but not yet investigated or fixed; see STATE.md's current
 next step.
+
+**Note on the direct `pyonmttok` dependency vs. the master plan.** The
+master plan (`docs/research/2026-10-29-rinchen-dev-agent-prompt.md`) lists
+`pyonmttok` under "Do NOT depend on: ... (we replace them)" — that line is
+about Rinchen's own text-processing pipeline, which must not import
+`pyonmttok` directly. The `pyonmttok==1.38.1` entry added to
+`[project.dependencies]` above is unrelated to that intent: it exists
+*only* as a dependency-resolution mechanism, because `uv`'s
+`[tool.uv.sources]` path overrides apply only to a project's direct or
+workspace dependencies, not to a package that is otherwise pulled in
+transitively via `eole`. Without the direct pin, the locally-built wheel
+override is silently ignored and `uv lock` fails exactly as before. Adding
+this pin does not reverse or weaken the master plan's "we replace them"
+design decision — Rinchen's own code still may not `import pyonmttok`
+directly; `eole` is the only thing in this workspace allowed to depend on
+it.
