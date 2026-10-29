@@ -1,0 +1,10 @@
+{
+  "source": {
+    "repo": "https://github.com/OpenNMT/Tokenizer",
+    "tag": "v1.38.1",
+    "commit": "ae4b83b0b2af2172ed306c372835e84b51d5d77e"
+  },
+  "icu_version": "73.2",
+  "pybind11_version": "3.1.0",
+  "builds": []
+}
