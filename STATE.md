@@ -1,6 +1,16 @@
 # STATE.md
 
-Phase 0 (environment and benchmark) — in progress (P0.1 complete).
+**Plan switched 2026-10-29.** The master plan is now
+`docs/research/2026-10-29-rinchen-dev-agent-prompt.md` (milestones D0-D15),
+superseding the Phase 0-14 plan in
+`docs/research/2026-10-28-python314-stack-and-prompt.md` (kept as evidence
+source — see that doc's own superseded-notice). The old Phase 0 / P0.1 work
+below remains valid; it maps onto the new plan's D0 milestone, which has not
+started. Sequencing decision: the pyonmttok/eole blocker (below) must be
+resolved before D0, since D0's own doctor checks (`D-EOLE-PY`, `D-EOLE-CLI`)
+and CI step (`uv sync --frozen --group dev`) require a working `eole`.
+Current next step: resolve pyonmttok (likely building it from source for
+cp314) — not yet started.
 
 Repo scaffold is complete: uv workspace, directory tree, CLAUDE.md, STATE.md,
 DECISIONS.md, .gitignore, and CI stub. No package has been installed or

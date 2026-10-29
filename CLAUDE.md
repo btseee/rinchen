@@ -42,11 +42,17 @@ data/{raw,clean,mined,synth,test}/ (gitignored content, tracked dirs)
 
 ## Current phase
 
-Phase 0 (environment and benchmark) — in progress (P0.1 complete). See `STATE.md`.
+Master plan switched 2026-10-29 to milestones D0-D15 (see below). Next up:
+resolve the pyonmttok/eole blocker (D0's doctor checks require a working
+`eole`); D0 itself has not started. See `STATE.md`.
 
-## Evidence and full phase plan
+## Evidence and full plan
 
-The complete package evidence, version decisions, and all 15 phase specs (ids 0-14) live in
-`docs/research/2026-10-28-python314-stack-and-prompt.md`. This file only carries
-the hard constraints and pointers; consult the research doc before pinning or
-changing any dependency.
+The current master plan — milestones D0-D15, repo layout, hard constraints,
+build-ourselves specs — lives in
+`docs/research/2026-10-29-rinchen-dev-agent-prompt.md`. The prior Phase 0-14
+plan, `docs/research/2026-10-28-python314-stack-and-prompt.md`, is superseded
+but kept as the evidence source for decisions already recorded in
+`DECISIONS.md` (the package wheel matrix, the pyonmttok/eole finding's
+origin). This file only carries the hard constraints and pointers; consult
+the master plan before pinning or changing any dependency.

@@ -1,5 +1,13 @@
 # Rinchen on Python 3.14: verified stack, build-it-ourselves plan, and the full Claude prompt
 
+> **Superseded 2026-10-29.** The project's master plan is now
+> `docs/research/2026-10-29-rinchen-dev-agent-prompt.md` (milestones D0-D15),
+> which replaces this doc's Phase 0-14 structure going forward. This doc is
+> kept as-is because it's the evidence source for decisions already made and
+> recorded in `DECISIONS.md` — the Python-3.14 package wheel matrix, and the
+> origin of the confirmed `pyonmttok`/`eole` import-crash finding (see
+> `STATE.md` for the current, fuller evidence on that finding).
+
 The whole Rinchen pipeline can run on CPython 3.14 with no 3.12/3.13 fallback. The core is evidence-backed: torch 2.14.1, CTranslate2 4.8.4, sentencepiece, tokenizers, transformers 5.x, kiwipiepy and fasttext-new all ship cp314 or abi3 wheels. Eole and sacrebleu are pure Python. On PyPI, vLLM 0.32.0 declares "Requires: Python <3.15, >=3.11".
 
 Two components have to be built by us:
