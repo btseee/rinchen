@@ -6,13 +6,12 @@ eole/transforms/clean.py does at runtime.
 """
 import urllib.request
 
+import fasttext
 import pytest
 
 
 @pytest.mark.network
 def test_shim_loads_lid176_and_identifies_languages(tmp_path):
-    fasttext = pytest.importorskip("fasttext")
-
     model_path = tmp_path / "lid.176.ftz"
     urllib.request.urlretrieve(
         "https://dl.fbaipublicfiles.com/fasttext/supervised-models/lid.176.ftz",
