@@ -46,11 +46,9 @@ vendor/fasttext-wheel-shim/ (pure-Python shim package, see DECISIONS.md)
 
 Master plan switched 2026-10-29 to milestones D0-D15 (see below). Both the
 pyonmttok and fasttext-wheel cp314 blockers are resolved: `uv sync --dev`
-succeeds for the first time on this project. Verifying it with the real
-test/lint suite surfaced a separate, non-build finding (pre-existing
-`pytest`/`ruff` findings in the vendor-wheel integrity test and the
-fasttext-wheel-shim package) that keeps CI from being fully green yet; D0
-itself has not started. See `STATE.md`.
+succeeds, and CI's full step sequence (ruff, mypy, pytest) passes locally on
+Windows (not yet observed on CI's Linux runner). Next up: D0, which has not
+started. See `STATE.md`.
 
 ## Evidence and full plan
 

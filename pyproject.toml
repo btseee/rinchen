@@ -70,3 +70,9 @@ markers = [
     "network: tests that make real network calls",
     "subprocess: tests that spawn real subprocesses",
 ]
+
+[tool.ruff.lint.per-file-ignores]
+# The capitalized module name deliberately mirrors the real fasttext package's
+# own `fasttext.FastText` submodule, for import compatibility (see the shim's
+# docstrings and DECISIONS.md); renaming it would break that contract.
+"vendor/fasttext-wheel-shim/src/fasttext/FastText.py" = ["N999"]

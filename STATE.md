@@ -9,13 +9,14 @@ below remains valid; it maps onto the new plan's D0 milestone, which has not
 started. Sequencing decision: the pyonmttok/eole blocker (below) must be
 resolved before D0, since D0's own doctor checks (`D-EOLE-PY`, `D-EOLE-CLI`)
 and CI step (`uv sync --dev`) require a working `eole`.
-Current next step: both known Phase 0 blockers (pyonmttok cp314,
-fasttext-wheel cp314) are resolved — `uv sync --dev` succeeds for the first
-time on this project. Verifying it with the real test/lint suite surfaced a
-third, separate, non-build finding (2 pre-existing `pytest` failures in
-`tests/test_vendor_wheel_integrity.py` plus 1 pre-existing `ruff` N999
-finding, both detailed below) that keeps CI from being fully green yet; fix
-or accept those, then start D0.
+Current next step: start D0 (not yet started). Both known Phase 0 blockers
+(pyonmttok cp314, fasttext-wheel cp314) are resolved, `uv sync --dev`
+succeeds, and the test/lint findings that the first real sync surfaced are
+fixed (see the last "Resolved" bullet below). CI's exact step sequence
+(`uv sync --dev`, `uv run ruff check .`, `uv run mypy src`,
+`uv run pytest -q`) passes locally on win_amd64. It has not yet been
+observed green on CI's own ubuntu-latest runner: none of this work has been
+pushed yet.
 
 Repo scaffold is complete: uv workspace, directory tree, CLAUDE.md, STATE.md,
 DECISIONS.md, .gitignore, and CI stub. `pyonmttok` (built from source, see
@@ -33,11 +34,13 @@ wheel-tag status "ok" on Python 3.14.7 (an earlier run falsely flagged
 — `warcio`'s real tag is the compressed `py2.py3-none-any`, which does carry
 a wheel).
 
-CI is expected to stay red, but no longer at the `uv sync --dev` step: both
-the pyonmttok and fasttext-wheel cp314 gaps documented below are resolved
-and `uv sync --dev` now succeeds. CI's subsequent `ruff check`/`pytest -q`
-steps would still fail, on the newly-surfaced, unrelated test-suite/lint
-finding documented below.
+CI's full step sequence (`uv sync --dev`, `uv run ruff check .`,
+`uv run mypy src`, `uv run pytest -q`) passes locally on win_amd64 as of
+2026-10-29 (40 tests passed, no ruff or mypy findings). It has not run on
+CI's ubuntu-latest runner yet, because none of the pyonmttok/fasttext-wheel
+work has been pushed. On Linux, only the manylinux_2_28 pyonmttok
+build/smoke test has been run; no Linux `uv sync --dev` + test run is
+recorded yet.
 
 Known blockers for Phase 0 to resolve (see DECISIONS.md for the vLLM entry):
 
@@ -84,39 +87,31 @@ Known blockers for Phase 0 to resolve (see DECISIONS.md for the vLLM entry):
   and `uv run ruff check` both run against the real synced environment.
   Accepted tradeoff: `fasttext-new` is a small, alpha-status third-party
   package, not from Meta and not yet widely adopted.
-- New, third, separate finding — surfaced for the first time by this same
-  `uv sync --dev` (neither a build/compile failure nor related to
-  `fasttext-wheel` itself), not yet fixed: running the real `uv run
-  pytest -q` for the first time shows 2 failures, both in
-  `tests/test_vendor_wheel_integrity.py`
-  (`test_vendor_wheels_match_manifest_sha256`,
-  `test_vendor_wheels_match_uv_lock_hash`). That test globs every file in
-  `vendor/wheels/*.whl` and cross-checks each one's sha256 against
-  `manifests/pyonmttok_build.json` and against a `uv.lock` `[[package]]`
-  entry whose `name` is hardcoded to `"pyonmttok"` — it was written when
-  `vendor/wheels/` held only the two pyonmttok wheels, and (because `uv
-  sync`/`uv run pytest` had never succeeded before this change) it had
-  never actually been executed. Adding `vendor/wheels/fasttext_wheel-0.9.2-
-  py3-none-any.whl` (committed in the prior, already-merged fasttext-wheel-
-  shim task) means that wheel now fails both checks: it has no entry in
-  `manifests/pyonmttok_build.json` (a pyonmttok-specific manifest) and no
-  matching `uv.lock` package named `pyonmttok`. Separately, `uv run ruff
-  check` flags one pre-existing finding — `N999 Invalid module name:
-  'FastText'` on `vendor/fasttext-wheel-shim/src/fasttext/FastText.py` —
-  also introduced by that same already-merged commit and also never run
-  through ruff before now (`git blame` confirms both the file and this test
-  predate this change; nothing in this change touched either). `uv run
-  mypy src` passes cleanly. [EVIDENCE: live `uv run pytest -q`, `uv run
-  ruff check`, `uv run mypy src` runs, 2026-10-29, first real runs against
-  a synced `.venv` on this project.] Net effect: CI's `uv sync --dev` step
-  itself would now pass, but the `ruff check`/`pytest -q` steps that follow
-  it in `.github/workflows/ci.yml` would still fail, so CI is not yet fully
-  green. Next step (not started): decide how to generalize
-  `test_vendor_wheel_integrity.py` (and/or rename/restructure the
-  pyonmttok-specific manifest) to cover every committed vendor wheel, and
-  decide whether to fix or accept the `FastText.py` module-name finding —
-  both are test-suite/lint-hygiene gaps, not native-build problems, and
-  are unrelated to the pyonmttok/fasttext-wheel cp314 blockers themselves.
+- Resolved: the first real `uv run pytest -q` / `uv run ruff check` runs
+  against the synced `.venv` surfaced two non-build hygiene findings, both
+  now fixed. (1) `tests/test_vendor_wheel_integrity.py` hardcoded
+  `manifests/pyonmttok_build.json` and a `uv.lock` package named
+  `"pyonmttok"`, so the committed fasttext-wheel shim wheel failed both of
+  its checks (2 failures). The test now reads every `manifests/*_build.json`.
+  It requires each `vendor/wheels/*.whl` to be claimed by exactly one
+  manifest build entry with a matching sha256, and every manifest build entry
+  to point at a committed `vendor/wheels/` file. It matches `uv.lock` entries
+  by wheel path and filename instead of by package name, so a future vendored
+  wheel with its own `manifests/<name>_build.json` is covered without editing
+  the test. (2) `ruff`'s `N999` on
+  `vendor/fasttext-wheel-shim/src/fasttext/FastText.py` is suppressed by a
+  `[tool.ruff.lint.per-file-ignores]` entry in `pyproject.toml`, scoped to
+  that one path and that one rule; see DECISIONS.md for why this was chosen
+  over a rename or an in-file `# noqa`. This is the project's first
+  `[tool.ruff]` table. Diffing `ruff check --show-settings` before and after
+  confirms it changes nothing else: same rule set, same 3.14 target version.
+  [EVIDENCE: live `uv lock --check`, `uv sync --dev --locked`,
+  `uv run ruff check .`, `uv run mypy src`, `uv run pytest -q` (40 passed)
+  on win_amd64, 2026-10-29. A mutation check of the generalized test against
+  a temp copy of the vendor wheels, manifests, and `uv.lock` covered a
+  corrupted manifest or lock hash, a rebuilt wheel, an unrecorded wheel, a
+  deleted wheel, and a duplicate manifest claim; each case failed exactly the
+  expected assertion.]
 - A generator model (vLLM, or an alternative) for Phase 6 synthetic data has
   been deliberately left out of the main workspace; Phase 0 or Phase 6 must
   decide between a separate non-workspace uv project and the llama.cpp path.

@@ -81,7 +81,24 @@ from source under MSVC (`fasttext_pybind.cc(171): error C2065: 'ssize_t':
 undeclared identifier`, cascading into pybind11 `C2672` overload-resolution
 errors). Same category of problem as this pyonmttok gap (native extension,
 no cp314 wheel), but not yet investigated or fixed; see STATE.md's current
-next step.
+next step. **[Resolved later on 2026-10-29: see the "fasttext-wheel cp314
+shim via fasttext-new" entry below.]**
+
+**Note on the direct `pyonmttok` dependency vs. the master plan.** The
+master plan (`docs/research/2026-10-29-rinchen-dev-agent-prompt.md`) lists
+`pyonmttok` under "Do NOT depend on: ... (we replace them)" — that line is
+about Rinchen's own text-processing pipeline, which must not import
+`pyonmttok` directly. The `pyonmttok==1.38.1` entry added to
+`[project.dependencies]` above is unrelated to that intent: it exists
+*only* as a dependency-resolution mechanism, because `uv`'s
+`[tool.uv.sources]` path overrides apply only to a project's direct or
+workspace dependencies, not to a package that is otherwise pulled in
+transitively via `eole`. Without the direct pin, the locally-built wheel
+override is silently ignored and `uv lock` fails exactly as before. Adding
+this pin does not reverse or weaken the master plan's "we replace them"
+design decision — Rinchen's own code still may not `import pyonmttok`
+directly; `eole` is the only thing in this workspace allowed to depend on
+it.
 
 ## 2026-10-29: fasttext-wheel cp314 shim via fasttext-new
 
@@ -113,30 +130,23 @@ pyonmttok and fasttext-wheel cp314 gaps existed to reach. [EVIDENCE: live
 `uv.lock`'s `fasttext-wheel` package entry has `source = { path =
 "vendor/wheels/fasttext_wheel-0.9.2-py3-none-any.whl" }`, an ordinary path
 dependency on the built wheel file, not an editable/workspace source, and
-`pyproject.toml` has no `[tool.uv.workspace]` table at all.] Running the
-real `uv run pytest -q` / `uv run ruff check` / `uv run mypy src` for the
-first time against this synced environment surfaced one more, separate,
-non-build finding: `tests/test_vendor_wheel_integrity.py` (2 tests) and one
-`ruff` `N999` finding on `vendor/fasttext-wheel-shim/src/fasttext/
-FastText.py` both pre-date this change (from the prior fasttext-wheel-shim
-task) and had simply never been executed before, since `uv sync` had never
-succeeded; see STATE.md for the detailed finding and its own, not-yet-made,
-follow-up decision. `tests/test_fasttext_wheel_shim.py`'s network test
-(real download of `lid.176.ftz`, real `predict()` calls) passes against the
-real synced environment.
+`pyproject.toml` has no `[tool.uv.workspace]` table at all.]
+`tests/test_fasttext_wheel_shim.py`'s network test (real download of
+`lid.176.ftz`, real `predict()` calls) passes against the real synced
+environment.
 
-**Note on the direct `pyonmttok` dependency vs. the master plan.** The
-master plan (`docs/research/2026-10-29-rinchen-dev-agent-prompt.md`) lists
-`pyonmttok` under "Do NOT depend on: ... (we replace them)" — that line is
-about Rinchen's own text-processing pipeline, which must not import
-`pyonmttok` directly. The `pyonmttok==1.38.1` entry added to
-`[project.dependencies]` above is unrelated to that intent: it exists
-*only* as a dependency-resolution mechanism, because `uv`'s
-`[tool.uv.sources]` path overrides apply only to a project's direct or
-workspace dependencies, not to a package that is otherwise pulled in
-transitively via `eole`. Without the direct pin, the locally-built wheel
-override is silently ignored and `uv lock` fails exactly as before. Adding
-this pin does not reverse or weaken the master plan's "we replace them"
-design decision — Rinchen's own code still may not `import pyonmttok`
-directly; `eole` is the only thing in this workspace allowed to depend on
-it.
+The first real `uv run pytest -q` / `uv run ruff check` against this synced
+environment also surfaced two non-build hygiene findings, both since fixed
+(evidence in STATE.md). [DESIGN: `tests/test_vendor_wheel_integrity.py` was
+generalized to read every `manifests/<name>_build.json` and to match
+`uv.lock` entries by wheel path/filename rather than by a hardcoded
+`pyonmttok` package name. Each vendored package keeps its own build
+manifest (no shared or renamed manifest), and a future vendored wheel needs
+no test change. `ruff`'s `N999` on the shim's `FastText.py` is suppressed by
+a `[tool.ruff.lint.per-file-ignores]` entry in `pyproject.toml`, scoped to
+that single path and rule. Renaming the module was rejected because its
+name deliberately mirrors upstream's `fasttext.FastText` submodule. An
+in-file `# noqa` was rejected because the committed wheel is byte-identical
+to the shim source: editing the source would either leave it out of sync
+with the wheel, or force a rebuild and a re-hash of the wheel, its manifest,
+and `uv.lock`.]
