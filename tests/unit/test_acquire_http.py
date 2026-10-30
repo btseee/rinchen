@@ -1,4 +1,5 @@
 """Tests for rinchen.acquire.http.download: resume, retry, sha256, local scheme."""
+
 from __future__ import annotations
 
 import httpx

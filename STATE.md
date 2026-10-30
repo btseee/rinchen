@@ -11,8 +11,8 @@ nothing has been pushed yet. Sequencing decision honored: the pyonmttok/eole
 blocker (below) was resolved before D0, since D0's own doctor checks
 (`D-EOLE-PY`, `D-EOLE-CLI`) and CI's sync step require a working `eole`.
 Current next step: push this work and confirm CI is green on
-`ubuntu-latest` (the one remaining piece of D0's own STOP gate), then start
-D1 (Data acquisition). D0 (environment,
+`ubuntu-latest` (the one remaining piece of both D0's and D1's STOP gates
+-- see the D1 paragraph below), then start D2. D0 (environment,
 skeleton, doctor) is done and verified locally -- NOT yet confirmed on CI,
 since none of this work has been pushed to `origin` (`git status` shows the
 local branch 50+ commits ahead of `origin/main`): `pyproject.toml`
@@ -33,6 +33,42 @@ One real discrepancy from the master plan found and documented: eole
 0.6.4's CLI has no `model average` subcommand (see `docs/VERIFY.md`'s
 `D-EOLE-CLI` row) -- the build-ourselves checkpoint averager (D8/D10) is
 the planned fallback, not yet built.
+
+**D1 (Data acquisition) is done and verified locally** -- NOT yet
+confirmed on CI, for the same reason as D0: nothing on this branch
+(all of D0 and D1) has been pushed to `origin` yet (`git status` shows
+the local branch 60+ commits ahead of `origin/main`). D1 built the
+schema-validated source registry (`src/rinchen/acquire/registry.py`,
+a `SourceEntry` discriminated union over `http`/`opus`/`hf`/`commoncrawl`
+kinds) and its backends: resumable, retrying, sha256-verifying
+`http.py` download (with a `local://` scheme for offline fixtures), an
+OPUS API client (`opus.py`: `list_corpora`, `fetch`), WARC iteration and
+article-text extraction (`warc.py`, proven against a real 5-record
+fixture built by `scripts/build_sample_warc_fixture.py`), a HuggingFace
+streaming-to-Parquet-shards writer (`hf.py`), and a CommonCrawl CDX query
+plus bounded-range WARC fetch (`commoncrawl.py`). `rinchen data fetch`
+and `rinchen data ls` (`src/rinchen/cli/data.py`) dispatch across all
+four registry kinds. `configs/data/sources.tiny.yaml` ships 4 offline
+fixture entries (one per kind) for `--profile tiny`; `configs/data/sources.yaml`
+ships with zero real production entries by design -- see DECISIONS.md's
+2026-10-30 entry: 7 candidate real-world parallel corpora were vetted
+with a 100-random-sample, zero-tolerance review, 6 of 7 failed (script
+violations, truncation, misalignment, mistranslation), and the user
+chose to build Rinchen's own standard dataset from scratch rather than
+seed the registry with a flawed candidate. `docs/runbooks/01_acquisition.md`
+documents disk estimates, parallelism, rerun semantics, and the
+how-to-add-a-source procedure. D1's own STOP gate was run for real, not
+just via the automated test added in its final task: `just gate` green
+locally (102 passed, 6 network tests deselected, no ruff/mypy findings
+-- a handful of files needed a `ruff format` pass first, fixed as part
+of this same check), `uv run rinchen data fetch --profile tiny --all`
+fetched all 4 fixtures into `data/raw/` for real, `uv run rinchen data
+ls --profile tiny` listed all 4 entries, and the full `uv run pytest -q`
+(including the network-marked tests, which pass offline against the
+`local://` fixtures) passed at 108. [EVIDENCE:
+`docs/superpowers/plans/2026-10-30-d1-data-acquisition.md`,
+`docs/runbooks/01_acquisition.md`, live `just gate` / `rinchen data
+fetch` / `rinchen data ls` / `uv run pytest -q` runs, 2026-10-30.]
 
 Repo scaffold is done: uv workspace, directory tree, CLAUDE.md, STATE.md,
 DECISIONS.md, .gitignore, and a real (not stub) CI workflow

@@ -1,5 +1,6 @@
 """Source registry: validates `configs/data/sources.yaml`-shaped files
 against a `SourceEntry` discriminated union and loads them for fetching."""
+
 from __future__ import annotations
 
 from enum import Enum

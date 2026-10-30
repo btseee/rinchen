@@ -10,6 +10,7 @@ from the actual query entirely and instead picks the entry (or entries,
 for a corpus like Tatoeba that publishes many dated releases) whose
 ``latest`` field is the string ``"True"``.
 """
+
 from __future__ import annotations
 
 from pathlib import Path

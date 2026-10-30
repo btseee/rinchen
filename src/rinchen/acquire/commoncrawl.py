@@ -1,4 +1,5 @@
 """CommonCrawl CDX index queries and bounded-range WARC record fetches."""
+
 from __future__ import annotations
 
 import json

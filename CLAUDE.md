@@ -37,9 +37,12 @@ NEVER:
 CLAUDE.md STATE.md DECISIONS.md pyproject.toml uv.lock justfile
 .pre-commit-config.yaml
 configs/base.yaml configs/profiles/{tiny,full}.yaml configs/{spm,eole,serve}/
-docs/STACK.md docs/VERIFY.md docs/runbooks/
+configs/data/sources.yaml configs/data/sources.tiny.yaml
+docs/STACK.md docs/VERIFY.md
+docs/runbooks/00_environment.md docs/runbooks/01_acquisition.md
 docs/research/  docs/superpowers/{specs,plans}/
 src/rinchen/{config,manifest,utils,cli,text,filter,synth,metrics,eval,serve}/
+src/rinchen/acquire/{http,opus,hf,warc,commoncrawl,registry}.py
 src/rinchen/errors.py src/rinchen/__init__.py
 tests/ scripts/ plans/ reports/ manifests/ annotation_app/
 data/{raw,clean,mined,synth,test}/ (gitignored content, tracked dirs)
@@ -50,18 +53,19 @@ vendor/fasttext-wheel-shim/ (pure-Python shim package, see DECISIONS.md)
 
 Note: `data/`, `align/`, and `convert/` under `src/rinchen/` from the old
 Phase 0-14 plan have no home in the new D0-D15 repo layout and were removed;
-D1 builds `acquire/` + `corpus/` there instead of recreating `data/`.
+D1 built `acquire/` there instead of recreating `data/` (no `corpus/`
+module was needed for D1's actual scope -- see `STATE.md`'s D1 paragraph).
 
 ## Current phase
 
 Master plan switched 2026-10-29 to milestones D0-D15 (see below). D0
-(environment, skeleton, doctor) is done and verified locally: toolchain
-restructured, `just gate` green, `rinchen doctor` implemented with 7 checks
-(6 OK + 1 SKIP on this machine), 81 tests passing, CLI skeleton in place.
-CI verification is still pending -- nothing has been pushed to `origin` yet,
-so D0's STOP gate ("`just gate` green locally AND in CI") is only half met.
-Next up: start D1 (Data acquisition) once CI is confirmed green. See
-`STATE.md`.
+(environment, skeleton, doctor) and D1 (data acquisition: source registry,
+http/OPUS/HuggingFace/CommonCrawl backends, `rinchen data fetch`/`ls`) are
+both done and verified locally, with D1's tiny-profile fetch/ls proven for
+real; CI verification is still pending -- nothing has been pushed to
+`origin` yet, so both milestones' STOP gates ("`just gate` green locally
+AND in CI") are only half met. Next up: push and confirm CI green, then
+start D2. See `STATE.md`.
 
 ## Evidence and full plan
 

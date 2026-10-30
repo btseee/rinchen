@@ -1,4 +1,5 @@
 """Iterate WARC files and extract article text from their response records."""
+
 from __future__ import annotations
 
 from collections.abc import Iterator

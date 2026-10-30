@@ -1,4 +1,5 @@
 """`rinchen data`: fetch and list registry sources."""
+
 from __future__ import annotations
 
 from pathlib import Path

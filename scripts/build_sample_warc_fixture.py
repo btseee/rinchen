@@ -5,6 +5,7 @@ rinchen.acquire.warc. Re-run this script if the fixture ever needs
 regenerating; the golden extracted text in
 tests/unit/test_acquire_warc.py was computed from this exact content and
 must be updated together with any change here."""
+
 from __future__ import annotations
 
 import io
@@ -15,24 +16,44 @@ from warcio.statusandheaders import StatusAndHeaders  # type: ignore[import-unty
 from warcio.warcwriter import WARCWriter  # type: ignore[import-untyped]
 
 PAGES = [
-    ("http://example.test/page1", "First Article", [
-        "This is the first paragraph of the first test article.",
-        "It has a second sentence to give trafilatura enough content.",
-    ]),
-    ("http://example.test/page2", "Second Article", [
-        "This second article discusses a different synthetic topic entirely.",
-        "Enough text is present here for reliable extraction as well.",
-    ]),
-    ("http://example.test/page3", "Third Article", [
-        "The third synthetic article continues the pattern for testing purposes.",
-    ]),
-    ("http://example.test/page4", "Fourth Article", [
-        "A fourth short article rounds out the fixture set nicely.",
-        "Two sentences keep the extraction stable across all records.",
-    ]),
-    ("http://example.test/page5", "Fifth Article", [
-        "The fifth and final synthetic article closes out the sample WARC file.",
-    ]),
+    (
+        "http://example.test/page1",
+        "First Article",
+        [
+            "This is the first paragraph of the first test article.",
+            "It has a second sentence to give trafilatura enough content.",
+        ],
+    ),
+    (
+        "http://example.test/page2",
+        "Second Article",
+        [
+            "This second article discusses a different synthetic topic entirely.",
+            "Enough text is present here for reliable extraction as well.",
+        ],
+    ),
+    (
+        "http://example.test/page3",
+        "Third Article",
+        [
+            "The third synthetic article continues the pattern for testing purposes.",
+        ],
+    ),
+    (
+        "http://example.test/page4",
+        "Fourth Article",
+        [
+            "A fourth short article rounds out the fixture set nicely.",
+            "Two sentences keep the extraction stable across all records.",
+        ],
+    ),
+    (
+        "http://example.test/page5",
+        "Fifth Article",
+        [
+            "The fifth and final synthetic article closes out the sample WARC file.",
+        ],
+    ),
 ]
 
 

@@ -1,6 +1,7 @@
 """Generic HTTP download with resume, retry/backoff, sha256 verification,
 and a `local://` scheme for offline fixture-backed fetches (used by the
 registry's `kind: local` entries, see `registry.py`)."""
+
 from __future__ import annotations
 
 import hashlib

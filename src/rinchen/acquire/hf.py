@@ -7,6 +7,7 @@ only exercised via the registry's offline `kind: local` fixture path, not
 by a dedicated unit test (the master plan's own D1 test list names no
 such test, and a real network-backed test would violate the "never
 network-access in unit tests" hard constraint)."""
+
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
