@@ -49,6 +49,25 @@ sources:
     unexpected_field: 1
 """
 
+HF_WITH_EXPECTED_SHA_YAML = """
+sources:
+  - id: broken-hf
+    kind: hf
+    langs: [mn]
+    dataset: wikimedia/wikipedia
+    expected_sha: "0000000000000000000000000000000000000000000000000000000000000000"
+"""
+
+COMMONCRAWL_WITH_EXPECTED_SHA_YAML = """
+sources:
+  - id: broken-cc
+    kind: commoncrawl
+    langs: [mn]
+    url_pattern: "example.test/*"
+    collection: CC-MAIN-2026-43
+    expected_sha: "0000000000000000000000000000000000000000000000000000000000000000"
+"""
+
 
 def test_load_registry_parses_valid_entries(tmp_path):
     path = tmp_path / "sources.yaml"
@@ -87,6 +106,17 @@ def test_load_registry_rejects_extra_field(tmp_path):
         load_registry(path)
 
 
+def test_load_registry_raises_config_error_when_top_level_is_a_list(tmp_path):
+    """A malformed registry file whose top level is a YAML list (instead of
+    a mapping with a `sources:` key) must raise `ConfigError`, not a raw
+    `AttributeError` from calling `.get()` on a list."""
+    path = tmp_path / "sources.yaml"
+    path.write_text("- id: a\n- id: b\n", encoding="utf-8")
+
+    with pytest.raises(ConfigError):
+        load_registry(path)
+
+
 def test_load_registry_raises_config_error_when_file_missing(tmp_path):
     with pytest.raises(ConfigError, match="not found"):
         load_registry(tmp_path / "nonexistent.yaml")
@@ -100,6 +130,22 @@ def test_find_entry_returns_matching_entry(tmp_path):
     found = find_entry(entries, "wikipedia-mn")
 
     assert found.id == "wikipedia-mn"
+
+
+def test_load_registry_rejects_expected_sha_on_hf_kind(tmp_path):
+    path = tmp_path / "sources.yaml"
+    path.write_text(HF_WITH_EXPECTED_SHA_YAML, encoding="utf-8")
+
+    with pytest.raises(ConfigError):
+        load_registry(path)
+
+
+def test_load_registry_rejects_expected_sha_on_commoncrawl_kind(tmp_path):
+    path = tmp_path / "sources.yaml"
+    path.write_text(COMMONCRAWL_WITH_EXPECTED_SHA_YAML, encoding="utf-8")
+
+    with pytest.raises(ConfigError):
+        load_registry(path)
 
 
 def test_find_entry_raises_config_error_when_not_found(tmp_path):

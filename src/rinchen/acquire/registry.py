@@ -8,7 +8,14 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    ValidationError,
+    model_validator,
+)
 
 from rinchen.acquire import commoncrawl, hf, http, opus
 from rinchen.errors import ConfigError
@@ -51,11 +58,31 @@ class HfSourceEntry(_BaseSourceEntry):
     config: str | None = None
     split: str = "train"
 
+    @model_validator(mode="after")
+    def _reject_expected_sha(self) -> HfSourceEntry:
+        if self.expected_sha is not None:
+            raise ValueError(
+                "expected_sha is not supported for kind: hf -- an hf fetch "
+                "writes multiple Parquet shards, so a single sha256 has no "
+                "well-defined meaning here"
+            )
+        return self
+
 
 class CommonCrawlSourceEntry(_BaseSourceEntry):
     kind: Literal[SourceKind.COMMONCRAWL]
     url_pattern: str
     collection: str
+
+    @model_validator(mode="after")
+    def _reject_expected_sha(self) -> CommonCrawlSourceEntry:
+        if self.expected_sha is not None:
+            raise ValueError(
+                "expected_sha is not supported for kind: commoncrawl -- a "
+                "commoncrawl fetch writes multiple WARC records, so a "
+                "single sha256 has no well-defined meaning here"
+            )
+        return self
 
 
 class LocalSourceEntry(_BaseSourceEntry):
@@ -82,6 +109,11 @@ def load_registry(path: Path) -> list[SourceEntry]:
         raise ConfigError(f"registry file not found: {path}")
     with path.open(encoding="utf-8") as handle:
         raw = yaml.safe_load(handle) or {}
+    if not isinstance(raw, dict):
+        raise ConfigError(
+            f"invalid registry {path}: top level must be a mapping with a "
+            f"'sources' key, got {type(raw).__name__}"
+        )
     entries = raw.get("sources", [])
     try:
         return _LIST_ADAPTER.validate_python(entries)
@@ -107,7 +139,7 @@ def fetch_source(entry: SourceEntry, dest_dir: Path) -> Path:
 
     if isinstance(entry, OpusSourceEntry):
         dest = dest_dir / f"{entry.id}.zip"
-        return opus.fetch(
+        result = opus.fetch(
             entry.corpus,
             entry.src,
             entry.tgt,
@@ -115,16 +147,19 @@ def fetch_source(entry: SourceEntry, dest_dir: Path) -> Path:
             preprocessing=entry.preprocessing,
             version=entry.version,
         )
+        http.verify_sha256(result, entry.expected_sha)
+        return result
 
     if isinstance(entry, HfSourceEntry):
-        shard_dir = dest_dir / entry.id
-        hf.fetch(entry.dataset, shard_dir, config=entry.config, split=entry.split)
-        return shard_dir
+        # `dest_dir` is already `<data-root>/<entry.id>` (the CLI builds it
+        # that way), so it is used directly here rather than nesting
+        # `entry.id` a second time underneath it.
+        hf.fetch(entry.dataset, dest_dir, config=entry.config, split=entry.split)
+        return dest_dir
 
     if isinstance(entry, CommonCrawlSourceEntry):
-        shard_dir = dest_dir / entry.id
         records = commoncrawl.query_cdx(entry.url_pattern, entry.collection)
-        commoncrawl.fetch_records(records, shard_dir)
-        return shard_dir
+        commoncrawl.fetch_records(records, dest_dir)
+        return dest_dir
 
     raise ConfigError(f"unknown source kind for entry {entry.id!r}")
