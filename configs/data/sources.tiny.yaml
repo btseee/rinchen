@@ -8,6 +8,13 @@ sources:
     kind: local
     langs: [mn, en]
     url: "local://tests/fixtures/raw/opus_api_mn_en.json"
+  # NOTE: `langs: [mn]` on warc-sample and news-html-sample below is a
+  # schema/kind-dispatch test value only. The actual fixture content
+  # (sample.warc.gz's 5 records, mn_news.html) is synthetic placeholder
+  # English text, not real Mongolian. Do NOT use these two fixtures to
+  # validate language-detection or script-detection logic -- they will
+  # give a false positive/negative since the content doesn't match the
+  # declared language.
   - id: warc-sample
     kind: local
     langs: [mn]
