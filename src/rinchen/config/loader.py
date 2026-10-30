@@ -1,5 +1,5 @@
-"""Three-layer config loader: base -> profile -> overlay files -> CLI --set,
-then RINCHEN_* env vars as the final overlay."""
+"""Three-layer config loader: base -> profile -> overlay files -> RINCHEN_*
+env vars, then CLI --set overrides as the final, most-specific overlay."""
 
 from __future__ import annotations
 
@@ -52,7 +52,7 @@ def load(
     *overlays: Path,
     cli_overrides: dict[str, str] | None = None,
 ) -> RinchenConfig:
-    """Merge base -> profile -> overlay YAML files -> CLI --set overrides -> env vars."""
+    """Merge base -> profile -> overlay YAML files -> env vars -> CLI --set overrides."""
     merged: dict[str, Any] = {}
     if BASE_CONFIG_PATH.is_file():
         merged = _deep_merge(merged, _read_yaml(BASE_CONFIG_PATH))
@@ -64,12 +64,12 @@ def load(
     for overlay_path in overlays:
         merged = _deep_merge(merged, _read_yaml(overlay_path))
 
-    for dotted_key, raw_value in (cli_overrides or {}).items():
-        _apply_dotted_override(merged, dotted_key, raw_value)
-
     env = RinchenEnvSettings()
     if env.seed is not None:
         merged["seed"] = env.seed
+
+    for dotted_key, raw_value in (cli_overrides or {}).items():
+        _apply_dotted_override(merged, dotted_key, raw_value)
 
     try:
         return RinchenConfig(**merged)

@@ -28,6 +28,9 @@ jobs:
       - name: Gate (ruff format, ruff check, mypy, fast tests)
         run: just gate
 
+      - name: Doctor (environment checks must all pass or skip, never fail)
+        run: just doctor
+
       - name: Tiny pipeline (stub until D15)
         run: just tiny
 

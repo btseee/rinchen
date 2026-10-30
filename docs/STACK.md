@@ -2,13 +2,15 @@
 
 Resolved package versions for the current `uv.lock`, recorded per
 CLAUDE.md's hard constraint ("record every resolved package version").
-Regenerate after any `uv lock --upgrade`.
+Regenerate after any `uv lock --upgrade`. Windows-only snapshot (this
+machine's resolution): does not capture Linux-only resolutions (e.g.
+`nvidia-*` CUDA packages) that appear in the CI/GPU box's resolve.
 
-Generated: 2026-10-30T08:02:21Z
+Generated: 2026-10-30T09:14:12Z
 
 ```
-Package                 Version      Editable project location
------------------------ ------------ -----------------------------
+Package                 Version         Editable project location
+----------------------- --------------- -----------------------------
 absl-py                 2.5.1
 aiohappyeyeballs        2.7.1
 aiohttp                 3.14.5
@@ -121,7 +123,7 @@ rapidfuzz               3.14.6
 regex                   2026.9.29
 requests                2.34.2
 rich                    15.0.0
-rinchen                 0.0.0        D:\Personal documents\rinchen
+rinchen                 0.0.0           D:\Personal documents\rinchen
 ruff                    0.17.3
 sacrebleu               2.6.0
 safetensors             0.8.0
@@ -160,6 +162,7 @@ transformers            5.21.0
 truststore              0.10.5
 ty                      0.0.95
 typer                   0.27.3
+types-pyyaml            6.0.12.20261030
 typing-extensions       4.16.0
 typing-inspection       0.4.4
 tzdata                  2026.6

@@ -24,19 +24,23 @@ NEVER:
 
 ## Commands
 
+- `just gate` (ruff format --check, ruff check, mypy, pytest -m "not network" -q -- the full local gate CI also runs)
 - `uv run pytest -q`
-- `uv run ruff check`
+- `uv run ruff check .`
+- `uv run ruff format --check .`
 - `uv run mypy src`
+- `uv run rinchen doctor` (or `just doctor`)
 
 ## Repo layout
 
 ```
 CLAUDE.md STATE.md DECISIONS.md pyproject.toml uv.lock justfile
 .pre-commit-config.yaml
-configs/{spm,eole,serve}/
+configs/base.yaml configs/profiles/{tiny,full}.yaml configs/{spm,eole,serve}/
 docs/STACK.md docs/VERIFY.md docs/runbooks/
 docs/research/  docs/superpowers/{specs,plans}/
-src/rinchen/{data,text,align,filter,synth,metrics,eval,convert,serve,cli}/
+src/rinchen/{config,manifest,utils,cli,text,filter,synth,metrics,eval,serve}/
+src/rinchen/errors.py src/rinchen/__init__.py
 tests/ scripts/ plans/ reports/ manifests/ annotation_app/
 data/{raw,clean,mined,synth,test}/ (gitignored content, tracked dirs)
 vendor/wheels/ (committed binary wheels with no cp314 upstream release)
@@ -44,12 +48,20 @@ vendor/fasttext-wheel-shim/ (pure-Python shim package, see DECISIONS.md)
 .github/workflows/ci.yml
 ```
 
+Note: `data/`, `align/`, and `convert/` under `src/rinchen/` from the old
+Phase 0-14 plan have no home in the new D0-D15 repo layout and were removed;
+D1 builds `acquire/` + `corpus/` there instead of recreating `data/`.
+
 ## Current phase
 
 Master plan switched 2026-10-29 to milestones D0-D15 (see below). D0
-(environment, skeleton, doctor) is complete: toolchain restructured, `rinchen
-doctor` implemented with 7 checks, CLI skeleton in place. Next up: D1 (Data
-acquisition). See `STATE.md`.
+(environment, skeleton, doctor) is done and verified locally: toolchain
+restructured, `just gate` green, `rinchen doctor` implemented with 7 checks
+(6 OK + 1 SKIP on this machine), 81 tests passing, CLI skeleton in place.
+CI verification is still pending -- nothing has been pushed to `origin` yet,
+so D0's STOP gate ("`just gate` green locally AND in CI") is only half met.
+Next up: start D1 (Data acquisition) once CI is confirmed green. See
+`STATE.md`.
 
 ## Evidence and full plan
 

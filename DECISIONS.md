@@ -119,6 +119,79 @@ avoids native compilation entirely and needs no per-platform maintenance,
 at the accepted cost of depending on a smaller, alpha-status third-party
 package instead of the archived original.]
 
+## 2026-10-30: D0 wrap-up decisions and deliberately deferred scope
+
+A few D0 design decisions were made along the way but never recorded here;
+collected in one place rather than split across several near-duplicate
+entries.
+
+[DESIGN: `ruff`'s `extend-exclude = ["docs/"]` (in `pyproject.toml`'s
+`[tool.ruff]` table).] `docs/` holds historical design/plan prose
+(`docs/research/`, `docs/superpowers/`) with illustrative code fences, not
+real importable source. Without the exclusion, ruff's Markdown support
+lints/reformats those example snippets as if they were project code,
+producing noise unrelated to the actual codebase.
+
+[DESIGN: `rinchen doctor`'s `D-WHEELS` check (`src/rinchen/cli/doctor.py`)
+verifies each `[project.dependencies]` entry via
+`importlib.metadata.version(name)` against installed distribution metadata,
+rather than `import`-ing each package by its module name.] A PyPI
+distribution name does not reliably map to its import name (e.g.
+`PyYAML` -> `yaml`, `beautifulsoup4` -> `bs4`, `fasttext-wheel` -> `fasttext`,
+`scikit-learn` -> `sklearn`), so a generic "import every dependency by name"
+check would need a hand-maintained name-mapping table that silently drifts
+as dependencies are added. Checking installed distribution metadata by its
+PyPI name is robust to this without any such table, at the accepted cost of
+not actually exercising each package's import machinery (separate,
+targeted checks like `D-EOLE-PY` and `D-CT2-IMPORT` cover the packages
+where a real `import` matters).
+
+[DESIGN: no separate `rinchen doctor --gpu` flag.] The master plan's
+wording suggested a GPU-specific doctor flag; D0 instead always runs the
+GPU check (`D-TORCH-CUDA`) as part of the normal `rinchen doctor`
+invocation, reporting `skip` (not `fail`) when no GPU is present, rather
+than adding a separate flag that would need to be remembered and invoked
+on purpose on GPU machines. This keeps one invocation path for the whole
+doctor suite.
+
+[DESIGN: deliberately deferred CI gaps in `.github/workflows/ci.yml`, not
+attempted as part of this fix round.] The current `ci.yml` is a real,
+working gate (`uv sync --frozen --group dev` -> `just gate` -> `just
+doctor` -> `just tiny`, with a coverage-artifact upload step), but it is
+not yet the master plan's full target CI config. Known, deliberate gaps,
+each its own future scope:
+- No `uv` cache step (e.g. `astral-sh/setup-uv`'s built-in caching) --
+  every CI run currently does a full cold dependency resolve/download.
+- No `timeout-minutes` set on the `gate` job -- a hang would run until
+  GitHub Actions' own default job timeout.
+- No nightly/scheduled (`on: schedule`) trigger -- CI only runs on push to
+  `main` and on pull requests.
+- No `report.json` generation -- the master plan's eventual per-run
+  machine-readable report artifact is not produced by this workflow.
+- The `Upload coverage` step uploads `coverage.xml`, but no step ever
+  passes `--cov` to pytest, so `coverage.xml` is never produced; the
+  upload step's `if-no-files-found: ignore` means it silently no-ops on
+  every run rather than failing, which could give a false impression that
+  coverage is being collected.
+
+None of these should be mistaken for the master plan's full target CI
+config; each is real, separately-scoped work for a later milestone to pick
+up deliberately, not an oversight to silently work around.
+
+[DESIGN: the config-loader -> manifest integration seam
+(`config_sha256`/`code_version` inputs) is deferred, not built in D0.] The
+design spec asked the config loader to be able to dump the resolved
+config plus its sha256, and for `src/rinchen/__init__.py` to hold a real
+`__version__` string -- neither was built in D0, so nothing in the
+package today actually produces the `config_sha256`/`code_version` values
+that `Manifest`/`should_skip` (`src/rinchen/manifest/`) require as inputs.
+`src/rinchen/__init__.py` remains an empty file as of this entry. This is
+real scope, not a quick fix: designing the dump mechanism properly (what
+gets canonicalized before hashing, where the dump is written, how
+`code_version` is derived) is D1+ work. Whichever D1+ task first needs
+`config_sha256` for a real manifest should build this seam then, rather
+than assuming it already exists.
+
 Wiring this in (`pyproject.toml`'s `[project.dependencies]` plus a
 `[tool.uv.sources]` path override to the committed
 `vendor/wheels/fasttext_wheel-0.9.2-py3-none-any.whl`, mirroring the

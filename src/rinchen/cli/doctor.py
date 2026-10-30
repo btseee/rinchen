@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import importlib
 import importlib.metadata
-import shutil
 import subprocess
 import sys
 import tomllib
@@ -78,17 +77,10 @@ def _run_help(command: list[str]) -> tuple[bool, str]:
 
 
 def check_eole_cli() -> DoctorResult:
-    eole_bin = shutil.which("eole")
-    if eole_bin is None:
-        return DoctorResult(
-            "D-EOLE-CLI",
-            "fail",
-            "'eole' console script not found on PATH (run via `uv run rinchen doctor`)",
-        )
     subcommands = ["build_vocab", "train", "predict", "convert"]
     failures = []
     for sub in subcommands:
-        ok, output = _run_help([eole_bin, sub, "--help"])
+        ok, output = _run_help([sys.executable, "-m", "eole.bin.main", sub, "--help"])
         if not ok:
             failures.append(f"{sub}: {output}")
     if failures:

@@ -64,6 +64,22 @@ def test_cli_override_wins_over_everything(tmp_path, monkeypatch):
     assert config.seed == 4
 
 
+def test_cli_override_wins_over_env_var(tmp_path, monkeypatch):
+    base = tmp_path / "base.yaml"
+    _write(base, "seed: 1\n")
+    profiles_dir = tmp_path / "profiles"
+    profiles_dir.mkdir()
+    _write(profiles_dir / "tiny.yaml", "seed: 2\n")
+
+    monkeypatch.setattr(loader, "BASE_CONFIG_PATH", base)
+    monkeypatch.setattr(loader, "PROFILES_DIR", profiles_dir)
+    monkeypatch.setenv("RINCHEN_SEED", "99")
+
+    config = loader.load("tiny", cli_overrides={"seed": "4"})
+
+    assert config.seed == 4
+
+
 def test_cli_override_sets_nested_path(tmp_path, monkeypatch):
     base = tmp_path / "base.yaml"
     _write(base, "seed: 1\npaths:\n  data_root: /base\n")
