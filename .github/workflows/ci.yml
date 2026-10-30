@@ -6,7 +6,7 @@ on:
   pull_request:
 
 jobs:
-  lint-type-test:
+  gate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,14 +19,22 @@ jobs:
         with:
           python-version: "3.14"
 
+      - name: Install just
+        uses: extractions/setup-just@v2
+
       - name: Sync dependencies
-        run: uv sync --dev
+        run: uv sync --frozen --group dev
 
-      - name: Ruff check
-        run: uv run ruff check .
+      - name: Gate (ruff format, ruff check, mypy, fast tests)
+        run: just gate
 
-      - name: Mypy
-        run: uv run mypy src
+      - name: Tiny pipeline (stub until D15)
+        run: just tiny
 
-      - name: Pytest
-        run: uv run pytest -q
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.xml
+          if-no-files-found: ignore
