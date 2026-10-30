@@ -27,7 +27,11 @@ def sha256_of(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _verify_sha256(path: Path, expected: str | None) -> None:
+def verify_sha256(path: Path, expected: str | None) -> None:
+    """Raise `DataError` if `path`'s sha256 doesn't match `expected`
+    (deleting `path` first). A no-op when `expected` is None. Public so
+    other acquire backends (e.g. `registry.fetch_source`'s `opus` branch)
+    can reuse the same check and error type `download()` uses."""
     if expected is None:
         return
     actual = sha256_of(path)
@@ -59,7 +63,7 @@ def download(
         if not source.is_file():
             raise DataError(f"local source not found: {source}")
         shutil.copyfile(source, dest)
-        _verify_sha256(dest, sha256)
+        verify_sha256(dest, sha256)
         return dest
 
     part_path = dest.with_name(dest.name + ".part")
@@ -91,6 +95,6 @@ def download(
         if owns_client:
             http_client.close()
 
-    part_path.rename(dest)
-    _verify_sha256(dest, sha256)
+    part_path.replace(dest)
+    verify_sha256(dest, sha256)
     return dest
