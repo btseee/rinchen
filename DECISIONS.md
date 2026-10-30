@@ -224,3 +224,75 @@ gets canonicalized before hashing, where the dump is written, how
 `config_sha256` for a real manifest should build this seam then, rather
 than assuming it already exists.
 
+## 2026-10-30: D1 candidate parallel-corpus QA — 6 of 7 rejected
+
+[EVIDENCE: live, 100-random-sample pair-by-pair review of each candidate,
+2026-10-30, conducted via parallel forked review agents (each
+independently downloading and reading 100 real EN-MN pairs), under a
+zero-tolerance bar the user set explicitly ("if there is the slightest
+issue, ignore that dataset").] Before building D1's acquisition machinery,
+7 candidate real-world parallel corpora were vetted: 5 OPUS corpora the
+user pre-selected (TED2020, QED, NeuLab-TedTalks, GNOME, Tatoeba) plus two
+HuggingFace candidates (`ugshanyu/1millionMongolianSentence`,
+`davidstap/NTREX`). Verdicts:
+
+- **GNOME: FAIL.** 34 of 100 sampled pairs had issues: truncated verbs
+  (e.g. "Remove the queen of hearts." → "Бундангийн хатан", dropping the
+  verb entirely), leaked untranslated English developer comments sitting
+  in the Mongolian column, clear wrong-meaning mistranslations (e.g.
+  "Single card" → "Гурван карт", "three cards"), and at least one
+  misaligned/reused string pairing.
+- **NeuLab-TedTalks: FAIL.** ~19 of 100 pairs showed systematic
+  truncation — the Mongolian side drops clauses or trails off mid-sentence
+  relative to the English, a structural artifact of TED subtitle-segment
+  alignment, not isolated noise.
+- **QED: FAIL.** Galig/Latin-script Mongolian present in at least 9 of 100
+  pairs (e.g. `Tegeed ter ShinHwa group-n uv zalgamjlagch yumu?`) — a
+  direct hard-constraint violation (CLAUDE.md: "NEVER use galig/Latin
+  informal Mongolian") — plus severe misalignment (one pair's English
+  field contained Mongolian text verbatim; several pairs' Mongolian text
+  was entirely unrelated to the English).
+- **TED2020: FAIL.** 19+ distinct issues: 2 fully empty pairs, several
+  truncated/incomplete Mongolian sentences, wrong-sense mistranslations
+  (e.g. "race" as in ethnicity mistranslated as "уралдаан", a running
+  race), content inserted from neighboring subtitle segments with no
+  English counterpart at all, a misspelled real proper noun ("Aga Khan"
+  → "Агра Хан"), and one stray Cyrillic-homoglyph inconsistency.
+- **`ugshanyu/1millionMongolianSentence`: FAIL.** Character-substitution
+  defects (Latin `v` substituted for Cyrillic `ү`; Ukrainian `є` substituted
+  for Mongolian `ө`), plus real content/name mismatches (a named minister
+  in English replaced by two different, unrelated names in Mongolian;
+  garbled English proper nouns like "Reikakkal" for Reykjavik) consistent
+  with the English side being a poor machine back-translation rather than
+  an independent human translation, not a genuine parallel corpus.
+- **`davidstap/NTREX`: FAIL.** ~10% defect rate with meaning-inverting
+  mistranslations (e.g. "shark" → "аварга засаг", "great ruler"; the idiom
+  "full bore" rendered as nonsense; Iowa's agricultural-export status
+  misattributed to China). Note: NTREX's Mongolian config is internally
+  labeled `mon_Mong`, which was initially (incorrectly) flagged during
+  brainstorming as traditional Mongol script — directly downloading and
+  reading the real parquet content confirmed it is genuine Khalkha
+  Cyrillic; the label is just NTREX's own naming quirk, not a script
+  issue. The dataset was excluded for translation-quality reasons, not a
+  script violation.
+- **Tatoeba: borderline, user chose to exclude anyway.** The only
+  candidate without structural/alignment problems or script violations —
+  ~10 minor issues in 100 pairs (typos, one case-marking inconsistency, a
+  dropped proper name, one imprecise idiom, one geography-fact sentence
+  flagged for sensitivity-review rather than being an actual error).
+
+[DESIGN: rather than keep searching for a passing candidate, the user
+decided Rinchen will build its own standard dataset from scratch.
+`configs/data/sources.yaml` ships with zero real production entries as of
+D1 — D1's own scope (the acquisition machinery: `http.py`, `opus.py`,
+`hf.py`, `commoncrawl.py`, `warc.py`, `registry.py`) is unaffected by this,
+since it only needs a schema-valid registry and offline test fixtures to
+prove the machinery works, not a populated catalog. Real corpus curation
+is a separate, future, ongoing effort — any future candidate should be
+vetted with this same 100-sample zero-tolerance process before being added
+to `sources.yaml`, not assumed safe from a smaller spot-check (the
+original 5-line-per-corpus spot-check done earlier in this same
+brainstorm looked clean for all 7 candidates and would have wrongly
+greenlit 6 of them — the 100-sample pass is what actually caught the real
+defect rates).]
+
