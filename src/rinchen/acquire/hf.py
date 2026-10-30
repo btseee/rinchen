@@ -1,12 +1,15 @@
 """HuggingFace `datasets` streaming -> Parquet shards.
 
 `write_shards` takes an already-constructed row iterator so it is
-unit-testable without any network access; `fetch` is the thin wrapper
-that actually calls `datasets.load_dataset(..., streaming=True)` and is
-only exercised via the registry's offline `kind: local` fixture path, not
-by a dedicated unit test (the master plan's own D1 test list names no
-such test, and a real network-backed test would violate the "never
-network-access in unit tests" hard constraint)."""
+unit-testable without any network access, and is exercised directly by
+`tests/unit/test_acquire_hf.py`. `fetch` is the thin wrapper that actually
+calls `datasets.load_dataset(..., streaming=True)`; it has no test
+coverage at all (the master plan's own D1 test list names no such test,
+and a real network-backed test would violate the "never network-access in
+unit tests" hard constraint). It is NOT reachable via the tiny-profile
+`--profile tiny` fixture path either: every `sources.tiny.yaml` entry uses
+`kind: local`, which `registry.fetch_source` dispatches to
+`http.download`, never to `hf.fetch`."""
 
 from __future__ import annotations
 

@@ -87,8 +87,10 @@ function takes an injected row iterator (not a `datasets.load_dataset`
 call baked in), so the shard-writing logic itself is unit-testable
 without touching the network. The thin wrapper that actually calls
 `datasets.load_dataset(..., streaming=True)` is not unit-tested (would
-require network); it's exercised only via the registry's `kind: local`
-path in the offline tiny-profile fixture flow.
+require network) and has no coverage at all -- it is NOT reachable via the
+registry's `kind: local` path in the offline tiny-profile fixture flow,
+since every tiny-profile entry is `kind: local`, which dispatches to
+`http.download`, never to `hf.fetch`.
 
 **4. `src/rinchen/acquire/commoncrawl.py` + `src/rinchen/acquire/warc.py`**:
 `commoncrawl.py`'s `query_cdx(url_pattern, collection) -> list[dict]`
