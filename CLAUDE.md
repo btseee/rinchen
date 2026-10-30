@@ -31,8 +31,10 @@ NEVER:
 ## Repo layout
 
 ```
-CLAUDE.md STATE.md DECISIONS.md pyproject.toml uv.lock
+CLAUDE.md STATE.md DECISIONS.md pyproject.toml uv.lock justfile
+.pre-commit-config.yaml
 configs/{spm,eole,serve}/
+docs/STACK.md docs/VERIFY.md docs/runbooks/
 docs/research/  docs/superpowers/{specs,plans}/
 src/rinchen/{data,text,align,filter,synth,metrics,eval,convert,serve,cli}/
 tests/ scripts/ plans/ reports/ manifests/ annotation_app/
@@ -44,11 +46,10 @@ vendor/fasttext-wheel-shim/ (pure-Python shim package, see DECISIONS.md)
 
 ## Current phase
 
-Master plan switched 2026-10-29 to milestones D0-D15 (see below). Both the
-pyonmttok and fasttext-wheel cp314 blockers are resolved: `uv sync --dev`
-succeeds, and CI's full step sequence (ruff, mypy, pytest) passes locally on
-Windows (not yet observed on CI's Linux runner). Next up: D0, which has not
-started. See `STATE.md`.
+Master plan switched 2026-10-29 to milestones D0-D15 (see below). D0
+(environment, skeleton, doctor) is complete: toolchain restructured, `rinchen
+doctor` implemented with 7 checks, CLI skeleton in place. Next up: D1 (Data
+acquisition). See `STATE.md`.
 
 ## Evidence and full plan
 

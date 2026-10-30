@@ -9,14 +9,20 @@ below remains valid; it maps onto the new plan's D0 milestone, which has not
 started. Sequencing decision: the pyonmttok/eole blocker (below) must be
 resolved before D0, since D0's own doctor checks (`D-EOLE-PY`, `D-EOLE-CLI`)
 and CI step (`uv sync --dev`) require a working `eole`.
-Current next step: start D0 (not yet started). Both known Phase 0 blockers
-(pyonmttok cp314, fasttext-wheel cp314) are resolved, `uv sync --dev`
-succeeds, and the test/lint findings that the first real sync surfaced are
-fixed (see the last "Resolved" bullet below). CI's exact step sequence
-(`uv sync --dev`, `uv run ruff check .`, `uv run mypy src`,
-`uv run pytest -q`) passes locally on win_amd64. It has not yet been
-observed green on CI's own ubuntu-latest runner: none of this work has been
-pushed yet.
+Current next step: start D1 (Data acquisition). D0 (environment,
+skeleton, doctor) is complete: `pyproject.toml` restructured to the
+master plan's toolchain (see `docs/STACK.md` for resolved versions),
+`justfile`/CI/pre-commit in place, `rinchen doctor` implemented with 7
+checks (all pass or skip-as-expected on this machine; see
+`docs/VERIFY.md`), config loader / logging / seed / manifest modules
+implemented with passing tests, CLI skeleton registers all 13
+subcommand groups. [EVIDENCE:
+`docs/superpowers/plans/2026-10-30-d0-environment-skeleton-doctor.md`,
+`docs/VERIFY.md`, 2026-10-30.] One real discrepancy from the master
+plan found and documented: eole 0.6.4's CLI has no `model average`
+subcommand (see `docs/VERIFY.md`'s `D-EOLE-CLI` row) -- the
+build-ourselves checkpoint averager (D8/D10) is the planned fallback,
+not yet built.
 
 Repo scaffold is complete: uv workspace, directory tree, CLAUDE.md, STATE.md,
 DECISIONS.md, .gitignore, and CI stub. `pyonmttok` (built from source, see
