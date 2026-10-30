@@ -5,10 +5,11 @@
 superseding the Phase 0-14 plan in
 `docs/research/2026-10-28-python314-stack-and-prompt.md` (kept as evidence
 source — see that doc's own superseded-notice). The old Phase 0 / P0.1 work
-below remains valid; it maps onto the new plan's D0 milestone, which has not
-started. Sequencing decision: the pyonmttok/eole blocker (below) must be
-resolved before D0, since D0's own doctor checks (`D-EOLE-PY`, `D-EOLE-CLI`)
-and CI step (`uv sync --dev`) require a working `eole`.
+below remains valid; it maps onto the new plan's D0 milestone, which is now
+complete (see below). Sequencing decision honored: the pyonmttok/eole
+blocker (below) was resolved before D0, since D0's own doctor checks
+(`D-EOLE-PY`, `D-EOLE-CLI`) and CI step (`uv sync --dev`) require a working
+`eole`.
 Current next step: start D1 (Data acquisition). D0 (environment,
 skeleton, doctor) is complete: `pyproject.toml` restructured to the
 master plan's toolchain (see `docs/STACK.md` for resolved versions),
