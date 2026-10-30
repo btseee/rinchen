@@ -119,6 +119,38 @@ avoids native compilation entirely and needs no per-platform maintenance,
 at the accepted cost of depending on a smaller, alpha-status third-party
 package instead of the archived original.]
 
+Wiring this in (`pyproject.toml`'s `[project.dependencies]` plus a
+`[tool.uv.sources]` path override to the committed
+`vendor/wheels/fasttext_wheel-0.9.2-py3-none-any.whl`, mirroring the
+pyonmttok pattern above) let `uv lock` and then `uv sync --dev` succeed for
+the first time ever on this project — the actual milestone both the
+pyonmttok and fasttext-wheel cp314 gaps existed to reach. [EVIDENCE: live
+`uv lock` / `uv sync --dev` run, 2026-10-29; confirmed
+`vendor/fasttext-wheel-shim` was not pulled in as a `uv` workspace member —
+`uv.lock`'s `fasttext-wheel` package entry has `source = { path =
+"vendor/wheels/fasttext_wheel-0.9.2-py3-none-any.whl" }`, an ordinary path
+dependency on the built wheel file, not an editable/workspace source, and
+`pyproject.toml` has no `[tool.uv.workspace]` table at all.]
+`tests/test_fasttext_wheel_shim.py`'s network test (real download of
+`lid.176.ftz`, real `predict()` calls) passes against the real synced
+environment.
+
+The first real `uv run pytest -q` / `uv run ruff check` against this synced
+environment also surfaced two non-build hygiene findings, both since fixed
+(evidence in STATE.md). [DESIGN: `tests/test_vendor_wheel_integrity.py` was
+generalized to read every `manifests/<name>_build.json` and to match
+`uv.lock` entries by wheel path/filename rather than by a hardcoded
+`pyonmttok` package name. Each vendored package keeps its own build
+manifest (no shared or renamed manifest), and a future vendored wheel needs
+no test change. `ruff`'s `N999` on the shim's `FastText.py` is suppressed by
+a `[tool.ruff.lint.per-file-ignores]` entry in `pyproject.toml`, scoped to
+that single path and rule. Renaming the module was rejected because its
+name deliberately mirrors upstream's `fasttext.FastText` submodule. An
+in-file `# noqa` was rejected because the committed wheel is byte-identical
+to the shim source: editing the source would either leave it out of sync
+with the wheel, or force a rebuild and a re-hash of the wheel, its manifest,
+and `uv.lock`.]
+
 ## 2026-10-30: D0 wrap-up decisions and deliberately deferred scope
 
 A few D0 design decisions were made along the way but never recorded here;
@@ -192,34 +224,3 @@ gets canonicalized before hashing, where the dump is written, how
 `config_sha256` for a real manifest should build this seam then, rather
 than assuming it already exists.
 
-Wiring this in (`pyproject.toml`'s `[project.dependencies]` plus a
-`[tool.uv.sources]` path override to the committed
-`vendor/wheels/fasttext_wheel-0.9.2-py3-none-any.whl`, mirroring the
-pyonmttok pattern above) let `uv lock` and then `uv sync --dev` succeed for
-the first time ever on this project — the actual milestone both the
-pyonmttok and fasttext-wheel cp314 gaps existed to reach. [EVIDENCE: live
-`uv lock` / `uv sync --dev` run, 2026-10-29; confirmed
-`vendor/fasttext-wheel-shim` was not pulled in as a `uv` workspace member —
-`uv.lock`'s `fasttext-wheel` package entry has `source = { path =
-"vendor/wheels/fasttext_wheel-0.9.2-py3-none-any.whl" }`, an ordinary path
-dependency on the built wheel file, not an editable/workspace source, and
-`pyproject.toml` has no `[tool.uv.workspace]` table at all.]
-`tests/test_fasttext_wheel_shim.py`'s network test (real download of
-`lid.176.ftz`, real `predict()` calls) passes against the real synced
-environment.
-
-The first real `uv run pytest -q` / `uv run ruff check` against this synced
-environment also surfaced two non-build hygiene findings, both since fixed
-(evidence in STATE.md). [DESIGN: `tests/test_vendor_wheel_integrity.py` was
-generalized to read every `manifests/<name>_build.json` and to match
-`uv.lock` entries by wheel path/filename rather than by a hardcoded
-`pyonmttok` package name. Each vendored package keeps its own build
-manifest (no shared or renamed manifest), and a future vendored wheel needs
-no test change. `ruff`'s `N999` on the shim's `FastText.py` is suppressed by
-a `[tool.ruff.lint.per-file-ignores]` entry in `pyproject.toml`, scoped to
-that single path and rule. Renaming the module was rejected because its
-name deliberately mirrors upstream's `fasttext.FastText` submodule. An
-in-file `# noqa` was rejected because the committed wheel is byte-identical
-to the shim source: editing the source would either leave it out of sync
-with the wheel, or force a rebuild and a re-hash of the wheel, its manifest,
-and `uv.lock`.]

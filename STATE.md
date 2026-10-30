@@ -10,7 +10,9 @@ and verified locally (see below) -- CI verification is still pending since
 nothing has been pushed yet. Sequencing decision honored: the pyonmttok/eole
 blocker (below) was resolved before D0, since D0's own doctor checks
 (`D-EOLE-PY`, `D-EOLE-CLI`) and CI's sync step require a working `eole`.
-Current next step: start D1 (Data acquisition). D0 (environment,
+Current next step: push this work and confirm CI is green on
+`ubuntu-latest` (the one remaining piece of D0's own STOP gate), then start
+D1 (Data acquisition). D0 (environment,
 skeleton, doctor) is done and verified locally -- NOT yet confirmed on CI,
 since none of this work has been pushed to `origin` (`git status` shows the
 local branch 50+ commits ahead of `origin/main`): `pyproject.toml`
@@ -26,7 +28,7 @@ skeleton registers all 13 subcommand groups. D0's own STOP gate requires
 far; this file will be updated once a push triggers CI and it is observed
 passing on `ubuntu-latest`. [EVIDENCE:
 `docs/superpowers/plans/2026-10-30-d0-environment-skeleton-doctor.md`,
-`docs/VERIFY.md`, `.superpowers/sdd/final-review-fix-report.md`, 2026-10-30.]
+`docs/VERIFY.md`, commit 4a36b13, 2026-10-30.]
 One real discrepancy from the master plan found and documented: eole
 0.6.4's CLI has no `model average` subcommand (see `docs/VERIFY.md`'s
 `D-EOLE-CLI` row) -- the build-ourselves checkpoint averager (D8/D10) is
