@@ -100,11 +100,12 @@ def test_download_local_scheme_raises_data_error_when_missing(tmp_path, monkeypa
 
 
 def test_download_rerun_succeeds_when_dest_already_exists(tmp_path):
-    """Regression test: `dest.rename()` raises `FileExistsError` on Windows
-    when `dest` already exists from a prior complete download, leaving a
-    full `.part` file behind that gets misread as a stale partial on the
-    next run. `dest.replace()` must be used instead so a re-run to the
-    same destination succeeds and overwrites cleanly."""
+    """Regression test: `part_path.rename(dest)` raises `FileExistsError`
+    on Windows when `dest` already exists from a prior complete download,
+    leaving a full `.part` file behind that gets misread as a stale
+    partial on the next run. `part_path.replace(dest)` must be used
+    instead so a re-run to the same destination succeeds and overwrites
+    cleanly."""
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, content=b"hello world")

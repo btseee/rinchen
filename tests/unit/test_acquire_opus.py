@@ -34,6 +34,21 @@ FAKE_RESPONSE = {
             "url": "https://example.test/OPUS-Tatoeba/v2026-07-08/moses/en-mn.txt.zip",
         },
         {
+            # Higher version string than the latest=True entry above, and
+            # the last Tatoeba match in list order -- this entry exists
+            # specifically so that "pick max(version)" and "pick last
+            # match" mutants pick it instead of the real latest=True entry,
+            # making the fetch test below actually catch those mutants.
+            "corpus": "Tatoeba",
+            "source": "mn",
+            "target": "en",
+            "preprocessing": "moses",
+            "version": "v2099-01-01",
+            "latest": "False",
+            "size": 19,
+            "url": "https://example.test/OPUS-Tatoeba/v2099-01-01/moses/en-mn.txt.zip",
+        },
+        {
             "corpus": "QED",
             "source": "mn",
             "target": "en",
@@ -55,13 +70,14 @@ def test_list_corpora_never_sends_literal_version_param():
     client = httpx.Client(transport=httpx.MockTransport(handler))
     result = opus_module.list_corpora("mn", "en", client=client)
 
-    assert len(result) == 3
+    assert len(result) == 4
     assert result[0]["corpus"] == "Tatoeba"
 
 
 _CONTENT_BY_URL = {
     "https://example.test/OPUS-Tatoeba/v2021-03-10/moses/en-mn.txt.zip": b"tatoeba-not-latest-bytes",
     "https://example.test/OPUS-Tatoeba/v2026-07-08/moses/en-mn.txt.zip": b"tatoeba-latest-bytes",
+    "https://example.test/OPUS-Tatoeba/v2099-01-01/moses/en-mn.txt.zip": b"tatoeba-highest-version-not-latest-bytes",
     "https://example.test/OPUS-QED/v2.0a/moses/en-mn.txt.zip": b"qed-latest-bytes",
 }
 
@@ -69,9 +85,13 @@ _CONTENT_BY_URL = {
 def test_fetch_picks_the_entry_marked_latest_true(tmp_path):
     """Each mocked version's download URL returns distinguishable content,
     so this test actually fails if `fetch()` picks the wrong entry -- a
-    mutant that always downloaded the first/last match (instead of the one
-    tagged `latest: true`) previously passed undetected because every URL
-    returned identical bytes."""
+    mutant that always downloaded the first/last match, or the match with
+    the highest version string (instead of the one tagged `latest: true`),
+    previously passed undetected because every URL returned identical
+    bytes, and because the latest=True entry also happened to be the last
+    match and have the highest version among the first two Tatoeba
+    entries. The v2099-01-01 entry (latest=False, highest version, last
+    match in list order) exists to catch both of those mutants."""
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.host == "opus.nlpl.eu":

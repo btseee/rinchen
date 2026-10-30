@@ -11,11 +11,12 @@ nothing has been pushed yet. Sequencing decision honored: the pyonmttok/eole
 blocker (below) was resolved before D0, since D0's own doctor checks
 (`D-EOLE-PY`, `D-EOLE-CLI`) and CI's sync step require a working `eole`.
 Current next step: push this work and confirm CI is green on
-`ubuntu-latest` (the one remaining piece of both D0's and D1's STOP gates
--- see the D1 paragraph below), then start D2. D0 (environment,
+`ubuntu-latest` (the one remaining piece of D0's STOP gate -- D1's own
+STOP gate has no CI clause and is already fully met, see the D1 paragraph
+below), then start D2. D0 (environment,
 skeleton, doctor) is done and verified locally -- NOT yet confirmed on CI,
 since none of this work has been pushed to `origin` (`git status` shows the
-local branch 50+ commits ahead of `origin/main`): `pyproject.toml`
+local branch 82 commits ahead of `origin/main`): `pyproject.toml`
 restructured to the master plan's toolchain (see `docs/STACK.md` for
 resolved versions), `justfile`/CI/pre-commit in place, `just gate` (ruff
 format --check, ruff check, mypy, pytest -m "not network") green locally,
@@ -41,7 +42,7 @@ D1 section) is "all D1 tests green; `rinchen data fetch --profile tiny
 has no CI clause, so D1 does not need a CI run to be considered done
 (CI itself still hasn't run on this branch, for the same reason as D0:
 nothing has been pushed to `origin` yet -- `git status` shows the local
-branch 60+ commits ahead of `origin/main` -- but that is not part of D1's
+branch 82 commits ahead of `origin/main` -- but that is not part of D1's
 own gate). D1 built the schema-validated source registry
 (`src/rinchen/acquire/registry.py`, a `SourceEntry` discriminated union
 over five kinds: `http`/`opus`/`hf`/`commoncrawl`/`local`) and its
@@ -56,13 +57,19 @@ plus bounded-range WARC fetch (`commoncrawl.py`). `rinchen data fetch`
 and `rinchen data ls` (`src/rinchen/cli/data.py`) dispatch on all five
 registry kinds, but `registry.fetch_source`'s `http`/`local` branch (the
 two share one code path, `isinstance(entry, (HttpSourceEntry,
-LocalSourceEntry))`) is the only one exercised end-to-end, via the
-tiny-profile `kind: local` fixtures below. The `opus`, `hf`, and
-`commoncrawl` branches of `fetch_source` have no end-to-end test -- only
-their underlying module functions (`opus.fetch`, `hf.write_shards`,
-`commoncrawl.query_cdx`/`fetch_records`) have unit tests in isolation, via
-`httpx.MockTransport` (see
-`tests/unit/test_acquire_{opus,hf,commoncrawl}.py`).
+LocalSourceEntry))`) is the only one exercised end-to-end via real
+fixture bytes, via the tiny-profile `kind: local` fixtures below. The
+`opus`, `hf`, and `commoncrawl` branches of `fetch_source` have no
+end-to-end test against real fetched content -- their underlying module
+functions (`opus.fetch`, `hf.write_shards`, `commoncrawl.query_cdx`/
+`fetch_records`) have unit tests in isolation (`opus.py`'s and
+`commoncrawl.py`'s via `httpx.MockTransport`, `hf.py`'s via in-memory
+rows, not HTTP), and the post-hoc review fixes below added stubbed
+`fetch_source`-dispatch tests for the `opus`/`hf`/`commoncrawl` branches
+(covering `expected_sha` handling and destination-path nesting) with the
+underlying fetch functions replaced by test doubles -- see
+`tests/unit/test_acquire_{opus,hf,commoncrawl}.py` and
+`test_acquire_registry*.py`.
 `configs/data/sources.tiny.yaml` ships 4 offline fixture entries for
 `--profile tiny`, and **all 4 use `kind: local`** (not "one per kind" --
 there is no tiny-profile entry of kind `http`, `opus`, `hf`, or

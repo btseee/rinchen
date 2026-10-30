@@ -38,8 +38,12 @@ pinned), `typer`.
   `httpx.MockTransport` or local fixtures — no test makes a real HTTP
   request. `acquire/hf.py`'s actual `datasets.load_dataset(...)` call is
   the one real network-touching function in this milestone and is
-  deliberately NOT unit-tested (see Task 6) — it's exercised only via the
-  offline `kind: local` fixture path in Task 7's end-to-end test.
+  deliberately NOT unit-tested (see Task 6) — **correction, 2026-10-30
+  post-hoc review:** it has no test coverage at all and is not reachable
+  via the tiny-profile fixture path — every tiny-profile entry is
+  `kind: local`, which dispatches to `http.download`, never to
+  `hf.fetch`. See `STATE.md`'s "2026-10-30 post-hoc review fixes"
+  paragraph.
 - **All test fixtures are hand-authored, obviously-synthetic content** —
   none are derived from the 7 reviewed-and-rejected/borderline real
   corpora, keeping "data used to test the machinery" cleanly separate from

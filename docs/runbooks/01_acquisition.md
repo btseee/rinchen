@@ -31,7 +31,12 @@ for it to matter, not before.
 
 `acquire/http.py`'s `download()` resumes a truncated transfer via its
 `.part` file and verifies `sha256` if the registry entry sets
-`expected_sha`. It does not currently skip a fetch whose destination
+`expected_sha` -- this applies to `http`, `local`, and `opus` registry
+entries (each produces one output file); `hf` and `commoncrawl` entries
+reject `expected_sha` at config-validation time, since they write
+multiple output files with no single hash to check against (see
+`DECISIONS.md`'s 2026-10-30 "expected_sha narrowed to single-file kinds"
+entry). It does not currently skip a fetch whose destination
 already exists and is already complete (no hash-based rerun-skip wired to
 `rinchen.manifest`'s stage runner yet) — that integration is part of the
 still-deferred config→manifest seam noted in `DECISIONS.md`'s 2026-10-29

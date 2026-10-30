@@ -110,7 +110,13 @@ Iterator[WarcRecord]` uses `warcio`; `extract_text(record) -> str` uses
 **5. `src/rinchen/acquire/registry.py` + `configs/data/sources.yaml`**: a
 `SourceKind` enum (`http`, `opus`, `hf`, `commoncrawl`, `local`), each
 entry validated via a pydantic `SourceEntry` model (`id`, `kind`, `langs`,
-`url` or `query` depending on kind, `expected_sha` optional, `notes`).
+`url` or `query` depending on kind, `expected_sha` optional, `notes`) --
+**correction, 2026-10-30 post-hoc review:** `expected_sha` is accepted
+and verified for `http`/`local`/`opus` (single-output-file kinds) but
+rejected at validation time for `hf`/`commoncrawl`, which write multiple
+output files and have no single checksum to verify against. See
+`DECISIONS.md`'s 2026-10-30 "expected_sha narrowed to single-file
+kinds" entry.
 Invalid schema raises `ConfigError` (matching D0's config-loader
 convention: `ConfigError` for malformed configuration, `DataError`
 reserved for corrupt/mismatched *data*). `kind: local`'s `url` is a

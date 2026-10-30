@@ -296,3 +296,20 @@ brainstorm looked clean for all 7 candidates and would have wrongly
 greenlit 6 of them — the 100-sample pass is what actually caught the real
 defect rates).]
 
+## 2026-10-30: `expected_sha` narrowed to single-file registry kinds
+
+D1's final whole-branch review found that `expected_sha` was accepted by
+the `SourceEntry` schema for every registry kind but silently never
+checked for `opus`/`hf`/`commoncrawl` in `registry.fetch_source` —
+a config author could set it on those kinds and it would do nothing.
+
+[DESIGN: `expected_sha` verification now applies to `http`, `local`, and
+`opus` (each produces exactly one output file, so a single sha256 is
+meaningful). `HfSourceEntry` and `CommonCrawlSourceEntry` reject
+`expected_sha` at pydantic validation time with a `ConfigError`, since
+`hf.fetch` writes multiple Parquet shards and `commoncrawl.fetch_records`
+writes multiple WARC records — there is no single file for one sha256 to
+describe. A future milestone that needs integrity-checking for
+multi-file fetches should design a per-shard/per-record manifest rather
+than overload this single-hash field.]
+
