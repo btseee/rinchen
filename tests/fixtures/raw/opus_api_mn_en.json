@@ -1,0 +1,19 @@
+{
+  "corpora": [
+    {
+      "alignment_pairs": 42,
+      "corpus": "FixtureCorpus",
+      "documents": "",
+      "id": 999999,
+      "latest": "True",
+      "preprocessing": "moses",
+      "size": 5,
+      "source": "mn",
+      "source_tokens": 300,
+      "target": "en",
+      "target_tokens": 280,
+      "url": "https://example.test/OPUS-FixtureCorpus/v1/moses/en-mn.txt.zip",
+      "version": "v1"
+    }
+  ]
+}
