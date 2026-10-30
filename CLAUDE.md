@@ -53,19 +53,18 @@ vendor/fasttext-wheel-shim/ (pure-Python shim package, see DECISIONS.md)
 
 Note: `data/`, `align/`, and `convert/` under `src/rinchen/` from the old
 Phase 0-14 plan have no home in the new D0-D15 repo layout and were removed;
-D1 built `acquire/` there instead of recreating `data/` (no `corpus/`
-module was needed for D1's actual scope -- see `STATE.md`'s D1 paragraph).
+D1 built `acquire/` there instead of recreating `data/`. No `corpus/`
+module was needed because D1's actual scope (per the master plan) is
+acquisition only -- fetching/listing raw sources into `data/raw/` -- not
+corpus construction, cleaning, or alignment, which are later milestones.
 
 ## Current phase
 
-Master plan switched 2026-10-29 to milestones D0-D15 (see below). D0
-(environment, skeleton, doctor) and D1 (data acquisition: source registry,
-http/OPUS/HuggingFace/CommonCrawl backends, `rinchen data fetch`/`ls`) are
-both done and verified locally, with D1's tiny-profile fetch/ls proven for
-real; CI verification is still pending -- nothing has been pushed to
-`origin` yet, so both milestones' STOP gates ("`just gate` green locally
-AND in CI") are only half met. Next up: push and confirm CI green, then
-start D2. See `STATE.md`.
+Master plan switched 2026-10-29 to milestones D0-D15 (see below). D0 and
+D1 are both done locally; D0's STOP gate requires a green CI run (not yet
+done -- nothing has been pushed), while D1's STOP gate has no CI clause
+and is fully met. Next up: push to `origin`, confirm CI green for D0,
+then start D2. See `STATE.md`.
 
 ## Evidence and full plan
 

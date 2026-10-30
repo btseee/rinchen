@@ -34,25 +34,42 @@ One real discrepancy from the master plan found and documented: eole
 `D-EOLE-CLI` row) -- the build-ourselves checkpoint averager (D8/D10) is
 the planned fallback, not yet built.
 
-**D1 (Data acquisition) is done and verified locally** -- NOT yet
-confirmed on CI, for the same reason as D0: nothing on this branch
-(all of D0 and D1) has been pushed to `origin` yet (`git status` shows
-the local branch 60+ commits ahead of `origin/main`). D1 built the
-schema-validated source registry (`src/rinchen/acquire/registry.py`,
-a `SourceEntry` discriminated union over `http`/`opus`/`hf`/`commoncrawl`
-kinds) and its backends: resumable, retrying, sha256-verifying
-`http.py` download (with a `local://` scheme for offline fixtures), an
-OPUS API client (`opus.py`: `list_corpora`, `fetch`), WARC iteration and
-article-text extraction (`warc.py`, proven against a real 5-record
-fixture built by `scripts/build_sample_warc_fixture.py`), a HuggingFace
+**D1 (Data acquisition) is done; its own STOP gate is fully met.** The
+master plan's D1 STOP gate text (`docs/research/2026-10-29-rinchen-dev-agent-prompt.md`,
+D1 section) is "all D1 tests green; `rinchen data fetch --profile tiny
+--all` works offline using `local://` fixtures" -- unlike D0's gate, it
+has no CI clause, so D1 does not need a CI run to be considered done
+(CI itself still hasn't run on this branch, for the same reason as D0:
+nothing has been pushed to `origin` yet -- `git status` shows the local
+branch 60+ commits ahead of `origin/main` -- but that is not part of D1's
+own gate). D1 built the schema-validated source registry
+(`src/rinchen/acquire/registry.py`, a `SourceEntry` discriminated union
+over five kinds: `http`/`opus`/`hf`/`commoncrawl`/`local`) and its
+backends: resumable, retrying, sha256-verifying `http.py` download (with
+a `local://` scheme for offline fixtures, also used by `kind: local`
+registry entries), an OPUS API client (`opus.py`: `list_corpora`,
+`fetch`), WARC iteration and article-text extraction (`warc.py`, proven
+against a real 5-record fixture built by
+`scripts/build_sample_warc_fixture.py`), a HuggingFace
 streaming-to-Parquet-shards writer (`hf.py`), and a CommonCrawl CDX query
 plus bounded-range WARC fetch (`commoncrawl.py`). `rinchen data fetch`
-and `rinchen data ls` (`src/rinchen/cli/data.py`) dispatch across all
-four registry kinds. `configs/data/sources.tiny.yaml` ships 4 offline
-fixture entries (one per kind) for `--profile tiny`; `configs/data/sources.yaml`
-ships with zero real production entries by design -- see DECISIONS.md's
-2026-10-30 entry: 7 candidate real-world parallel corpora were vetted
-with a 100-random-sample, zero-tolerance review, 6 of 7 failed (script
+and `rinchen data ls` (`src/rinchen/cli/data.py`) dispatch on all five
+registry kinds, but `registry.fetch_source`'s `http`/`local` branch (the
+two share one code path, `isinstance(entry, (HttpSourceEntry,
+LocalSourceEntry))`) is the only one exercised end-to-end, via the
+tiny-profile `kind: local` fixtures below. The `opus`, `hf`, and
+`commoncrawl` branches of `fetch_source` have no end-to-end test -- only
+their underlying module functions (`opus.fetch`, `hf.write_shards`,
+`commoncrawl.query_cdx`/`fetch_records`) have unit tests in isolation, via
+`httpx.MockTransport` (see
+`tests/unit/test_acquire_{opus,hf,commoncrawl}.py`).
+`configs/data/sources.tiny.yaml` ships 4 offline fixture entries for
+`--profile tiny`, and **all 4 use `kind: local`** (not "one per kind" --
+there is no tiny-profile entry of kind `http`, `opus`, `hf`, or
+`commoncrawl`); `configs/data/sources.yaml` ships with zero real
+production entries by design -- see DECISIONS.md's 2026-10-30 entry: 7
+candidate real-world parallel corpora were vetted with a
+100-random-sample, zero-tolerance review, 6 of 7 failed (script
 violations, truncation, misalignment, mistranslation), and the user
 chose to build Rinchen's own standard dataset from scratch rather than
 seed the registry with a flawed candidate. `docs/runbooks/01_acquisition.md`
@@ -64,11 +81,41 @@ locally (102 passed, 6 network tests deselected, no ruff/mypy findings
 of this same check), `uv run rinchen data fetch --profile tiny --all`
 fetched all 4 fixtures into `data/raw/` for real, `uv run rinchen data
 ls --profile tiny` listed all 4 entries, and the full `uv run pytest -q`
-(including the network-marked tests, which pass offline against the
-`local://` fixtures) passed at 108. [EVIDENCE:
+passed at 108. D1 added no `pytest.mark.network` tests: the project's
+only network-marked tests are the pre-existing D0/Phase-0
+`tests/test_fasttext_wheel_shim.py` and `tests/test_probe_env.py`, which
+make real network calls (PyPI JSON API, the torch cu130 index, a real
+`uv lock` run) and are unrelated to D1's acquisition code -- they do not
+"pass offline against the `local://` fixtures"; they are simply deselected
+by `-m "not network"` and were not run as part of this count. [EVIDENCE:
 `docs/superpowers/plans/2026-10-30-d1-data-acquisition.md`,
 `docs/runbooks/01_acquisition.md`, live `just gate` / `rinchen data
 fetch` / `rinchen data ls` / `uv run pytest -q` runs, 2026-10-30.]
+
+**2026-10-30 post-hoc review fixes.** A whole-branch review of D1 found
+and fixed several bugs and false claims (see this file's history and the
+`D1 fix:`-prefixed commits for detail): a Windows-only bug where
+`http.download()` used `Path.rename()` instead of `Path.replace()`,
+leaving a stale complete `.part` file behind on any re-run to an existing
+`dest`; `expected_sha` being silently ignored for `opus`/`hf`/`commoncrawl`
+registry entries (now verified for `opus`, rejected at schema-validation
+time for `hf`/`commoncrawl` since those kinds write multiple output
+files); a double-nested output directory for `hf`/`commoncrawl` entries
+fetched via the CLI; `load_registry` raising a raw `AttributeError`
+instead of `ConfigError` when a registry file's top level is a YAML list;
+a weak OPUS "pick latest" test that could not fail on its own bug (mock
+HTTP responses for every version now return distinguishable bytes); two
+CWD-dependent test/script files now resolving fixture paths relative to
+`__file__`; the false `hf.fetch` test-coverage claims above (and in
+`docs/superpowers/specs/2026-10-30-d1-data-acquisition-design.md` and
+`docs/superpowers/plans/2026-10-30-d1-data-acquisition.md`); and this
+file's own false claims about D1 fixture kinds, dispatch coverage, and
+network-test behavior, corrected in the D1 paragraph above. After these
+fixes, `just gate` is green locally with 109 passed, 6 network tests
+deselected (115 total with `uv run pytest -q`), no ruff/mypy findings,
+and the D1 STOP gate was re-verified for real:
+`uv run rinchen data fetch --profile tiny --all` and `uv run rinchen data
+ls --profile tiny` both still work against all 4 fixtures.
 
 Repo scaffold is done: uv workspace, directory tree, CLAUDE.md, STATE.md,
 DECISIONS.md, .gitignore, and a real (not stub) CI workflow
