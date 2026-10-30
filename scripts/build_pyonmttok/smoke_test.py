@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 """Round-trip smoke test for a built pyonmttok wheel (from its own README)."""
+
 import sys
 
 

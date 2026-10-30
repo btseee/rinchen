@@ -4,6 +4,7 @@ loading the lid.176 language-identification model and predicting with it.
 Requires network access to download the real model file, exactly as
 eole/transforms/clean.py does at runtime.
 """
+
 import urllib.request
 
 import fasttext

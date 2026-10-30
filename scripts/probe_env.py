@@ -163,9 +163,7 @@ def render_report(manifest: dict) -> str:
             "Raw resolver output:\n\n```\n" + stderr_display + "\n```"
         )
     non_ok = {
-        name: pkg
-        for name, pkg in manifest["packages"].items()
-        if pkg["status"] != "ok"
+        name: pkg for name, pkg in manifest["packages"].items() if pkg["status"] != "ok"
     }
     if non_ok:
         for name, pkg in sorted(non_ok.items()):
@@ -306,7 +304,7 @@ def detect_gpu() -> dict | None:
             timeout=10,
             check=False,
         )
-    except (OSError, subprocess.SubprocessError):
+    except OSError, subprocess.SubprocessError:
         return None
     if result.returncode != 0 or not result.stdout.strip():
         return None

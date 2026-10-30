@@ -118,7 +118,9 @@ def test_build_manifest_assembles_expected_structure():
         gpu=None,
         uv_version="0.13.5",
         uv_lock_result={"success": True, "stderr_tail": None},
-        packages={"torch": {"requested": "2.14.1", "wheel_tags": ["cp314"], "status": "ok"}},
+        packages={
+            "torch": {"requested": "2.14.1", "wheel_tags": ["cp314"], "status": "ok"}
+        },
     )
     assert manifest["python_version"] == "3.14.7"
     assert manifest["gpu"] is None
@@ -151,7 +153,11 @@ def test_render_report_includes_python_and_package_table():
         uv_lock_result={"success": True, "stderr_tail": None},
         packages={
             "torch": {"requested": "2.14.1", "wheel_tags": ["cp314"], "status": "ok"},
-            "pyonmttok": {"requested": None, "wheel_tags": ["none"], "status": "no-wheel-found"},
+            "pyonmttok": {
+                "requested": None,
+                "wheel_tags": ["none"],
+                "status": "no-wheel-found",
+            },
         },
     )
     report = render_report(manifest)

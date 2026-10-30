@@ -2,6 +2,7 @@
 """Upsert one platform's build record into a vendored-wheel build manifest
 (manifests/pyonmttok_build.json by default; pass --manifest PATH for another,
 e.g. manifests/fasttext_wheel_build.json)."""
+
 import hashlib
 import json
 import sys

@@ -53,7 +53,9 @@ def _manifest_builds_by_wheel() -> dict[str, list[tuple[str, dict]]]:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         for build in manifest["builds"]:
             wheel_name = Path(build["wheel"]).name
-            builds_by_wheel.setdefault(wheel_name, []).append((manifest_path.name, build))
+            builds_by_wheel.setdefault(wheel_name, []).append(
+                (manifest_path.name, build)
+            )
     return builds_by_wheel
 
 
@@ -95,13 +97,19 @@ def test_vendor_wheels_match_uv_lock_hash():
     for wheel in _vendor_wheels():
         rel_path = f"vendor/wheels/{wheel.name}"
         matching_packages = [
-            pkg for pkg in lock["package"] if pkg.get("source", {}).get("path") == rel_path
+            pkg
+            for pkg in lock["package"]
+            if pkg.get("source", {}).get("path") == rel_path
         ]
-        assert matching_packages, f"uv.lock has no [[package]] entry with source path {rel_path}"
+        assert matching_packages, (
+            f"uv.lock has no [[package]] entry with source path {rel_path}"
+        )
 
         expected_hash = f"sha256:{_sha256_of(wheel)}"
         for pkg in matching_packages:
-            wheel_entries = [w for w in pkg.get("wheels", []) if w.get("filename") == wheel.name]
+            wheel_entries = [
+                w for w in pkg.get("wheels", []) if w.get("filename") == wheel.name
+            ]
             assert wheel_entries, (
                 f"uv.lock {pkg['name']} entry for {rel_path} has no wheels[] "
                 f"entry named {wheel.name}"

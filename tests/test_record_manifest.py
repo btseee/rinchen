@@ -49,7 +49,14 @@ def test_main_replaces_existing_platform_record(tmp_path, monkeypatch):
         json.dumps(
             {
                 "source": {"commit": "deadbeef"},
-                "builds": [{"platform": "win_amd64", "wheel": "old.whl", "sha256": "old", "built_at": "old"}],
+                "builds": [
+                    {
+                        "platform": "win_amd64",
+                        "wheel": "old.whl",
+                        "sha256": "old",
+                        "built_at": "old",
+                    }
+                ],
             }
         ),
         encoding="utf-8",
@@ -64,7 +71,9 @@ def test_main_replaces_existing_platform_record(tmp_path, monkeypatch):
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert len(manifest["builds"]) == 1
-    assert manifest["builds"][0]["sha256"] == hashlib.sha256(b"new contents").hexdigest()
+    assert (
+        manifest["builds"][0]["sha256"] == hashlib.sha256(b"new contents").hexdigest()
+    )
 
 
 def test_main_returns_1_when_wheel_missing(tmp_path, monkeypatch):
