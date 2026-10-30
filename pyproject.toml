@@ -58,6 +58,7 @@ dev = [
     "pytest-timeout",
     "pre-commit",
     "ty",
+    "types-PyYAML",
 ]
 
 [tool.uv]

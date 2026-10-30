@@ -1,0 +1,3 @@
+seed: 1234
+paths:
+  data_root: data/tiny
