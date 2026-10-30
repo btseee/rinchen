@@ -1,4 +1,5 @@
 """Every rinchen CLI subcommand must respond to --help with exit code 0."""
+
 import pytest
 from typer.testing import CliRunner
 

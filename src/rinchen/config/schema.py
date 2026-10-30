@@ -3,6 +3,7 @@
 Minimal at D0: just enough fields to prove the merge mechanism. Later
 milestones add real fields as they need profile-driven config.
 """
+
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict

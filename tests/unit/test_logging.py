@@ -1,4 +1,5 @@
 """Tests for rinchen.utils.logging.get."""
+
 import json
 
 from rinchen.utils import logging as rinchen_logging

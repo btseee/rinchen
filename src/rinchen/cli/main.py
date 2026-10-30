@@ -1,4 +1,5 @@
 """Top-level `rinchen` typer app, registering one sub-app per CLI module."""
+
 from __future__ import annotations
 
 import typer

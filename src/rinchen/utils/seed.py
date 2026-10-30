@@ -1,4 +1,5 @@
 """Deterministic seeding across every RNG Rinchen touches."""
+
 from __future__ import annotations
 
 import random

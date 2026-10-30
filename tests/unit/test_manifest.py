@@ -1,4 +1,5 @@
 """Tests for the manifest model, store, and hash-based stage skip mechanism."""
+
 from pathlib import Path
 
 from rinchen.manifest import stage, store

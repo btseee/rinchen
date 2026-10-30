@@ -1,4 +1,5 @@
 """Tests for rinchen.config.loader.load's base -> profile -> overlay -> CLI merge."""
+
 import pytest
 
 from rinchen.config import loader

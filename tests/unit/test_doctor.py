@@ -1,4 +1,5 @@
 """Tests for rinchen.cli.doctor's checks."""
+
 import sys
 
 from rinchen.cli import doctor

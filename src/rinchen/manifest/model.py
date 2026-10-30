@@ -1,4 +1,5 @@
 """Pydantic model for a stage's manifest.json, per <contracts> in the master plan."""
+
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict

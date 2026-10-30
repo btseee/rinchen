@@ -1,4 +1,5 @@
 """Read/write a stage's manifest.json."""
+
 from __future__ import annotations
 
 from pathlib import Path

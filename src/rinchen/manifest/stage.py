@@ -1,4 +1,5 @@
 """Stage runner: skip a stage iff inputs+config sha match an existing manifest."""
+
 from __future__ import annotations
 
 import hashlib

@@ -1,4 +1,5 @@
 """Tests for rinchen.errors exception hierarchy."""
+
 import pytest
 
 from rinchen.errors import (

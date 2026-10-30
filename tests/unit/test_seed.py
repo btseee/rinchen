@@ -1,4 +1,5 @@
 """Tests for rinchen.utils.seed.set_all."""
+
 import random
 
 from rinchen.utils import seed
