@@ -33,10 +33,32 @@ dependencies = [
     "fastapi",
     "uvicorn",
     "pydantic",
+    "pydantic-settings",
+    "typer",
+    "rich",
+    "structlog",
+    "jinja2",
+    "python-multipart",
+    "prometheus-client",
+    "regex",
+    "PyYAML",
 ]
 
+[project.scripts]
+rinchen = "rinchen.cli.main:app"
+
 [dependency-groups]
-dev = ["pytest", "ruff", "mypy"]
+dev = [
+    "pytest",
+    "ruff",
+    "mypy",
+    "hypothesis",
+    "pytest-xdist",
+    "pytest-cov",
+    "pytest-timeout",
+    "pre-commit",
+    "ty",
+]
 
 [tool.uv]
 environments = [
