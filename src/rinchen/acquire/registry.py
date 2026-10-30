@@ -9,6 +9,7 @@ from typing import Annotated, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
+from rinchen.acquire import commoncrawl, hf, http, opus
 from rinchen.errors import ConfigError
 
 
@@ -92,3 +93,37 @@ def find_entry(entries: list[SourceEntry], source_id: str) -> SourceEntry:
         if entry.id == source_id:
             return entry
     raise ConfigError(f"no source with id {source_id!r} in registry")
+
+
+def fetch_source(entry: SourceEntry, dest_dir: Path) -> Path:
+    """Dispatch `entry` to the right acquisition module based on its kind."""
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    if isinstance(entry, (HttpSourceEntry, LocalSourceEntry)):
+        filename = entry.url.rstrip("/").split("/")[-1] or entry.id
+        dest = dest_dir / filename
+        return http.download(entry.url, dest, sha256=entry.expected_sha)
+
+    if isinstance(entry, OpusSourceEntry):
+        dest = dest_dir / f"{entry.id}.zip"
+        return opus.fetch(
+            entry.corpus,
+            entry.src,
+            entry.tgt,
+            dest,
+            preprocessing=entry.preprocessing,
+            version=entry.version,
+        )
+
+    if isinstance(entry, HfSourceEntry):
+        shard_dir = dest_dir / entry.id
+        hf.fetch(entry.dataset, shard_dir, config=entry.config, split=entry.split)
+        return shard_dir
+
+    if isinstance(entry, CommonCrawlSourceEntry):
+        shard_dir = dest_dir / entry.id
+        records = commoncrawl.query_cdx(entry.url_pattern, entry.collection)
+        commoncrawl.fetch_records(records, shard_dir)
+        return shard_dir
+
+    raise ConfigError(f"unknown source kind for entry {entry.id!r}")

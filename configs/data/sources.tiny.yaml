@@ -1,0 +1,22 @@
+# Offline, fixture-backed registry used only when `--profile tiny` is
+# passed to `rinchen data fetch`/`ls`. Every entry uses `kind: local`, so
+# fetching this registry makes zero network requests -- this is what
+# proves D1's STOP gate: "rinchen data fetch --profile tiny --all works
+# offline using local:// fixtures."
+sources:
+  - id: opus-api-sample
+    kind: local
+    langs: [mn, en]
+    url: "local://tests/fixtures/raw/opus_api_mn_en.json"
+  - id: warc-sample
+    kind: local
+    langs: [mn]
+    url: "local://tests/fixtures/raw/sample.warc.gz"
+  - id: news-html-sample
+    kind: local
+    langs: [mn]
+    url: "local://tests/fixtures/raw/mn_news.html"
+  - id: moses-zip-sample
+    kind: local
+    langs: [mn, en]
+    url: "local://tests/fixtures/raw/moses_mn_en.zip"
