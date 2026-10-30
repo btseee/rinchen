@@ -1,0 +1,13 @@
+# Rinchen's real, production data-source registry.
+#
+# This file is deliberately empty of real entries as of D1. Before any
+# source is added here, it must pass the same 100-random-sample,
+# zero-tolerance translation/script/alignment review used during D1's own
+# design -- see DECISIONS.md's 2026-10-30 entry, which rejected 6 of 7
+# candidates reviewed that way (one hard-constraint violation: galig/Latin
+# script; the rest: systematic misalignment, mistranslation, or character-
+# encoding defects). Rinchen is building its own standard dataset from
+# scratch rather than seeding from any of those candidates.
+#
+# Schema: see src/rinchen/acquire/registry.py's SourceEntry union.
+sources: []
