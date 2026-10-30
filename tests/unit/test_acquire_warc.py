@@ -5,7 +5,7 @@ from pathlib import Path
 
 from rinchen.acquire import warc
 
-FIXTURE = Path("tests/fixtures/raw/sample.warc.gz")
+FIXTURE = Path(__file__).resolve().parent.parent / "fixtures" / "raw" / "sample.warc.gz"
 
 GOLDEN = [
     "First Article\nThis is the first paragraph of the first test article.\nIt has a second sentence to give trafilatura enough content.",

@@ -67,7 +67,8 @@ def _make_html(title: str, paragraphs: list[str]) -> bytes:
 
 def main() -> int:
     assert sys.version_info[:2] == (3, 14), sys.version
-    out_path = Path("tests/fixtures/raw/sample.warc.gz")
+    repo_root = Path(__file__).resolve().parent.parent
+    out_path = repo_root / "tests" / "fixtures" / "raw" / "sample.warc.gz"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("wb") as handle:
         writer = WARCWriter(handle, gzip=True)
