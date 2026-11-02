@@ -44,7 +44,7 @@ docs/research/  docs/superpowers/{specs,plans}/
 src/rinchen/{config,manifest,utils,cli,text,filter,synth,metrics,eval,serve}/
 src/rinchen/acquire/{http,opus,hf,warc,commoncrawl,registry}.py
 src/rinchen/errors.py src/rinchen/__init__.py
-tests/ scripts/ plans/ reports/ manifests/ annotation_app/
+tests/ scripts/ plans/ reports/ manifests/
 data/{raw,clean,mined,synth,test}/ (gitignored content, tracked dirs)
 vendor/wheels/ (committed binary wheels with no cp314 upstream release)
 vendor/fasttext-wheel-shim/ (pure-Python shim package, see DECISIONS.md)
