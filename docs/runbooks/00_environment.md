@@ -29,7 +29,9 @@
 
 ## CI
 
-GitHub Actions (`.github/workflows/ci.yml`) runs on `ubuntu-latest`
+GitHub Actions (`.github/workflows/ci.yml`) runs on `ubuntu-24.04`
+(pinned, not `ubuntu-latest`, to avoid the runner silently migrating to
+Ubuntu 26 mid-project)
 with CPython 3.14, syncs with `uv sync --frozen --group dev`, then runs
 `just gate` (ruff format check, ruff check, mypy, fast tests) and `just
 tiny` (currently a stub that always succeeds — real from D15 onward).

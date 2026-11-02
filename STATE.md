@@ -11,7 +11,7 @@ nothing has been pushed yet. Sequencing decision honored: the pyonmttok/eole
 blocker (below) was resolved before D0, since D0's own doctor checks
 (`D-EOLE-PY`, `D-EOLE-CLI`) and CI's sync step require a working `eole`.
 Current next step: push this work and confirm CI is green on
-`ubuntu-latest` (the one remaining piece of D0's STOP gate -- D1's own
+`ubuntu-24.04` (the one remaining piece of D0's STOP gate -- D1's own
 STOP gate has no CI clause and is already fully met, see the D1 paragraph
 below), then start D2. D0 (environment,
 skeleton, doctor) is done and verified locally -- NOT yet confirmed on CI,
@@ -27,7 +27,7 @@ logging / seed / manifest modules implemented with passing tests, CLI
 skeleton registers all 13 subcommand groups. D0's own STOP gate requires
 `just gate` green "locally AND in CI" -- only the "locally" half is met so
 far; this file will be updated once a push triggers CI and it is observed
-passing on `ubuntu-latest`. [EVIDENCE:
+passing on `ubuntu-24.04`. [EVIDENCE:
 `docs/superpowers/plans/2026-10-30-d0-environment-skeleton-doctor.md`,
 `docs/VERIFY.md`, commit 4a36b13, 2026-10-30.]
 One real discrepancy from the master plan found and documented: eole
@@ -153,7 +153,7 @@ ran the doctor checks), then `just tiny` (an echo stub until D15) -- has
 been run locally on win_amd64 as of 2026-10-30: `just gate` green (75
 tests passed, 6 network tests deselected, no ruff/mypy findings),
 `rinchen doctor` 6 OK + 1 SKIP, `just tiny` prints its stub message and
-exits 0. It has NOT yet run on CI's `ubuntu-latest` runner, because
+exits 0. It has NOT yet run on CI's `ubuntu-24.04` runner, because
 nothing on this branch has been pushed to `origin` yet -- this is the one
 piece of D0's STOP gate still outstanding. On Linux, only the
 manylinux_2_28 pyonmttok build/smoke test has been run; no Linux
