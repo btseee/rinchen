@@ -185,15 +185,21 @@ Expected: FAIL / collection error — `rinchen.annotate.db` doesn't exist yet.
 - [ ] **Step 3: Create the fixture**
 
 ```json
-{"src": "Sain baina uu", "src_lang": "mn_Cyrl", "tgt_lang": "en", "doc_id": "doc1", "seg_idx": 0}
-{"src": "Bayarlalaa", "src_lang": "mn_Cyrl", "tgt_lang": "en", "doc_id": "doc1", "seg_idx": 1}
-{"src": "ᠠᠡᠨᠬᡠ᠋ ", "src_lang": "mn_Mong", "tgt_lang": "en", "doc_id": "doc2", "seg_idx": 0}
+{"src": "\u0421\u0430\u0439\u043d \u0431\u0430\u0439\u043d\u0430 \u0443\u0443", "src_lang": "mn_Cyrl", "tgt_lang": "en", "doc_id": "doc1", "seg_idx": 0}
+{"src": "\u0411\u0430\u044f\u0440\u043b\u0430\u043b\u0430\u0430", "src_lang": "mn_Cyrl", "tgt_lang": "en", "doc_id": "doc1", "seg_idx": 1}
+{"src": "\u1820\u1821\u1828\u182c\u1860\u180b\u202f", "src_lang": "mn_Mong", "tgt_lang": "en", "doc_id": "doc2", "seg_idx": 0}
 ```
 
-Save as `tests/fixtures/annot/import_sample.jsonl` (JSON lines, UTF-8, the
-3rd line's `src` uses `\uXXXX` escapes for real traditional-script
-codepoints to keep the source file itself plain-ASCII-safe to edit on any
-OS — `json.loads` resolves the escapes to the real characters).
+Save as `tests/fixtures/annot/import_sample.jsonl` (JSON lines, UTF-8, every
+`src` value uses `\uXXXX` escapes -- for the 3rd line's real
+traditional-script codepoints, and (post D2 whole-branch-review Finding 4)
+for the two `mn_Cyrl` lines' real Cyrillic Mongolian text
+("Сайн байна уу" / "Баярлалаа") -- to keep the source file itself
+plain-ASCII-safe to edit on any OS; `json.loads` resolves the escapes to
+the real characters). An earlier version of this fixture used
+Latin-transliterated ("galig") text mislabeled as `mn_Cyrl`, which violates
+CLAUDE.md's permanent "NEVER: Use galig/Latin informal Mongolian" rule;
+corrected per the D2 whole-branch review.
 
 - [ ] **Step 4: Implement `models.py`**
 
@@ -2198,27 +2204,34 @@ git commit -m "D2: wire rinchen annotate CLI; remove stale annotation_app/ dir"
 
 Generate `tests/fixtures/annot/e2e_20_items.jsonl` with 20 lines, same
 JSONL shape as `import_sample.jsonl` (Task 1). Mix: 17 ordinary Cyrillic
-pairs across a few `doc_id`s, plus 3 lines with `src_lang: "mn_Mong"` using
-real U+1800–U+18AF codepoints. The resulting committed JSONL file will
-contain the real UTF-8 characters (fine -- it's a data fixture, not test
-source). The generation script itself builds the traditional-script text
-via `chr()` on integer codepoints rather than embedding the literal
-character or an escape sequence directly in the shell command text, so
-there's no non-ASCII byte in the command line itself to risk shell/console
-encoding mangling on Windows:
+Mongolian pairs across a few `doc_id`s, plus 3 lines with `src_lang:
+"mn_Mong"` using real U+1800–U+18AF codepoints. Per CLAUDE.md's permanent
+"NEVER: Use galig/Latin informal Mongolian" rule, the `mn_Cyrl` lines must
+be genuine Cyrillic text (Unicode block U+0400–U+04FF), not a Latin
+transliteration mislabeled as Cyrillic -- an earlier version of this
+fixture violated that rule and was corrected (see Finding 4 of the D2
+whole-branch review, DECISIONS.md). The generation script builds BOTH the
+Cyrillic and the traditional-script text via `chr()` on integer codepoints
+rather than embedding a literal non-ASCII character directly in the shell
+command text, so there's no non-ASCII byte in the command line itself to
+risk shell/console encoding mangling on Windows, and writes the file with
+`ensure_ascii=True` so the committed JSONL holds `\uXXXX` escapes for both
+scripts (consistent with `import_sample.jsonl`'s style) rather than raw
+UTF-8 bytes:
 
 ```bash
 uv run python -c "
 import json
+cyr_chars = ''.join(chr(c) for c in (0x0421, 0x0430, 0x0439, 0x043D, 0x0020, 0x0431, 0x0430, 0x0439, 0x043D, 0x0430, 0x0020, 0x0443, 0x0443))
 mong_chars = ''.join(chr(c) for c in (0x1820, 0x1821, 0x1828, 0x182C, 0x1860, 0x180B, 0x202F))
 lines = []
 for i in range(17):
-    lines.append({'src': f'Sain baina uu {i}', 'src_lang': 'mn_Cyrl', 'tgt_lang': 'en', 'doc_id': f'doc{i % 4}', 'seg_idx': i})
+    lines.append({'src': f'{cyr_chars} {i}', 'src_lang': 'mn_Cyrl', 'tgt_lang': 'en', 'doc_id': f'doc{i % 4}', 'seg_idx': i})
 for i in range(3):
     lines.append({'src': mong_chars + str(i), 'src_lang': 'mn_Mong', 'tgt_lang': 'en', 'doc_id': 'doc_mong', 'seg_idx': i})
 with open('tests/fixtures/annot/e2e_20_items.jsonl', 'w', encoding='utf-8') as f:
     for line in lines:
-        f.write(json.dumps(line, ensure_ascii=False) + chr(10))
+        f.write(json.dumps(line, ensure_ascii=True) + chr(10))
 "
 ```
 
