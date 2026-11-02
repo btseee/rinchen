@@ -136,6 +136,73 @@ and the D1 STOP gate was re-verified for real:
 `uv run rinchen data fetch --profile tiny --all` and `uv run rinchen data
 ls --profile tiny` both still work against all 4 fixtures.
 
+**D2 (human test-set annotation app) is done; its STOP gate is fully met.**
+The master plan's D2 STOP gate text
+(`docs/research/2026-10-29-rinchen-dev-agent-prompt.md:343`) is "app serves
+locally; 20-item fixture can be fully annotated by a scripted client and
+exported." D2 was built across 8 tasks (commits `3f94ca9` schema/migrations/
+import, `539f1a3` chrF wrapper, `239e68c`/`fcac627` the task-claiming/
+submission engine -- `fcac627` fixed the engine's docstring to match its own
+kind-priority tie-break, adjudicate > review > translate within each
+annotator's eligible set, then oldest-created -- `ee18987` the agreement
+report, `44b23e2`/`7f3be6b` export (jsonl/tsv/parquet, adjudication-aware),
+`9109ba2` the FastAPI/Jinja2/htmx app, `8d9beab` the CLI) before this task
+(Task 8) added the fixture, e2e test, and runbook proving the STOP gate
+itself. `tests/fixtures/annot/e2e_20_items.jsonl` has 20 lines: 17 ordinary
+`mn_Cyrl` pairs across 4 `doc_id`s, plus 3 `mn_Mong` lines built from real
+U+1820-range codepoints via `chr()` in the generating script (not a literal
+non-ASCII byte in the shell command) so the committed file itself holds real
+traditional-script UTF-8 text. `tests/unit/test_annotate_e2e.py` (one test,
+`test_20_item_fixture_fully_annotated_and_exported`) imports all 20 items,
+round-robins three named annotators (`alice`, `bob`, `carol`) through
+`FastAPI TestClient` calls to `/annotator/<name>/next` and the matching
+`/task/<id>/{translate,review,adjudicate}` POST, asserts
+`SELECT COUNT(*) FROM tasks WHERE status != 'done'` is 0, then calls
+`export_jsonl` and asserts it returns 20. This test passed on its first run
+with no changes needed to any Task 1-7 file: `uv run pytest
+tests/unit/test_annotate_e2e.py -v` -> `1 passed in 2.64s`; there was no RED
+phase to report because it is an integration test over already-implemented,
+already-unit-tested code, not new production code written test-first. A
+separate, uncommitted instrumented rerun of the identical round-robin logic
+(same file, with added per-kind counters, run manually and discarded) showed
+the loop finishes in 63 rounds with 40 translate and 20 review tasks done
+and **zero adjudicate tasks ever created** -- every submitted translation in
+this test is of the form `"work by <name>"` and every review score is fixed
+at 95, so chrF between any two translations stays above 40 and the score
+never drops below 70, so `db.submit_review`'s adjudicate trigger
+(chrF < 40 or score < 70) is never hit for this fixture. State this
+precisely: the committed e2e test proves the translate+review half of the
+lifecycle end-to-end, plus export of all 20 items; it does not exercise the
+`adjudicate` task kind or `adjudicate_task.html`, which still has no direct
+test coverage of its own, consistent with Task 6's reviewer note on that
+template. `rinchen annotate serve` itself (not just the `TestClient`-wrapped
+app) was separately checked live: a scratch DB was initialized, `uv run
+rinchen annotate serve --db <scratch> --port 8731` was started as a real
+background process, and `curl` got HTTP 200 from both `/healthz`
+(`{"status":"ok"}`) and `/` (the real `index.html`, title "Rinchen
+Annotate"); the process was then killed by PID and the scratch DB deleted --
+neither is part of the repo or this commit. `docs/runbooks/02_human_testsets.md`
+was written verbatim per the task-8 brief; its CLI walkthrough
+(`init`/`import`/`serve`/`export`/`agreement` with `--db`/`--annotators`/
+`--file`/`--set`/`--format`/`--out`) and its quoted Krippendorff's-alpha
+"N/A" message text were cross-checked against `src/rinchen/cli/annotate.py`
+and match exactly. Full gate, run on win_amd64, 2026-11-02: `uv run ruff
+format --check .` -- 92 files already formatted; `uv run ruff check .` --
+all checks passed; `uv run mypy src` -- no issues found in 50 source files;
+`uv run pytest -q -m "not network"` -- **150 passed, 6 deselected** (run both
+via `just gate` and directly); `uv run pytest -q` (including the 6
+network-marked tests, pre-existing and unrelated to D2) -- **156 passed**.
+No limitation beyond the one stated above (`adjudicate_task.html`
+coverage) is newly introduced by this task; the Krippendorff's-alpha "N/A"
+behavior and the kind-priority queue-ordering behavior are pre-existing,
+already documented in the runbook's Operational notes. [EVIDENCE:
+`docs/superpowers/plans/2026-11-02-d2-human-annotation.md`,
+`docs/superpowers/specs/2026-11-02-d2-human-annotation-design.md`,
+`docs/runbooks/02_human_testsets.md`, `tests/unit/test_annotate_e2e.py`,
+`tests/fixtures/annot/e2e_20_items.jsonl`, commits `3f94ca9` through
+`8d9beab` above, live `just gate` / `uv run pytest -q` / `rinchen annotate
+serve` + `curl` runs, 2026-11-02.]
+
 Repo scaffold is done: uv workspace, directory tree, CLAUDE.md, STATE.md,
 DECISIONS.md, .gitignore, and a real (not stub) CI workflow
 (`.github/workflows/ci.yml`) -- see the "CI step sequence" paragraph below
