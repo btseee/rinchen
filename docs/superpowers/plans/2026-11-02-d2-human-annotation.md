@@ -26,7 +26,10 @@ design rationale. One real bug was caught and is already fixed below (a
 missing `conn.row_factory = sqlite3.Row` in export's query helper), and the
 Krippendorff's alpha implementation below was cross-checked against the
 independent `krippendorff` PyPI package on 4 inputs including the canonical
-Hayes & Krippendorff (2007) worked example (both give ≈0.849).
+Hayes & Krippendorff (2007) worked example (both give ≈0.862 -- see the
+corrected value in Task 4's test below; an earlier draft of this plan had
+mistranscribed this as ≈0.849, caught and fixed during Task 4's
+implementation when the two independently-computed values disagreed).
 
 ## Global Constraints
 
@@ -1020,16 +1023,18 @@ def test_krippendorff_alpha_perfect_agreement_is_one():
 def test_krippendorff_alpha_matches_hayes_krippendorff_2007_worked_example():
     # Canonical worked example from Hayes & Krippendorff (2007),
     # "Answering the Call for a Standard Reliability Measure for Coding
-    # Data", Table 1 (interval metric). Cross-checked during D2's design
-    # phase against the independent `krippendorff` PyPI package: both
-    # implementations give ~0.849 for this dataset.
+    # Data", Table 1 (interval metric). Cross-checked directly against the
+    # independent `krippendorff` PyPI package in an isolated scratch venv
+    # (not a project dependency): `krippendorff.alpha(reliability_data=data,
+    # level_of_measurement="interval")` on this exact dataset gives
+    # 0.8621041879468846, matching this hand-rolled implementation.
     data = [
         [1, 2, 3, 3, 2, 1, 4, 1, 2, None, None, None],
         [1, 2, 3, 3, 2, 2, 4, 1, 2, 5, None, 3],
         [None, 3, 3, 3, 2, 3, 4, 2, 2, 5, 1, None],
     ]
     alpha = krippendorff_alpha(data)
-    assert math.isclose(alpha, 0.8491, abs_tol=0.001)
+    assert math.isclose(alpha, 0.8621, abs_tol=0.001)
 
 
 def test_pairwise_chrf_mean_on_identical_translations(tmp_path):
