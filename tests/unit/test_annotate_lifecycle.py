@@ -90,11 +90,13 @@ def test_claim_next_task_retries_once_after_losing_the_race(tmp_path, monkeypatc
 
     original_select = db._select_candidate_task
     call_count = {"n": 0}
+    stolen_task_id = {"id": None}
 
     def flaky_select(c, annotator_id):
         row = original_select(c, annotator_id)
         call_count["n"] += 1
         if call_count["n"] == 1 and row is not None:
+            stolen_task_id["id"] = row["id"]
             rival_conn.execute(
                 "UPDATE tasks SET status='assigned', annotator_id=? "
                 "WHERE id=? AND status='pending'",
@@ -117,6 +119,19 @@ def test_claim_next_task_retries_once_after_losing_the_race(tmp_path, monkeypatc
         "id"
     ]
     assert row["annotator_id"] == alice_id
+
+    # The rival (bob) must still actually own the row it stole -- alice's
+    # retry must not have clobbered or re-claimed it.
+    assert stolen_task_id["id"] is not None
+    assert stolen_task_id["id"] != claimed.id
+    stolen_row = conn.execute(
+        "SELECT annotator_id, status FROM tasks WHERE id=?",
+        (stolen_task_id["id"],),
+    ).fetchone()
+    assert stolen_row["status"] == "assigned"
+    assert stolen_row["annotator_id"] == bob_id
+
+    rival_conn.close()
 
 
 def test_translator_cannot_review_own_item(tmp_path):

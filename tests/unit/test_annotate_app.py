@@ -95,21 +95,37 @@ def test_connection_can_be_closed_from_a_different_thread(tmp_path):
 
 
 def test_concurrent_requests_do_not_return_500(tmp_path):
-    # Regression for Finding 1: fires a burst of concurrent requests at a
-    # real TestClient-backed app and asserts none of them come back as a
-    # 500. TestClient's own threading is more synchronous than a real
-    # deployed server's threadpool, so this cannot perfectly reproduce the
-    # original crash, but it's a real concurrency smoke test on top of the
-    # deterministic thread-close test above, which directly proves the
-    # fix's mechanism.
-    client = _client(tmp_path)
+    # Regression for Finding 1: sqlite3.connect() defaults to
+    # check_same_thread=True, which raises sqlite3.ProgrammingError if a
+    # connection crosses threads. This only actually gets exercised when:
+    # (1) the route touches the database (so GET /healthz, which never
+    # touches the db, doesn't discriminate), and (2) a SINGLE TestClient
+    # instance is reused across requests as a context manager (`with
+    # TestClient(app) as client:`), which runs one shared event loop for
+    # the whole `with` block, so FastAPI's threadpool dispatches concurrent
+    # requests' sync route bodies -- and their get_db dependency's
+    # enter/exit -- across different worker threads sharing that one loop.
+    # A plain `TestClient(app)` (no context manager) starts a fresh event
+    # loop per request instead, which never crosses threads for a given
+    # connection and made the previous version of this test pass
+    # unconditionally regardless of whether the fix was present. Live
+    # verification: reverting check_same_thread=False gives ~253/300
+    # failures with this exact setup; with the fix in place, 0/300.
+    db_path = tmp_path / "test.sqlite"
+    conn = db.connect(db_path)
+    db.init_db(conn)
+    db.seed_annotators(conn, ["alice", "bob", "carol"])
+    conn.close()
+    app = create_app(db_path)
 
-    def _hit(_i: int) -> int:
-        resp = client.get("/healthz")
-        return resp.status_code
+    with TestClient(app) as client:
 
-    with ThreadPoolExecutor(max_workers=10) as pool:
-        statuses = list(pool.map(_hit, range(30)))
+        def _hit(_i: int) -> int:
+            resp = client.get("/")
+            return resp.status_code
+
+        with ThreadPoolExecutor(max_workers=30) as pool:
+            statuses = list(pool.map(_hit, range(300)))
 
     assert all(status == 200 for status in statuses), statuses
 
