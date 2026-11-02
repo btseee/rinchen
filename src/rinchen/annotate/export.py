@@ -21,6 +21,18 @@ _COLUMNS = [
     "split",
 ]
 
+_PARQUET_SCHEMA: dict[str, type[pl.DataType]] = {
+    "src": pl.Utf8,
+    "tgt": pl.Utf8,
+    "src_lang": pl.Utf8,
+    "tgt_lang": pl.Utf8,
+    "doc_id": pl.Utf8,
+    "seg_idx": pl.Int64,
+    "set": pl.Utf8,
+    "origin": pl.Utf8,
+    "split": pl.Utf8,
+}
+
 
 def _resolved_rows(conn: sqlite3.Connection, set_name: str) -> list[dict]:
     """One row per fully-resolved item in `set_name`.
@@ -103,10 +115,11 @@ def export_tsv(conn: sqlite3.Connection, set_name: str, out_path: Path) -> int:
 
 def export_parquet(conn: sqlite3.Connection, set_name: str, out_path: Path) -> int:
     rows = _resolved_rows(conn, set_name)
-    df = (
-        pl.DataFrame(rows, schema=_COLUMNS)
-        if rows
-        else pl.DataFrame(schema={c: pl.Utf8 for c in _COLUMNS})
-    )
+    # Explicit per-column dtypes (not left to inference) so an empty export
+    # has the exact same schema as a populated one -- otherwise `seg_idx`
+    # would infer as Int64 when rows exist but fall back to a mismatched
+    # dtype when the frame is built with no rows, breaking anything that
+    # concatenates or type-checks across multiple per-set exports.
+    df = pl.DataFrame(rows, schema=_PARQUET_SCHEMA)
     df.write_parquet(out_path)
     return len(rows)

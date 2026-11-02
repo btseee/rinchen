@@ -148,3 +148,24 @@ def test_export_parquet_round_trips_via_polars(tmp_path):
     df = pl.read_parquet(out)
     assert df.height == 2
     assert set(df.columns) == _COLUMNS
+
+
+def test_export_parquet_empty_and_populated_schemas_match(tmp_path):
+    # Regression: an empty export (e.g. exporting a set with nothing
+    # resolved yet) must have the exact same column dtypes as a populated
+    # export, not just the same column names -- otherwise concatenating or
+    # type-checking across multiple per-set exports breaks the first time
+    # one of them happens to be empty.
+    conn = _build_fixture_db(tmp_path)
+
+    populated_out = tmp_path / "populated.parquet"
+    export_parquet(conn, "demo", populated_out)
+    populated_schema = pl.read_parquet(populated_out).schema
+
+    empty_out = tmp_path / "empty.parquet"
+    count = export_parquet(conn, "nonexistent-set", empty_out)
+    assert count == 0
+    empty_df = pl.read_parquet(empty_out)
+    assert empty_df.height == 0
+    assert empty_df.schema == populated_schema
+    assert empty_df.schema["seg_idx"] == pl.Int64
