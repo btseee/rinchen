@@ -157,7 +157,13 @@ def _annotator_id(conn: sqlite3.Connection, name: str) -> int:
 def claim_next_task(
     conn: sqlite3.Connection, annotator_name: str
 ) -> ClaimedTask | None:
-    """Claim the oldest-created eligible task for `annotator_name`.
+    """Claim the highest-priority, then oldest-created eligible task for
+    `annotator_name`.
+
+    Priority: 'adjudicate' > 'review' > 'translate' -- adjudication and
+    review work is time-sensitive and should not be starved by a backlog
+    of older translate tasks on unrelated items. Within one kind, the
+    oldest-created eligible task wins (ties broken by id).
 
     Eligibility: a 'translate' task on an item this annotator has no other
     task on; a 'review' task only once both the item's translate tasks are
