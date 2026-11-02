@@ -236,7 +236,6 @@ Release targets:
 ├── plans/
 ├── reports/
 ├── manifests/
-├── annotation_app/
 ├── data/
 └── .github/
     └── workflows/

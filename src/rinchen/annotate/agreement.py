@@ -1,12 +1,12 @@
 """Agreement statistics: pairwise chrF and Krippendorff's alpha.
 
 Krippendorff's alpha is hand-implemented (not a new dependency) per
-CLAUDE.md's build-ourselves precedent. D2 produces exactly one review per
-item, so `review_score_alpha` operates on a single-rater vector --
-Krippendorff's alpha is formally undefined (NaN) for that shape until a
-later milestone captures 2+ independent reviews per item. The function
-itself is still the real, tested formula (not a stub), ready for that
-future data shape -- see the design spec's "Spec findings" note.
+DECISIONS.md's build-ourselves precedent, established during D1's
+pyonmttok/fasttext-wheel work. D2 produces exactly one review per item, so
+`review_score_alpha` operates on a single-rater vector -- Krippendorff's
+alpha is formally undefined (NaN) for that shape until a later milestone
+captures 2+ independent reviews per item. The function itself is still
+the real, tested formula (not a stub), ready for that future data shape.
 """
 
 from __future__ import annotations

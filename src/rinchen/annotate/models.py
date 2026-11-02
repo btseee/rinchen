@@ -8,7 +8,7 @@ import sqlite3
 from dataclasses import dataclass
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Annotator:
     id: int
     name: str
@@ -19,7 +19,7 @@ class Annotator:
         return cls(id=row["id"], name=row["name"], created_at=row["created_at"])
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Item:
     id: int
     set_name: str
@@ -42,7 +42,7 @@ class Item:
         )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Task:
     id: int
     item_id: int
@@ -67,7 +67,7 @@ class Task:
         )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Translation:
     task_id: int
     text: str
@@ -84,7 +84,7 @@ class Translation:
         )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Review:
     task_id: int
     score: int
