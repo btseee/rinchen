@@ -1,7 +1,8 @@
 <div>
   <h2>Review</h2>
   {% if is_vertical %}
-  <div class="src-text vertical" style="writing-mode: vertical-lr;">{{ src }}</div>
+  <button type="button" onclick="this.nextElementSibling.style.writingMode = this.nextElementSibling.style.writingMode === 'vertical-lr' ? 'horizontal-tb' : 'vertical-lr'">Toggle direction</button>
+  <div class="src-text" style="writing-mode: vertical-lr;">{{ src }}</div>
   {% else %}
   <div class="src-text">{{ src }}</div>
   {% endif %}
@@ -10,7 +11,12 @@
     <div>
       <label>
         <input type="radio" name="chosen_translation_id" value="{{ choice['task_id'] }}" required>
+        {% if is_vertical %}
+        <button type="button" onclick="this.nextElementSibling.style.writingMode = this.nextElementSibling.style.writingMode === 'vertical-lr' ? 'horizontal-tb' : 'vertical-lr'">Toggle direction</button>
+        <span class="choice-text" style="writing-mode: vertical-lr;">{{ choice['text'] }}</span>
+        {% else %}
         {{ choice['text'] }}
+        {% endif %}
       </label>
     </div>
     {% endfor %}

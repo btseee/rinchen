@@ -1,8 +1,8 @@
 <div>
   <h2>Translate</h2>
   {% if is_vertical %}
-  <button type="button" onclick="this.nextElementSibling.classList.toggle('vertical')">Toggle direction</button>
-  <div class="src-text vertical" style="writing-mode: vertical-lr;">{{ src }}</div>
+  <button type="button" onclick="this.nextElementSibling.style.writingMode = this.nextElementSibling.style.writingMode === 'vertical-lr' ? 'horizontal-tb' : 'vertical-lr'">Toggle direction</button>
+  <div class="src-text" style="writing-mode: vertical-lr;">{{ src }}</div>
   {% else %}
   <div class="src-text">{{ src }}</div>
   {% endif %}
