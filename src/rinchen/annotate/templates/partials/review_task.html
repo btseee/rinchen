@@ -1,0 +1,21 @@
+<div>
+  <h2>Review</h2>
+  {% if is_vertical %}
+  <div class="src-text vertical" style="writing-mode: vertical-lr;">{{ src }}</div>
+  {% else %}
+  <div class="src-text">{{ src }}</div>
+  {% endif %}
+  <form hx-post="/task/{{ task_id }}/review" hx-target="#main" hx-swap="innerHTML">
+    {% for choice in choices %}
+    <div>
+      <label>
+        <input type="radio" name="chosen_translation_id" value="{{ choice['task_id'] }}" required>
+        {{ choice['text'] }}
+      </label>
+    </div>
+    {% endfor %}
+    <label>Score (0-100): <input type="number" name="score" min="0" max="100" required></label>
+    <label>Errors (comma-separated): <input type="text" name="errors"></label>
+    <button type="submit">Submit</button>
+  </form>
+</div>

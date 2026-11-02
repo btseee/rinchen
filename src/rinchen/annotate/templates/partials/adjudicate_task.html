@@ -1,0 +1,19 @@
+<div>
+  <h2>Adjudicate</h2>
+  {% if is_vertical %}
+  <div class="src-text vertical" style="writing-mode: vertical-lr;">{{ src }}</div>
+  {% else %}
+  <div class="src-text">{{ src }}</div>
+  {% endif %}
+  <p>Translation candidates:</p>
+  <ul>
+    {% for choice in choices %}
+    <li>{{ choice['text'] }}</li>
+    {% endfor %}
+  </ul>
+  <form hx-post="/task/{{ task_id }}/adjudicate" hx-target="#main" hx-swap="innerHTML">
+    <textarea name="text" required></textarea>
+    <input type="number" name="minutes" step="0.1" required>
+    <button type="submit">Submit final translation</button>
+  </form>
+</div>

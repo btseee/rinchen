@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Pick annotator</h1>
+<ul>
+  {% for name in names %}
+  <li><a href="/annotator/{{ name }}/next"
+         hx-get="/annotator/{{ name }}/next"
+         hx-target="#main"
+         hx-swap="innerHTML">{{ name }}</a></li>
+  {% endfor %}
+</ul>
+{% endblock %}

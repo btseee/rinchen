@@ -1,0 +1,14 @@
+<div>
+  <h2>Translate</h2>
+  {% if is_vertical %}
+  <button type="button" onclick="this.nextElementSibling.classList.toggle('vertical')">Toggle direction</button>
+  <div class="src-text vertical" style="writing-mode: vertical-lr;">{{ src }}</div>
+  {% else %}
+  <div class="src-text">{{ src }}</div>
+  {% endif %}
+  <form hx-post="/task/{{ task_id }}/translate" hx-target="#main" hx-swap="innerHTML">
+    <textarea name="text" required></textarea>
+    <input type="number" name="minutes" step="0.1" required>
+    <button type="submit">Submit</button>
+  </form>
+</div>
