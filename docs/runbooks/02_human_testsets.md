@@ -34,12 +34,29 @@ uv run rinchen annotate agreement --db test.sqlite --set myset
 
 ## Operational notes
 
-- **Adjudication tasks jump the queue.** `claim_next_task` serves the
-  oldest-created eligible task across all three kinds (translate, review,
-  adjudicate) for each annotator. If adjudicate tasks pile up unresolved,
-  they will sit at the front of every eligible annotator's queue ahead of
-  newer translate/review work. Encourage whoever can adjudicate to clear
-  that queue promptly rather than letting it block throughput.
+- **At least 3 annotators are required for the workflow to ever resolve
+  an item.** Each item needs 2 independent translations (from 2 different
+  annotators) plus 1 review from a third annotator who did not translate
+  that item -- a translator cannot review their own item's translations.
+  With only 2 annotators seeded, every item's review task is permanently
+  ineligible for both of them, so no item ever resolves past the
+  translate stage. Seed at least 3 names with `annotate init
+  --annotators` (or `annotate init` + re-running with more names) before
+  starting real annotation work.
+- **Task priority: adjudicate, then review, then translate -- not simple
+  oldest-first.** `claim_next_task` does NOT serve the oldest-created
+  eligible task across all three kinds. It first checks priority by kind
+  (`adjudicate` > `review` > `translate`), and only within the
+  highest-priority kind that has an eligible task does it break ties by
+  oldest-created. In practice this means ALL eligible adjudicate tasks are
+  served before ANY eligible review task, and ALL eligible review tasks
+  are served before ANY eligible translate task -- an adjudicate task
+  jumps ahead of every translate task for an eligible annotator, not just
+  newer ones. It also re-serves an annotator's own already-`assigned`
+  task before claiming anything new, so refreshing or revisiting the page
+  never orphans an in-progress task. Encourage whoever can adjudicate to
+  clear that queue promptly, since unresolved adjudicate/review work
+  blocks all translate throughput for annotators eligible to do it.
 - **Krippendorff's alpha reports "N/A" by design.** D2 captures exactly
   one review per item, which is a single-rater vector -- Krippendorff's
   alpha is undefined for that shape. The CLI reports "N/A (needs 2+

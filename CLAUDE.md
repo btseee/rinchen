@@ -40,9 +40,11 @@ configs/base.yaml configs/profiles/{tiny,full}.yaml configs/{spm,eole,serve}/
 configs/data/sources.yaml configs/data/sources.tiny.yaml
 docs/STACK.md docs/VERIFY.md
 docs/runbooks/00_environment.md docs/runbooks/01_acquisition.md
+docs/runbooks/02_human_testsets.md
 docs/research/  docs/superpowers/{specs,plans}/
 src/rinchen/{config,manifest,utils,cli,text,filter,synth,metrics,eval,serve}/
 src/rinchen/acquire/{http,opus,hf,warc,commoncrawl,registry}.py
+src/rinchen/annotate/{db,export,agreement,app,routes,models}.py
 src/rinchen/errors.py src/rinchen/__init__.py
 tests/ scripts/ plans/ reports/ manifests/
 data/{raw,clean,mined,synth,test}/ (gitignored content, tracked dirs)
@@ -62,7 +64,10 @@ corpus construction, cleaning, or alignment, which are later milestones.
 
 Master plan switched 2026-10-29 to milestones D0-D15 (see below). D0 and
 D1 are both done, both STOP gates fully met including a green CI run on
-`origin/main` (2026-11-02). Next up: D2. See `STATE.md`.
+`origin/main` (2026-11-02). D2 (human test-set annotation app) is also
+done locally, STOP gate fully met, including post-hoc whole-branch-review
+fixes -- not yet pushed or CI-verified. Next up: push to `origin`, confirm
+CI green for D2, then start D3. See `STATE.md`.
 
 ## Evidence and full plan
 

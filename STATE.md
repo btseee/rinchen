@@ -28,8 +28,48 @@ unedited as historical plan text). CI run after both fixes
 (`41447258653`, commit `334e30f`) passed clean: `just gate`, `just
 doctor`, `just tiny` all green on `ubuntu-24.04`. D0's STOP gate ("`just
 gate` green locally AND in CI") and D1's STOP gate (no CI clause, met
-locally as detailed below) are both now fully satisfied. Next step: start
-D2.
+locally as detailed below) are both now fully satisfied.
+
+**D2 (human test-set annotation app) is also done; its STOP gate is fully
+met, including a whole-branch post-hoc review pass.** See the full D2
+paragraph below for the original build (commits `3f94ca9` through
+`8d9beab`). A subsequent whole-branch review found and fixed 6 Important
+and 6 worthwhile Minor findings (commits `7ace665`, `ed9ce04`, `79edb74`,
+`d86dced`, `b7e7771`, and this commit): a real data-loss bug where
+concurrent requests crashed with `sqlite3.ProgrammingError` and returned
+HTTP 500 (`db.connect()` now passes `check_same_thread=False`); a
+permanently-orphaned-claim bug where a refresh/double-click/back-button
+abandoned an in-progress task forever (`claim_next_task` now re-serves an
+annotator's existing `assigned` task); a non-atomic claim race that could
+let two annotators claim the same task (the claiming `UPDATE` now checks
+`status='pending'` and `cursor.rowcount`, retrying once on a lost race); a
+missing traditional-script export round-trip test (added, passed on
+first run); two fixtures and one test file that mislabeled
+Latin-transliterated ("galig") Mongolian text as Cyrillic, a direct
+violation of CLAUDE.md's permanent "NEVER: Use galig/Latin informal
+Mongolian" rule (replaced with genuine Cyrillic Mongolian text, Unicode
+block U+0400-U+04FF); a vertical-script toggle button that changed
+nothing because no CSS defined the class it toggled, present on only one
+of three task templates (now flips the element's own inline
+`writing-mode` style directly, on all three templates); and a UI dead end
+after every task submission (submit routes now re-render the annotator's
+next task instead of a static "Submitted." page). Also fixed: `slots=True`
+added to `models.py`'s dataclasses (convention match), a stale
+`annotation_app/` line in `README.md`, a misattributed docstring citation
+in `agreement.py`, and this file's/`CLAUDE.md`'s/the runbook's own
+staleness (D2 was previously undocumented here as done; the runbook's
+queue-priority note described pre-fix behavior; see DECISIONS.md and the
+full D2 paragraph below for detail). Full gate after all fixes: `uv run
+ruff format --check .` -- 93 files already formatted; `uv run ruff check
+.` -- all checks passed; `uv run mypy src` -- no issues found in 50 source
+files; `uv run pytest -q -m "not network"` -- **161 passed, 6 deselected**;
+`uv run pytest -q` -- **167 passed**. [EVIDENCE: live `just gate` /
+`uv run pytest -q` runs, 2026-11-02, commits `7ace665` through this one.]
+
+Next step: push to `origin`, confirm CI green for D2's code (D2 has not
+yet been pushed or run on CI -- as of this commit, `main` is 21 commits
+ahead of `origin/main`, via `git rev-list --count origin/main..HEAD`),
+then start D3.
 
 D0 (environment, skeleton, doctor): `pyproject.toml` restructured to the
 master plan's toolchain (see `docs/STACK.md` for resolved versions),
@@ -149,10 +189,18 @@ report, `44b23e2`/`7f3be6b` export (jsonl/tsv/parquet, adjudication-aware),
 `9109ba2` the FastAPI/Jinja2/htmx app, `8d9beab` the CLI) before this task
 (Task 8) added the fixture, e2e test, and runbook proving the STOP gate
 itself. `tests/fixtures/annot/e2e_20_items.jsonl` has 20 lines: 17 ordinary
-`mn_Cyrl` pairs across 4 `doc_id`s, plus 3 `mn_Mong` lines built from real
-U+1820-range codepoints via `chr()` in the generating script (not a literal
-non-ASCII byte in the shell command) so the committed file itself holds real
-traditional-script UTF-8 text. `tests/unit/test_annotate_e2e.py` (one test,
+`mn_Cyrl` source-only entries (each line is a single segment for
+annotators to translate, not a src/tgt translation pair) across 4
+`doc_id`s, plus 3 `mn_Mong` lines -- both scripts built from real
+codepoints via `chr()` in the generating script (not a literal non-ASCII
+byte in the shell command), and written with `ensure_ascii=True` so the
+committed file holds `\uXXXX` escapes for both scripts rather than raw
+UTF-8 bytes. (Until the D2 whole-branch review's Findings 4 and 12 -- see
+the paragraph above -- the `mn_Cyrl` lines were actually
+Latin-transliterated ["galig"] text mislabeled as Cyrillic, a violation of
+CLAUDE.md's permanent rule against it, and the traditional-script line
+held raw UTF-8 bytes instead of `\uXXXX` escapes; both are now fixed.)
+`tests/unit/test_annotate_e2e.py` (one test,
 `test_20_item_fixture_fully_annotated_and_exported`) imports all 20 items,
 round-robins three named annotators (`alice`, `bob`, `carol`) through
 `FastAPI TestClient` calls to `/annotator/<name>/next` and the matching
@@ -195,7 +243,13 @@ network-marked tests, pre-existing and unrelated to D2) -- **156 passed**.
 No limitation beyond the one stated above (`adjudicate_task.html`
 coverage) is newly introduced by this task; the Krippendorff's-alpha "N/A"
 behavior and the kind-priority queue-ordering behavior are pre-existing,
-already documented in the runbook's Operational notes. [EVIDENCE:
+already documented in the runbook's Operational notes. (This last claim
+was not actually accurate at the time -- the runbook's note described
+simple oldest-first ordering across all kinds, not the real
+kind-priority-then-oldest-created mechanism, and didn't mention the
+3-annotator minimum; both are fixed by the D2 whole-branch review's
+Finding 6, see the paragraph above, and the claim is accurate now.)
+[EVIDENCE:
 `docs/superpowers/plans/2026-11-02-d2-human-annotation.md`,
 `docs/superpowers/specs/2026-11-02-d2-human-annotation-design.md`,
 `docs/runbooks/02_human_testsets.md`, `tests/unit/test_annotate_e2e.py`,
