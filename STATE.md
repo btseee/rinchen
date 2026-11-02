@@ -5,31 +5,44 @@
 superseding the Phase 0-14 plan in
 `docs/research/2026-10-28-python314-stack-and-prompt.md` (kept as evidence
 source — see that doc's own superseded-notice). The old Phase 0 / P0.1 work
-below remains valid; it maps onto the new plan's D0 milestone, which is done
-and verified locally (see below) -- CI verification is still pending since
-nothing has been pushed yet. Sequencing decision honored: the pyonmttok/eole
-blocker (below) was resolved before D0, since D0's own doctor checks
-(`D-EOLE-PY`, `D-EOLE-CLI`) and CI's sync step require a working `eole`.
-Current next step: push this work and confirm CI is green on
-`ubuntu-24.04` (the one remaining piece of D0's STOP gate -- D1's own
-STOP gate has no CI clause and is already fully met, see the D1 paragraph
-below), then start D2. D0 (environment,
-skeleton, doctor) is done and verified locally -- NOT yet confirmed on CI,
-since none of this work has been pushed to `origin` (`git status` shows the
-local branch 82 commits ahead of `origin/main`): `pyproject.toml`
-restructured to the master plan's toolchain (see `docs/STACK.md` for
-resolved versions), `justfile`/CI/pre-commit in place, `just gate` (ruff
-format --check, ruff check, mypy, pytest -m "not network") green locally,
-`rinchen doctor` implemented with 7 checks and showing 6 OK + 1 SKIP
-(the skip is the GPU check, expected on this no-GPU dev machine; see
-`docs/VERIFY.md`), 81 tests passing (`uv run pytest -q`), config loader /
-logging / seed / manifest modules implemented with passing tests, CLI
-skeleton registers all 13 subcommand groups. D0's own STOP gate requires
-`just gate` green "locally AND in CI" -- only the "locally" half is met so
-far; this file will be updated once a push triggers CI and it is observed
-passing on `ubuntu-24.04`. [EVIDENCE:
+below remains valid; it maps onto the new plan's D0 milestone. Sequencing
+decision honored: the pyonmttok/eole blocker (below) was resolved before
+D0, since D0's own doctor checks (`D-EOLE-PY`, `D-EOLE-CLI`) and CI's sync
+step require a working `eole`.
+
+**D0 and D1 are both done; both STOP gates are fully met, including CI.**
+Pushed to `origin/main` 2026-11-02. First CI run (commit `b0eca33`) failed
+on `ruff check`'s `EXE001`: two pyonmttok build scripts were tracked as
+mode `100644` despite having a shebang (fixed in `abdbb1c` via
+`git update-index --chmod=+x`, content unchanged). That run also flagged
+two GitHub notices unrelated to the failure: every pinned Action targeted
+the deprecated Node 20 runtime, and `ubuntu-latest` is mid-migration to
+Ubuntu 26 — both addressed in `334e30f` (bumped `actions/checkout` to
+`@v7`, `actions/setup-python` to `@v7`, `actions/upload-artifact` to
+`@v7`, `extractions/setup-just` to `@v4`, `astral-sh/setup-uv` to its
+exact latest `@v10.3.3` since it has no floating major tag; pinned
+`runs-on` to `ubuntu-24.04` instead of `ubuntu-latest` — this is a
+deliberate deviation from the master plan's literal "CI: ubuntu-latest"
+line, `docs/research/2026-10-29-rinchen-dev-agent-prompt.md:318`, kept
+unedited as historical plan text). CI run after both fixes
+(`41447258653`, commit `334e30f`) passed clean: `just gate`, `just
+doctor`, `just tiny` all green on `ubuntu-24.04`. D0's STOP gate ("`just
+gate` green locally AND in CI") and D1's STOP gate (no CI clause, met
+locally as detailed below) are both now fully satisfied. Next step: start
+D2.
+
+D0 (environment, skeleton, doctor): `pyproject.toml` restructured to the
+master plan's toolchain (see `docs/STACK.md` for resolved versions),
+`justfile`/CI/pre-commit in place, `just gate` (ruff format --check, ruff
+check, mypy, pytest -m "not network") green locally and in CI, `rinchen
+doctor` implemented with 7 checks and showing 6 OK + 1 SKIP (the skip is
+the GPU check, expected on this no-GPU dev machine and on CI's runner;
+see `docs/VERIFY.md`), config loader / logging / seed / manifest modules
+implemented with passing tests, CLI skeleton registers all 13 subcommand
+groups. [EVIDENCE:
 `docs/superpowers/plans/2026-10-30-d0-environment-skeleton-doctor.md`,
-`docs/VERIFY.md`, commit 4a36b13, 2026-10-30.]
+`docs/VERIFY.md`, commits 4a36b13, abdbb1c, 334e30f, CI run 41447258653,
+2026-11-02.]
 One real discrepancy from the master plan found and documented: eole
 0.6.4's CLI has no `model average` subcommand (see `docs/VERIFY.md`'s
 `D-EOLE-CLI` row) -- the build-ourselves checkpoint averager (D8/D10) is
@@ -39,11 +52,10 @@ the planned fallback, not yet built.
 master plan's D1 STOP gate text (`docs/research/2026-10-29-rinchen-dev-agent-prompt.md`,
 D1 section) is "all D1 tests green; `rinchen data fetch --profile tiny
 --all` works offline using `local://` fixtures" -- unlike D0's gate, it
-has no CI clause, so D1 does not need a CI run to be considered done
-(CI itself still hasn't run on this branch, for the same reason as D0:
-nothing has been pushed to `origin` yet -- `git status` shows the local
-branch 82 commits ahead of `origin/main` -- but that is not part of D1's
-own gate). D1 built the schema-validated source registry
+has no CI clause, so D1 did not need a CI run to be considered done --
+though as of 2026-11-02 the branch has been pushed and CI has run green
+anyway (see the paragraph above). D1 built the schema-validated source
+registry
 (`src/rinchen/acquire/registry.py`, a `SourceEntry` discriminated union
 over five kinds: `http`/`opus`/`hf`/`commoncrawl`/`local`) and its
 backends: resumable, retrying, sha256-verifying `http.py` download (with
@@ -127,8 +139,8 @@ ls --profile tiny` both still work against all 4 fixtures.
 Repo scaffold is done: uv workspace, directory tree, CLAUDE.md, STATE.md,
 DECISIONS.md, .gitignore, and a real (not stub) CI workflow
 (`.github/workflows/ci.yml`) -- see the "CI step sequence" paragraph below
-for what it actually runs; it has not yet been observed running on CI
-itself, since nothing has been pushed. `pyonmttok` (built from source, see
+for what it actually runs; confirmed green on CI as of 2026-11-02 (see
+the D0/D1 paragraph above). `pyonmttok` (built from source, see
 below) is installed and verified on Python 3.14 via its smoke test on both
 win_amd64 and manylinux_2_28_x86_64. `uv sync --dev` now succeeds for the
 first time, installing all 145 pinned packages as of the fasttext-wheel fix
@@ -150,14 +162,12 @@ The current `.github/workflows/ci.yml`'s full step sequence --
 ruff check, mypy, `pytest -m "not network" -q`), then `just doctor`
 (`uv run rinchen doctor`, added to close the gap where CI never actually
 ran the doctor checks), then `just tiny` (an echo stub until D15) -- has
-been run locally on win_amd64 as of 2026-10-30: `just gate` green (75
-tests passed, 6 network tests deselected, no ruff/mypy findings),
-`rinchen doctor` 6 OK + 1 SKIP, `just tiny` prints its stub message and
-exits 0. It has NOT yet run on CI's `ubuntu-24.04` runner, because
-nothing on this branch has been pushed to `origin` yet -- this is the one
-piece of D0's STOP gate still outstanding. On Linux, only the
-manylinux_2_28 pyonmttok build/smoke test has been run; no Linux
-`uv sync` + full gate run is recorded yet.
+been run locally on win_amd64 (`just gate` green, `rinchen doctor` 6 OK +
+1 SKIP, `just tiny` prints its stub message and exits 0) and, as of
+2026-11-02, on CI's `ubuntu-24.04` runner (run `41447258653`, all three
+steps green -- see the D0/D1 paragraph above). On Linux, besides that CI
+run, only the manylinux_2_28 pyonmttok build/smoke test has been run
+directly; no interactive Linux `uv sync` + full gate session is recorded.
 
 Known blockers for Phase 0 to resolve (see DECISIONS.md for the vLLM entry):
 

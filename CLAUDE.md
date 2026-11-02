@@ -61,10 +61,8 @@ corpus construction, cleaning, or alignment, which are later milestones.
 ## Current phase
 
 Master plan switched 2026-10-29 to milestones D0-D15 (see below). D0 and
-D1 are both done locally; D0's STOP gate requires a green CI run (not yet
-done -- nothing has been pushed), while D1's STOP gate has no CI clause
-and is fully met. Next up: push to `origin`, confirm CI green for D0,
-then start D2. See `STATE.md`.
+D1 are both done, both STOP gates fully met including a green CI run on
+`origin/main` (2026-11-02). Next up: D2. See `STATE.md`.
 
 ## Evidence and full plan
 
