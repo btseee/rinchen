@@ -313,3 +313,45 @@ describe. A future milestone that needs integrity-checking for
 multi-file fetches should design a per-shard/per-record manifest rather
 than overload this single-hash field.]
 
+## 2026-11-02: D2 human-annotation design decisions
+
+Three D2 (`src/rinchen/annotate/`) design decisions worth recording for
+future reference, collected here rather than split across near-duplicate
+entries.
+
+[DESIGN: Krippendorff's alpha (`agreement.py`'s `krippendorff_alpha`) is
+hand-implemented rather than adding the `krippendorff` PyPI package as a
+new dependency.] This follows the master plan's "Build-ourselves (no
+dependency)" principle (`docs/research/2026-10-29-rinchen-dev-agent-prompt.md`,
+its `<toolchain>` section) — that line doesn't name this statistic specifically,
+but the same build-it-ourselves-rather-than-add-a-dependency reasoning
+applies: D2's agreement reporting needs exactly one well-understood
+formula, not a general-purpose library.
+
+[DESIGN: `db.connect` passes `sqlite3.connect(..., check_same_thread=False)`
+(Finding 1 of the D2 whole-branch review).] `sqlite3.connect()` defaults to
+`check_same_thread=True`, which raises `sqlite3.ProgrammingError` if a
+connection is used or closed from a thread other than the one that created
+it. Each request's connection is logically scoped to that one request, but
+FastAPI can still run a sync route's dependency-enter (the `yield` in
+`get_db`, in `routes.py`) and dependency-exit (the `finally: conn.close()`)
+on different threadpool worker threads for the same logical request —
+`check_same_thread=False` is required for that reason, not because
+connections are actually shared across requests. [EVIDENCE: live
+reproduction confirmed ~253/300 request failures with the fix reverted and
+0/300 with it in place, firing a burst of concurrent `GET /` requests at a
+single `with TestClient(app) as client:` instance via a `ThreadPoolExecutor`
+— `tests/unit/test_annotate_app.py::test_concurrent_requests_do_not_return_500`.]
+
+[DESIGN: `claim_next_task`'s priority ordering is kind-priority
+(`adjudicate` > `review` > `translate`, oldest-created within a kind),
+with re-serving an annotator's own already-`assigned` task taking priority
+over all of that — not the originally-planned pure oldest-created-wins
+ordering across all kinds.] Found necessary via TDD during D2
+implementation: adjudication and review work is time-sensitive and
+shouldn't be starved by a backlog of older `translate` tasks on unrelated
+items, and an annotator with unfinished in-progress work must always get
+that same task back on a subsequent claim (Finding 2) rather than a
+different, newly-prioritized one. See `claim_next_task`'s docstring in
+`src/rinchen/annotate/db.py` for the full eligibility rules.
+

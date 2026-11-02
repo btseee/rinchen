@@ -58,8 +58,8 @@ added to `models.py`'s dataclasses (convention match), a stale
 `annotation_app/` line in `README.md`, a misattributed docstring citation
 in `agreement.py`, and this file's/`CLAUDE.md`'s/the runbook's own
 staleness (D2 was previously undocumented here as done; the runbook's
-queue-priority note described pre-fix behavior; see DECISIONS.md and the
-full D2 paragraph below for detail). Full gate after all fixes: `uv run
+queue-priority note described pre-fix behavior; see DECISIONS.md's
+2026-11-02 entry and the full D2 paragraph below for detail). Full gate after all fixes: `uv run
 ruff format --check .` -- 93 files already formatted; `uv run ruff check
 .` -- all checks passed; `uv run mypy src` -- no issues found in 50 source
 files; `uv run pytest -q -m "not network"` -- **161 passed, 6 deselected**;
