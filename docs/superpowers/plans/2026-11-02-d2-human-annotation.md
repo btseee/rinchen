@@ -190,16 +190,18 @@ Expected: FAIL / collection error — `rinchen.annotate.db` doesn't exist yet.
 {"src": "\u1820\u1821\u1828\u182c\u1860\u180b\u202f", "src_lang": "mn_Mong", "tgt_lang": "en", "doc_id": "doc2", "seg_idx": 0}
 ```
 
-Save as `tests/fixtures/annot/import_sample.jsonl` (JSON lines, UTF-8, every
-`src` value uses `\uXXXX` escapes -- for the 3rd line's real
-traditional-script codepoints, and (post D2 whole-branch-review Finding 4)
-for the two `mn_Cyrl` lines' real Cyrillic Mongolian text
-("Сайн байна уу" / "Баярлалаа") -- to keep the source file itself
-plain-ASCII-safe to edit on any OS; `json.loads` resolves the escapes to
-the real characters). An earlier version of this fixture used
-Latin-transliterated ("galig") text mislabeled as `mn_Cyrl`, which violates
-CLAUDE.md's permanent "NEVER: Use galig/Latin informal Mongolian" rule;
-corrected per the D2 whole-branch review.
+Save as `tests/fixtures/annot/import_sample.jsonl` (JSON lines, UTF-8). Only
+the 3rd line's `src` value uses `\uXXXX` escapes, for its real
+traditional-script codepoints -- the Windows-console-crash concern above
+applies specifically to U+1800-U+18AF, not to Cyrillic, so there's no need
+to escape it. The two `mn_Cyrl` lines are, per CLAUDE.md's permanent
+"NEVER: Use galig/Latin informal Mongolian" rule, genuine Cyrillic
+Mongolian text ("Сайн байна уу" / "Баярлалаа"), written as raw UTF-8
+characters directly in the committed file (`json.loads` resolves the 3rd
+line's escapes to the real characters; the raw Cyrillic needs no
+resolving). An earlier version of this fixture used Latin-transliterated
+("galig") text mislabeled as `mn_Cyrl`, which violates that rule; corrected
+per the D2 whole-branch review (Finding 4).
 
 - [ ] **Step 4: Implement `models.py`**
 
@@ -488,11 +490,11 @@ from rinchen.metrics.bleu_chrf import chrf
 
 
 def test_chrf_identical_strings_is_100():
-    assert chrf("Sain baina uu", "Sain baina uu") == 100.0
+    assert chrf("Hello there", "Hello there") == 100.0
 
 
 def test_chrf_returns_plain_float_in_range():
-    score = chrf("Sain baina uu", "Goodbye forever")
+    score = chrf("Hello there", "Goodbye forever")
     assert isinstance(score, float)
     assert 0.0 <= score <= 100.0
 
@@ -500,7 +502,7 @@ def test_chrf_returns_plain_float_in_range():
 def test_chrf_dissimilar_strings_below_threshold():
     # Used by the adjudication trigger (chrf < 40) -- confirm a genuinely
     # dissimilar pair actually lands below that threshold, not just "low".
-    score = chrf("Sain baina uu", "The weather today is sunny and warm")
+    score = chrf("Hello there", "The weather today is sunny and warm")
     assert score < 40.0
 ```
 
@@ -2210,7 +2212,7 @@ Mongolian pairs across a few `doc_id`s, plus 3 lines with `src_lang:
 be genuine Cyrillic text (Unicode block U+0400–U+04FF), not a Latin
 transliteration mislabeled as Cyrillic -- an earlier version of this
 fixture violated that rule and was corrected (see Finding 4 of the D2
-whole-branch review, DECISIONS.md). The generation script builds BOTH the
+whole-branch review). The generation script builds BOTH the
 Cyrillic and the traditional-script text via `chr()` on integer codepoints
 rather than embedding a literal non-ASCII character directly in the shell
 command text, so there's no non-ASCII byte in the command line itself to
