@@ -9,8 +9,12 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+
+from rinchen.errors import DataError
+from rinchen.metrics.bleu_chrf import chrf
 
 SCHEMA_VERSION = 1
 
@@ -134,3 +138,180 @@ def import_items(conn: sqlite3.Connection, file_path: Path, set_name: str) -> in
             count += 1
     conn.commit()
     return count
+
+
+@dataclass(frozen=True)
+class ClaimedTask:
+    id: int
+    item_id: int
+    kind: str
+
+
+def _annotator_id(conn: sqlite3.Connection, name: str) -> int:
+    row = conn.execute("SELECT id FROM annotators WHERE name = ?", (name,)).fetchone()
+    if row is None:
+        raise DataError(f"unknown annotator: {name}")
+    return row["id"]
+
+
+def claim_next_task(
+    conn: sqlite3.Connection, annotator_name: str
+) -> ClaimedTask | None:
+    """Claim the oldest-created eligible task for `annotator_name`.
+
+    Eligibility: a 'translate' task on an item this annotator has no other
+    task on; a 'review' task only once both the item's translate tasks are
+    done and this annotator is not one of the two translators; an
+    'adjudicate' task only once created and this annotator is not one of
+    the two translators (the reviewer MAY adjudicate their own item).
+
+    Returns None (not an error) when nothing is eligible -- an empty queue
+    is a normal condition.
+    """
+    annotator_id = _annotator_id(conn, annotator_name)
+
+    translate_row = conn.execute(
+        """
+        SELECT t.id, t.item_id, t.kind, t.created_at
+        FROM tasks t
+        WHERE t.kind = 'translate' AND t.status = 'pending'
+          AND NOT EXISTS (
+              SELECT 1 FROM tasks t2
+              WHERE t2.item_id = t.item_id AND t2.annotator_id = ?
+          )
+        ORDER BY t.created_at, t.id
+        LIMIT 1
+        """,
+        (annotator_id,),
+    ).fetchone()
+
+    review_row = conn.execute(
+        """
+        SELECT t.id, t.item_id, t.kind, t.created_at
+        FROM tasks t
+        WHERE t.kind = 'review' AND t.status = 'pending'
+          AND (
+              SELECT COUNT(*) FROM tasks tt
+              WHERE tt.item_id = t.item_id AND tt.kind = 'translate' AND tt.status = 'done'
+          ) = 2
+          AND NOT EXISTS (
+              SELECT 1 FROM tasks tt
+              WHERE tt.item_id = t.item_id AND tt.kind = 'translate' AND tt.annotator_id = ?
+          )
+        ORDER BY t.created_at, t.id
+        LIMIT 1
+        """,
+        (annotator_id,),
+    ).fetchone()
+
+    adjudicate_row = conn.execute(
+        """
+        SELECT t.id, t.item_id, t.kind, t.created_at
+        FROM tasks t
+        WHERE t.kind = 'adjudicate' AND t.status = 'pending'
+          AND NOT EXISTS (
+              SELECT 1 FROM tasks tt
+              WHERE tt.item_id = t.item_id AND tt.kind = 'translate' AND tt.annotator_id = ?
+          )
+        ORDER BY t.created_at, t.id
+        LIMIT 1
+        """,
+        (annotator_id,),
+    ).fetchone()
+
+    candidates = [
+        r for r in (translate_row, review_row, adjudicate_row) if r is not None
+    ]
+    if not candidates:
+        return None
+
+    # Prefer finishing in-flight items (adjudicate, then review) over
+    # starting fresh translate work, since a freshly-created adjudicate
+    # task is otherwise always newer than untouched translate tasks on
+    # other items and would never win a pure created_at comparison.
+    _kind_priority = {"adjudicate": 0, "review": 1, "translate": 2}
+    chosen = min(
+        candidates, key=lambda r: (_kind_priority[r["kind"]], r["created_at"], r["id"])
+    )
+
+    conn.execute(
+        "UPDATE tasks SET status='assigned', annotator_id=?, assigned_at=? WHERE id=?",
+        (annotator_id, _now(), chosen["id"]),
+    )
+    conn.commit()
+    return ClaimedTask(id=chosen["id"], item_id=chosen["item_id"], kind=chosen["kind"])
+
+
+def submit_translate(
+    conn: sqlite3.Connection, task_id: int, text: str, minutes: float, flags: list[str]
+) -> None:
+    conn.execute(
+        "INSERT INTO translations (task_id, text, minutes, flags) VALUES (?, ?, ?, ?)",
+        (task_id, text, minutes, json.dumps(flags)),
+    )
+    conn.execute(
+        "UPDATE tasks SET status='done', completed_at=? WHERE id=?", (_now(), task_id)
+    )
+    conn.commit()
+
+
+def submit_review(
+    conn: sqlite3.Connection,
+    task_id: int,
+    score: int,
+    errors: list[str],
+    chosen_translation_id: int,
+) -> bool:
+    """Writes the review, marks the task done, and -- if chrF(t1,t2) < 40
+    or score < 70 -- creates an 'adjudicate' task. Returns whether one was
+    created.
+    """
+    conn.execute(
+        "INSERT INTO reviews (task_id, score, errors, chosen_translation_id) "
+        "VALUES (?, ?, ?, ?)",
+        (task_id, score, json.dumps(errors), chosen_translation_id),
+    )
+    conn.execute(
+        "UPDATE tasks SET status='done', completed_at=? WHERE id=?", (_now(), task_id)
+    )
+
+    item_id = conn.execute(
+        "SELECT item_id FROM tasks WHERE id=?", (task_id,)
+    ).fetchone()[0]
+    translate_ids = [
+        r["id"]
+        for r in conn.execute(
+            "SELECT id FROM tasks WHERE item_id=? AND kind='translate' ORDER BY id",
+            (item_id,),
+        ).fetchall()
+    ]
+    t1_text = conn.execute(
+        "SELECT text FROM translations WHERE task_id=?", (translate_ids[0],)
+    ).fetchone()[0]
+    t2_text = conn.execute(
+        "SELECT text FROM translations WHERE task_id=?", (translate_ids[1],)
+    ).fetchone()[0]
+
+    needs_adjudication = chrf(t1_text, t2_text) < 40 or score < 70
+
+    if needs_adjudication:
+        conn.execute(
+            "INSERT INTO tasks (item_id, kind, status, created_at) "
+            "VALUES (?, 'adjudicate', 'pending', ?)",
+            (item_id, _now()),
+        )
+    conn.commit()
+    return needs_adjudication
+
+
+def submit_adjudicate(
+    conn: sqlite3.Connection, task_id: int, text: str, minutes: float, flags: list[str]
+) -> None:
+    conn.execute(
+        "INSERT INTO translations (task_id, text, minutes, flags) VALUES (?, ?, ?, ?)",
+        (task_id, text, minutes, json.dumps(flags)),
+    )
+    conn.execute(
+        "UPDATE tasks SET status='done', completed_at=? WHERE id=?", (_now(), task_id)
+    )
+    conn.commit()
