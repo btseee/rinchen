@@ -40,12 +40,83 @@ def test_same_annotator_cannot_claim_both_translate_slots(tmp_path):
     assert first.kind == "translate"
     assert first.item_id == item_id
 
-    # alice still has other items' translate tasks available, so claiming
-    # again must not hand her the SAME item's second translate slot.
+    # Submit the first task so alice has no 'assigned' task of her own --
+    # otherwise (Finding 2) claim_next_task would just re-serve that same
+    # in-progress task, which isn't what this test is checking. With it
+    # submitted, alice still has other items' translate tasks available, so
+    # claiming again must not hand her the SAME item's second translate slot.
+    db.submit_translate(conn, first.id, "translation", 1.0, [])
     second = db.claim_next_task(conn, "alice")
     assert not (
         second is not None and second.item_id == item_id and second.kind == "translate"
     )
+
+
+def test_claim_next_task_reserves_existing_assigned_task(tmp_path):
+    # Regression for Finding 2: an annotator who already has an
+    # assigned-but-not-done task must get that SAME task back on a
+    # subsequent claim, not a different one -- otherwise refreshing,
+    # double-clicking, or revisiting the URL abandons the in-progress
+    # task and orphans it permanently.
+    conn = _setup(tmp_path, ["alice", "bob"])
+
+    first = db.claim_next_task(conn, "alice")
+    assert first is not None
+
+    second = db.claim_next_task(conn, "alice")
+
+    assert second is not None
+    assert second.id == first.id
+    assert second.item_id == first.item_id
+    assert second.kind == first.kind
+
+
+def test_claim_next_task_retries_once_after_losing_the_race(tmp_path, monkeypatch):
+    # Regression for Finding 7: the claiming UPDATE is guarded by
+    # `AND status = 'pending'` and checks cursor.rowcount; if another
+    # request wins the race and claims the same row first, this retries
+    # the whole selection once instead of returning a stale ClaimedTask
+    # for a task that's no longer actually pending.
+    #
+    # Deterministic reproduction: monkeypatch the internal selection helper
+    # so that, on its first call, a SECOND connection to the same database
+    # file steals the exact row it just selected (assigns it to a
+    # different annotator) before claim_next_task's own UPDATE runs. This
+    # forces rowcount == 0 on the first attempt.
+    conn = _setup(tmp_path, ["alice", "bob"])
+    db_path = tmp_path / "test.sqlite"
+    rival_conn = db.connect(db_path)
+    bob_id = conn.execute("SELECT id FROM annotators WHERE name='bob'").fetchone()["id"]
+
+    original_select = db._select_candidate_task
+    call_count = {"n": 0}
+
+    def flaky_select(c, annotator_id):
+        row = original_select(c, annotator_id)
+        call_count["n"] += 1
+        if call_count["n"] == 1 and row is not None:
+            rival_conn.execute(
+                "UPDATE tasks SET status='assigned', annotator_id=? "
+                "WHERE id=? AND status='pending'",
+                (bob_id, row["id"]),
+            )
+            rival_conn.commit()
+        return row
+
+    monkeypatch.setattr("rinchen.annotate.db._select_candidate_task", flaky_select)
+    claimed = db.claim_next_task(conn, "alice")
+
+    assert call_count["n"] == 2  # first attempt lost the race, retry succeeded
+    assert claimed is not None
+    # The retried claim must actually be assigned to alice, not stale.
+    row = conn.execute(
+        "SELECT annotator_id, status FROM tasks WHERE id=?", (claimed.id,)
+    ).fetchone()
+    assert row["status"] == "assigned"
+    alice_id = conn.execute("SELECT id FROM annotators WHERE name='alice'").fetchone()[
+        "id"
+    ]
+    assert row["annotator_id"] == alice_id
 
 
 def test_translator_cannot_review_own_item(tmp_path):

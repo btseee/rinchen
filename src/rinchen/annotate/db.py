@@ -68,7 +68,14 @@ def _now() -> str:
 
 
 def connect(db_path: Path) -> sqlite3.Connection:
-    conn = sqlite3.connect(db_path)
+    # check_same_thread=False: each connection in this app is scoped to
+    # exactly one request (opened and closed within routes.py's get_db,
+    # a single generator lifetime), so this never introduces concurrent
+    # use of one connection. It's needed because FastAPI can run a sync
+    # route's dependency-enter and dependency-exit on different
+    # threadpool threads for the same logical request; without this,
+    # sqlite3 raises ProgrammingError in that case (see Finding 1).
+    conn = sqlite3.connect(db_path, check_same_thread=False)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.row_factory = sqlite3.Row
@@ -154,28 +161,12 @@ def _annotator_id(conn: sqlite3.Connection, name: str) -> int:
     return row["id"]
 
 
-def claim_next_task(
-    conn: sqlite3.Connection, annotator_name: str
-) -> ClaimedTask | None:
-    """Claim the highest-priority, then oldest-created eligible task for
-    `annotator_name`.
-
-    Priority: 'adjudicate' > 'review' > 'translate' -- adjudication and
-    review work is time-sensitive and should not be starved by a backlog
-    of older translate tasks on unrelated items. Within one kind, the
-    oldest-created eligible task wins (ties broken by id).
-
-    Eligibility: a 'translate' task on an item this annotator has no other
-    task on; a 'review' task only once both the item's translate tasks are
-    done and this annotator is not one of the two translators; an
-    'adjudicate' task only once created and this annotator is not one of
-    the two translators (the reviewer MAY adjudicate their own item).
-
-    Returns None (not an error) when nothing is eligible -- an empty queue
-    is a normal condition.
+def _select_candidate_task(
+    conn: sqlite3.Connection, annotator_id: int
+) -> sqlite3.Row | None:
+    """Run the three eligibility queries and return the single
+    highest-priority, then oldest-created eligible 'pending' task, or None.
     """
-    annotator_id = _annotator_id(conn, annotator_name)
-
     translate_row = conn.execute(
         """
         SELECT t.id, t.item_id, t.kind, t.created_at
@@ -236,16 +227,78 @@ def claim_next_task(
     # task is otherwise always newer than untouched translate tasks on
     # other items and would never win a pure created_at comparison.
     _kind_priority = {"adjudicate": 0, "review": 1, "translate": 2}
-    chosen = min(
+    return min(
         candidates, key=lambda r: (_kind_priority[r["kind"]], r["created_at"], r["id"])
     )
 
-    conn.execute(
-        "UPDATE tasks SET status='assigned', annotator_id=?, assigned_at=? WHERE id=?",
-        (annotator_id, _now(), chosen["id"]),
-    )
-    conn.commit()
-    return ClaimedTask(id=chosen["id"], item_id=chosen["item_id"], kind=chosen["kind"])
+
+def claim_next_task(
+    conn: sqlite3.Connection, annotator_name: str
+) -> ClaimedTask | None:
+    """Claim the highest-priority, then oldest-created eligible task for
+    `annotator_name`.
+
+    If `annotator_name` already has a task with status='assigned' (any
+    kind -- an in-progress claim they haven't submitted yet), that SAME
+    task is returned instead of claiming a new one. This makes every call
+    idempotent for an annotator with unfinished work: a refresh,
+    double-click, or revisit of the URL always re-shows their current
+    in-progress task instead of abandoning it and orphaning it (Finding 2).
+
+    Priority among newly-claimed tasks: 'adjudicate' > 'review' >
+    'translate' -- adjudication and review work is time-sensitive and
+    should not be starved by a backlog of older translate tasks on
+    unrelated items. Within one kind, the oldest-created eligible task
+    wins (ties broken by id).
+
+    Eligibility: a 'translate' task on an item this annotator has no other
+    task on; a 'review' task only once both the item's translate tasks are
+    done and this annotator is not one of the two translators; an
+    'adjudicate' task only once created and this annotator is not one of
+    the two translators (the reviewer MAY adjudicate their own item).
+
+    The claiming UPDATE is guarded by `AND status = 'pending'` and checks
+    `cursor.rowcount`, retrying the whole selection once if another
+    request won the race for the same task (Finding 7) -- this avoids two
+    annotators both being handed the same task, or returning a stale
+    ClaimedTask for a row that was already taken.
+
+    Returns None (not an error) when nothing is eligible -- an empty queue
+    is a normal condition.
+    """
+    annotator_id = _annotator_id(conn, annotator_name)
+
+    in_progress = conn.execute(
+        "SELECT id, item_id, kind FROM tasks WHERE annotator_id = ? AND status = 'assigned'",
+        (annotator_id,),
+    ).fetchone()
+    if in_progress is not None:
+        return ClaimedTask(
+            id=in_progress["id"],
+            item_id=in_progress["item_id"],
+            kind=in_progress["kind"],
+        )
+
+    for _attempt in range(2):
+        chosen = _select_candidate_task(conn, annotator_id)
+        if chosen is None:
+            return None
+
+        cursor = conn.execute(
+            "UPDATE tasks SET status='assigned', annotator_id=?, assigned_at=? "
+            "WHERE id=? AND status='pending'",
+            (annotator_id, _now(), chosen["id"]),
+        )
+        if cursor.rowcount == 1:
+            conn.commit()
+            return ClaimedTask(
+                id=chosen["id"], item_id=chosen["item_id"], kind=chosen["kind"]
+            )
+        # Lost the race to another request claiming the same task between
+        # the SELECT and this UPDATE -- retry the whole selection once.
+        conn.rollback()
+
+    return None
 
 
 def submit_translate(

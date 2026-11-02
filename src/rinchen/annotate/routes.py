@@ -58,16 +58,18 @@ def index(
     )
 
 
-@router.get("/annotator/{name}/next", response_class=HTMLResponse)
-def next_task(
-    request: Request,
-    name: str,
-    conn: sqlite3.Connection = Depends(get_db),  # noqa: B008 -- FastAPI DI pattern
+def _render_claimed_or_no_task(
+    request: Request, conn: sqlite3.Connection, annotator_name: str
 ) -> HTMLResponse:
-    try:
-        claimed = db.claim_next_task(conn, name)
-    except DataError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    """Claim the annotator's next task (which may be their current
+    in-progress one, per db.claim_next_task's Finding-2 fix) and render its
+    partial, or partials/no_task.html if nothing is eligible.
+
+    Shared by GET /annotator/{name}/next and every POST /task/{id}/...
+    submit route, so a submission re-renders the annotator's next task
+    instead of a dead-end "Submitted." page (Finding 8).
+    """
+    claimed = db.claim_next_task(conn, annotator_name)
 
     if claimed is None:
         return templates.TemplateResponse(
@@ -106,6 +108,27 @@ def next_task(
     )
 
 
+def _annotator_name_for_task(conn: sqlite3.Connection, task_id: int) -> str:
+    row = conn.execute(
+        "SELECT a.name AS name FROM tasks t JOIN annotators a ON a.id = t.annotator_id "
+        "WHERE t.id = ?",
+        (task_id,),
+    ).fetchone()
+    return row["name"]
+
+
+@router.get("/annotator/{name}/next", response_class=HTMLResponse)
+def next_task(
+    request: Request,
+    name: str,
+    conn: sqlite3.Connection = Depends(get_db),  # noqa: B008 -- FastAPI DI pattern
+) -> HTMLResponse:
+    try:
+        return _render_claimed_or_no_task(request, conn, name)
+    except DataError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @router.post("/task/{task_id}/translate", response_class=HTMLResponse)
 def submit_translate(
     request: Request,
@@ -116,10 +139,9 @@ def submit_translate(
     conn: sqlite3.Connection = Depends(get_db),  # noqa: B008 -- FastAPI DI pattern
 ) -> HTMLResponse:
     flag_list = [f.strip() for f in flags.split(",") if f.strip()]
+    annotator_name = _annotator_name_for_task(conn, task_id)
     db.submit_translate(conn, task_id, text, minutes, flag_list)
-    return templates.TemplateResponse(
-        request=request, name="partials/submitted.html", context={}
-    )
+    return _render_claimed_or_no_task(request, conn, annotator_name)
 
 
 @router.post("/task/{task_id}/review", response_class=HTMLResponse)
@@ -132,14 +154,9 @@ def submit_review(
     conn: sqlite3.Connection = Depends(get_db),  # noqa: B008 -- FastAPI DI pattern
 ) -> HTMLResponse:
     error_list = [e.strip() for e in errors.split(",") if e.strip()]
-    needs_adjudication = db.submit_review(
-        conn, task_id, score, error_list, chosen_translation_id
-    )
-    return templates.TemplateResponse(
-        request=request,
-        name="partials/submitted.html",
-        context={"needs_adjudication": needs_adjudication},
-    )
+    annotator_name = _annotator_name_for_task(conn, task_id)
+    db.submit_review(conn, task_id, score, error_list, chosen_translation_id)
+    return _render_claimed_or_no_task(request, conn, annotator_name)
 
 
 @router.post("/task/{task_id}/adjudicate", response_class=HTMLResponse)
@@ -152,7 +169,6 @@ def submit_adjudicate(
     conn: sqlite3.Connection = Depends(get_db),  # noqa: B008 -- FastAPI DI pattern
 ) -> HTMLResponse:
     flag_list = [f.strip() for f in flags.split(",") if f.strip()]
+    annotator_name = _annotator_name_for_task(conn, task_id)
     db.submit_adjudicate(conn, task_id, text, minutes, flag_list)
-    return templates.TemplateResponse(
-        request=request, name="partials/submitted.html", context={}
-    )
+    return _render_claimed_or_no_task(request, conn, annotator_name)
