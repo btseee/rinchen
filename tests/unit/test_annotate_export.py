@@ -150,6 +150,69 @@ def test_export_parquet_round_trips_via_polars(tmp_path):
     assert set(df.columns) == _COLUMNS
 
 
+def test_traditional_script_round_trips_byte_exact_through_every_format(tmp_path):
+    # Regression for Finding 3: a traditional-script (U+1800-U+18AF) segment
+    # must round-trip byte-exact through import -> DB -> every export
+    # format. Built via chr() on integer codepoints rather than a literal
+    # traditional-script character in this source file, per this project's
+    # established convention (see test_annotate_db.py's
+    # test_import_items_round_trips_traditional_script_byte_exact and
+    # conftest.py's docstring: Windows' console encoding can't print these
+    # characters on a failing assertion).
+    mong_text = "".join(
+        chr(c) for c in (0x1820, 0x1821, 0x1828, 0x182C, 0x1860, 0x180B, 0x202F)
+    )
+
+    conn = db.connect(tmp_path / "test.sqlite")
+    db.init_db(conn)
+    conn.execute(
+        "INSERT INTO items (set_name, src, src_lang, tgt_lang, doc_id, seg_idx) "
+        "VALUES ('demo', 'placeholder src', 'en', 'mn_Mong', 'd', 0)"
+    )
+    conn.commit()
+    item_id = conn.execute("SELECT id FROM items LIMIT 1").fetchone()["id"]
+
+    def add_task(kind, status):
+        cur = conn.execute(
+            "INSERT INTO tasks (item_id, kind, status, created_at) VALUES (?, ?, ?, 'now')",
+            (item_id, kind, status),
+        )
+        return cur.lastrowid
+
+    translate_id_1 = add_task("translate", "done")
+    translate_id_2 = add_task("translate", "done")
+    review_id = add_task("review", "done")
+
+    # The chosen translation carries the traditional-script text -- this is
+    # the side (tgt) that must round-trip byte-exact.
+    db.submit_translate(conn, translate_id_1, mong_text, 1.0, [])
+    db.submit_translate(conn, translate_id_2, "some other translation", 1.0, [])
+    conn.execute(
+        "INSERT INTO reviews (task_id, score, errors, chosen_translation_id) "
+        "VALUES (?, 95, '[]', ?)",
+        (review_id, translate_id_1),
+    )
+    conn.commit()
+
+    jsonl_out = tmp_path / "out.jsonl"
+    tsv_out = tmp_path / "out.tsv"
+    parquet_out = tmp_path / "out.parquet"
+
+    assert export_jsonl(conn, "demo", jsonl_out) == 1
+    assert export_tsv(conn, "demo", tsv_out) == 1
+    assert export_parquet(conn, "demo", parquet_out) == 1
+
+    jsonl_row = json.loads(jsonl_out.read_text(encoding="utf-8").splitlines()[0])
+    assert jsonl_row["tgt"] == mong_text
+
+    with tsv_out.open(encoding="utf-8") as f:
+        tsv_row = next(csv.DictReader(f, delimiter="\t"))
+    assert tsv_row["tgt"] == mong_text
+
+    parquet_df = pl.read_parquet(parquet_out)
+    assert parquet_df["tgt"].to_list()[0] == mong_text
+
+
 def test_export_parquet_empty_and_populated_schemas_match(tmp_path):
     # Regression: an empty export (e.g. exporting a set with nothing
     # resolved yet) must have the exact same column dtypes as a populated
