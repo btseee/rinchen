@@ -164,6 +164,11 @@ _LATIN_AND_CYRILLIC_CASES = [
         "Das gilt i. d. R. für alle. Gut.",
         ["Das gilt i. d. R. für alle.", "Gut."],
     ),
+    (
+        "deu_Latn",
+        "Das ist d. h. ein Test. Gut.",
+        ["Das ist d. h. ein Test.", "Gut."],
+    ),
     # A window of dotted tokens must not swallow a real sentence boundary.
     (
         "deu_Latn",
@@ -248,6 +253,11 @@ _LATIN_AND_CYRILLIC_CASES = [
     ),
     ("rus_Cyrl", "Он ушёл. Ёж спит.", ["Он ушёл.", "Ёж спит."]),
     (
+        "rus_Cyrl",
+        "Мы купили хлеб, молоко и т. д. Потом ушли.",
+        ["Мы купили хлеб, молоко и т. д. Потом ушли."],
+    ),
+    (
         "kaz_Cyrl",
         "Қазақстан — үлкен ел. Астана — оның астанасы.",
         ["Қазақстан — үлкен ел.", "Астана — оның астанасы."],
@@ -281,6 +291,18 @@ def test_turkish_and_korean_have_no_abbreviation_handling(
     # These families have no abbreviation set, so "z. B." is cut like any other
     # sentence end; the spaced-abbreviation rule must not apply to them.
     assert split(text, lang) == expected
+
+
+def test_closer_after_a_dot_keeps_each_part_stable_when_split_again() -> None:
+    # The dot of "a.)" has a closer after it and joins no window. If it consulted
+    # its neighbours it would pair with "u." and be suppressed while "u." is cut,
+    # and the part "a.) o." would split again on its own.
+    text = "u. a.) o. Foo"
+
+    parts = split(text, "deu_Latn")
+
+    assert all(split(part, "deu_Latn") == [part] for part in parts)
+    assert "".join("".join(parts).split()) == "".join(text.split())
 
 
 @pytest.mark.parametrize("lang", ["khk_Cyrl", "rus_Cyrl", "kaz_Cyrl"])
