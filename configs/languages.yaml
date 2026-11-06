@@ -1,0 +1,33 @@
+# Language registry: the single source of truth for D3 language codes.
+# Order is the order of the `<2xx>` direction-tag symbols in the SPM vocab.
+languages:
+  - code: khk_Cyrl
+    scripts: [Cyrillic]
+    direction_tag: "<2khk_Cyrl>"
+  - code: mn_Mong
+    scripts: [Mongolian]
+    direction_tag: "<2mn_Mong>"
+  - code: eng_Latn
+    scripts: [Latin]
+    direction_tag: "<2eng_Latn>"
+  - code: rus_Cyrl
+    scripts: [Cyrillic]
+    direction_tag: "<2rus_Cyrl>"
+  - code: zho_Hans
+    scripts: [Han]
+    direction_tag: "<2zho_Hans>"
+  - code: kor_Hang
+    scripts: [Hangul]
+    direction_tag: "<2kor_Hang>"
+  - code: jpn_Jpan
+    scripts: [Han, Hiragana, Katakana]
+    direction_tag: "<2jpn_Jpan>"
+  - code: deu_Latn
+    scripts: [Latin]
+    direction_tag: "<2deu_Latn>"
+  - code: kaz_Cyrl
+    scripts: [Cyrillic]
+    direction_tag: "<2kaz_Cyrl>"
+  - code: tur_Latn
+    scripts: [Latin]
+    direction_tag: "<2tur_Latn>"
