@@ -89,6 +89,10 @@ packages = ["src/rinchen"]
 
 [tool.pytest.ini_options]
 pythonpath = ["scripts"]
+filterwarnings = [
+    # sentencepiece's SWIG bindings emit these when imported on Python 3.14.
+    "ignore:builtin type Swig.* has no __module__ attribute:DeprecationWarning",
+]
 markers = [
     "network: tests that make real network calls",
     "subprocess: tests that spawn real subprocesses",
