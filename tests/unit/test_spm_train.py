@@ -58,6 +58,41 @@ def test_train_tiny_returns_model_with_1000_pieces(tiny_cfg: SpmConfig) -> None:
     assert processor.get_piece_size() == TINY_VOCAB_SIZE
 
 
+def test_trainer_receives_exactly_the_policy_options(
+    tiny_cfg: SpmConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: dict[str, object] = {}
+
+    def record_options(**options: object) -> None:
+        captured.update(options)
+
+    monkeypatch.setattr(
+        sentencepiece.SentencePieceTrainer, "train", staticmethod(record_options)
+    )
+
+    train_spm(tiny_cfg)
+
+    # Spelled out rather than imported from train.py, so changing a policy
+    # invariant there fails this test. Anything not listed (hard_vocab_limit,
+    # num_threads) is left at the trainer's default.
+    assert captured == {
+        "input": str(_sampled_file(tiny_cfg)),
+        "model_prefix": str(tiny_cfg.output_prefix),
+        "vocab_size": tiny_cfg.vocab_size,
+        "character_coverage": tiny_cfg.character_coverage,
+        "input_sentence_size": tiny_cfg.input_sentence_size,
+        "model_type": "unigram",
+        "byte_fallback": True,
+        "split_digits": True,
+        "normalization_rule_name": "identity",
+        "user_defined_symbols": user_defined_symbols(),
+        "shuffle_input_sentence": True,
+        "minloglevel": 2,
+    }
+    for flag in ("byte_fallback", "split_digits", "shuffle_input_sentence"):
+        assert captured[flag] is True, flag
+
+
 def test_vocab_file_is_written_next_to_the_model(tiny_cfg: SpmConfig) -> None:
     train_spm(tiny_cfg)
 

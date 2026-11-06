@@ -11,12 +11,16 @@ import pytest
 
 from rinchen.config.languages import known_language_codes
 from rinchen.errors import ConfigError
+from rinchen.spm.symbols import user_defined_symbols
 from rinchen.text.normalize import normalize
 
 # Mongolian letters U+1820..U+1842 (A through CHI), joined without separators.
 _MONGOLIAN_LETTERS = "".join(chr(code) for code in range(0x1820, 0x1843))
 
 _MONGOL_WORD = "\u041c\u043e\u043d\u0433\u043e\u043b"  # Cyrillic "Mongol"
+# Cyrillic "Mongolchuud"; ten Cyrillic letters outweigh the seven Latin letters
+# of the tag "<2khk_Cyrl>", which the six of "Mongol" do not.
+_LONG_MONGOL_WORD = "\u041c\u043e\u043d\u0433\u043e\u043b\u0447\u0443\u0443\u0434"
 
 
 def test_nfc_composes() -> None:
@@ -157,3 +161,35 @@ def test_letterless_tokens_do_not_crash() -> None:
 def test_unknown_language_raises_config_error(lang: str) -> None:
     with pytest.raises(ConfigError):
         normalize("text", lang)
+
+
+@pytest.mark.parametrize("lang", sorted(known_language_codes()))
+def test_whitespace_separated_reserved_symbols_survive_next_to_a_cyrillic_word(
+    lang: str,
+) -> None:
+    for symbol in user_defined_symbols():
+        before_word = normalize(f"{symbol} {_MONGOL_WORD}", lang).split(" ")[0]
+        after_word = normalize(f"{_MONGOL_WORD} {symbol}", lang).split(" ")[-1]
+
+        assert before_word == symbol, f"{symbol!r} became {before_word!r} in {lang}"
+        assert after_word == symbol, f"{symbol!r} became {after_word!r} in {lang}"
+
+
+@pytest.mark.parametrize(
+    ("tag", "word"),
+    [
+        ("<sep>", _MONGOL_WORD),
+        ("<doc>", _MONGOL_WORD),
+        ("<2khk_Cyrl>", _LONG_MONGOL_WORD),
+    ],
+)
+def test_known_limitation_reserved_symbol_glued_to_a_cyrillic_word_is_rewritten(
+    tag: str, word: str
+) -> None:
+    """Documents unsupported input, not a feature: `normalize` runs on raw text
+    before reserved symbols are inserted, and a symbol glued to a Cyrillic word
+    shares its token, so the homoglyph step turns the symbol's Latin letters
+    into Cyrillic ones whenever the token is mostly Cyrillic."""
+    glued = f"{tag}{word}"
+
+    assert normalize(glued, "khk_Cyrl") != glued

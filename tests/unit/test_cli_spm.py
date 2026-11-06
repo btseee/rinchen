@@ -45,13 +45,23 @@ NON_ATOMIC_PREFIX = "non-atomic symbol: "
 ArgsBuilder = Callable[[Path, Path], list[str]]
 
 
+# Far more pieces than the tiny fixture corpus can supply, so the trainer rejects it.
+UNREACHABLE_VOCAB_SIZE = 50_000
+
+
 def _write_tiny_config(
-    path: Path, *, output_prefix: Path, corpus_dir: Path = FIXTURE_DIR
+    path: Path,
+    *,
+    output_prefix: Path,
+    corpus_dir: Path = FIXTURE_DIR,
+    **overrides: object,
 ) -> Path:
-    """Write the tiny config with only its two location fields redirected."""
+    """Write the tiny config with its two location fields redirected and any
+    further `overrides` applied."""
     fields = yaml.safe_load(TINY_CONFIG_PATH.read_text(encoding="utf-8"))
     fields["corpus_dir"] = str(corpus_dir)
     fields["output_prefix"] = str(output_prefix)
+    fields.update(overrides)
     path.write_text(yaml.safe_dump(fields), encoding="utf-8")
     return path
 
@@ -208,6 +218,15 @@ def _unwritable_output_prefix(workdir: Path, model: Path) -> list[str]:
     return ["spm", "train", "--config", str(config)]
 
 
+def _unreachable_vocab_size(workdir: Path, model: Path) -> list[str]:
+    config = _write_tiny_config(
+        workdir / "oversized.yaml",
+        output_prefix=workdir / "oversized" / "tiny",
+        vocab_size=UNREACHABLE_VOCAB_SIZE,
+    )
+    return ["spm", "train", "--config", str(config)]
+
+
 @pytest.mark.parametrize(
     ("build_args", "exit_code", "message_start"),
     [
@@ -220,6 +239,12 @@ def _unwritable_output_prefix(workdir: Path, model: Path) -> list[str]:
             1,
             "error: cannot write SentencePiece outputs for ",
             id="unwritable-output-prefix",
+        ),
+        pytest.param(
+            _unreachable_vocab_size,
+            4,
+            "error: sentencepiece training failed for ",
+            id="trainer-rejects-vocab-size",
         ),
     ],
 )

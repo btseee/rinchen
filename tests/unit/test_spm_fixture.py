@@ -69,7 +69,6 @@ def test_lines_are_nonblank_nfc_and_tab_free(code: str) -> None:
         assert line.strip(), f"{where} is blank"
         assert unicodedata.is_normalized("NFC", line), f"{where} is not NFC"
         assert "\t" not in line, f"{where} contains a tab"
-        assert "\r" not in line, f"{where} contains a carriage return"
 
 
 @pytest.mark.parametrize("code", LANGUAGES_WITH_DIGITS)

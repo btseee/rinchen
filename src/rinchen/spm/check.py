@@ -63,7 +63,8 @@ def check_spm(
     sample_lines: int = 1000,
 ) -> SpmCheckReport:
     """Check the model at `model_path` and measure its coverage of each
-    language's first `sample_lines` non-blank lines in `corpus_files`.
+    language's first `sample_lines` non-blank lines in `corpus_files`. A file is
+    not read past that sample, so corruption beyond it goes unnoticed.
 
     A symbol is atomic when it encodes to itself, alone or after the dummy
     prefix. Byte fallback is on when all 256 byte pieces `<0x00>`..`<0xFF>`
@@ -127,7 +128,7 @@ def _measure_coverage(
     path: Path,
     sample_lines: int,
 ) -> LanguageCoverage:
-    lines = read_lines(path)[:sample_lines]
+    lines = read_lines(path, limit=sample_lines)
     encoded = processor.encode(lines, out_type=int)
     piece_ids = [piece_id for ids in encoded for piece_id in ids]
     fallback_pieces = sum(

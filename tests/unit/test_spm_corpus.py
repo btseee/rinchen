@@ -183,6 +183,49 @@ def test_read_lines_strips_a_leading_bom(tmp_path: Path) -> None:
     assert not lines[0].startswith("\N{ZERO WIDTH NO-BREAK SPACE}")
 
 
+def test_read_lines_limit_returns_the_first_non_blank_lines(tmp_path: Path) -> None:
+    _write_files(tmp_path, {"corpus.txt": "\nalpha\n  \nbeta\r\n\t\ngamma\ndelta\n"})
+
+    assert read_lines(tmp_path / "corpus.txt", limit=2) == ["alpha", "beta"]
+
+
+def test_read_lines_limit_beyond_the_file_returns_every_line(tmp_path: Path) -> None:
+    _write_files(tmp_path, {"corpus.txt": "alpha\nbeta\n"})
+
+    assert read_lines(tmp_path / "corpus.txt", limit=10) == ["alpha", "beta"]
+
+
+def test_read_lines_without_a_limit_returns_every_line(tmp_path: Path) -> None:
+    _write_files(tmp_path, {"corpus.txt": "alpha\n\nbeta\ngamma\n"})
+
+    assert read_lines(tmp_path / "corpus.txt", limit=None) == ["alpha", "beta", "gamma"]
+
+
+def test_read_lines_limit_zero_returns_no_lines(tmp_path: Path) -> None:
+    _write_files(tmp_path, {"corpus.txt": "alpha\nbeta\n"})
+
+    assert read_lines(tmp_path / "corpus.txt", limit=0) == []
+
+
+def test_read_lines_negative_limit_raises_value_error(tmp_path: Path) -> None:
+    _write_files(tmp_path, {"corpus.txt": "alpha\n"})
+
+    with pytest.raises(ValueError, match="limit"):
+        read_lines(tmp_path / "corpus.txt", limit=-1)
+
+
+def test_read_lines_limit_does_not_read_past_the_limit(tmp_path: Path) -> None:
+    # The filler is far longer than any read-ahead chunk, so the invalid bytes
+    # sit in a chunk that a bounded read never decodes.
+    path = tmp_path / "corpus.txt"
+    path.write_bytes(b"alpha\nbeta\n" + b"filler\n" * 200_000 + b"\xff\xfe\n")
+
+    assert read_lines(path, limit=2) == ["alpha", "beta"]
+    with pytest.raises(DataError, match="corpus.txt") as excinfo:
+        read_lines(path)
+    assert isinstance(excinfo.value.__cause__, UnicodeDecodeError)
+
+
 def test_read_lines_invalid_utf8_raises_data_error_naming_file(
     tmp_path: Path,
 ) -> None:

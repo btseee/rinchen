@@ -39,6 +39,8 @@ def _rinchen_errors_as_exit_codes() -> Iterator[None]:
     try:
         yield
     except RinchenError as exc:
+        # The error classes are siblings, so the order of this lookup does not
+        # matter; a subclass would have to be listed before its parent.
         exit_code = next(
             (
                 code

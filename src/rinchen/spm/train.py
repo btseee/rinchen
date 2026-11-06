@@ -16,8 +16,9 @@ from rinchen.errors import UpstreamError
 from rinchen.spm.corpus import discover_corpus, read_lines, sample_balanced
 from rinchen.spm.symbols import user_defined_symbols
 
-# Project invariants, not config fields; `spm/check.py` verifies a trained
-# model still honors them.
+# Project invariants, not config fields. A test pins the options passed to the
+# trainer; `check_spm` verifies that a trained model keeps its symbols atomic and
+# has byte fallback on.
 MODEL_TYPE = "unigram"
 BYTE_FALLBACK = True
 SPLIT_DIGITS = True

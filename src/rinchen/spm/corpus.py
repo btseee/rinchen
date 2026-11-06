@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import math
 import random
-from collections.abc import Iterator, Mapping
+from collections.abc import Generator, Mapping
+from contextlib import closing
+from itertools import islice
 from pathlib import Path
 
 from rinchen.config.languages import known_language_codes
@@ -32,18 +34,26 @@ def discover_corpus(corpus_dir: Path) -> dict[str, Path]:
     return corpus
 
 
-def read_lines(path: Path) -> list[str]:
+def read_lines(path: Path, *, limit: int | None = None) -> list[str]:
     """Read a corpus file as UTF-8, one entry per non-blank line.
 
     Lines end at ``"\\n"`` only, with any trailing ``"\\r"`` dropped, and a
     leading BOM is removed. Nothing else is stripped: a NNBSP at a line's edge
     is meaningful in mn_Mong.
 
+    With a `limit`, only the first `limit` non-blank lines are returned and the
+    file is not read past them, so a decoding error further on goes unnoticed.
+
     Raises:
+        ValueError: `limit` is negative.
         DataError: the file cannot be read or is not valid UTF-8; the message
             names the file and the cause is chained.
     """
-    return list(_iter_text_lines(path))
+    if limit is not None and limit < 0:
+        raise ValueError(f"limit must be >= 0 or None, got {limit}")
+    # closing() releases the file at once when the limit stops the read early.
+    with closing(_iter_text_lines(path)) as lines:
+        return list(islice(lines, limit))
 
 
 def sample_balanced(
@@ -114,7 +124,7 @@ def _require_text(corpus: Mapping[str, Path]) -> None:
             )
 
 
-def _iter_text_lines(path: Path) -> Iterator[str]:
+def _iter_text_lines(path: Path) -> Generator[str]:
     # newline="\n" ends lines at "\n" only; the default would also end them at a
     # lone "\r". The "\r" of a CRLF ending is dropped below. "utf-8-sig" drops a
     # leading BOM, which would otherwise put U+FEFF into the first line and so

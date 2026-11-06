@@ -24,8 +24,8 @@ _ZERO_WIDTH_CHARS = "\u200b\u200c\u200d\u2060\ufeff"
 # Mongolian free variation selectors and vowel separator (U+180B..U+180F):
 # meaningful only in traditional Mongolian script, noise elsewhere.
 _MONGOLIAN_FORMAT_CHARS = "".join(chr(code) for code in range(0x180B, 0x1810))
-_STRIP_EVERYWHERE = str.maketrans("", "", _ZERO_WIDTH_CHARS)
-_STRIP_OUTSIDE_MN_MONG = str.maketrans(
+_ZERO_WIDTH_TABLE_MN_MONG = str.maketrans("", "", _ZERO_WIDTH_CHARS)
+_ZERO_WIDTH_TABLE_OTHER = str.maketrans(
     "", "", _ZERO_WIDTH_CHARS + _MONGOLIAN_FORMAT_CHARS
 )
 
@@ -68,7 +68,7 @@ def _require_known_language(lang: str) -> None:
 
 
 def _strip_zero_width(text: str, lang: str) -> str:
-    table = _STRIP_EVERYWHERE if lang == _MN_MONG else _STRIP_OUTSIDE_MN_MONG
+    table = _ZERO_WIDTH_TABLE_MN_MONG if lang == _MN_MONG else _ZERO_WIDTH_TABLE_OTHER
     return text.translate(table)
 
 
@@ -107,7 +107,18 @@ def _fold_fita(text: str) -> str:
 
 
 def normalize(text: str, lang: str) -> str:
-    """Normalize `text` for language `lang`; raises ConfigError if `lang` is not in the registry."""
+    """Normalize `text` for language `lang`.
+
+    Meant for raw text, run before any reserved symbol (a ``<2xx>`` tag, ``<doc>``,
+    ``<sep>``, ``<t>``, a placeholder) is inserted. Reserved symbols must be
+    separated from text by whitespace: the homoglyph step works on space-delimited
+    tokens, so a symbol glued to a Cyrillic word would share its token and have
+    its Latin lookalike letters rewritten (``<sep>`` glued to a Cyrillic word
+    becomes ``<s`` + Cyrillic ``e`` + ``r>``).
+
+    Raises:
+        ConfigError: `lang` is not in the language registry.
+    """
     _require_known_language(lang)
     text = unicodedata.normalize("NFC", text)
     text = _strip_zero_width(text, lang)

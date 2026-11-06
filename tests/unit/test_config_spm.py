@@ -217,6 +217,26 @@ def test_valid_config_round_trips_every_field(tmp_path: Path):
             id="corpus-dir-list",
         ),
         pytest.param(
+            _spm_yaml(corpus_dir='""'),
+            "Value error, corpus_dir must not be empty",
+            id="empty-corpus-dir",
+        ),
+        pytest.param(
+            _spm_yaml(corpus_dir='"   "'),
+            "Value error, corpus_dir must not be empty",
+            id="blank-corpus-dir",
+        ),
+        pytest.param(
+            _spm_yaml(output_prefix='""'),
+            "Value error, output_prefix must not be empty",
+            id="empty-output-prefix",
+        ),
+        pytest.param(
+            _spm_yaml(output_prefix='"   "'),
+            "Value error, output_prefix must not be empty",
+            id="blank-output-prefix",
+        ),
+        pytest.param(
             "- vocab_size: 1000\n", "top level must be a mapping", id="top-level-list"
         ),
         pytest.param("", "top level must be a mapping", id="empty-file"),
@@ -232,6 +252,18 @@ def test_malformed_config_raises_config_error(
         load_spm_config(path)
 
     assert path.name in str(excinfo.value)
+
+
+def test_upper_bound_of_character_coverage_is_inclusive(tmp_path: Path):
+    config = load_spm_config(_write(tmp_path, _spm_yaml(character_coverage="1")))
+
+    assert config.character_coverage == 1
+
+
+def test_integer_valued_temperature_loads(tmp_path: Path):
+    config = load_spm_config(_write(tmp_path, _spm_yaml(temperature="1")))
+
+    assert config.temperature == 1
 
 
 def test_field_violation_chains_the_validation_error(tmp_path: Path):

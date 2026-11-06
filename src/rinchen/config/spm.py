@@ -7,7 +7,14 @@ from pathlib import Path
 from typing import Annotated
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    ValidationInfo,
+    field_validator,
+)
 
 from rinchen.config.loader import REPO_ROOT
 from rinchen.errors import ConfigError
@@ -31,6 +38,16 @@ class SpmConfig(BaseModel):
     seed: int = Field(strict=True)
     corpus_dir: Path  # holds <lang_code>.txt files
     output_prefix: Path  # the trained model is <output_prefix>.model
+
+    @field_validator("corpus_dir", "output_prefix", mode="before")
+    @classmethod
+    def _reject_blank_path(cls, value: object, info: ValidationInfo) -> object:
+        # Before validation: Path("") already collapses to ".", which anchoring
+        # would turn into the repo root itself (as output_prefix, that puts the
+        # model outside the repository).
+        if isinstance(value, str) and not value.strip():
+            raise ValueError(f"{info.field_name} must not be empty or blank")
+        return value
 
     @field_validator("corpus_dir", "output_prefix")
     @classmethod
