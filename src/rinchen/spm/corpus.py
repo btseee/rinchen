@@ -22,7 +22,8 @@ def discover_corpus(corpus_dir: Path) -> dict[str, Path]:
     Raises:
         ConfigError: `corpus_dir` is not a directory, or a `.txt` file is not
             named after a registry language code.
-        DataError: there is no `.txt` file, or a file has no non-blank line.
+        DataError: there is no `.txt` file, a file has no non-blank line, or a
+            file cannot be read or decoded as UTF-8.
     """
     files = _list_corpus_files(corpus_dir)
     _require_registry_codes(files)
@@ -34,8 +35,13 @@ def discover_corpus(corpus_dir: Path) -> dict[str, Path]:
 def read_lines(path: Path) -> list[str]:
     """Read a corpus file as UTF-8, one entry per non-blank line.
 
-    Lines end at ``"\\n"`` only, with any trailing ``"\\r"`` dropped. Nothing
-    else is stripped: a NNBSP at a line's edge is meaningful in mn_Mong.
+    Lines end at ``"\\n"`` only, with any trailing ``"\\r"`` dropped, and a
+    leading BOM is removed. Nothing else is stripped: a NNBSP at a line's edge
+    is meaningful in mn_Mong.
+
+    Raises:
+        DataError: the file cannot be read or is not valid UTF-8; the message
+            names the file and the cause is chained.
     """
     return list(_iter_text_lines(path))
 
@@ -110,12 +116,17 @@ def _require_text(corpus: Mapping[str, Path]) -> None:
 
 def _iter_text_lines(path: Path) -> Iterator[str]:
     # newline="\n" ends lines at "\n" only; the default would also end them at a
-    # lone "\r". The "\r" of a CRLF ending is dropped below.
-    with path.open(encoding="utf-8", newline="\n") as handle:
-        for raw_line in handle:
-            line = raw_line.removesuffix("\n").rstrip("\r")
-            if line.strip():
-                yield line
+    # lone "\r". The "\r" of a CRLF ending is dropped below. "utf-8-sig" drops a
+    # leading BOM, which would otherwise put U+FEFF into the first line and so
+    # into the SentencePiece vocabulary.
+    try:
+        with path.open(encoding="utf-8-sig", newline="\n") as handle:
+            for raw_line in handle:
+                line = raw_line.removesuffix("\n").rstrip("\r")
+                if line.strip():
+                    yield line
+    except (UnicodeDecodeError, OSError) as exc:
+        raise DataError(f"cannot read corpus file {path}: {exc}") from exc
 
 
 def _sample_language(

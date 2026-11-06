@@ -173,6 +173,56 @@ def test_read_lines_splits_only_on_newline(tmp_path: Path, separator: str) -> No
     assert read_lines(tmp_path / "corpus.txt") == [f"left{separator}right", "next"]
 
 
+def test_read_lines_strips_a_leading_bom(tmp_path: Path) -> None:
+    path = tmp_path / "corpus.txt"
+    path.write_bytes(b"\xef\xbb\xbffirst\nsecond\n")
+
+    lines = read_lines(path)
+
+    assert lines == ["first", "second"]
+    assert not lines[0].startswith("\N{ZERO WIDTH NO-BREAK SPACE}")
+
+
+def test_read_lines_invalid_utf8_raises_data_error_naming_file(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "corpus.txt"
+    path.write_bytes(b"\xff\xfe\x00")
+
+    with pytest.raises(DataError, match="corpus.txt") as excinfo:
+        read_lines(path)
+
+    assert isinstance(excinfo.value.__cause__, UnicodeDecodeError)
+
+
+def test_read_lines_unreadable_file_raises_data_error_naming_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_files(tmp_path, {"corpus.txt": "line\n"})
+
+    def deny(self: Path, *args: object, **kwargs: object) -> None:
+        raise PermissionError(13, "Permission denied", str(self))
+
+    monkeypatch.setattr(Path, "open", deny)
+
+    with pytest.raises(DataError, match="corpus.txt") as excinfo:
+        read_lines(tmp_path / "corpus.txt")
+
+    assert isinstance(excinfo.value.__cause__, PermissionError)
+
+
+def test_discover_invalid_utf8_file_raises_data_error_naming_file(
+    tmp_path: Path,
+) -> None:
+    corpus_dir = _write_files(tmp_path / "corpus", {"eng_Latn.txt": "line\n"})
+    (corpus_dir / "khk_Cyrl.txt").write_bytes(b"\xff\xfe\x00")
+
+    with pytest.raises(DataError, match="khk_Cyrl.txt") as excinfo:
+        discover_corpus(corpus_dir)
+
+    assert isinstance(excinfo.value.__cause__, UnicodeDecodeError)
+
+
 # --- sample_balanced -------------------------------------------------------
 
 
@@ -243,6 +293,23 @@ def test_quota_capped_by_language_size_without_redistribution() -> None:
 
     assert _count_per_language(sample, languages) == [83, 5]
     assert len(sample) == 88
+
+
+def test_small_language_quota_capped_at_its_size_without_redistribution() -> None:
+    languages = ["khk_Cyrl", "eng_Latn"]
+    sizes = [1000, 10]
+    lines_by_lang = {
+        language: _language_lines(language, size)
+        for language, size in zip(languages, sizes, strict=True)
+    }
+
+    sample = sample_balanced(
+        lines_by_lang, input_sentence_size=100, temperature=0.3, seed=7
+    )
+
+    # The 10-line language's quota is 20, so it gives all 10 lines and the 10 unused
+    # slots go unfilled rather than to the large language.
+    assert _count_per_language(sample, languages) == [79, 10]
 
 
 def test_same_seed_same_sample_different_seed_differs() -> None:
