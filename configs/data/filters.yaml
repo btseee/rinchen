@@ -48,6 +48,13 @@ lid:
   top_k: 3
   # Language code -> labels counted as that language; a code that is not
   # listed accepts only its own label.
+  # Measured on GlotLID v3 with 20 sentences per language: every registry code
+  # is also GlotLID's label except Chinese, which it calls cmn_Hani (19 of 20;
+  # the 20th is wuu_Hani), so a Chinese side scores 0.0 unless accept names it.
+  # Recommended once Chinese data is filtered:
+  #   zho_Hans: [cmn_Hani]
+  # Hani labels do not tell Simplified from Traditional. Traditional-script
+  # Mongolian needs no entry: the wrapper labels it mn_Mong itself.
   accept: {}
 
 # Near-duplicate removal over src + TAB + tgt. Unvalidated priors.
