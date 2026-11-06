@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.metadata
+import subprocess
+from collections.abc import Sequence
 from pathlib import Path
 
+from rinchen.config.loader import REPO_ROOT
 from rinchen.manifest import store
 from rinchen.manifest.model import ManifestFile
 
@@ -15,6 +19,40 @@ def sha256_of(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1 << 20), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def code_version() -> str:
+    """First 7 characters of the checkout's HEAD sha, plus `-dirty` when the
+    working tree has uncommitted changes (untracked files included); `unknown`
+    when git is unavailable or the repository has no commit."""
+    try:
+        head = _git("rev-parse", "HEAD")
+        dirty = _git("status", "--porcelain")
+    except OSError, subprocess.SubprocessError:
+        return "unknown"
+    return head[:7] + ("-dirty" if dirty else "")
+
+
+def tool_versions(packages: Sequence[str]) -> dict[str, str]:
+    """Installed version of each package; `not installed` for a missing one."""
+    versions: dict[str, str] = {}
+    for package in packages:
+        try:
+            versions[package] = importlib.metadata.version(package)
+        except importlib.metadata.PackageNotFoundError:
+            versions[package] = "not installed"
+    return versions
+
+
+def _git(*args: str) -> str:
+    result = subprocess.run(
+        ["git", "-C", str(REPO_ROOT), *args],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=30,
+    )
+    return result.stdout.strip()
 
 
 def build_inputs(input_paths: list[Path]) -> list[ManifestFile]:

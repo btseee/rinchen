@@ -1,0 +1,73 @@
+# Default filter pipeline (D4). Every number below is an unvalidated prior:
+# no real corpus exists yet, so none of them has been tuned or checked on
+# data. This file must load to exactly the FilterConfig() defaults in
+# src/rinchen/config/filters.py; change both together.
+#
+# Relative paths are anchored at the repository root.
+
+# Stages run in this order; a row keeps the reason of the first stage it fails.
+stages:
+  - script_ratio
+  - numbers
+  - length
+  - lid
+  - minhash
+  - labse
+  - qe
+
+# Share of a side's letters that must belong to the language's registry
+# scripts (configs/languages.yaml). Unvalidated prior.
+script_ratio:
+  min_ratio: 0.9
+
+# Effective-length ratio tgt/src, counted in weighted characters, and the
+# SentencePiece token-count ratio. Unvalidated priors.
+length:
+  char_ratio: {min: 0.5, max: 2.0}
+  token_ratio: {min: 0.4, max: 2.5}
+  # Weight per character of a script; every other character weighs 1.0.
+  # Listing char_weights replaces this table, it is not merged into it.
+  char_weights:
+    Han: 2.5
+    Hangul: 2.0
+    Hiragana: 1.5
+    Katakana: 1.5
+  # Per-direction replacement bounds, keyed "<src_lang>-><tgt_lang>":
+  #   khk_Cyrl->eng_Latn:
+  #     char_ratio: {min: 0.6, max: 1.8}
+  by_direction: {}
+  # The token-ratio check runs only when a SentencePiece model is set.
+  spm_model: null
+
+# Language identification: a side passes when the summed probability of the
+# labels accepted for its language, among the top_k predictions, reaches
+# min_prob. Unvalidated priors.
+lid:
+  model_path: models/lid/glotlid_v3.bin
+  min_prob: 0.5
+  top_k: 3
+  # Language code -> labels counted as that language; a code that is not
+  # listed accepts only its own label.
+  accept: {}
+
+# Near-duplicate removal over src + TAB + tgt. Unvalidated priors.
+minhash:
+  num_perm: 128
+  ngram: 5
+  threshold: 0.8
+  seed: 1
+
+# Cosine of LaBSE sentence embeddings. Unvalidated prior.
+labse:
+  model: sentence-transformers/LaBSE
+  min_cosine: 0.7
+  batch_size: 128
+  device: auto
+
+# Quality estimation (GPU only). The scorer picks which threshold applies.
+# Unvalidated priors.
+qe:
+  scorer: metricx_qe
+  max_metricx_qe: 8.0
+  min_cometkiwi: 0.55
+  batch_size: 32

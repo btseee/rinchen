@@ -29,3 +29,5 @@ class Manifest(BaseModel):
     outputs: list[ManifestFile] = []
     metrics: dict[str, float] = {}
     tool_versions: dict[str, str] = {}
+    # Per-stage outcome: "ok", "partial: ..." or "skipped: ...".
+    status: dict[str, str] = {}
