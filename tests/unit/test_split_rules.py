@@ -264,6 +264,38 @@ _LATIN_AND_CYRILLIC_CASES = [
         "Қазақстан — үлкен ел. Астана — оның астанасы.",
         ["Қазақстан — үлкен ел.", "Астана — оның астанасы."],
     ),
+    # Kazakh dotted abbreviations from the official punctuation rules: the units
+    # year, century, minute, hour and second, and "and so on".
+    (
+        "kaz_Cyrl",
+        "1991 ж. Қазақстан тәуелсіздік алды. Бұл маңызды күн.",
+        ["1991 ж. Қазақстан тәуелсіздік алды.", "Бұл маңызды күн."],
+    ),
+    (
+        "kaz_Cyrl",
+        "19 ғ. Абай өмір сүрді. Ол ақын болды.",
+        ["19 ғ. Абай өмір сүрді.", "Ол ақын болды."],
+    ),
+    (
+        "kaz_Cyrl",
+        "Жиналыс 40 мин. Астанада өтті. Бәрі келді.",
+        ["Жиналыс 40 мин. Астанада өтті.", "Бәрі келді."],
+    ),
+    (
+        "kaz_Cyrl",
+        "Біз 3 сағ. Астанада болдық. Содан кейін кеттік.",
+        ["Біз 3 сағ. Астанада болдық.", "Содан кейін кеттік."],
+    ),
+    (
+        "kaz_Cyrl",
+        "Ол 30 сек. Алматыда тұрды. Содан кейін кетті.",
+        ["Ол 30 сек. Алматыда тұрды.", "Содан кейін кетті."],
+    ),
+    (
+        "kaz_Cyrl",
+        "Алма, өрік т.б. Алматыда өседі. Бұл жақсы.",
+        ["Алма, өрік т.б. Алматыда өседі.", "Бұл жақсы."],
+    ),
 ]
 
 
@@ -312,6 +344,38 @@ def test_cyrillic_languages_share_one_rule_family(lang: str) -> None:
     text = "Б. Баяр жил на ул. Ленина. Это далеко."
 
     assert split(text, lang) == ["Б. Баяр жил на ул. Ленина.", "Это далеко."]
+
+
+_KAZAKH_YEAR_TEXT = "1991 ж. Қазақстан тәуелсіздік алды."
+_MONGOLIAN_ETC_TEXT = "Улаанбаатар, Дархан г.м. Монгол хотууд олон."
+
+
+@pytest.mark.parametrize(
+    ("lang", "expected"),
+    [
+        ("kaz_Cyrl", [_KAZAKH_YEAR_TEXT]),
+        ("khk_Cyrl", ["1991 ж.", "Қазақстан тәуелсіздік алды."]),
+        ("rus_Cyrl", ["1991 ж.", "Қазақстан тәуелсіздік алды."]),
+    ],
+)
+def test_kazakh_only_abbreviation_does_not_apply_to_mongolian_or_russian(
+    lang: str, expected: list[str]
+) -> None:
+    assert split(_KAZAKH_YEAR_TEXT, lang) == expected
+
+
+@pytest.mark.parametrize(
+    ("lang", "expected"),
+    [
+        ("khk_Cyrl", [_MONGOLIAN_ETC_TEXT]),
+        ("kaz_Cyrl", ["Улаанбаатар, Дархан г.м.", "Монгол хотууд олон."]),
+        ("rus_Cyrl", ["Улаанбаатар, Дархан г.м.", "Монгол хотууд олон."]),
+    ],
+)
+def test_mongolian_only_abbreviation_does_not_apply_to_kazakh_or_russian(
+    lang: str, expected: list[str]
+) -> None:
+    assert split(_MONGOLIAN_ETC_TEXT, lang) == expected
 
 
 # The minimum abbreviations each family must know, with a capitalised word to
@@ -372,6 +436,16 @@ _MINIMUM_ABBREVIATIONS = [
             "рис",
             "стр",
         ],
+    ),
+    # Mongolian-only entries: and so on, for example, in other words, before the
+    # common era.
+    ("khk_Cyrl", "Монгол", ["г.м", "ж.нь", "ө.х", "м.э.ө"]),
+    # Kazakh-only entries: year, century, second, minute, hour, and so on, and the
+    # like, and the like (long form), before the common era.
+    (
+        "kaz_Cyrl",
+        "Қазақстан",
+        ["ж", "ғ", "сек", "мин", "сағ", "т.б", "т.с", "т.т", "т.с.с", "б.з.д"],
     ),
 ]
 

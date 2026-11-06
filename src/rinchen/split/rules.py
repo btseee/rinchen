@@ -7,6 +7,10 @@ non-empty parts. A new family registers its splitter in `_SPLITTERS`.
 The Latin and Cyrillic families (`_SpacedFamily`) end a sentence only before
 whitespace and a sentence start; a lone "." after an abbreviation (also one
 written with spaces, "z. B."), an initial or an ordinal number does not end one.
+The Cyrillic languages share one boundary rule and a base of Russian-origin
+abbreviations; Mongolian and Kazakh each add entries of their own, so each
+language has its own family and an entry listed for one does not apply to the
+others.
 """
 
 from __future__ import annotations
@@ -128,9 +132,9 @@ _GERMAN_ABBREVIATIONS = frozenset(
 )
 # The Cyrillic entries are code-point escapes to keep this file ASCII; each comment
 # glosses its entry.
-_CYRILLIC_ABBREVIATIONS = frozenset(
+_CYRILLIC_COMMON_ABBREVIATIONS = frozenset(
     {
-        # Russian, as used in Mongolian and Kazakh text too.
+        # Russian in origin, and used in Mongolian and Kazakh text as well.
         "\u0442.\u0434",  # and so on
         "\u0442.\u0435",  # that is
         "\u0442.\u043f",  # and the like
@@ -158,13 +162,30 @@ _CYRILLIC_ABBREVIATIONS = frozenset(
         "\u043a\u043e\u043f",  # kopeck
         "\u0440\u0438\u0441",  # figure
         "\u0441\u0442\u0440",  # page
-        # Mongolian.
+    }
+)
+_MONGOLIAN_ABBREVIATIONS = frozenset(
+    {
         "\u0433.\u043c",  # and so on
         "\u0436.\u043d\u044c",  # for example
         "\u04e9.\u0445",  # in other words
         "\u043c.\u044d.\u04e9",  # before the common era
-        # Kazakh.
+    }
+)
+_KAZAKH_ABBREVIATIONS = frozenset(
+    {
+        # From the official Kazakh punctuation rules: the dotted forms of
+        # "and so on" and "and the like", and the units year, century, second,
+        # minute and hour.
         "\u0442.\u0431",  # and so on
+        "\u0442.\u0441",  # and the like
+        "\u0442.\u0442",  # and so on
+        "\u0436",  # year
+        "\u0493",  # century
+        "\u0441\u0435\u043a",  # second
+        "\u043c\u0438\u043d",  # minute
+        "\u0441\u0430\u0493",  # hour
+        # Found in a Kazakh abbreviation list, not in the official text read.
         "\u0442.\u0441.\u0441",  # and the like
         "\u0431.\u0437.\u0434",  # before the common era
     }
@@ -238,8 +259,18 @@ _GERMAN = _SpacedFamily(
     exempts_ordinals=True,
 )
 _PLAIN_LATIN = _SpacedFamily(_LATIN_BOUNDARY)
-_CYRILLIC = _SpacedFamily(
-    _CYRILLIC_BOUNDARY, _CYRILLIC_ABBREVIATIONS, exempts_initials=True
+_KHK_CYRL = _SpacedFamily(
+    _CYRILLIC_BOUNDARY,
+    _CYRILLIC_COMMON_ABBREVIATIONS | _MONGOLIAN_ABBREVIATIONS,
+    exempts_initials=True,
+)
+_RUS_CYRL = _SpacedFamily(
+    _CYRILLIC_BOUNDARY, _CYRILLIC_COMMON_ABBREVIATIONS, exempts_initials=True
+)
+_KAZ_CYRL = _SpacedFamily(
+    _CYRILLIC_BOUNDARY,
+    _CYRILLIC_COMMON_ABBREVIATIONS | _KAZAKH_ABBREVIATIONS,
+    exempts_initials=True,
 )
 
 
@@ -358,9 +389,9 @@ _SPLITTERS: dict[str, Callable[[str], list[str]]] = {
     "deu_Latn": partial(_split_spaced, _GERMAN),
     "tur_Latn": partial(_split_spaced, _PLAIN_LATIN),
     "kor_Hang": partial(_split_spaced, _PLAIN_LATIN),
-    "khk_Cyrl": partial(_split_spaced, _CYRILLIC),
-    "rus_Cyrl": partial(_split_spaced, _CYRILLIC),
-    "kaz_Cyrl": partial(_split_spaced, _CYRILLIC),
+    "khk_Cyrl": partial(_split_spaced, _KHK_CYRL),
+    "rus_Cyrl": partial(_split_spaced, _RUS_CYRL),
+    "kaz_Cyrl": partial(_split_spaced, _KAZ_CYRL),
 }
 
 
