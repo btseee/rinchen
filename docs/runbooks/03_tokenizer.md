@@ -7,8 +7,9 @@ D3 is the text layer under every later milestone: `normalize(text, lang)`
 (`src/rinchen/split/rules.py`), and the SentencePiece tooling
 (`rinchen spm train` / `rinchen spm check`). This runbook covers retraining a
 model, adding a language, the sampling temperature, and updating the golden
-file. Why the rules are what they are lives in `DECISIONS.md`
-(2026-11-06 entry).
+file. Why the rules are what they are lives in `DECISIONS.md` (the 2026-11-06
+entry and its "D3 follow-up" entry); the evidence behind the follow-up is in
+`docs/research/2026-11-06-mongolian-controls-and-spm-tags.md`.
 
 Every Rinchen SentencePiece model reserves 118 single-piece symbols: one
 `<2xx>` direction tag per registry language (10), `<bt> <ft> <t> </t> <r>
@@ -205,14 +206,37 @@ expected values are never generated from `normalize` output.
   abbreviations in brackets, sentences ending in `U.S.` followed by a capital
   word, the pronoun "I", ASCII `?` and `!` splitting inside mn_Mong URL-like
   text) are listed in `DECISIONS.md`.
-- **Order of use: normalize, split, tags, SentencePiece.** `normalize` runs
-  on raw text, before any reserved symbol is inserted, and the reserved
-  symbols (the `<2xx>` tags, `<doc>`, `<sep>`, `<t>`, the placeholders) must
-  be separated from text by whitespace. The homoglyph step works on
-  space-delimited tokens, so a tag glued to a Cyrillic word is rewritten:
-  `<sep>` glued to a Cyrillic word becomes `<s`, U+0435, U+0440 and `>`. So
-  insert tags and placeholders after `normalize` and `split`, and only then
-  hand the text to SentencePiece.
+- **Cyrillic abbreviation sets are per language.** `khk_Cyrl`, `rus_Cyrl` and
+  `kaz_Cyrl` share one boundary rule but each has its own family in
+  `src/rinchen/split/rules.py`: a shared Russian-origin base
+  (`_CYRILLIC_COMMON_ABBREVIATIONS`) plus `_MONGOLIAN_ABBREVIATIONS` for
+  `khk_Cyrl` only and `_KAZAKH_ABBREVIATIONS` for `kaz_Cyrl` only. To add an
+  entry, put it in the constant of the languages it belongs to (lowercase,
+  inner dots kept, no final dot, written as `\uXXXX` escapes with a gloss
+  comment, because that file is pure ASCII), add it to the matching row of
+  `_MINIMUM_ABBREVIATIONS` in `tests/unit/test_split_rules.py`, and, for an
+  entry that belongs to one language, add an isolation row beside
+  `test_kazakh_only_abbreviation_does_not_apply_to_mongolian_or_russian` and
+  `test_mongolian_only_abbreviation_does_not_apply_to_kazakh_or_russian`.
+  Then run the splitter unit and property tests.
+- **Order of use: normalize, split, placeholders and inline tags,
+  SentencePiece, then the direction tag as a token.** `normalize` runs on raw
+  text, before any reserved symbol is inserted, and the reserved symbols that
+  live inside text (the placeholders and the inline tags `<t>`, `</t>`, `<r>`,
+  `</r>`, `<doc>`, `<sep>`) must be separated from text by whitespace. The
+  homoglyph step works on space-delimited tokens, so a tag glued to a Cyrillic
+  word is rewritten: `<sep>` glued to a Cyrillic word becomes `<s`, U+0435,
+  U+0440 and `>`. So insert placeholders and inline tags after `normalize` and
+  `split`, and only then hand the text to SentencePiece.
+- **The direction tag `<2xx>` is a token, never text.** Written into the text it
+  is encoded after a standalone U+2581 piece. Add it after SentencePiece
+  instead: in Eole training with the `prefix` transform listed after
+  `sentencepiece` (`transforms: [sentencepiece, prefix]`) and a per-direction
+  corpus whose `src_prefix` is the tag, and at inference in the CTranslate2
+  wrapper, which prepends the tag to the SentencePiece pieces (neither is built
+  yet). Strip or escape literal reserved-symbol strings from raw text before
+  encoding, so that user text cannot inject a tag. The reasons and the tests
+  to add at D8 are in item 1 of the "D3 follow-up" entry of `DECISIONS.md`.
 - **Memory.** `train_spm` reads every `<lang>.txt` in full
   (`read_lines`) before sampling, so memory follows the total corpus size,
   not the budget. Measured on Python 3.14.10 with `sys.getsizeof`, a
@@ -228,8 +252,19 @@ expected values are never generated from `normalize` output.
   into a file goes unnoticed. The first N lines are not a random sample.
 - **Dummy prefix.** The default `add_dummy_prefix` is kept: a bare tag
   encodes as a standalone U+2581 piece followed by the tag, not as the tag
-  alone. `spm check` accepts both shapes. Whether to turn it off is to be
-  decided before D8 (Eole training).
+  alone. `spm check` accepts both shapes. Keeping it is decided: the direction
+  tag is added as a token after SentencePiece, so no training source is to
+  start with a standalone U+2581 followed by a tag (see the direction-tag
+  bullet above).
+- **Traditional-script spaces and controls.** The converter (D5, not built
+  yet) is to emit U+202F NNBSP before a separated suffix and never ZWJ or
+  ZWNJ, with a validator that fails on either in its output. In `mn_Mong`,
+  `normalize` keeps NNBSP and U+180E MVS exactly as they are and maps neither
+  to the other (MVS also has a lexical use, so only a one-way NNBSP to MVS
+  mapping could ever be added); it strips ZWNJ and ZWJ there too. Never apply
+  NFKC or NFKD to `mn_Mong` text: NFKC turns NNBSP into a plain space, and
+  SentencePiece's `nmt_nfkc` rule also turns ZWNJ and NNBSP into spaces (the
+  trainer pins `identity`).
 - **No manifest.** `spm train` writes no manifest and prints only the
   `trained ...` line.
 - **SentencePiece failures** surface as exit 4 with the SentencePiece

@@ -140,6 +140,44 @@ Count the Fita-like substitutes, uppercase `Y` and U+200C/U+200D in the real
 corpora before freezing the vocabulary. Decide `add_dummy_prefix` before D8;
 `spm train` writes no manifest, so D8 must hash the model itself.
 
+**D3 research follow-up (branch `d3-research-followup`, cut from `main` at
+`93ffdf2`; not merged and not pushed).** The three open decisions were
+researched and recorded in DECISIONS.md ("2026-11-06: D3 follow-up - the three
+open decisions, resolved by research"; evidence, sources and the reproduction
+harness in `docs/research/2026-11-06-mongolian-controls-and-spm-tags.md`): (1)
+the `<2xx>` target-language tag is inserted at token level after SentencePiece
+(Eole's `prefix` transform in training, the CTranslate2 wrapper at inference)
+and `add_dummy_prefix` stays at its default, which supersedes the "Decide
+`add_dummy_prefix` before D8" item in the notes above; (2) ZWNJ and ZWJ stay
+stripped in `mn_Mong`, with safeguards, which resolves that FLAG; (3) the
+converter emits NNBSP before separated suffixes, and `normalize` keeps NNBSP
+and MVS and maps neither. One code change: the Cyrillic splitter has
+per-language abbreviation sets (a shared base plus Mongolian-only and
+Kazakh-only sets), so Kazakh-only entries no longer apply to Mongolian or
+Russian and the other way round, and the Kazakh set gained the dotted
+abbreviations of the official punctuation rules (the units year, century,
+second, minute and hour, and one more form each of "and so on" and "and the
+like"). Gates: D4 - abbreviation induction and a boundary-error sample per
+language, the count of o-like substitutes and uppercase Y in real khk_Cyrl, an
+audit of U+200C, U+200D, U+180A..U+180F and U+202F in any real
+traditional-script text; D5 - the converter never emits ZWJ or ZWNJ (a
+validator enforces it) and emits NNBSP, a render check in the target fonts, and
+the abbreviation and suffix questions that need a Mongolian reader; D8 - the
+tag and prefix design with its listed tests, per-direction corpora against a
+custom transform, and sanitising reserved strings in raw text. Not verified: no
+Mongolian reader judged any render, only two Noto Sans Mongolian builds were
+tested, the texts of MNS 5552:2005 and MNS 4333:1996 were not retrieved, Eole
+per-direction corpora were not run end to end, and the Mongolian abbreviation
+entries still lack an authoritative source. Full gate on this branch's head,
+run individually (`just` is not installed): `ruff format --check .` -- 124
+files already formatted; `ruff check .` -- all checks passed; `mypy src` -- no
+issues found in 63 source files; `pytest -m "not network" -q` -- **938 passed,
+6 deselected** (912 before this branch plus 26 new splitter tests), with the
+same pydantic UserWarning as before. Commits on top of `93ffdf2`: `ce35cad`
+(the splitter change and its tests), `ec611fc` (the research note) and this
+commit. [EVIDENCE: live runs of the four gate commands and of the three harness
+scripts, 2026-11-06.]
+
 Next step: D4 (Filtering & mining).
 
 D0 (environment, skeleton, doctor): `pyproject.toml` restructured to the
