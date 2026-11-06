@@ -105,3 +105,8 @@ extend-exclude = ["docs/"]
 # own `fasttext.FastText` submodule, for import compatibility (see the shim's
 # docstrings and DECISIONS.md); renaming it would break that contract.
 "vendor/fasttext-wheel-shim/src/fasttext/FastText.py" = ["N999"]
+
+[[tool.mypy.overrides]]
+# Neither ships usable type information (no py.typed / stubs not installed).
+module = ["regex", "sentencepiece"]
+ignore_missing_imports = true
