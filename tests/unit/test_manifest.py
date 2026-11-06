@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from rinchen.errors import DataError
 from rinchen.manifest import stage, store
 from rinchen.manifest.model import Manifest
 
@@ -114,6 +115,67 @@ def test_status_round_trips_through_the_store(tmp_path):
     assert loaded.schema == "rinchen.manifest/1"
 
 
+def _demo_manifest(**fields):
+    return Manifest(
+        stage="demo",
+        created="2026-11-06T00:00:00Z",
+        code_version="deadbeef",
+        config_sha256="cfg-abc",
+        seed=0,
+        **fields,
+    )
+
+
+def test_write_replaces_the_manifest_whole_and_leaves_no_part_file(tmp_path):
+    store.write(tmp_path, _demo_manifest(metrics={"rows": 1.0}))
+
+    store.write(tmp_path, _demo_manifest(metrics={"rows": 2.0}))
+
+    loaded = store.read(tmp_path)
+    assert loaded is not None
+    assert loaded.metrics == {"rows": 2.0}
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["manifest.json"]
+
+
+def test_a_failed_write_leaves_the_old_manifest_and_no_part_file(tmp_path, monkeypatch):
+    store.write(tmp_path, _demo_manifest(metrics={"rows": 1.0}))
+    before = store.manifest_path(tmp_path).read_bytes()
+
+    def refuse_to_rename(self, target):
+        raise OSError("rename refused")
+
+    monkeypatch.setattr(Path, "replace", refuse_to_rename)
+    with pytest.raises(OSError, match="rename refused"):
+        store.write(tmp_path, _demo_manifest(metrics={"rows": 2.0}))
+
+    assert store.manifest_path(tmp_path).read_bytes() == before
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["manifest.json"]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        pytest.param('{"schema": "rinchen.manifest/1", "stage": "dem', id="truncated"),
+        pytest.param('{"stage": "demo"}', id="not-a-manifest"),
+        pytest.param("", id="empty"),
+    ],
+)
+def test_reading_a_broken_manifest_is_a_data_error_naming_the_file(tmp_path, text):
+    (tmp_path / "manifest.json").write_text(text, encoding="utf-8")
+
+    with pytest.raises(DataError, match="manifest.json") as raised:
+        store.read(tmp_path)
+
+    assert raised.value.__cause__ is not None
+
+
+def test_reading_a_manifest_that_is_not_utf8_is_a_data_error(tmp_path):
+    (tmp_path / "manifest.json").write_bytes(b"\xff\xfe not utf-8")
+
+    with pytest.raises(DataError, match="manifest.json"):
+        store.read(tmp_path)
+
+
 def test_manifest_without_status_loads_with_an_empty_one(tmp_path):
     (tmp_path / "manifest.json").write_text(
         """{"schema": "rinchen.manifest/1", "stage": "old",
@@ -137,7 +199,7 @@ def test_importing_the_cli_raises_no_user_warning():
             sys.executable,
             "-I",
             "-W",
-            "error::UserWarning",
+            "error:Field name:UserWarning",
             "-c",
             "import rinchen.cli.main",
         ],

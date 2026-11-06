@@ -9,6 +9,7 @@ downloaded. Everything lands under pytest's temporary directories.
 
 from __future__ import annotations
 
+import shutil
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -18,6 +19,7 @@ from typing import Any
 import polars as pl
 import pytest
 import yaml
+from click.testing import Result
 from typer.testing import CliRunner
 
 from rinchen.cli import filter as filter_cli
@@ -83,15 +85,20 @@ class Workspace:
         self, *extra: str, config: Path | None = None, out_dir: Path | None = None
     ) -> list[str]:
         return [
+            *self.args_without_out_dir(config=config),
+            "--out-dir",
+            str(self.out_dir if out_dir is None else out_dir),
+            *extra,
+        ]
+
+    def args_without_out_dir(self, *, config: Path | None = None) -> list[str]:
+        return [
             "filter",
             "run",
             "--corpus",
             str(self.corpus),
             "--config",
             str(self.config if config is None else config),
-            "--out-dir",
-            str(self.out_dir if out_dir is None else out_dir),
-            *extra,
         ]
 
 
@@ -148,13 +155,26 @@ def workspace(
 ) -> Workspace:
     corpus = tmp_path / "planted.parquet"
     write_corpus(planted.frame, corpus)
+    # Private copies, so that a test may delete or change a model file.
+    models = tmp_path / "models"
+    models.mkdir()
+    own_lid_model = shutil.copy(lid_model, models / "lid.bin")
+    own_spm_model = shutil.copy(spm_model, models / "tiny.model")
     return Workspace(
         corpus=corpus,
-        config=_write_config(tmp_path / "filters.yaml", lid_model, spm_model),
+        config=_write_config(
+            tmp_path / "filters.yaml", Path(own_lid_model), Path(own_spm_model)
+        ),
         out_dir=tmp_path / "out",
-        lid_model=lid_model,
-        spm_model=spm_model,
+        lid_model=Path(own_lid_model),
+        spm_model=Path(own_spm_model),
     )
+
+
+def _run_ok(args: list[str]) -> Result:
+    result = runner.invoke(app, args)
+    assert result.exit_code == 0, result.output
+    return result
 
 
 def _write_config(
@@ -185,9 +205,8 @@ def _planted_reason_metrics() -> dict[str, float]:
 def test_tiny_filter_run_scores_and_filters_the_planted_corpus(
     workspace: Workspace, planted: PlantedCorpus
 ) -> None:
-    result = runner.invoke(app, workspace.args())
+    result = _run_ok(workspace.args())
 
-    assert result.exit_code == 0, result.output
     assert result.stdout.splitlines()[-1] == f"manifest: {workspace.manifest}"
     manifest = _manifest(workspace)
     assert manifest.metrics == {
@@ -209,7 +228,7 @@ def test_tiny_filter_run_scores_and_filters_the_planted_corpus(
 def test_scored_parquet_holds_every_row_with_its_planted_reason(
     workspace: Workspace, planted: PlantedCorpus
 ) -> None:
-    runner.invoke(app, workspace.args())
+    _run_ok(workspace.args())
 
     scored = scan_corpus(workspace.scored).collect()
     assert (
@@ -223,7 +242,7 @@ def test_scored_parquet_holds_every_row_with_its_planted_reason(
 def test_kept_parquet_holds_exactly_the_clean_rows(
     workspace: Workspace, planted: PlantedCorpus
 ) -> None:
-    runner.invoke(app, workspace.args())
+    _run_ok(workspace.args())
 
     kept = scan_corpus(workspace.kept).collect()
     clean_ids = [i for i, reason in planted.expected_reason.items() if reason is None]
@@ -235,7 +254,7 @@ def test_kept_parquet_holds_exactly_the_clean_rows(
 def test_manifest_records_inputs_outputs_config_and_environment(
     workspace: Workspace,
 ) -> None:
-    runner.invoke(app, workspace.args())
+    _run_ok(workspace.args())
 
     manifest = _manifest(workspace)
     assert manifest.stage == "filter"
@@ -259,9 +278,19 @@ def test_manifest_records_inputs_outputs_config_and_environment(
 
 
 def test_seed_option_is_recorded_in_the_manifest(workspace: Workspace) -> None:
-    result = runner.invoke(app, workspace.args("--seed", "7"))
+    _run_ok(workspace.args("--seed", "7"))
 
-    assert result.exit_code == 0, result.output
+    assert _manifest(workspace).seed == 7
+
+
+def test_a_different_seed_does_not_stop_a_rerun_from_skipping(
+    workspace: Workspace,
+) -> None:
+    _run_ok(workspace.args("--seed", "7"))
+
+    result = _run_ok(workspace.args("--seed", "8"))
+
+    assert result.stdout.startswith("skipped:")
     assert _manifest(workspace).seed == 7
 
 
@@ -275,22 +304,38 @@ def test_models_of_unused_stages_are_not_listed_as_inputs(
         stages=["numbers"],
     )
 
-    result = runner.invoke(app, workspace.args(config=config))
+    _run_ok(workspace.args(config=config))
 
-    assert result.exit_code == 0, result.output
     assert [item.path for item in _manifest(workspace).inputs] == [
         str(workspace.corpus)
     ]
 
 
+def test_the_default_out_dir_is_the_corpus_stem_under_the_default_root(
+    workspace: Workspace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "clean_root"
+    monkeypatch.setattr(filter_cli, "DEFAULT_OUT_ROOT", root)
+    expected = root / workspace.corpus.stem
+
+    result = _run_ok(workspace.args_without_out_dir())
+
+    assert result.stdout.splitlines()[-1] == f"manifest: {expected / 'manifest.json'}"
+    assert sorted(path.name for path in expected.iterdir()) == [
+        "kept.parquet",
+        "manifest.json",
+        "scored.parquet",
+    ]
+    assert not workspace.out_dir.exists()
+
+
 def test_a_rerun_with_unchanged_inputs_skips(workspace: Workspace) -> None:
-    runner.invoke(app, workspace.args())
+    _run_ok(workspace.args())
     manifest_before = workspace.manifest.read_bytes()
     scored_before = workspace.scored.stat().st_mtime_ns
 
-    result = runner.invoke(app, workspace.args())
+    result = _run_ok(workspace.args())
 
-    assert result.exit_code == 0, result.output
     assert result.stdout.splitlines()[0].startswith("skipped:")
     assert result.stdout.splitlines()[-1] == f"manifest: {workspace.manifest}"
     assert workspace.manifest.read_bytes() == manifest_before
@@ -298,29 +343,31 @@ def test_a_rerun_with_unchanged_inputs_skips(workspace: Workspace) -> None:
 
 
 def test_force_reruns_even_when_nothing_changed(workspace: Workspace) -> None:
-    runner.invoke(app, workspace.args())
-    created_before = _manifest(workspace).created
+    _run_ok(workspace.args())
+    scored_before = workspace.scored.stat()
 
-    result = runner.invoke(app, workspace.args("--force"))
+    result = _run_ok(workspace.args("--force"))
 
-    assert result.exit_code == 0, result.output
+    scored_after = workspace.scored.stat()
     assert not result.stdout.startswith("skipped:")
-    assert _manifest(workspace).created != created_before
+    assert (scored_after.st_ino, scored_after.st_mtime_ns) != (
+        scored_before.st_ino,
+        scored_before.st_mtime_ns,
+    )
 
 
 def test_a_deleted_output_is_rebuilt_instead_of_skipped(workspace: Workspace) -> None:
-    runner.invoke(app, workspace.args())
+    _run_ok(workspace.args())
     workspace.kept.unlink()
 
-    result = runner.invoke(app, workspace.args())
+    result = _run_ok(workspace.args())
 
-    assert result.exit_code == 0, result.output
     assert not result.stdout.startswith("skipped:")
     assert scan_corpus(workspace.kept).collect().height == CLEAN_ROWS
 
 
 def test_a_changed_config_reruns(workspace: Workspace) -> None:
-    runner.invoke(app, workspace.args())
+    _run_ok(workspace.args())
     config = _write_config(
         workspace.config,
         workspace.lid_model,
@@ -329,19 +376,100 @@ def test_a_changed_config_reruns(workspace: Workspace) -> None:
     )
     assert config == workspace.config
 
-    result = runner.invoke(app, workspace.args())
+    result = _run_ok(workspace.args())
 
-    assert result.exit_code == 0, result.output
     assert not result.stdout.startswith("skipped:")
     assert _manifest(workspace).config_sha256 == sha256_of(workspace.config)
+
+
+def test_a_changed_corpus_reruns(workspace: Workspace, planted: PlantedCorpus) -> None:
+    _run_ok(workspace.args())
+    write_corpus(planted.frame.head(40), workspace.corpus)
+
+    result = _run_ok(workspace.args())
+
+    assert not result.stdout.startswith("skipped:")
+    assert _manifest(workspace).metrics["rows_in"] == 40.0
+
+
+# Bytes that keep a model loadable: a trailing byte for fastText, an unknown
+# protobuf field for SentencePiece.
+@pytest.mark.parametrize(
+    ("model", "suffix"),
+    [("lid_model", b"\0"), ("spm_model", b"\xa0\x06\x01")],
+)
+def test_a_changed_model_file_reruns(
+    workspace: Workspace, model: str, suffix: bytes
+) -> None:
+    _run_ok(workspace.args())
+    path: Path = getattr(workspace, model)
+    with path.open("ab") as handle:
+        handle.write(suffix)
+
+    result = _run_ok(workspace.args())
+
+    assert not result.stdout.startswith("skipped:")
+    recorded = {item.path: item.sha256 for item in _manifest(workspace).inputs}
+    assert recorded[str(path)] == sha256_of(path)
+
+
+def test_a_run_that_fails_part_way_leaves_no_manifest_for_a_later_run_to_trust(
+    workspace: Workspace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _run_ok(workspace.args())
+    relaxed = _write_config(
+        tmp_path / "relaxed.yaml",
+        workspace.lid_model,
+        workspace.spm_model,
+        script_ratio={"min_ratio": 0.5},
+    )
+    real_write = filter_cli.write_corpus
+    writes: list[Path] = []
+
+    def fail_on_the_second_write(frame: pl.DataFrame, path: Path) -> int:
+        writes.append(path)
+        if len(writes) == 2:
+            raise OSError("disk full")
+        return real_write(frame, path)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(filter_cli, "write_corpus", fail_on_the_second_write)
+        failed = runner.invoke(app, workspace.args(config=relaxed))
+
+    assert failed.exit_code == 1, failed.output
+    assert failed.stderr.startswith("error: cannot write the filter outputs under ")
+    assert [path.name for path in writes] == ["scored.parquet", "kept.parquet"]
+    assert not workspace.manifest.exists()
+
+    rerun = _run_ok(workspace.args())
+
+    assert not rerun.stdout.startswith("skipped:")
+    assert [(item.path, item.sha256) for item in _manifest(workspace).outputs] == [
+        (str(path), sha256_of(path)) for path in (workspace.scored, workspace.kept)
+    ]
+
+
+def test_a_corrupt_manifest_is_a_data_error_until_the_run_is_forced(
+    workspace: Workspace,
+) -> None:
+    _run_ok(workspace.args())
+    workspace.manifest.write_text(
+        '{"schema": "rinchen.manifest/1", "st', encoding="utf-8"
+    )
+
+    result = runner.invoke(app, workspace.args())
+
+    assert result.exit_code == 3, result.output
+    assert result.stderr.startswith(f"error: unreadable manifest {workspace.manifest}")
+    _run_ok(workspace.args("--force"))
+    assert _manifest(workspace).stage == "filter"
 
 
 def test_dry_run_prints_the_stage_plan_and_writes_nothing(
     workspace: Workspace,
 ) -> None:
-    result = runner.invoke(app, workspace.args("--dry-run"))
+    result = _run_ok(workspace.args("--dry-run"))
 
-    assert result.exit_code == 0, result.output
     assert result.stdout.splitlines() == [
         "script_ratio",
         "numbers",
@@ -373,9 +501,8 @@ def test_stages_that_are_not_configured_build_no_models(
     )
     assert config == workspace.config
 
-    result = runner.invoke(app, workspace.args())
+    _run_ok(workspace.args())
 
-    assert result.exit_code == 0, result.output
     assert built == []
 
 
@@ -384,9 +511,8 @@ def test_a_corpus_without_rows_gives_empty_outputs(
 ) -> None:
     write_corpus(corpus_frame([]), workspace.corpus)
 
-    result = runner.invoke(app, workspace.args())
+    _run_ok(workspace.args())
 
-    assert result.exit_code == 0, result.output
     manifest = _manifest(workspace)
     assert manifest.metrics == {
         "rows_in": 0.0,
@@ -409,9 +535,8 @@ def test_a_corpus_in_which_every_row_is_rejected_keeps_nothing(
     ]
     write_corpus(planted.frame.filter(pl.col("id").is_in(rejected)), workspace.corpus)
 
-    result = runner.invoke(app, workspace.args())
+    _run_ok(workspace.args())
 
-    assert result.exit_code == 0, result.output
     manifest = _manifest(workspace)
     assert manifest.metrics["rows_in"] == float(len(rejected))
     assert manifest.metrics["rows_kept"] == 0.0
@@ -426,9 +551,8 @@ def test_a_qe_scorer_is_used_and_released_after_the_run(
     scorer = SpyQeScorer()
     monkeypatch.setattr(filter_cli, "build_qe_scorer", lambda cfg: scorer)
 
-    result = runner.invoke(app, workspace.args())
+    _run_ok(workspace.args())
 
-    assert result.exit_code == 0, result.output
     assert _manifest(workspace).status["qe"] == "ok"
     scored = scan_corpus(workspace.scored).collect()
     assert scored["scores"].struct.field("metricx_qe").null_count() == 0
@@ -590,18 +714,49 @@ def test_a_missing_config_is_a_config_error(workspace: Workspace) -> None:
     assert result.stderr.startswith("error: filter config file not found: ")
 
 
-def test_a_missing_lid_model_is_a_config_error(
-    workspace: Workspace, tmp_path: Path
+@pytest.mark.parametrize("extra", [[], ["--dry-run"]])
+@pytest.mark.parametrize(
+    ("model", "key"),
+    [("lid_model", "lid.model_path"), ("spm_model", "length.spm_model")],
+)
+def test_a_configured_model_file_that_is_missing_is_a_config_error(
+    workspace: Workspace, model: str, key: str, extra: list[str]
 ) -> None:
-    absent = tmp_path / "absent_lid.bin"
-    _write_config(workspace.config, absent, workspace.spm_model)
+    path: Path = getattr(workspace, model)
+    path.unlink()
+
+    result = runner.invoke(app, workspace.args(*extra))
+
+    assert result.exit_code == 2, result.output
+    assert result.stderr == f"error: {key} is not a file: {path}\n"
+    assert not workspace.out_dir.exists()
+
+
+def test_a_model_deleted_after_a_run_is_an_error_not_a_skip(
+    workspace: Workspace,
+) -> None:
+    _run_ok(workspace.args())
+    manifest_before = workspace.manifest.read_bytes()
+    workspace.lid_model.unlink()
 
     result = runner.invoke(app, workspace.args())
 
     assert result.exit_code == 2, result.output
-    assert result.stderr.startswith("error: LID model file not found: ")
-    assert str(absent) in result.stderr
-    assert not workspace.manifest.exists()
+    assert result.stdout == ""
+    assert workspace.manifest.read_bytes() == manifest_before
+
+
+def test_a_missing_model_of_a_stage_that_is_not_configured_is_ignored(
+    workspace: Workspace, tmp_path: Path
+) -> None:
+    config = _write_config(
+        tmp_path / "numbers_only.yaml",
+        tmp_path / "absent_lid.bin",
+        tmp_path / "absent.model",
+        stages=["numbers"],
+    )
+
+    _run_ok(workspace.args(config=config))
 
 
 def test_help_lists_the_options() -> None:

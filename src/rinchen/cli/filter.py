@@ -54,10 +54,10 @@ _FAILURE_EXIT_CODE = 1
 # raised inside a stage.
 _POLARS_EXPRESSION_NOTE = "\n\nThis error occurred in the following expression"
 
-STAGE_NAME = "filter"
+_STAGE_NAME = "filter"
 DEFAULT_OUT_ROOT = REPO_ROOT / "data" / "clean"
-SCORED_FILE = "scored.parquet"
-KEPT_FILE = "kept.parquet"
+_SCORED_FILE = "scored.parquet"
+_KEPT_FILE = "kept.parquet"
 _TOOL_PACKAGES = (
     "polars",
     "datasketch",
@@ -104,17 +104,15 @@ def _rinchen_errors_as_exit_codes() -> Iterator[None]:
             ),
             _FAILURE_EXIT_CODE,
         )
-        _exit_with_error(_terminal_message(exc), exit_code)
+        text = str(exc)
+        message = _without_polars_note(text)
+        if message != text:
+            get_logger(__name__).error("filter_error_detail", detail=text)
+        _exit_with_error(message, exit_code)
 
 
-def _terminal_message(exc: RinchenError) -> str:
-    """The error text without polars' expression note; the whole text goes to
-    the log when the note was cut."""
-    text = str(exc)
-    message = text.split(_POLARS_EXPRESSION_NOTE, 1)[0]
-    if message != text:
-        get_logger(__name__).error("filter_error_detail", detail=text)
-    return message
+def _without_polars_note(text: str) -> str:
+    return text.split(_POLARS_EXPRESSION_NOTE, 1)[0]
 
 
 @app.command("run")
@@ -140,17 +138,31 @@ def run(
         bool,
         typer.Option(
             "--dry-run",
-            help="Check the config and the corpus, print the stages, write nothing.",
+            help=(
+                "Check the config, the model files and the corpus, print the "
+                "stages, write nothing. A QE skip is shown only when it can be "
+                "known without importing torch (no scorer to build)."
+            ),
         ),
     ] = False,
     seed: Annotated[
-        int, typer.Option("--seed", help="Seed recorded in the manifest.")
+        int,
+        typer.Option(
+            "--seed",
+            help=(
+                "Recorded in the manifest only: the pipeline is deterministic "
+                "(minhash has its own seed in the config), and the seed does "
+                "not affect skipping."
+            ),
+        ),
     ] = 0,
 ) -> None:
     """Score a corpus with the configured stages and split it into the scored
-    corpus (every row, with its filter reason) and the kept corpus."""
+    corpus (every row, with its filter reason) and the kept corpus. The corpus
+    is held in memory: budget two to three times its size."""
     with _rinchen_errors_as_exit_codes():
         cfg = load_filter_config(config)
+        _require_model_files(cfg)
         frame = scan_corpus(corpus)
         if dry_run:
             for line in _plan_lines(cfg):
@@ -158,7 +170,7 @@ def run(
             return
 
         target = out_dir if out_dir is not None else DEFAULT_OUT_ROOT / corpus.stem
-        input_paths = [corpus, *_configured_model_files(cfg)]
+        input_paths = [corpus, *(path for _, path in _model_files(cfg))]
         config_sha256 = sha256_of(config)
         if _outputs_are_current(target, input_paths, config_sha256, force=force):
             typer.echo("skipped: inputs and config are unchanged since the last run")
@@ -193,22 +205,31 @@ def _plan_lines(cfg: FilterConfig) -> list[str]:
     return lines
 
 
-def _configured_model_files(cfg: FilterConfig) -> list[Path]:
-    """The LID and SentencePiece model files that exist and that a configured
-    stage reads; a run depends on their content."""
-    configured = [
-        cfg.lid.model_path if "lid" in cfg.stages else None,
-        cfg.length.spm_model if "length" in cfg.stages else None,
-    ]
-    return [path for path in configured if path is not None and path.is_file()]
+def _model_files(cfg: FilterConfig) -> list[tuple[str, Path]]:
+    """The config key and path of each LID and SentencePiece model file that
+    a configured stage reads."""
+    files = []
+    if "lid" in cfg.stages:
+        files.append(("lid.model_path", cfg.lid.model_path))
+    if "length" in cfg.stages and cfg.length.spm_model is not None:
+        files.append(("length.spm_model", cfg.length.spm_model))
+    return files
+
+
+def _require_model_files(cfg: FilterConfig) -> None:
+    """Fail before any work, and before the skip check, when a model file the
+    config names is gone: unchanged inputs must not hide a missing model."""
+    for key, path in _model_files(cfg):
+        if not path.is_file():
+            raise ConfigError(f"{key} is not a file: {path}")
 
 
 def _outputs_are_current(
     out_dir: Path, input_paths: list[Path], config_sha256: str, *, force: bool
 ) -> bool:
     # `should_skip` compares the manifest only; a deleted output must not pass.
-    outputs_exist = (out_dir / SCORED_FILE).is_file() and (
-        out_dir / KEPT_FILE
+    outputs_exist = (out_dir / _SCORED_FILE).is_file() and (
+        out_dir / _KEPT_FILE
     ).is_file()
     return outputs_exist and should_skip(
         out_dir, input_paths, config_sha256, force=force
@@ -238,12 +259,16 @@ def _write_run(
     """Write the scored and the kept corpus, then the manifest, which comes
     last so that it never describes outputs that are not there. Returns the
     manifest path."""
+    # The manifest is the commit marker: drop the old one before touching an
+    # output, so a failure part-way leaves no manifest that vouches for a mix
+    # of old and new outputs.
+    store.manifest_path(out_dir).unlink(missing_ok=True)
     outputs = [
-        _written_file(result.frame, out_dir / SCORED_FILE),
-        _written_file(kept, out_dir / KEPT_FILE),
+        _written_file(result.frame, out_dir / _SCORED_FILE),
+        _written_file(kept, out_dir / _KEPT_FILE),
     ]
     manifest = Manifest(
-        stage=STAGE_NAME,
+        stage=_STAGE_NAME,
         created=datetime.now(UTC).isoformat(),
         code_version=code_version(),
         config_sha256=config_sha256,

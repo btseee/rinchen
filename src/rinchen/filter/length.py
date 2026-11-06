@@ -17,6 +17,7 @@ from rinchen.filter.reasons import FilterReason, flag, with_scores
 from rinchen.lang.scripts import Script, script_of
 
 _TOKEN_RATIO = "_token_ratio"
+NO_SPM_MODEL_REASON = "token ratio skipped (no spm_model)"
 
 
 @functools.lru_cache(maxsize=65_536)
@@ -34,6 +35,12 @@ def effective_length(text: str, weights: Mapping[Script, float]) -> float:
             script = _script_of_char(char)
             total += 1.0 if script is None else weights.get(script, 1.0)
     return total
+
+
+def token_check_skip_reason(cfg: LengthConfig) -> str | None:
+    """Why the token-ratio check will not run, or None when it will: it needs
+    `cfg.spm_model`."""
+    return NO_SPM_MODEL_REASON if cfg.spm_model is None else None
 
 
 def apply(df: pl.LazyFrame, cfg: LengthConfig) -> pl.LazyFrame:

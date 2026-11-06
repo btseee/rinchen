@@ -368,3 +368,12 @@ def test_a_file_that_is_not_a_model_is_a_config_error(tmp_path: Path) -> None:
 
     with pytest.raises(ConfigError, match="broken.model"):
         length.apply(_lazy(("ab", "ab")), LengthConfig(spm_model=broken)).collect()
+
+
+def test_token_check_is_skipped_exactly_when_no_spm_model_is_configured(
+    tiny_model: Path,
+) -> None:
+    assert length.token_check_skip_reason(LengthConfig()) == (
+        "token ratio skipped (no spm_model)"
+    )
+    assert length.token_check_skip_reason(LengthConfig(spm_model=tiny_model)) is None

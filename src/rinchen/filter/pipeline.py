@@ -1,12 +1,16 @@
 """The ordered filter pipeline: runs the stages a `FilterConfig` lists, in that
 order, over a corpus frame. The order is the precedence of `filter_reason`: a
 row keeps the reason of the first stage it fails. This module is the only one
-that knows every stage; it holds no filtering rule of its own."""
+that knows every stage; it holds no filtering rule of its own.
+
+The corpus is held in memory, as the input and again as each stage's result:
+budget two to three times its size."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
 
 import polars as pl
 
@@ -18,8 +22,8 @@ from rinchen.filter.reasons import FilterReason
 from rinchen.mine.embed import Embedder
 
 _OK = "ok"
+_PARTIAL_PREFIX = "partial: "
 _SKIPPED_PREFIX = "skipped: "
-_LENGTH_WITHOUT_SPM_STATUS = "partial: token ratio skipped (no spm_model)"
 
 
 # Compared by identity: the frame's own `==` is elementwise, not a bool.
@@ -46,9 +50,15 @@ class _Models:
 
 
 @dataclass(frozen=True, slots=True)
-class _Stage:
-    apply: Callable[[pl.LazyFrame, FilterConfig, _Models], pl.LazyFrame]
-    status: Callable[[FilterConfig, _Models], str]
+class _Plan:
+    """What one stage does in this run: its status and, unless it is skipped,
+    the function that applies it."""
+
+    status: str
+    apply: Callable[[pl.LazyFrame], pl.LazyFrame] | None
+
+
+_Planner = Callable[[FilterConfig, _Models], _Plan]
 
 
 def run_pipeline(
@@ -68,17 +78,17 @@ def run_pipeline(
 
     The frame is collected after every stage, so the LID model, LaBSE and the
     QE model are never in memory together and an error surfaces at the stage
-    that caused it."""
+    that caused it. The whole corpus is in memory, the input plus the current
+    stage's result: budget two to three times its size."""
     validate_corpus_schema(df.collect_schema(), source="filter pipeline input")
     models = _Models(embedder=embedder, qe_scorer=qe_scorer)
     frame = df.collect()
     stage_status: dict[str, str] = {}
     for name in cfg.stages:
-        stage = _STAGES[name]
-        status = stage.status(cfg, models)
-        stage_status[name] = status
-        if not status.startswith(_SKIPPED_PREFIX):
-            frame = stage.apply(frame.lazy(), cfg, models).collect()
+        plan = _PLANNERS[name](cfg, models)
+        stage_status[name] = plan.status
+        if plan.apply is not None:
+            frame = plan.apply(frame.lazy()).collect()
     return PipelineResult(
         frame=frame,
         reason_counts=_count_reasons(frame),
@@ -98,40 +108,40 @@ def _count_reasons(frame: pl.DataFrame) -> dict[str, int]:
     return counts
 
 
-def _always_ok(cfg: FilterConfig, models: _Models) -> str:
-    return _OK
+def _runs(apply: Callable[[pl.LazyFrame], pl.LazyFrame]) -> _Plan:
+    return _Plan(_OK, apply)
 
 
-def _length_status(cfg: FilterConfig, models: _Models) -> str:
-    return _OK if cfg.length.spm_model is not None else _LENGTH_WITHOUT_SPM_STATUS
+def _skipped(reason: str) -> _Plan:
+    return _Plan(f"{_SKIPPED_PREFIX}{reason}", None)
 
 
-def _qe_status(cfg: FilterConfig, models: _Models) -> str:
-    reason = qe.skip_reason(cfg.qe, models.qe_scorer)
-    return _OK if reason is None else f"{_SKIPPED_PREFIX}{reason}"
+def _plan_length(cfg: FilterConfig, models: _Models) -> _Plan:
+    reason = length.token_check_skip_reason(cfg.length)
+    status = _OK if reason is None else f"{_PARTIAL_PREFIX}{reason}"
+    return _Plan(status, partial(length.apply, cfg=cfg.length))
 
 
-def _apply_qe(df: pl.LazyFrame, cfg: FilterConfig, models: _Models) -> pl.LazyFrame:
+def _plan_qe(cfg: FilterConfig, models: _Models) -> _Plan:
     scorer = models.qe_scorer
-    assert scorer is not None  # `_qe_status` skips the stage without a scorer
-    return qe.apply(df, cfg.qe, scorer=scorer)
+    if scorer is None:
+        return _skipped(qe.NO_SCORER_REASON)
+    reason = qe.skip_reason(cfg.qe, scorer)
+    if reason is not None:
+        return _skipped(reason)
+    return _runs(partial(qe.apply, cfg=cfg.qe, scorer=scorer))
 
 
-_STAGES: dict[StageName, _Stage] = {
-    "script_ratio": _Stage(
-        lambda df, cfg, models: script_ratio.apply(df, cfg.script_ratio), _always_ok
+_PLANNERS: dict[StageName, _Planner] = {
+    "script_ratio": lambda cfg, models: _runs(
+        partial(script_ratio.apply, cfg=cfg.script_ratio)
     ),
-    "numbers": _Stage(lambda df, cfg, models: numbers.apply(df), _always_ok),
-    "length": _Stage(
-        lambda df, cfg, models: length.apply(df, cfg.length), _length_status
+    "numbers": lambda cfg, models: _runs(numbers.apply),
+    "length": _plan_length,
+    "lid": lambda cfg, models: _runs(partial(lid.apply, cfg=cfg.lid)),
+    "minhash": lambda cfg, models: _runs(partial(minhash.apply, cfg=cfg.minhash)),
+    "labse": lambda cfg, models: _runs(
+        partial(labse.apply, cfg=cfg.labse, embedder=models.embedder)
     ),
-    "lid": _Stage(lambda df, cfg, models: lid.apply(df, cfg.lid), _always_ok),
-    "minhash": _Stage(
-        lambda df, cfg, models: minhash.apply(df, cfg.minhash), _always_ok
-    ),
-    "labse": _Stage(
-        lambda df, cfg, models: labse.apply(df, cfg.labse, embedder=models.embedder),
-        _always_ok,
-    ),
-    "qe": _Stage(_apply_qe, _qe_status),
+    "qe": _plan_qe,
 }
