@@ -128,6 +128,27 @@ def test_japanese_accepts_han_hiragana_and_katakana() -> None:
     assert result["filter_reason"].to_list() == [None]
 
 
+def test_the_katakana_long_vowel_mark_does_not_lower_the_japanese_share() -> None:
+    long_vowel = chr(0x30FC)
+    coffee_please = (  # katakana, long-vowel marks, then hiragana
+        chr(0x30B3)
+        + long_vowel
+        + chr(0x30D2)
+        + long_vowel
+        + chr(0x3092)
+        + chr(0x304F)
+        + chr(0x3060)
+        + chr(0x3055)
+        + chr(0x3044)
+    )
+    frame = _lazy((coffee_please, "coffee, please"), src_lang="jpn_Jpan")
+
+    result = script_ratio.apply(frame, CONFIG).collect()
+
+    assert _score(result, "script_src") == [1.0]
+    assert result["filter_reason"].to_list() == [None]
+
+
 def test_empty_and_whitespace_sides_are_vacuously_in_script() -> None:
     frame = _lazy(("", "   "), ("12", "1,5"))
 
@@ -156,6 +177,29 @@ def test_scores_already_in_the_struct_survive() -> None:
 
     assert _score(result, "labse") == [0.25]
     assert _score(result, "script_src") == [1.0]
+
+
+def test_null_text_is_read_as_empty_and_in_script() -> None:
+    frame = _lazy(("x", "y")).with_columns(
+        pl.lit(None, dtype=pl.String).alias("src"),
+        pl.lit(None, dtype=pl.String).alias("tgt"),
+    )
+
+    result = script_ratio.apply(frame, CONFIG).collect()
+
+    assert _score(result, "script_src") == [1.0]
+    assert _score(result, "script_tgt") == [1.0]
+    assert result["filter_reason"].to_list() == [None]
+
+
+@pytest.mark.parametrize("side", ["src_lang", "tgt_lang"])
+def test_a_null_language_code_raises_data_error(side: str) -> None:
+    frame = _lazy(("Монгол", "text")).with_columns(
+        pl.lit(None, dtype=pl.String).alias(side)
+    )
+
+    with pytest.raises(DataError, match="None"):
+        script_ratio.apply(frame, CONFIG).collect()
 
 
 @pytest.mark.parametrize("side", ["src_lang", "tgt_lang"])

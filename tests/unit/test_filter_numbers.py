@@ -158,6 +158,24 @@ def test_scores_and_reasons_on_a_small_frame() -> None:
     assert result.schema == CORPUS_SCHEMA
 
 
+@pytest.mark.parametrize(
+    ("src", "tgt", "num_ok"),
+    [(None, None, True), (None, "no digits", True), (None, "12", False)],
+)
+def test_null_text_is_read_as_empty(
+    src: str | None, tgt: str | None, num_ok: bool
+) -> None:
+    frame = _lazy(("x", "y")).with_columns(
+        pl.lit(src, dtype=pl.String).alias("src"),
+        pl.lit(tgt, dtype=pl.String).alias("tgt"),
+    )
+
+    result = numbers.apply(frame).collect()
+
+    assert result["scores"].struct.field("num_ok").to_list() == [num_ok]
+    assert result["filter_reason"].to_list() == [None if num_ok else "numbers"]
+
+
 def test_an_earlier_reason_is_kept() -> None:
     frame = _lazy(("1", "2")).with_columns(pl.lit("script_src").alias("filter_reason"))
 

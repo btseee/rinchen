@@ -146,6 +146,36 @@ def test_char_ratio_is_scored_and_judged_against_the_default_bounds(
     assert result.schema == CORPUS_SCHEMA
 
 
+def _bounded(bounds: Bounds, *, by_direction: bool) -> LengthConfig:
+    if by_direction:
+        return LengthConfig(
+            by_direction={DIRECTION: DirectionBounds(char_ratio=bounds)}
+        )
+    return LengthConfig(char_ratio=bounds)
+
+
+@pytest.mark.parametrize("by_direction", [False, True], ids=["default", "direction"])
+@pytest.mark.parametrize(
+    ("bounds", "tgt_length", "reason"),
+    [
+        # float32(0.7) is below 0.7 and float32(1.1) is above 1.1, so a
+        # comparison against the float64 bound would flag the two inside rows.
+        (Bounds(min=0.7, max=2.0), 7, None),
+        (Bounds(min=0.7, max=2.0), 6, "len_ratio_char"),
+        (Bounds(min=0.5, max=1.1), 11, None),
+        (Bounds(min=0.5, max=1.1), 12, "len_ratio_char"),
+    ],
+)
+def test_a_ratio_equal_to_a_bound_stays_inside_it_in_float32(
+    bounds: Bounds, tgt_length: int, reason: str | None, by_direction: bool
+) -> None:
+    frame = _lazy(("abcdefghij", "k" * tgt_length))
+
+    result = length.apply(frame, _bounded(bounds, by_direction=by_direction)).collect()
+
+    assert result["filter_reason"].to_list() == [reason]
+
+
 def test_an_earlier_reason_is_kept() -> None:
     frame = _lazy(("ab", "abcde")).with_columns(
         pl.lit("lid_src").alias("filter_reason")
@@ -162,6 +192,32 @@ def test_a_language_missing_from_the_registry_is_not_an_error() -> None:
     result = length.apply(frame, DEFAULT_CONFIG).collect()
 
     assert result["filter_reason"].to_list() == ["len_ratio_char"]
+
+
+@pytest.mark.parametrize("column", [["src"], ["tgt"], ["src", "tgt"]])
+def test_null_text_has_no_ratio_and_fails_the_char_check(column: list[str]) -> None:
+    frame = _lazy(("abcd", "abcd")).with_columns(
+        *(pl.lit(None, dtype=pl.String).alias(name) for name in column)
+    )
+
+    result = length.apply(frame, DEFAULT_CONFIG).collect()
+
+    assert result["scores"].struct.field("len_ratio").to_list() == [None]
+    assert result["filter_reason"].to_list() == ["len_ratio_char"]
+
+
+@pytest.mark.parametrize("side", ["src_lang", "tgt_lang"])
+def test_a_null_language_code_falls_back_to_the_default_bounds(side: str) -> None:
+    cfg = _bounded(Bounds(min=0.9, max=1.1), by_direction=True)
+    frame = _lazy(("abcd", "abcdef"))  # ratio 1.5: outside only the direction bounds
+
+    overridden = length.apply(frame, cfg).collect()
+    unknown = length.apply(
+        frame.with_columns(pl.lit(None, dtype=pl.String).alias(side)), cfg
+    ).collect()
+
+    assert overridden["filter_reason"].to_list() == ["len_ratio_char"]
+    assert unknown["filter_reason"].to_list() == [None]
 
 
 def test_zero_rows_keep_the_corpus_schema() -> None:

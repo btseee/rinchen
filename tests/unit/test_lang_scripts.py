@@ -43,3 +43,25 @@ def test_letterless_text_returns_empty(text: str) -> None:
 
 def test_letters_of_unlisted_scripts_count_in_denominator() -> None:
     assert script_of("Мо" + "αβ") == {Script.CYRILLIC: 0.5}
+
+
+KATAKANA_LONG_VOWEL = chr(0x30FC)
+MODIFIER_LETTER_APOSTROPHE = chr(0x02BC)
+
+
+def test_common_script_letters_are_neutral_in_numerator_and_denominator() -> None:
+    coffee = chr(0x30B3) + KATAKANA_LONG_VOWEL + chr(0x30D2) + KATAKANA_LONG_VOWEL
+
+    assert script_of(coffee) == {Script.KATAKANA: 1.0}
+    assert script_of("Mongol" + MODIFIER_LETTER_APOSTROPHE) == {Script.LATIN: 1.0}
+
+
+def test_text_of_only_common_script_letters_returns_empty() -> None:
+    assert script_of(KATAKANA_LONG_VOWEL * 3 + MODIFIER_LETTER_APOSTROPHE) == {}
+
+
+def test_neutral_letters_do_not_dilute_a_mixed_text() -> None:
+    assert script_of("aМ" + KATAKANA_LONG_VOWEL * 4 + "αβ") == {
+        Script.LATIN: 0.25,
+        Script.CYRILLIC: 0.25,
+    }
