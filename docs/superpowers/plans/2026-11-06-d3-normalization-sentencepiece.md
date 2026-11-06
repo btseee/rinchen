@@ -76,9 +76,9 @@ Inputs the spec implies but its tests do not cover; each has a test in the ownin
   Ratio = letters (`\p{L}`) of that script ÷ **all** letters in `text`; digits, punctuation, marks, whitespace excluded. Letters of a script outside the enum (e.g. Greek) count in the denominator only, so the sum is ≤ 1.0 (== 1.0 when every letter is in the enum). No letters → `{}`. Only scripts with count > 0 appear as keys.
 
 - [ ] **Step 1: Write failing tests** in `tests/unit/test_lang_scripts.py`:
-  - `test_pure_script_is_ratio_one` — parametrized (script, text): CYRILLIC `"Монгол"`, MONGOLIAN `"ᠠᠡᠢ"`, LATIN `"Mongol"`, HAN `"中文"`, HANGUL `"한국어"`, HIRAGANA `"ひらがな"`, KATAKANA `"カタカナ"` → `script_of(text) == {script: 1.0}`.
+  - `test_pure_script_is_ratio_one` — parametrized (script, text): CYRILLIC `"Монгол"`, MONGOLIAN `"\u1820\u1821\u1822"`, LATIN `"Mongol"`, HAN `"中文"`, HANGUL `"한국어"`, HIRAGANA `"ひらがな"`, KATAKANA `"カタカナ"` → `script_of(text) == {script: 1.0}`.
   - `test_mixed_text_gives_proportions`: `script_of("abМо") == {Script.LATIN: 0.5, Script.CYRILLIC: 0.5}`; `script_of("日本語のカタカナ") == {HAN: 0.375, HIRAGANA: 0.125, KATAKANA: 0.5}`.
-  - `test_non_letters_are_ignored`: `script_of("12 ,.— Мо") == {Script.CYRILLIC: 1.0}`; `script_of("ᠠ᠋ ᠃") == {Script.MONGOLIAN: 1.0}` (FVS, NNBSP, U+1803 not counted).
+  - `test_non_letters_are_ignored`: `script_of("12 ,.— Мо") == {Script.CYRILLIC: 1.0}`; `script_of("\u1820\u180b\u202f\u1803") == {Script.MONGOLIAN: 1.0}` (FVS, NNBSP, U+1803 not counted).
   - `test_letterless_text_returns_empty` — parametrized `""`, `"   "`, `"123 !?"` → `{}`.
   - `test_letters_of_unlisted_scripts_count_in_denominator`: `script_of("Мо" + "αβ") == {Script.CYRILLIC: 0.5}` (Greek letters are in the denominator only).
 - [ ] **Step 2:** `uv run pytest tests/unit/test_lang_scripts.py -v` → FAIL (`ModuleNotFoundError: rinchen.lang`).
@@ -166,34 +166,34 @@ Inputs the spec implies but its tests do not cover; each has a test in the ownin
 - Consumes: `known_language_codes()` (Task 2), `ConfigError`.
 - Produces: `def normalize(text: str, lang: str) -> str` — `ConfigError` if `lang` is not a registry code.
 
-**Pipeline (pinned values).** *Builder's call:* the spec's order puts zero-width cleanup last, but then `"a ​ b"` becomes `"a  b"` (two spaces), violating the spec's own idempotency property; and the Ү/Ө fold or homoglyph step can create a composable pair. So the order is: **1 NFC → 2 zero-width → 3 whitespace → 4 quotes → 5 homoglyph → 6 Ү/Ө fold → 7 NFC again.** Results are identical to the spec's order except for those cases.
+**Pipeline (pinned values).** *Builder's call:* the spec's order puts zero-width cleanup last, but then `"a \u200b b"` becomes `"a  b"` (two spaces), violating the spec's own idempotency property; and the Ү/Ө fold or homoglyph step can create a composable pair. So the order is: **1 NFC → 2 zero-width → 3 whitespace → 4 quotes → 5 homoglyph → 6 Ү/Ө fold → 7 NFC again.** Results are identical to the spec's order except for those cases.
 
 | Step | Rule |
 |---|---|
 | 2 zero-width | Strip U+200B, U+200C, U+200D, U+2060, U+FEFF for every language. Also strip U+180B–U+180F **unless** `lang == "mn_Mong"` (there they are preserved verbatim). *Spec-literal:* ZWNJ/ZWJ are stripped in `mn_Mong` too. |
 | 3 whitespace | Every whitespace run → one `" "`; strip leading/trailing `" "`. For `mn_Mong`, U+202F is **not** whitespace (survives, is never collapsed or stripped); elsewhere it collapses like any space. Tabs/newlines collapse too. |
-| 4 quotes | `“ ” „ ‟ « »` (U+201C, 201D, 201E, 201F, 00AB, 00BB) → `"`; `‘ ’ ‚ ‛` (U+2018, 2019, 201A, 201B) → `'`. All languages. |
-| 5 homoglyph | Token = maximal run of non-space chars. If > 50% of the token's `str.isalpha()` chars are Cyrillic (`\p{Script=Cyrillic}`), map Latin `a e o p c x y A E O P C X Y` → Cyrillic `а е о р с х у А Е О Р С Х У` (U+0430, 0435, 043E, 0440, 0441, 0445, 0443, 0410, 0415, 041E, 0420, 0421, 0425, 0423). No alphabetic chars → untouched. *Builder's call:* uppercase variants included. |
+| 4 quotes | `\u201c \u201d \u201e \u201f \u00ab \u00bb` (U+201C, 201D, 201E, 201F, 00AB, 00BB) → `"`; `\u2018 \u2019 \u201a \u201b` (U+2018, 2019, 201A, 201B) → `'`. All languages. |
+| 5 homoglyph | Token = maximal run of non-space chars. If > 50% of the token's `str.isalpha()` chars are Cyrillic (`\p{Script=Cyrillic}`), map Latin `a e o p c x y A E O P C X Y` → Cyrillic `\u0430 \u0435 \u043e \u0440 \u0441 \u0445 \u0443 \u0410 \u0415 \u041e \u0420 \u0421 \u0425 \u0423` (U+0430, 0435, 043E, 0440, 0441, 0445, 0443, 0410, 0415, 041E, 0420, 0421, 0425, 0423). No alphabetic chars → untouched. *Builder's call:* uppercase variants included. |
 | 6 fold | Ѳ U+0472 → Ө U+04E8; ѳ U+0473 → ө U+04E9. Nothing else (Ұ/ұ and Greek Θ/θ are never touched). |
 
 - [ ] **Step 1: Write failing unit tests** in `tests/unit/test_text_normalize.py` (BUILD-OPERATE-CHECK, escapes keep invisible chars visible):
-  - `test_nfc_composes`: `normalize("é", "eng_Latn") == "é"`.
-  - `test_whitespace_collapses_and_strips`: `normalize("  a \t\n b 　c  ", "eng_Latn") == "a b c"`.
-  - `test_nnbsp_collapses_outside_mn_mong`: `normalize("a b", "eng_Latn") == "a b"`.
-  - `test_nnbsp_preserved_in_mn_mong`: `s = "ᠠ ᠡ"`; `normalize(s, "mn_Mong") == s`.
-  - `test_quotes_canonicalized`: `normalize("“Hi” ‘x’ «Y» „Z‟", "eng_Latn") == "\"Hi\" 'x' \"Y\" \"Z\""`.
-  - `test_zero_width_stripped_without_double_space`: `normalize("a ​ b", "eng_Latn") == "a b"`; `normalize("a​b﻿⁠", "eng_Latn") == "ab"`.
-  - `test_fvs_preserved_only_in_mn_mong`: `s = "ᠠ᠋ᠡ"`; `normalize(s, "mn_Mong") == s`; `normalize(s, "khk_Cyrl") == "ᠠᠡ"`.
-  - `test_homoglyph_repairs_latin_inside_cyrillic_token`: `normalize("Мoнгoл", "khk_Cyrl") == "Монгол"` (Latin `o` at two positions).
-  - `test_homoglyph_uppercase`: `normalize("Pоссия", "rus_Cyrl") == "Россия"`.
-  - `test_homoglyph_gated_by_majority` — parametrized `(text, expected)`: `("pop", "pop")`, `("Мop", "Мop")` (1/3 Cyrillic), `("Мo", "Мo")` (exactly 50% — unchanged), `("Моo", "Моо")` (2/3 — fixed), `("аа1o", "аа1о")` (digit not counted).
-  - `test_fita_folds_to_o_umlaut_letters`: `normalize("Ѳѳ", "khk_Cyrl") == "Өө"`; `test_other_u_o_variants_untouched`: `"ҮүӨө"` and Kazakh `"Ұұ"` unchanged.
-  - `test_final_nfc_pass_keeps_idempotence`: `normalize("Ѳ̈", "khk_Cyrl") == "Ӫ"`; `normalize("ууy̆", "rus_Cyrl") == "ууў"`.
+  - `test_nfc_composes`: `normalize("e\u0301", "eng_Latn") == "\u00e9"`.
+  - `test_whitespace_collapses_and_strips`: `normalize("  a \t\n b\u00a0\u3000c  ", "eng_Latn") == "a b c"`.
+  - `test_nnbsp_collapses_outside_mn_mong`: `normalize("a\u202fb", "eng_Latn") == "a b"`.
+  - `test_nnbsp_preserved_in_mn_mong`: `s = "\u1820\u202f\u1821"`; `normalize(s, "mn_Mong") == s`.
+  - `test_quotes_canonicalized`: `normalize("\u201cHi\u201d \u2018x\u2019 \u00abY\u00bb \u201eZ\u201f", "eng_Latn") == "\"Hi\" 'x' \"Y\" \"Z\""`.
+  - `test_zero_width_stripped_without_double_space`: `normalize("a \u200b b", "eng_Latn") == "a b"`; `normalize("a\u200bb\ufeff\u2060", "eng_Latn") == "ab"`.
+  - `test_fvs_preserved_only_in_mn_mong`: `s = "\u1820\u180b\u1821"`; `normalize(s, "mn_Mong") == s`; `normalize(s, "khk_Cyrl") == "\u1820\u1821"`.
+  - `test_homoglyph_repairs_latin_inside_cyrillic_token`: `normalize("\u041co\u043d\u0433o\u043b", "khk_Cyrl") == "\u041c\u043e\u043d\u0433\u043e\u043b"` (Latin `o` at two positions).
+  - `test_homoglyph_uppercase`: `normalize("P\u043e\u0441\u0441\u0438\u044f", "rus_Cyrl") == "\u0420\u043e\u0441\u0441\u0438\u044f"`.
+  - `test_homoglyph_gated_by_majority` — parametrized `(text, expected)`: `("pop", "pop")`, `("\u041cop", "\u041cop")` (1/3 Cyrillic), `("\u041co", "\u041co")` (exactly 50% — unchanged), `("\u041c\u043eo", "\u041c\u043e\u043e")` (2/3 — fixed), `("\u0430\u04301o", "\u0430\u04301\u043e")` (digit not counted).
+  - `test_fita_folds_to_o_umlaut_letters`: `normalize("\u0472\u0473", "khk_Cyrl") == "\u04e8\u04e9"`; `test_other_u_o_variants_untouched`: `"\u04ae\u04af\u04e8\u04e9"` and Kazakh `"\u04b0\u04b1"` unchanged.
+  - `test_final_nfc_pass_keeps_idempotence`: `normalize("\u0472\u0308", "khk_Cyrl") == "\u04ea"`; `normalize("\u0443\u0443y\u0306", "rus_Cyrl") == "\u0443\u0443\u045e"`.
   - `test_mn_mong_letters_untouched`: all letters U+1820..U+1842 joined → unchanged for `"mn_Mong"`.
-  - `test_empty_and_whitespace_only`: `normalize("", l) == ""`; `normalize("  \t ", "eng_Latn") == ""`; `normalize(" ", "khk_Cyrl") == ""`; `normalize("   ", "mn_Mong") == " "`.
-  - `test_letterless_tokens_do_not_crash`: `normalize("12.5 — !?", "khk_Cyrl") == "12.5 — !?"`.
+  - `test_empty_and_whitespace_only`: `normalize("", l) == ""`; `normalize(" \u00a0\t ", "eng_Latn") == ""`; `normalize("\u202f", "khk_Cyrl") == ""`; `normalize(" \u202f ", "mn_Mong") == "\u202f"`.
+  - `test_letterless_tokens_do_not_crash`: `normalize("12.5 \u2014 !?", "khk_Cyrl") == "12.5 \u2014 !?"`.
   - `test_unknown_language_raises_config_error`: `pytest.raises(ConfigError)` for `"mn_mong"` and `""`.
-- [ ] **Step 2: Write failing property tests** in `tests/property/test_normalize_properties.py`. In `tests/conftest.py` add `from hypothesis import settings; settings.register_profile("rinchen", derandomize=True, deadline=None, max_examples=200); settings.load_profile("rinchen")`. Strategy alphabet = `st.sampled_from` over: Latin `a e o p c x y A E O P C X Y b d`, Cyrillic `а о Ө ө Ү ү Ѳ ұ м н`, digits, `. , ! ? —`, space/tab/newline/U+00A0/U+202F, U+200B/200C/200D/FEFF, U+180B/180E/180F, quotes `“ ” ‘ ’ « »`, combining U+0301/0306/0308, Mongolian letters U+1820–U+182F. Properties: (a) `test_idempotent` for `lang` drawn from `known_language_codes()`; (b) `test_mn_mong_letters_never_altered`: the subsequence of `\p{L}` chars in U+1800–U+18AF is identical before/after for `lang="mn_Mong"`; (c) `test_homoglyph_only_fires_in_cyrillic_majority_tokens`: for a token built only from Latin and Cyrillic letters with Cyrillic ≤ 50% of letters, `normalize(token, "eng_Latn") == token`.
+- [ ] **Step 2: Write failing property tests** in `tests/property/test_normalize_properties.py`. In `tests/conftest.py` add `from hypothesis import settings; settings.register_profile("rinchen", derandomize=True, deadline=None, max_examples=200); settings.load_profile("rinchen")`. Strategy alphabet = `st.sampled_from` over: Latin `a e o p c x y A E O P C X Y b d`, Cyrillic `\u0430 \u043e \u04e8 \u04e9 \u04ae \u04af \u0472 \u04b1 \u043c \u043d`, digits, `. , ! ? \u2014`, space/tab/newline/U+00A0/U+202F, U+200B/200C/200D/FEFF, U+180B/180E/180F, quotes `\u201c \u201d \u2018 \u2019 \u00ab \u00bb`, combining U+0301/0306/0308, Mongolian letters U+1820–U+182F. Properties: (a) `test_idempotent` for `lang` drawn from `known_language_codes()`; (b) `test_mn_mong_letters_never_altered`: the subsequence of `\p{L}` chars in U+1800–U+18AF is identical before/after for `lang="mn_Mong"`; (c) `test_homoglyph_only_fires_in_cyrillic_majority_tokens`: for a token built only from Latin and Cyrillic letters with Cyrillic ≤ 50% of letters, `normalize(token, "eng_Latn") == token`.
 - [ ] **Step 3:** Run both files → FAIL.
 - [ ] **Step 4:** Implement `normalize` in `src/rinchen/text/normalize.py`: one private function per step, tables as module-level constants, `normalize` only sequences them. If a property test finds a counterexample, fix the implementation, not the property.
 - [ ] **Step 5:** Run both files → PASS (property tests deterministic via the profile).
@@ -209,13 +209,13 @@ Inputs the spec implies but its tests do not cover; each has a test in the ownin
 **File format.** UTF-8, LF, pure ASCII: every non-ASCII or control char is written `\uXXXX` / `\UXXXXXXXX`, a literal backslash is `\\`. Lines starting `#` or blank are ignored; each data line is `input<TAB>expected<TAB>lang` (real tabs). `# category: <name>` comments group lines. **200 data lines exactly**, quotas: `nfc` 15, `zero_width` 20, `whitespace` 30, `quotes` 25, `homoglyph` 40, `fold` 20, `mn_mong_preservation` 30, `passthrough` 20 (already-clean text, every one of the 10 languages at least once). Example rows:
 
 ```
-é<TAB>é<TAB>eng_Latn
-a ​ b<TAB>a b<TAB>eng_Latn
-  Монгол　<TAB>Монгол<TAB>khk_Cyrl
-“Сайн”<TAB>"Сайн"<TAB>khk_Cyrl
-Мoнгoл<TAB>Монгол<TAB>khk_Cyrl
-Ѳѳ<TAB>Өө<TAB>khk_Cyrl
-ᠠ᠋ ᠡ<TAB>ᠠ᠋ ᠡ<TAB>mn_Mong
+e\u0301<TAB>\u00e9<TAB>eng_Latn
+a \u200b b<TAB>a b<TAB>eng_Latn
+\u00a0 \u041c\u043e\u043d\u0433\u043e\u043b\u3000<TAB>\u041c\u043e\u043d\u0433\u043e\u043b<TAB>khk_Cyrl
+\u201c\u0421\u0430\u0439\u043d\u201d<TAB>"\u0421\u0430\u0439\u043d"<TAB>khk_Cyrl
+\u041co\u043d\u0433o\u043b<TAB>\u041c\u043e\u043d\u0433\u043e\u043b<TAB>khk_Cyrl
+\u0472\u0473<TAB>\u04e8\u04e9<TAB>khk_Cyrl
+\u1820\u180b\u202f\u1821<TAB>\u1820\u180b\u202f\u1821<TAB>mn_Mong
 ```
 
 **Authoring rule:** derive every `expected` by hand from the Task 4 rule table. Never run `normalize` and paste its output. Mongolian lines use real Cyrillic words (Монгол, улс, нийслэл, Улаанбаатар, өдөр, үнэ …) or traditional-script codepoints; no Latin transliteration.
@@ -240,10 +240,10 @@ a ​ b<TAB>a b<TAB>eng_Latn
 
 Rules in this task: **`mn_Mong`** splits after a run of `U+1803 U+1809 ? !` (plus closers), whitespace or not, if more text follows; U+1802 never splits. **CJK** splits after a run of `。！？` (plus closers `） 」 』 ” "`), whitespace or not.
 
-- [ ] **Step 1: Write failing tests** (use `S1 = "ᠠᠡ"`, `S2 = "ᠢᠣ"` for traditional script):
-  - `test_mn_mong_splits_on_full_stops_and_question`: `split(f"{S1}᠃ {S2}᠉ {S1}?", "mn_Mong") == [f"{S1}᠃", f"{S2}᠉", f"{S1}?"]`.
-  - `test_mn_mong_comma_never_splits`: `split(f"{S1}᠂ {S2}᠃", "mn_Mong") == [f"{S1}᠂ {S2}᠃"]`.
-  - `test_mn_mong_splits_without_following_space`: `split(f"{S1}᠃{S2}᠃", "mn_Mong") == [f"{S1}᠃", f"{S2}᠃"]`; stacked `?!`: `split(f"{S1}?! {S2}", "mn_Mong") == [f"{S1}?!", S2]`.
+- [ ] **Step 1: Write failing tests** (use `S1 = "\u1820\u1821"`, `S2 = "\u1822\u1823"` for traditional script):
+  - `test_mn_mong_splits_on_full_stops_and_question`: `split(f"{S1}\u1803 {S2}\u1809 {S1}?", "mn_Mong") == [f"{S1}\u1803", f"{S2}\u1809", f"{S1}?"]`.
+  - `test_mn_mong_comma_never_splits`: `split(f"{S1}\u1802 {S2}\u1803", "mn_Mong") == [f"{S1}\u1802 {S2}\u1803"]`.
+  - `test_mn_mong_splits_without_following_space`: `split(f"{S1}\u1803{S2}\u1803", "mn_Mong") == [f"{S1}\u1803", f"{S2}\u1803"]`; stacked `?!`: `split(f"{S1}?! {S2}", "mn_Mong") == [f"{S1}?!", S2]`.
   - `test_cjk_splits_after_fullwidth_terminators`: `split("今天天气很好。你好吗？我很好！", "zho_Hans") == ["今天天气很好。", "你好吗？", "我很好！"]`; `split("今日は晴れです。明日は雨ですか？はい。", "jpn_Jpan") == ["今日は晴れです。", "明日は雨ですか？", "はい。"]`.
   - `test_cjk_closers_stay_with_their_sentence`: `split("他说：「你好。」然后走了。", "zho_Hans") == ["他说：「你好。」", "然后走了。"]`.
   - `test_no_terminator_returns_single_part` (parametrized over `mn_Mong`, `zho_Hans`): text without terminator → `[text]`.
