@@ -146,7 +146,8 @@ see the D3 research follow-up below). `spm train` writes no manifest, so D8
 must hash the model itself.
 
 **D3 research follow-up (branch `d3-research-followup`, cut from `main` at
-`93ffdf2`; not merged and not pushed).** The three open decisions were
+`93ffdf2`; merged into `main` locally by fast-forward to `2346cea` on
+2026-11-06, not pushed).** The three open decisions were
 researched and recorded in DECISIONS.md ("2026-11-06: D3 follow-up - the three
 open decisions, resolved by research"; evidence, sources and the reproduction
 harness in `docs/research/2026-11-06-mongolian-controls-and-spm-tags.md`): (1)
