@@ -141,8 +141,12 @@ class LidConfig(BaseModel):
     min_prob: _Probability = 0.5
     top_k: _PositiveInt = 3
     # Language code -> labels counted as that language; a code that is not
-    # listed accepts only its own label.
-    accept: dict[str, list[str]] = {}
+    # listed accepts only its own label. GlotLID v3 calls Mandarin cmn_Hani
+    # (and sometimes wuu_Hani), never zho_Hans. A table you supply replaces
+    # this one, like char_weights: list zho_Hans again if you still need it.
+    accept: dict[str, list[str]] = Field(
+        default_factory=lambda: {"zho_Hans": ["cmn_Hani", "wuu_Hani"]}
+    )
 
 
 class MinHashConfig(BaseModel):

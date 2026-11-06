@@ -5,6 +5,8 @@ in for it where a test needs to control or count its answers."""
 
 from __future__ import annotations
 
+import threading
+import time
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -50,6 +52,32 @@ class FakeModel:
         labels = [[f"__label__{label}" for label, _ in chosen] for _ in texts]
         probs = [np.array([prob for _, prob in chosen]) for _ in texts]
         return labels, probs
+
+
+class SliceProbeModel(FakeModel):
+    """A `FakeModel` that notes how many calls were running at once for each
+    side of the corpus, told apart by the "src" / "tgt" prefix of its texts,
+    and lingers in each call so that an overlap would show."""
+
+    def __init__(self, answer: Sequence[tuple[str, float]]) -> None:
+        super().__init__(answer)
+        self._lock = threading.Lock()
+        self._running: dict[str, int] = {}
+        self.most_running: dict[str, int] = {}
+
+    def predict(self, texts: list[str], k: int) -> tuple[Any, Any]:
+        side = texts[0].split()[0]
+        with self._lock:
+            self._running[side] = self._running.get(side, 0) + 1
+            self.most_running[side] = max(
+                self.most_running.get(side, 0), self._running[side]
+            )
+        try:
+            time.sleep(0.005)
+            return super().predict(texts, k)
+        finally:
+            with self._lock:
+                self._running[side] -= 1
 
 
 def _use_model(monkeypatch: pytest.MonkeyPatch, model: object) -> None:
@@ -161,9 +189,11 @@ def test_k_below_one_is_rejected(glotlid: GlotLID) -> None:
         glotlid.predict([KHK_TEXT], k=0)
 
 
-def test_a_probability_above_one_is_clamped(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_probabilities_outside_zero_to_one_are_clamped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     # fastText reports 1.00001 for a certain answer.
-    _use_model(monkeypatch, FakeModel([("khk_Cyrl", 1.00001), ("rus_Cyrl", -0.0)]))
+    _use_model(monkeypatch, FakeModel([("khk_Cyrl", 1.00001), ("rus_Cyrl", -0.1)]))
 
     predictions = GlotLID(Path("unused.bin")).predict([KHK_TEXT], k=2)
 
@@ -519,6 +549,37 @@ def test_a_summed_score_never_exceeds_one(
     assert _scores(result, "src") == [1.0]
 
 
+def test_the_default_accept_table_counts_the_glotlid_labels_of_chinese() -> None:
+    assert CONFIG.accept == {"zho_Hans": ["cmn_Hani", "wuu_Hani"]}
+    assert LidConfig().accept is not CONFIG.accept
+
+
+@pytest.mark.parametrize("label", ["cmn_Hani", "wuu_Hani"])
+def test_with_the_default_config_a_chinese_side_labelled_as_glotlid_does_passes(
+    monkeypatch: pytest.MonkeyPatch, label: str
+) -> None:
+    _use_model(monkeypatch, FakeModel([(label, 1.0)]))
+    frame = _frame(_row("a", "b", src_lang="zho_Hans", tgt_lang="zho_Hans")).lazy()
+
+    result = lid.apply(frame, CONFIG).collect()
+
+    assert _scores(result, "src") == [1.0]
+    assert _scores(result, "tgt") == [1.0]
+    assert _reasons(result) == [None]
+
+
+def test_a_supplied_accept_table_replaces_the_default_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_model(monkeypatch, FakeModel([("cmn_Hani", 1.0)]))
+    frame = _frame(_row("a", "b", src_lang="zho_Hans", tgt_lang="zho_Hans")).lazy()
+
+    result = lid.apply(frame, LidConfig(accept={"khk_Cyrl": ["khk_Cyrl"]})).collect()
+
+    assert _scores(result, "src") == [0.0]
+    assert _reasons(result) == ["lid_src"]
+
+
 # --- apply: the threshold -----------------------------------------------------------
 
 
@@ -698,7 +759,7 @@ def test_a_missing_model_raises_config_error_when_apply_is_called(
         )
 
 
-def test_the_model_is_loaded_once_per_apply_and_asked_once_per_side(
+def test_the_model_is_loaded_once_per_apply_and_asked_once_per_side_under_the_slice_size(
     monkeypatch: pytest.MonkeyPatch, model_path: Path
 ) -> None:
     loads: list[Path] = []
@@ -716,6 +777,57 @@ def test_the_model_is_loaded_once_per_apply_and_asked_once_per_side(
     assert loads == [model_path]
     assert [len(texts) for texts, _ in model.calls] == [9, 9]
     assert [k for _, k in model.calls] == [CONFIG.top_k, CONFIG.top_k]
+
+
+def test_a_column_is_scored_in_sequential_slices_in_row_order(
+    monkeypatch: pytest.MonkeyPatch, model_path: Path
+) -> None:
+    monkeypatch.setattr(lid, "_SCORING_SLICE_ROWS", 4)
+    model = SliceProbeModel([("khk_Cyrl", 0.9)])
+    _use_model(monkeypatch, model)
+    rows = [
+        _row(f"src {index}", f"tgt {index}", tgt_lang="khk_Cyrl") for index in range(9)
+    ]
+
+    result = lid.apply(_frame(*rows).lazy(), _config(model_path)).collect()
+
+    for side in ("src", "tgt"):
+        batches = [texts for texts, _ in model.calls if texts[0].startswith(side)]
+        assert batches == [
+            [f"{side} {index}" for index in range(4)],
+            [f"{side} {index}" for index in range(4, 8)],
+            [f"{side} 8"],
+        ]
+        assert model.most_running[side] == 1
+    assert _scores(result, "src") == [pytest.approx(0.9, abs=1e-6)] * 9
+    assert _reasons(result) == [None] * 9
+
+
+def test_slicing_does_not_change_the_scores(
+    monkeypatch: pytest.MonkeyPatch, planted: PlantedCorpus, model_path: Path
+) -> None:
+    unsliced = lid.apply(planted.frame.lazy(), _config(model_path)).collect()
+
+    monkeypatch.setattr(lid, "_SCORING_SLICE_ROWS", 4)
+    sliced = lid.apply(planted.frame.lazy(), _config(model_path)).collect()
+
+    assert sliced.equals(unsliced)
+    assert planted.frame.height > 4 * 3
+
+
+def test_a_bad_language_code_in_a_late_slice_is_found_before_any_prediction(
+    monkeypatch: pytest.MonkeyPatch, model_path: Path
+) -> None:
+    monkeypatch.setattr(lid, "_SCORING_SLICE_ROWS", 4)
+    model = FakeModel([("khk_Cyrl", 0.9)])
+    _use_model(monkeypatch, model)
+    rows = [_row(f"src {index}", f"tgt {index}") for index in range(8)]
+    rows.append(_row("src 8", "tgt 8", src_lang="xx_Latn", tgt_lang="yy_Latn"))
+
+    with pytest.raises(DataError):
+        lid.apply(_frame(*rows).lazy(), _config(model_path)).collect()
+
+    assert model.calls == []
 
 
 def test_top_k_comes_from_the_config(

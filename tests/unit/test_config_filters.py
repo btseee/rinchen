@@ -57,7 +57,7 @@ def test_defaults_are_the_documented_priors():
         model_path=REPO_ROOT / "models" / "lid" / "glotlid_v3.bin",
         min_prob=0.5,
         top_k=3,
-        accept={},
+        accept={"zho_Hans": ["cmn_Hani", "wuu_Hani"]},
     )
     assert config.minhash == MinHashConfig(num_perm=128, ngram=5, threshold=0.8, seed=1)
     assert config.labse == LabseConfig(
@@ -77,6 +77,25 @@ def test_shipped_filters_yaml_equals_the_defaults():
     assert FILTERS_CONFIG_PATH == REPO_ROOT / "configs" / "data" / "filters.yaml"
     assert loaded.model_dump(mode="json") == FilterConfig().model_dump(mode="json")
     assert loaded == FilterConfig()
+
+
+def test_a_supplied_accept_table_replaces_the_default_one(tmp_path: Path):
+    supplied = {"khk_Cyrl": ["khk_Cyrl", "mon_Cyrl"]}
+
+    config = load_filter_config(_write(tmp_path, {"lid": {"accept": supplied}}))
+    cleared = load_filter_config(_write(tmp_path, {"lid": {"accept": {}}}))
+
+    assert config.lid.accept == supplied
+    assert cleared.lid.accept == {}
+
+
+def test_each_config_gets_its_own_default_accept_table():
+    first, second = FilterConfig(), FilterConfig()
+
+    first.lid.accept["zho_Hans"].append("yue_Hani")
+
+    assert second.lid.accept == {"zho_Hans": ["cmn_Hani", "wuu_Hani"]}
+    assert LidConfig().accept == {"zho_Hans": ["cmn_Hani", "wuu_Hani"]}
 
 
 def test_empty_sections_use_the_defaults(tmp_path: Path):

@@ -1,6 +1,7 @@
 {
  "model": "cis-lmu/glotlid model_v3.bin",
  "reference": "fasttext python API predict, k=1",
+ "note": "The 20 mn_Mong entries are synthetic, not model output: their lines are 2-4 word phrases in traditional Mongolian script that no Mongolian reader has validated, and parity checks the wrapper's pre-detector against the hard-coded label mn_Mong with probability 1.0. The Mongolian-Cyrillic and Kazakh sentences were not reviewed by a native speaker. The other 180 entries are the raw fastText top-1 label and probability.",
  "lines": [
  {"label": "khk_Cyrl", "prob": 0.999968},
  {"label": "khk_Cyrl", "prob": 1.0},

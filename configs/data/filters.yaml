@@ -47,15 +47,16 @@ lid:
   min_prob: 0.5
   top_k: 3
   # Language code -> labels counted as that language; a code that is not
-  # listed accepts only its own label.
-  # Measured on GlotLID v3 with 20 sentences per language: every registry code
-  # is also GlotLID's label except Chinese, which it calls cmn_Hani (19 of 20;
-  # the 20th is wuu_Hani), so a Chinese side scores 0.0 unless accept names it.
-  # Recommended once Chinese data is filtered:
-  #   zho_Hans: [cmn_Hani]
-  # Hani labels do not tell Simplified from Traditional. Traditional-script
-  # Mongolian needs no entry: the wrapper labels it mn_Mong itself.
-  accept: {}
+  # listed accepts only its own label. Listing accept replaces this table, it
+  # is not merged into it.
+  # GlotLID v3 labels Mandarin cmn_Hani, never zho_Hans, and sometimes labels a
+  # short Mandarin sentence wuu_Hani (Wu), so both count as Chinese. Hani
+  # labels do not separate Simplified from Traditional: D4 does not check that
+  # distinction. Every other registry code is also GlotLID's label, except
+  # mn_Mong: GlotLID has no mn_Mong (it has und_Mong), so the wrapper's script
+  # pre-detector supplies it for traditional-script text.
+  accept:
+    zho_Hans: [cmn_Hani, wuu_Hani]
 
 # Near-duplicate removal over src + TAB + tgt. Unvalidated priors.
 minhash:

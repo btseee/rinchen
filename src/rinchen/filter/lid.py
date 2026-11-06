@@ -26,6 +26,9 @@ TRADITIONAL_MONGOLIAN_LABEL = "mn_Mong"
 # The Mongolian block, U+1800..U+18AF.
 _TRADITIONAL_FIRST = 0x1800
 _TRADITIONAL_LAST = 0x18AF
+# Rows handed to the model per call: bounds the memory of a batch, which holds
+# the texts and predictions of one slice, not of the whole column.
+_SCORING_SLICE_ROWS = 100_000
 
 
 class _FastTextModel(Protocol):
@@ -131,25 +134,28 @@ def _side_score(
     text_column: str, lang_column: str, model: GlotLID, cfg: LidConfig
 ) -> pl.Expr:
     def score_batch(batch: pl.Series) -> pl.Series:
-        texts = batch.struct.field("text").to_list()
-        langs = batch.struct.field("lang").to_list()
         # Resolved before the model runs: a bad code must not cost a prediction.
         accepted = {
-            lang: _accepted_labels(lang, cfg.accept) for lang in dict.fromkeys(langs)
+            lang: _accepted_labels(lang, cfg.accept)
+            for lang in batch.struct.field("lang").unique(maintain_order=True)
         }
-        predictions = model.predict(texts, k=cfg.top_k)
-        return pl.Series(
-            [
+        scores: list[float] = []
+        for offset in range(0, batch.len(), _SCORING_SLICE_ROWS):
+            rows = batch.slice(offset, _SCORING_SLICE_ROWS)
+            langs = rows.struct.field("lang").to_list()
+            predictions = model.predict(
+                rows.struct.field("text").to_list(), k=cfg.top_k
+            )
+            scores.extend(
                 _accepted_probability(row_predictions, accepted[lang])
                 for row_predictions, lang in zip(predictions, langs, strict=True)
-            ],
-            dtype=pl.Float32,
-        )
+            )
+        return pl.Series(scores, dtype=pl.Float32)
 
     # Not elementwise, although a score depends on its own row only: polars
     # would split the column into one morsel per thread, down to one row per
     # model call on a small frame, and call the model from several threads.
-    # One sequential call per side is what the model is built for.
+    # Each side is scored by sequential calls over slices of its column.
     return pl.struct(
         pl.col(text_column).fill_null("").alias("text"),
         pl.col(lang_column).alias("lang"),
