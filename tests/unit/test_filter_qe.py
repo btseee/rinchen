@@ -6,10 +6,7 @@ from __future__ import annotations
 
 import math
 import re
-import subprocess
-import sys
 from collections.abc import Callable, Mapping, Sequence
-from pathlib import Path
 
 import numpy as np
 import polars as pl
@@ -19,7 +16,7 @@ from rinchen.config.filters import QeConfig
 from rinchen.corpus.schema import CORPUS_SCHEMA, corpus_frame
 from rinchen.errors import UpstreamError
 from rinchen.filter import qe
-from rinchen.filter.qe import EoleMetricXQEScorer, QEScorer
+from rinchen.filter.qe import QEScorer
 from tests.support.planted_corpus import PlantedCorpus, build_planted_corpus
 
 METRICX = QeConfig(scorer="metricx_qe", max_metricx_qe=8.0, batch_size=32)
@@ -403,7 +400,7 @@ def test_cuda_is_only_looked_up_when_a_cuda_scorer_needs_the_answer(
         lookups.append(None)
         return False
 
-    monkeypatch.setattr(qe, "_cuda_is_available", cuda_is_available)
+    monkeypatch.setattr(qe, "cuda_is_available", cuda_is_available)
 
     assert qe.skip_reason(METRICX, None) == "no QE scorer configured"
     assert qe.skip_reason(METRICX, FakeScorer()) is None
@@ -434,83 +431,3 @@ def test_a_fake_scorer_satisfies_the_protocol() -> None:
     scorer: QEScorer = FakeScorer()
 
     assert scorer.requires_cuda is False
-
-
-# --- the Eole MetricX-QE adapter ----------------------------------------------------
-
-
-def test_the_eole_scorer_needs_cuda_and_is_a_scorer() -> None:
-    scorer: QEScorer = EoleMetricXQEScorer()
-
-    assert scorer.requires_cuda is True
-
-
-def test_the_eole_scorer_scores_no_pairs_without_loading_a_model(
-    tmp_path: Path,
-) -> None:
-    scorer = EoleMetricXQEScorer(str(tmp_path / "not-a-model"))
-
-    assert scorer.score([], []) == []
-
-
-# Importing Eole warns about its missing C++ extension and flash_attn and about
-# deprecations in Eole, pydantic and torch; none of it is ours to fix.
-@pytest.mark.filterwarnings("ignore::DeprecationWarning")
-@pytest.mark.filterwarnings("ignore:Could not import:RuntimeWarning")
-@pytest.mark.filterwarnings("ignore:.torch.jit.script. is not supported:FutureWarning")
-def test_a_model_that_is_neither_a_directory_nor_a_repo_is_an_upstream_error(
-    tmp_path: Path,
-) -> None:
-    scorer = EoleMetricXQEScorer(str(tmp_path / "not-a-model"))
-
-    with pytest.raises(UpstreamError, match="not-a-model"):
-        scorer.score(["hello"], ["world"])
-
-
-@pytest.mark.subprocess
-def test_importing_the_qe_stage_does_not_import_torch_or_eole() -> None:
-    snippet = (
-        "import sys\n"
-        "import rinchen.filter.qe\n"
-        "heavy = [m for m in ('torch', 'eole', 'transformers')"
-        " if m in sys.modules]\n"
-        "print(','.join(heavy))\n"
-    )
-
-    completed = subprocess.run(
-        [sys.executable, "-I", "-c", snippet],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-    assert completed.returncode == 0, completed.stderr
-    assert completed.stdout.strip() == ""
-
-
-# --- the real model -----------------------------------------------------------------
-
-
-@pytest.mark.network
-def test_metricx_qe_scores_a_translation_lower_than_a_mismatched_pair() -> None:
-    if not qe._cuda_is_available():
-        pytest.skip("MetricX-QE through Eole needs a CUDA device")
-    sources = [
-        "The weather is nice today.",
-        "The weather is nice today.",
-        "I bought three apples at the market.",
-        "I bought three apples at the market.",
-    ]
-    translations = [
-        "Өнөөдөр цаг агаар сайхан байна.",
-        "Хадны оройд цас орж байна.",
-        "Би зах дээрээс гурван алим худалдаж авлаа.",
-        "Манай компани шинэ оффис нээлээ.",
-    ]
-
-    scores = EoleMetricXQEScorer().score(sources, translations)
-
-    assert len(scores) == 4
-    assert all(0.0 <= score <= 25.0 for score in scores)
-    assert scores[0] < scores[1]
-    assert scores[2] < scores[3]
