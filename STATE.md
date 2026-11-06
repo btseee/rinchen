@@ -119,7 +119,11 @@ disagreements across all 200 lines.
 `spm train` writes no manifest. Known limitations, three items flagged for
 human review (ZWNJ/ZWJ stripped in mn_Mong; the Mongolian and Kazakh
 abbreviation extras; the O-umlaut look-alikes `normalize` does not fold) and
-the `add_dummy_prefix` revisit-before-D8 note are in DECISIONS.md.
+the `add_dummy_prefix` revisit-before-D8 note are in DECISIONS.md. The D3
+research follow-up below resolved the ZWNJ/ZWJ flag (kept stripping, with an
+audit gate before D5) and the `add_dummy_prefix` note (default kept, tag added
+as a token), and narrowed the abbreviation flag by a published handbook
+source; the O-umlaut flag is still open.
 Process gotcha: the editor tools (Write/Edit) convert backslash-u escapes into
 the raw characters, so any file that holds invisible or look-alike characters
 as escapes must be re-checked with `grep -nP '[^\x00-\x7F]'` after editing.
@@ -137,8 +141,9 @@ abbreviation, so log boundary errors by family on a ~1k-sentence sample before
 tuning. `read_lines` and `sample_balanced` materialise the corpus: budget the
 memory for it, or add a streaming reader before the student/teacher runs.
 Count the Fita-like substitutes, uppercase `Y` and U+200C/U+200D in the real
-corpora before freezing the vocabulary. Decide `add_dummy_prefix` before D8;
-`spm train` writes no manifest, so D8 must hash the model itself.
+corpora before freezing the vocabulary. `add_dummy_prefix` is decided (kept;
+see the D3 research follow-up below). `spm train` writes no manifest, so D8
+must hash the model itself.
 
 **D3 research follow-up (branch `d3-research-followup`, cut from `main` at
 `93ffdf2`; not merged and not pushed).** The three open decisions were
@@ -147,35 +152,39 @@ open decisions, resolved by research"; evidence, sources and the reproduction
 harness in `docs/research/2026-11-06-mongolian-controls-and-spm-tags.md`): (1)
 the `<2xx>` target-language tag is inserted at token level after SentencePiece
 (Eole's `prefix` transform in training, the CTranslate2 wrapper at inference)
-and `add_dummy_prefix` stays at its default, which supersedes the "Decide
-`add_dummy_prefix` before D8" item in the notes above; (2) ZWNJ and ZWJ stay
-stripped in `mn_Mong`, with safeguards, which resolves that FLAG; (3) the
-converter emits NNBSP before separated suffixes, and `normalize` keeps NNBSP
-and MVS and maps neither. One code change: the Cyrillic splitter has
-per-language abbreviation sets (a shared base plus Mongolian-only and
-Kazakh-only sets), so Kazakh-only entries no longer apply to Mongolian or
+and `add_dummy_prefix` stays at its default, which settles the
+`add_dummy_prefix` item in the notes above; (2) ZWNJ and ZWJ stay stripped in
+`mn_Mong`, with safeguards, which resolves that FLAG to keep-stripping with an
+audit gate before D5 (the Mongolian-reader review the old FLAG asked for has
+not happened); (3) the converter emits NNBSP before separated suffixes, and
+`normalize` keeps NNBSP and MVS and maps neither. One code change: the Cyrillic
+splitter has per-language abbreviation sets (a shared base plus Mongolian-only
+and Kazakh-only sets), so Kazakh-only entries no longer apply to Mongolian or
 Russian and the other way round, and the Kazakh set gained the dotted
-abbreviations of the official punctuation rules (the units year, century,
-second, minute and hour, and one more form each of "and so on" and "and the
-like"). Gates: D4 - abbreviation induction and a boundary-error sample per
-language, the count of o-like substitutes and uppercase Y in real khk_Cyrl, an
-audit of U+200C, U+200D, U+180A..U+180F and U+202F in any real
-traditional-script text; D5 - the converter never emits ZWJ or ZWNJ (a
-validator enforces it) and emits NNBSP, a render check in the target fonts, and
-the abbreviation and suffix questions that need a Mongolian reader; D8 - the
-tag and prefix design with its listed tests, per-direction corpora against a
-custom transform, and sanitising reserved strings in raw text. Not verified: no
-Mongolian reader judged any render, only two Noto Sans Mongolian builds were
-tested, the texts of MNS 5552:2005 and MNS 4333:1996 were not retrieved, Eole
-per-direction corpora were not run end to end, and the Mongolian abbreviation
-entries still lack an authoritative source. Full gate on this branch's head,
-run individually (`just` is not installed): `ruff format --check .` -- 124
-files already formatted; `ruff check .` -- all checks passed; `mypy src` -- no
-issues found in 63 source files; `pytest -m "not network" -q` -- **938 passed,
-6 deselected** (912 before this branch plus 26 new splitter tests), with the
-same pydantic UserWarning as before. Commits on top of `93ffdf2`: `ce35cad`
-(the splitter change and its tests), `ec611fc` (the research note) and this
-commit. [EVIDENCE: live runs of the four gate commands and of the three harness
+abbreviations of the Kazakh punctuation rules (Syzdykova, handbook chapter,
+2000, reprinted at bilim-all.kz; the units year, century, second, minute and
+hour, and one more form each of "and so on" and "and the like"). Gates: D4 -
+abbreviation induction and a boundary-error sample per language, the count of
+o-like substitutes and uppercase Y in real khk_Cyrl, an audit of U+200C,
+U+200D, U+180A..U+180F and U+202F in any real traditional-script text; D5 - the
+converter never emits ZWJ or ZWNJ (a validator enforces it) and emits NNBSP, a
+render check in the target fonts, and the abbreviation and suffix questions
+that need a Mongolian reader; D8 - the tag and prefix design with its listed
+tests, per-direction corpora against a custom transform, and sanitising
+reserved strings in raw text. Not verified: no Mongolian reader judged any
+render, only two Noto Sans Mongolian builds were tested, the texts of MNS
+5552:2005 and MNS 4333:1996 were not retrieved, Eole per-direction corpora were
+not run end to end, and the abbreviation entries still lack an orthographic
+authority (the Kazakh ones rest on a published handbook chapter, the Mongolian
+ones on web usage evidence). Full gate on this branch's head, run individually
+(`just` is not installed): `ruff format --check .` -- 124 files already
+formatted; `ruff check .` -- all checks passed; `mypy src` -- no issues found
+in 63 source files; `pytest -m "not network" -q` -- **938 passed, 6
+deselected** (912 before this branch plus 26 new splitter tests), with the same
+pydantic UserWarning as before. Commits on top of `93ffdf2`: `ce35cad` (the
+splitter change and its tests), `ec611fc` (the research note), `719a741` (the
+records) and a last commit that corrects provenance and wording found in
+review. [EVIDENCE: live runs of the four gate commands and of the harness
 scripts, 2026-11-06.]
 
 Next step: D4 (Filtering & mining).

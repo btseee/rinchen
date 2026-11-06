@@ -555,14 +555,18 @@ returned 1000 for the model trained in the STOP-gate run, 2026-11-06.]
 
 ## 2026-11-06: D3 follow-up - the three open decisions, resolved by research
 
-This entry resolves the ZWNJ/ZWJ FLAG and the `add_dummy_prefix`
-revisit-before-D8 note of the D3 entry above, and narrows its abbreviation
-FLAG: the Kazakh set now has an official source for most of its entries (not
-for `т.с.с` and `б.з.д`), and the Mongolian entries still rest on web usage
-evidence. The third FLAG of the D3 entry, the O-umlaut look-alikes, is
-untouched and stays a D4 gate. The D3 entry is left as written (append-only);
-where the two differ, this entry is the current decision. The evidence, with
-its sources, quotes and the reproduction harness, is in
+This entry resolves the ZWNJ/ZWJ FLAG to keep-stripping, with an audit gate
+before D5 (the Mongolian-reader review the old FLAG asked for has not
+happened), and resolves the `add_dummy_prefix` revisit-before-D8 note of the D3
+entry above. It narrows the abbreviation FLAG of the D3 entry by a published
+handbook source (the Kazakh punctuation rules: Syzdykova, handbook chapter,
+2000, reprinted at bilim-all.kz), not by an authority: the Kazakh entries other
+than `б.з.д` have support in that text, the Mongolian entries still rest on web
+usage evidence, and an officially approved Kazakh orthography text was not
+located. The third FLAG of the D3 entry, the O-umlaut look-alikes, is untouched
+and stays a D4 gate. The D3 entry is left as written (append-only); where the
+two differ, this entry is the current decision. The evidence, with its sources,
+quotes and the reproduction harness, is in
 `docs/research/2026-11-06-mongolian-controls-and-spm-tags.md`; procedures are
 in `docs/runbooks/03_tokenizer.md`.
 
@@ -597,14 +601,21 @@ listed; the SentencePiece transform (`eole/transforms/tokenize.py`) encodes the
 whole string with `sp_model.encode(string, out_type=str)`. A tag written into
 the TEXT is therefore matched as a user-defined symbol and gets a standalone
 `▁` before it (verified: `['▁', '<2khk_Cyrl>', ...]`); with `transforms:
-[sentencepiece, prefix]` the tag becomes a token and no `▁` appears. A research
-pass over the released SentencePiece models found `add_dummy_prefix=True` in
-NLLB-200, M2M-100, mBART-50, MADLAD-400, OPUS-MT and t5-small; NLLB, M2M-100,
-mBART-50 and Marian add the language tag as an id or token after SentencePiece;
-only MADLAD-400 puts `<2xx>` in the text, and it shows the same standalone `▁`
-as ours. The SentencePiece author says the dummy prefix exists so that a word
-is segmented the same wherever it appears and that no experiments with it off
-exist (issues 305, 183 and 877 of the SentencePiece repository). On a toy
+[sentencepiece, prefix]` the tag becomes a token and no `▁` appears. The
+released SentencePiece model files checked on 2026-11-06
+(NLLB-200-distilled-600M, M2M-100-418M, mBART-large-50, MADLAD-400-3b-mt,
+OPUS-MT en-mul and t5-small) all have `add_dummy_prefix=True`; their addresses
+and sha256 prefixes are in the research note (the files can change upstream, so
+the prefixes are a snapshot). NLLB, M2M-100 and mBART-50 add the language tag
+as an id or token after SentencePiece. The OPUS-MT file contains no `>>xxx<<`
+tag: the Hugging Face MarianTokenizer strips it before SentencePiece and
+prepends it as a token afterwards, so "Marian adds the tag after SentencePiece"
+is true of that tokenizer only, and how Marian was trained was not examined.
+Only MADLAD-400 puts `<2xx>` in the text (493 `<2xx>` pieces, all
+user-defined), and it shows the same standalone `▁` as ours. The SentencePiece
+author says the dummy prefix exists so that a word is segmented the same
+wherever it appears (issues 305, 183 and 877 of the SentencePiece repository),
+and said in issue 877 that they had not run experiments on it. On a toy
 310-piece model, turning it off segmented a sentence-initial word into single
 letters while the same word mid-sentence was one piece (the direction is
 certain; the size of the effect on the real model was not measured).]
@@ -625,43 +636,47 @@ per language (not implemented yet; do it when a real mn_Mong corpus is first
 normalized); (c) audit real traditional-script text before the policy is
 frozen: counts and neighbours of U+200B, U+200C, U+200D, U+2060, U+FEFF,
 U+180A..U+180F and U+202F; words that become identical once the joiners are
-removed; a free variation selector that does not directly follow a letter. Flip
-condition: switch to "preserve, move the joiner after the FVS, and gate with a
-validator" only if the audit shows source-side joiners carrying
-display-critical content that must round-trip. Never apply NFKC or NFKD to
-`mn_Mong`: NFKC turns U+202F into a plain space, and SentencePiece's `nmt_nfkc`
-rule also turns ZWNJ and NNBSP into spaces (verified locally); the trainer
-already uses `identity` and a test pins it.
+removed; a free variation selector that does not directly follow a letter. The
+concrete gate of the older FLAG is retained as part of this audit: if the audit
+finds ZWNJ used as a suffix separator in legacy text, mapping ZWNJ to NNBSP is
+the first thing to try before switching to the preserve policy. Flip condition:
+switch to "preserve, move the joiner after the FVS, and gate with a validator"
+only if the audit shows source-side joiners carrying display-critical content
+that must round-trip. Never apply NFKC or NFKD to `mn_Mong`: NFKC turns U+202F
+into a plain space, and SentencePiece's `nmt_nfkc` rule also turns ZWNJ and
+NNBSP into spaces (verified locally); the trainer already uses `identity` and a
+test pins it.
 
 [EVIDENCE: Unicode 18 core specification, chapter 13 (re-read directly):
 "U+200C ZERO WIDTH NON-JOINER (ZWNJ) and U+200D ZERO WIDTH JOINER (ZWJ) may be
 used to select a particular positional form of a letter in isolation or to
-override the expected positional form within a word". They never distinguish
-words: only MVS and the free variation selectors (FVS) carry spelling
-information, and the normalizer preserves those. Unicode Technical Note #57 (a
-Technical Note, not normative) says everyday text does not need them and
-recommends the visible U+180A for joining. U+180A..U+180F, U+200C, U+200D and
-U+202F all have combining class 0 and are stable under NFC (checked locally
-with `unicodedata`), so NFC never reorders them. MNS 4932:2000 (the Mongolian
-national standard, read from the scan) defines ZWJ and ZWNJ as positional or
-joining controls for displaying a letter's initial, medial or final form alone
-or for splitting a word for display, and says that when a free variation
-selector is also needed for such a standalone or separated letter it is placed
-AFTER the ZWJ or ZWNJ; the Unicode standard requires the selector IMMEDIATELY
-after the base letter. Real shaping (HarfBuzz 15.0 with Noto Sans Mongolian
-v3.103) accepted the selector in 62 of the 117 standardized variants of UCD
-18.0.0 in the Unicode order `<base, FVS, ZWJ>` and in 0 of 117 in the legacy
-order `<base, ZWJ, FVS>`; the 2020 font build also diverged between the two
-orders in 21 of 117.]
+override the expected positional form within a word". The specification gives
+them no lexical role: only MVS and the free variation selectors (FVS) carry
+spelling information, and the normalizer preserves those. Unicode Technical
+Note #57 (a Technical Note, not normative) says everyday text does not need
+them and recommends the visible U+180A for joining. U+180A..U+180F, U+200C,
+U+200D and U+202F all have combining class 0 and are stable under NFC (checked
+locally with `unicodedata`), so NFC never reorders them. MNS 4932:2000 (the
+Mongolian national standard, read from the scan) defines ZWJ and ZWNJ as
+positional or joining controls for displaying a letter's initial, medial or
+final form alone or for splitting a word for display, and says that when a free
+variation selector is also needed for such a standalone or separated letter it
+is placed AFTER the ZWJ or ZWNJ; the Unicode standard requires the selector
+IMMEDIATELY after the base letter. Real shaping (HarfBuzz 15.0 with Noto Sans
+Mongolian v3.103) accepted the selector in 62 of the 117 standardized variants
+of UCD 18.0.0 in the Unicode order `<base, FVS, ZWJ>` and in 0 of 117 in the
+legacy order `<base, ZWJ, FVS>`; the 2020 font build also diverged between the
+two orders in 21 of 117.]
 
 [DESIGN: 3. NNBSP against MVS for separated suffixes: emit NNBSP, preserve
 both, map nothing yet.] The converter (D5) emits NNBSP before separated
-suffixes: it is the national standard's form and renders correctly in both font
-generations tested. `normalize` keeps preserving NNBSP and MVS exactly as they
-are; there is no NNBSP to MVS mapping now. A one-way NNBSP to MVS mapping
-before a Mongolian letter is possible later, never the reverse, because MVS
-also has the lexical use. Revisit when the national standards are revised to
-MVS or when a renderer matrix shows that MVS is safe in the fonts users have.
+suffixes: it is the national standard's form and shapes without error in both
+fonts tested (no Mongolian reader has judged the result). `normalize` keeps
+preserving NNBSP and MVS exactly as they are; there is no NNBSP to MVS mapping
+now. A one-way NNBSP to MVS mapping before a Mongolian letter is possible
+later, never the reverse, because MVS also has the lexical use. Revisit when
+the national standards are revised to MVS or when a renderer matrix shows that
+MVS is safe in the fonts users have.
 
 [EVIDENCE: Unicode 16.0 and later (re-read in the Unicode 18 text): "Prior to
 Unicode Version 16.0, U+202F NARROW NO-BREAK SPACE (NNBSP) was used to
@@ -683,31 +698,41 @@ a/e case still changes the glyphs, and the joiners change forms.]
 
 [DESIGN: 4. Abbreviations: the Cyrillic splitter now has a shared
 Russian-origin base plus per-language sets.] Mongolian-only and Kazakh-only
-entries no longer leak into the other languages. The Kazakh set gained the
-entries of the official rules listed below (`т.с`, `т.т`, `ж`, `ғ`, `сек`,
-`мин`, `сағ`); `т.с.с` and `б.з.д` stay as found in a Kazakh abbreviation list,
-not in the official text read. A wrong abbreviation entry is low-risk: it can
-only suppress a split before a capitalised word. Long term, hand lists are a
-stopgap: D4 should induce abbreviations from the real corpus (the Punkt
-approach of Kiss and Strunk 2006: collocation and length statistics) and
-measure boundary errors per language on a small human-labelled sample (the D2
-annotation app can produce it). A pretrained sentence segmenter such as SaT
-could be used only as an evaluation baseline (project rule: no external models
-in the pipeline), and its Mongolian and Kazakh coverage was not confirmed.
+entries no longer leak into the other languages. The single Cyrillic
+abbreviation set of the D3 entry is now `_CYRILLIC_COMMON_ABBREVIATIONS`,
+`_MONGOLIAN_ABBREVIATIONS` and `_KAZAKH_ABBREVIATIONS`, with one family per
+language. The Kazakh set gained the entries of the Kazakh punctuation rules
+(Syzdykova, handbook chapter, 2000, reprinted at bilim-all.kz) listed below
+(`т.с`, `т.т`, `ж`, `ғ`, `сек`, `мин`, `сағ`); `т.с.с` is used in the chapter's
+running examples but is not in its paragraph-8 list, and only `б.з.д` has no
+support in the text read. An officially approved Kazakh orthography text was
+not located, so the Kazakh and Mongolian entries still lack an orthographic
+authority. A wrong abbreviation entry is low-risk: it can only suppress a split
+before a capitalised word. Long term, hand lists are a stopgap: D4 should
+induce abbreviations from the real corpus (the Punkt approach of Kiss and
+Strunk 2006: collocation and length statistics) and measure boundary errors per
+language on a small human-labelled sample (the D2 annotation app can produce
+it). A pretrained sentence segmenter such as SaT could be used only as an
+evaluation baseline (project rule: no external models in the pipeline), and its
+Mongolian and Kazakh coverage was not confirmed.
 
-[EVIDENCE: The official Kazakh punctuation rules (paragraphs 7-10 of the
-punctuation chapter by Rabiga Syzdykova) list the dotted abbreviations `т.б.`,
-`т.с.`, `т.т.` and `ж.` (year), `ғ.` (century), `сек.`, `мин.`, `сағ.`;
-initials keep their dots; unit symbols such as km, m and cm take no dot. The
-Mongolian punctuation rules summary that was read uses a dot for initials and
-for abbreviations of names and a hyphen for contractions of common words (`д-р`
-doctor, `н-р` comrade), which cannot create a sentence boundary. The dotted
-Mongolian forms for "and so on", "for example", "in other words" and "before
-the common era" are widely attested in government, health and news documents,
-but no authoritative Mongolian list was found. Tests:
-`tests/unit/test_split_rules.py` pins every entry of the Kazakh and Mongolian
-sets, and that one entry of each (`ж`, `г.м`) does not apply to the other
-languages.]
+[EVIDENCE: The Kazakh punctuation rules (a handbook chapter by Rabiga Syzdykova
+from "Қазақ тілінің анықтағышы", Astana: Elorda, 2000, reprinted at
+bilim-all.kz on a learning site; nothing on the page marks it as official or
+approved; paragraphs 7-10 of the punctuation chapter) list the dotted
+abbreviations `т.б.`, `т.с.`, `т.т.` and `ж.` (year), `ғ.` (century), `сек.`,
+`мин.`, `сағ.`; initials keep their dots; unit symbols such as km, m and cm
+take no dot; `т.с.с.` occurs 20 times in the running examples of the page. The
+Mongolian punctuation rules summary that was read (a blog post crediting
+material by Ш. Лувсанвандан, not a primary text; address in the research note)
+uses a dot for initials and for abbreviations of names and a hyphen for
+contractions of common words (`д-р` doctor, `н-р` comrade), which cannot create
+a sentence boundary. The dotted Mongolian forms for "and so on", "for example",
+"in other words" and "before the common era" are widely attested in government,
+health and news documents, but no authoritative Mongolian list was found.
+Tests: `tests/unit/test_split_rules.py` pins every entry of the Kazakh and
+Mongolian sets, and that one entry of each (`ж`, `г.м`) does not apply to the
+other languages.]
 
 [EVIDENCE: 5. Verification status. Retrieved and read: MNS 4932:2000 (full
 scan, hosted in the Unicode document archive at
@@ -715,16 +740,18 @@ scan, hosted in the Unicode document archive at
 images, so the translations of its items 12-16 are the research pass's own and
 want a native-speaker check; its control-character table on page 5 has labels
 that do not match their code points and should not be relied on). The
-regulator's list (crc.gov.mn, items 148-151) confirms that MNS 4333:1996, MNS
+regulator's list (crc.gov.mn, items 148-150) confirms that MNS 4333:1996, MNS
 4932:2000 and MNS 5552:2005 exist, which proves titles, not that the editions
 are current. NOT retrieved: the full text of MNS 5552:2005 (it needs the
-national portal login) and its current edition (a portal notice title refers to
-a 2025 revision with public comment open until 18 Aug 2024; adoption
-unconfirmed), and MNS 4333:1996. Fonts tested: Noto Sans Mongolian 2.001
-(system, 2020) and v3.103 (2026) only, with HarfBuzz 15.0.0 through uharfbuzz
-0.57 and Pillow-Raqm (HarfBuzz 14.5.0) on Linux and Python 3.14.10. Not tested:
-browsers, Windows, Mongolian Baiti, Pango (the attempt rendered blank). No
-Mongolian reader has judged the orthographic correctness of the renders.]
+national portal login), its current edition, and MNS 4333:1996. A 2025 revision
+with public comment open until 18 Aug 2024 was seen only in a search-result
+snippet of a portal notice that could not be re-fetched (the 2025 title next to
+a 2024 deadline is unexplained); adoption and edition status are unconfirmed.
+Fonts tested: Noto Sans Mongolian 2.001 (system, 2020) and v3.103 (2026) only,
+with HarfBuzz 15.0.0 through uharfbuzz 0.57 and Pillow-Raqm (HarfBuzz 14.5.0)
+on Linux and Python 3.14.10. Not tested: browsers, Windows, Mongolian Baiti,
+Pango (the attempt rendered blank). No Mongolian reader has judged the
+orthographic correctness of the renders.]
 
 [DESIGN: 6. Gates.] D4: abbreviation induction and a boundary-error sample per
 language; count the o-like substitutes and uppercase Y inside Cyrillic-majority

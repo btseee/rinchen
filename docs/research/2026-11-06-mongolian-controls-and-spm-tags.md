@@ -31,7 +31,9 @@ abbreviation sets of the Cyrillic sentence splitter.
 | SentencePiece issues 305, 183 and 877 | `https://github.com/google/sentencepiece/issues/305`, `.../183`, `.../877` |
 | CTranslate2 guide on Transformer models | `https://github.com/OpenNMT/CTranslate2/blob/master/docs/guides/transformers.md` |
 | MADLAD-400 model card | `https://huggingface.co/google/madlad400-3b-mt` |
-| Kazakh punctuation rules (chapter by Rabiga Syzdykova) | `https://bilim-all.kz/article/5583` |
+| Released SentencePiece model files | the table in finding 1 |
+| Kazakh punctuation rules: a handbook chapter by Rabiga Syzdykova (from "Қазақ тілінің анықтағышы", Astana: Elorda, 2000), reprinted on a learning site; nothing on the page marks it as official or approved | `https://bilim-all.kz/article/5583` |
+| Mongolian punctuation rules summary, "Монгол хэлэнд цэг, таслал, тэмдгийг хэрхэн ашиглах тухай": a blog post crediting material by Ш. Лувсанвандан, not a primary text | `https://natsagdorjcom.wordpress.com/2018/03/17/%D0%BC%D0%BE%D0%BD%D0%B3%D0%BE%D0%BB-%D1%85%D1%8D%D0%BB%D1%8D%D0%BD%D0%B4-%D1%86%D1%8D%D0%B3-%D1%82%D0%B0%D1%81%D0%B0%D0%BB-%D1%82%D1%8D%D0%BC%D0%B4%D0%B3%D0%B8%D0%B9%D0%B3-%D1%85%D1%8D%D1%80%D1%85/` |
 | Mongolian regulator's list of standards | `https://www.crc.gov.mn/salbaryn-standartyn-zhagsaalt` |
 | Eole 0.6.4 source, as installed in the repo environment | `eole/transforms/misc.py`, `eole/transforms/tokenize.py`, `eole/inputters/text_corpus.py` |
 | Noto Sans Mongolian v3.103 release | `NotoSansMongolian-v3.103` at `github.com/notofonts/mongolian` |
@@ -53,14 +55,19 @@ abbreviation sets of the Cyrillic sentence splitter.
   standalone `▁` before it (checked: `['▁', '<2khk_Cyrl>', ...]`). With
   `transforms: [sentencepiece, prefix]` the tag is added as a token afterwards
   and no `▁` appears.
-- The released SentencePiece models looked at have `add_dummy_prefix=True`:
-  NLLB-200, M2M-100, mBART-50, MADLAD-400, OPUS-MT and t5-small. NLLB,
-  M2M-100, mBART-50 and Marian add the language tag as an id or token after
-  SentencePiece. Only MADLAD-400 puts `<2xx>` in the text, and it shows the
-  same standalone `▁` as ours.
+- The released SentencePiece models checked on 2026-11-06 all have
+  `add_dummy_prefix=True` (table below; `dummy_prefix.py` in the appendix reads
+  the setting). NLLB-200, M2M-100 and mBART-50 add the language tag as an id
+  or token after SentencePiece. The OPUS-MT file contains no `>>xxx<<` tag:
+  the Hugging Face MarianTokenizer strips it before SentencePiece and
+  prepends it as a token afterwards, so "Marian adds the tag after
+  SentencePiece" is true of that tokenizer only; how Marian was trained was
+  not examined. MADLAD-400 puts `<2xx>` in the text: its file has 493 `<2xx>`
+  pieces, all user-defined, and `<2mn> Hello world` encodes as
+  `['▁', '<2mn>', '▁Hello', '▁world']`, the same standalone `▁` as ours.
 - The SentencePiece author says the dummy prefix exists so that a word is
-  segmented the same wherever it appears, and that no experiments with it off
-  exist (issues 305, 183 and 877).
+  segmented the same wherever it appears (issues 305, 183 and 877), and said
+  in issue 877 that they had not run experiments on it.
 - A toy 310-piece model: with the prefix off, a sentence-initial word was
   segmented into single letters while the same word in mid-sentence was one
   piece. The direction is certain; the size of the effect on the real model was
@@ -70,14 +77,27 @@ abbreviation sets of the Cyrillic sentence splitter.
 - `check_spm` already accepts both `[symbol]` and `['▁', symbol]`.
 - Not tested: running per-direction Eole corpora end to end with `eole train`.
 
+Model files checked (all `add_dummy_prefix=True`). The files can change
+upstream; the hash prefixes are a snapshot from 2026-11-06.
+
+| Model | File | sha256 prefix |
+|---|---|---|
+| NLLB-200-distilled-600M | `https://huggingface.co/facebook/nllb-200-distilled-600M/resolve/main/sentencepiece.bpe.model` | `14bb8dfb35c0...` |
+| M2M-100-418M | `https://huggingface.co/facebook/m2m100_418M/resolve/main/sentencepiece.bpe.model` | `d8f7c76ed2a5...` |
+| mBART-large-50 | `https://huggingface.co/facebook/mbart-large-50/resolve/main/sentencepiece.bpe.model` | `cfc8146abe2a...` |
+| MADLAD-400-3b-mt | `https://huggingface.co/google/madlad400-3b-mt/resolve/main/spiece.model` | `ef11ac9a22c7...` |
+| OPUS-MT en-mul | `https://huggingface.co/Helsinki-NLP/opus-mt-en-mul/resolve/main/source.spm` | `9129bf81ef9d...` |
+| t5-small | `https://huggingface.co/google-t5/t5-small/resolve/main/spiece.model` | `d60acb128cf7...` |
+
 ### 2. ZWNJ and ZWJ in `mn_Mong`
 
 - Unicode 18, chapter 13: "U+200C ZERO WIDTH NON-JOINER (ZWNJ) and U+200D ZERO
   WIDTH JOINER (ZWJ) may be used to select a particular positional form of a
   letter in isolation or to override the expected positional form within a
-  word." They never distinguish words; only MVS (the specification calls its
-  joined-or-separated choice purely lexical) and the free variation selectors
-  (FVS) carry spelling information, and the normalizer preserves those.
+  word." The specification gives them no lexical role; only MVS (the
+  specification calls its joined-or-separated choice purely lexical) and the
+  free variation selectors (FVS) carry spelling information, and the
+  normalizer preserves those.
 - UTN #57 says everyday text does not need ZWNJ and ZWJ and recommends the
   visible U+180A MONGOLIAN NIRUGU for joining.
 - U+180A..U+180F, U+200C, U+200D and U+202F all have canonical combining class
@@ -122,18 +142,25 @@ abbreviation sets of the Cyrillic sentence splitter.
 
 ### 4. Abbreviations
 
-- The official Kazakh punctuation rules (paragraphs 7-10 of the punctuation
-  chapter by Rabiga Syzdykova) list the dotted abbreviations `т.б.`, `т.с.`,
-  `т.т.` and `ж.` (year), `ғ.` (century), `сек.`, `мин.`, `сағ.`. Initials keep
-  their dots; unit symbols such as km, m and cm take no dot.
-- The Mongolian punctuation rules summary that was read uses a dot for initials
-  and for abbreviations of names, and a hyphen for contractions of common words
-  (`д-р` doctor, `н-р` comrade), which cannot create a sentence boundary.
+- The Kazakh punctuation rules (a handbook chapter by Rabiga Syzdykova,
+  reprinted at bilim-all.kz; paragraphs 7-10 of its punctuation chapter) list
+  the dotted abbreviations `т.б.`, `т.с.`, `т.т.` and `ж.` (year), `ғ.`
+  (century), `сек.`, `мин.`, `сағ.`. Initials keep their dots; unit symbols
+  such as km, m and cm take no dot. Nothing on the page marks the text as
+  official or approved.
+- The Mongolian punctuation rules summary that was read (a blog post, not a
+  primary text; see the sources table) uses a dot for initials and for
+  abbreviations of names, and a hyphen for contractions of common words (`д-р`
+  doctor, `н-р` comrade), which cannot create a sentence boundary.
 - The dotted Mongolian forms for "and so on", "for example", "in other words"
   and "before the common era" are widely attested in government, health and news
   documents, but no authoritative Mongolian list was found.
-- `т.с.с` and `б.з.д` were found in a Kazakh abbreviation list, not in the
-  official text that was read.
+- `т.с.с` is used in the chapter's running examples (`т.с.с.` 20 times on the
+  page) but is not in its paragraph-8 list; `б.з.д` does not occur on the page,
+  so it is the only entry with no support in the text read.
+- An officially approved Kazakh orthography text was not located, so the
+  Kazakh entries, like the Mongolian ones, still lack an orthographic
+  authority.
 - A wrong abbreviation entry is low-risk: it can only suppress a split before a
   capitalised word. Hand lists are a stopgap. The Punkt approach (Kiss and
   Strunk 2006: collocation and length statistics) would induce them from the
@@ -186,18 +213,20 @@ in the sequence; for v3.103 the `.valid` counts are the informative measure.
   Pango (the attempt rendered blank). No Mongolian reader has judged the
   orthographic correctness of the renders.
 - Retrieved and read: the full scan of MNS 4932:2000. The regulator's list
-  (items 148-151) confirms that MNS 4333:1996, MNS 4932:2000 and MNS 5552:2005
+  (items 148-150) confirms that MNS 4333:1996, MNS 4932:2000 and MNS 5552:2005
   exist; that proves titles, not that the editions are current.
 - Not retrieved: the full text of MNS 5552:2005 (it needs the national portal
-  login) and its current edition (a portal notice title refers to a 2025
-  revision with public comment open until 18 Aug 2024; adoption unconfirmed),
-  and MNS 4333:1996.
+  login), its current edition, and MNS 4333:1996. A 2025 revision with public
+  comment open until 18 Aug 2024 was seen only in a search-result snippet of a
+  portal notice that could not be re-fetched (the 2025 title next to a 2024
+  deadline is unexplained); adoption and edition status are unconfirmed.
 - The combining-class and NFC check used the `unicodedata` of Python 3.14.10,
   which carries Unicode 16.0.0 data; the specification text and the variant
   list are Unicode 18.0.0.
-- The `add_dummy_prefix` values of NLLB-200, M2M-100, mBART-50, OPUS-MT and
-  t5-small come from the research pass over their released model files; their
-  file addresses are not recorded here.
+- The model files of finding 1 can change upstream; their hash prefixes are a
+  snapshot from 2026-11-06. How Marian itself was trained was not examined.
+- Both abbreviation sources are secondary: the Kazakh text is a reprint of a
+  handbook chapter on a learning site, and the Mongolian one is a blog summary.
 - The toy-model segmentation effect was measured on a 310-piece model only.
 - No end-to-end Eole training with per-direction corpora was run.
 
@@ -205,7 +234,10 @@ in the sequence; for v3.103 the `.valid` counts are the informative measure.
 
 Three scripts rerun the font results. They build every string from hex code
 points, so they hold no raw Mongolian, invisible or transliterated text; keep
-them that way.
+them that way. A fourth, `dummy_prefix.py`, reads the `add_dummy_prefix`
+setting of the model files listed in finding 1 (download them from the listed
+addresses into an empty directory and treat them as untrusted data; it needs
+the `sentencepiece` package).
 
 The fonts are not in the repo. Download the Noto Sans Mongolian release
 `NotoSansMongolian-v3.103` from `github.com/notofonts/mongolian` and unpack it;
@@ -439,4 +471,26 @@ for label, path in FONTS.items():
         f"{label}: of {n} variants, the FVS changes the glyphs: {total['with_fvs_vs_without']}; "
         f"the order matters (FVS,ZWJ vs ZWJ,FVS): {total['order_zwj']}; with ZWNJ: {total['order_zwnj']}"
     )
+```
+
+### `dummy_prefix.py`
+
+```python
+"""Print the add_dummy_prefix setting stored in SentencePiece model files.
+
+Usage: python -I dummy_prefix.py MODEL_FILE [MODEL_FILE ...]
+"""
+
+import hashlib
+import sys
+
+from sentencepiece import sentencepiece_model_pb2 as model_pb2
+
+for path in sys.argv[1:]:
+    with open(path, "rb") as handle:
+        data = handle.read()
+    proto = model_pb2.ModelProto()
+    proto.ParseFromString(data)
+    digest = hashlib.sha256(data).hexdigest()[:12]
+    print(f"{path}: sha256 {digest}..., add_dummy_prefix={proto.normalizer_spec.add_dummy_prefix}")
 ```

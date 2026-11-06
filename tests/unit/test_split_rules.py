@@ -264,8 +264,9 @@ _LATIN_AND_CYRILLIC_CASES = [
         "Қазақстан — үлкен ел. Астана — оның астанасы.",
         ["Қазақстан — үлкен ел.", "Астана — оның астанасы."],
     ),
-    # Kazakh dotted abbreviations from the official punctuation rules: the units
-    # year, century, minute, hour and second, and "and so on".
+    # Kazakh dotted abbreviations from the Kazakh punctuation rules (Syzdykova,
+    # handbook chapter, 2000): the units year, century, minute, hour and second,
+    # and "and so on".
     (
         "kaz_Cyrl",
         "1991 ж. Қазақстан тәуелсіздік алды. Бұл маңызды күн.",

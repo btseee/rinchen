@@ -174,9 +174,10 @@ _MONGOLIAN_ABBREVIATIONS = frozenset(
 )
 _KAZAKH_ABBREVIATIONS = frozenset(
     {
-        # From the official Kazakh punctuation rules: the dotted forms of
-        # "and so on" and "and the like", and the units year, century, second,
-        # minute and hour.
+        # Listed in the Kazakh punctuation rules (Syzdykova, handbook chapter,
+        # 2000, reprinted at bilim-all.kz): the dotted forms of "and so on"
+        # and "and the like", and the units year, century, second, minute and
+        # hour.
         "\u0442.\u0431",  # and so on
         "\u0442.\u0441",  # and the like
         "\u0442.\u0442",  # and so on
@@ -185,8 +186,9 @@ _KAZAKH_ABBREVIATIONS = frozenset(
         "\u0441\u0435\u043a",  # second
         "\u043c\u0438\u043d",  # minute
         "\u0441\u0430\u0493",  # hour
-        # Found in a Kazakh abbreviation list, not in the official text read.
+        # Used in the running examples of those rules, but not in their list.
         "\u0442.\u0441.\u0441",  # and the like
+        # No support in the text read.
         "\u0431.\u0437.\u0434",  # before the common era
     }
 )
