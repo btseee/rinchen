@@ -9,6 +9,8 @@ characters.
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from rinchen.config.languages import known_language_codes
@@ -455,3 +457,35 @@ def test_unknown_language_raises_even_for_empty_text() -> None:
 def test_every_registry_language_has_a_split_family() -> None:
     for code in sorted(known_language_codes()):
         assert split("x", code) == ["x"], code
+
+
+_RUN_LENGTH = 60_000
+_MAX_SECONDS_FOR_TERMINATOR_RUN = 0.5
+
+
+@pytest.mark.parametrize(
+    ("lang", "terminator", "tail"),
+    [
+        ("mn_Mong", chr(0x1803), ""),
+        ("mn_Mong", "?", ""),
+        ("zho_Hans", chr(0x3002), ""),
+        ("eng_Latn", ".", ""),
+        ("eng_Latn", ".", " 3"),
+        ("khk_Cyrl", ".", ""),
+        ("khk_Cyrl", ".", " 3"),
+    ],
+    ids=lambda value: repr(value),
+)
+def test_long_terminator_run_without_a_sentence_start_splits_in_linear_time(
+    lang: str, terminator: str, tail: str
+) -> None:
+    # Nothing starts a sentence after the run (a digit starts none in the spaced
+    # families; the end of the text starts none anywhere), so it is one part.
+    text = terminator * _RUN_LENGTH + tail
+
+    started = time.perf_counter()
+    parts = split(text, lang)
+    elapsed = time.perf_counter() - started
+
+    assert parts == [text]
+    assert elapsed < _MAX_SECONDS_FOR_TERMINATOR_RUN

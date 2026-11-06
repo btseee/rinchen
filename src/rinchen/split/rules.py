@@ -37,11 +37,13 @@ def _boundary_after(terminators: str) -> re.Pattern[str]:
 
     The quantifiers are possessive so that a run is never matched in part: at
     the end of the text, backtracking would otherwise cut "?!" between its
-    characters, because the "!" counts as text that follows the "?".
+    characters, because the "!" counts as text that follows the "?". The
+    lookbehind lets a match start only at the first terminator of a run: a
+    failed attempt there fails at every later offset of the run too, and
+    retrying them would take quadratic time on a long run.
     """
-    return re.compile(
-        rf"[{re.escape(terminators)}]++[{re.escape(_CLOSERS)}]*+(?=\s*\S)"
-    )
+    run = re.escape(terminators)
+    return re.compile(rf"(?<![{run}])[{run}]++[{re.escape(_CLOSERS)}]*+(?=\s*\S)")
 
 
 _MN_MONG_BOUNDARY = _boundary_after(_MN_MONG_TERMINATORS)
@@ -173,10 +175,12 @@ def _spaced_boundary(sentence_start: str) -> regex.Pattern[str]:
     """Match a terminator run and its closers when whitespace and a start follow.
 
     The quantifiers are possessive so that a run is never matched in part, which
-    would cut "?!" between its characters.
+    would cut "?!" between its characters. The lookbehind lets a match start only
+    at the first terminator of a run, as in `_boundary_after`.
     """
+    run = regex.escape(_SPACED_TERMINATORS)
     return regex.compile(
-        rf"(?P<terminator>[{regex.escape(_SPACED_TERMINATORS)}]++)"
+        rf"(?<![{run}])(?P<terminator>[{run}]++)"
         rf"[{regex.escape(_CLOSERS)}]*+(?=\s+(?:{sentence_start}))",
         regex.V1,
     )
