@@ -112,5 +112,5 @@ extend-exclude = ["docs/"]
 
 [[tool.mypy.overrides]]
 # None ships usable type information (no py.typed / stubs not installed).
-module = ["datasketch", "fasttext", "regex", "sentencepiece"]
+module = ["datasketch", "eole", "eole.*", "fasttext", "regex", "sentencepiece"]
 ignore_missing_imports = true
