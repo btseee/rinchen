@@ -30,8 +30,10 @@ doctor`, `just tiny` all green on `ubuntu-24.04`. D0's STOP gate ("`just
 gate` green locally AND in CI") and D1's STOP gate (no CI clause, met
 locally as detailed below) are both now fully satisfied.
 
-**D2 (human test-set annotation app) is also done; its STOP gate is fully
-met, including a whole-branch post-hoc review pass.** See the full D2
+**D2 (human test-set annotation app) is done; its STOP gate is fully met,
+including a whole-branch post-hoc review pass and a green CI run.**
+Pushed to `origin/main` 2026-11-02 (commit `d7e0248`); CI run `41473011127`
+passed clean on `ubuntu-24.04` with no further fixes needed. See the full D2
 paragraph below for the original build (commits `3f94ca9` through
 `8d9beab`). A subsequent whole-branch review found and fixed 6 Important
 and 6 worthwhile Minor findings (commits `7ace665`, `ed9ce04`, `79edb74`,
@@ -66,10 +68,7 @@ files; `uv run pytest -q -m "not network"` -- **161 passed, 6 deselected**;
 `uv run pytest -q` -- **167 passed**. [EVIDENCE: live `just gate` /
 `uv run pytest -q` runs, 2026-11-02, commits `7ace665` through this one.]
 
-Next step: push to `origin`, confirm CI green for D2's code (D2 has not
-yet been pushed or run on CI -- as of this commit, `main` is 21 commits
-ahead of `origin/main`, via `git rev-list --count origin/main..HEAD`),
-then start D3.
+Next step: start D3 (Normalization & SentencePiece).
 
 D0 (environment, skeleton, doctor): `pyproject.toml` restructured to the
 master plan's toolchain (see `docs/STACK.md` for resolved versions),

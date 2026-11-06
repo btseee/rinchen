@@ -62,12 +62,10 @@ corpus construction, cleaning, or alignment, which are later milestones.
 
 ## Current phase
 
-Master plan switched 2026-10-29 to milestones D0-D15 (see below). D0 and
-D1 are both done, both STOP gates fully met including a green CI run on
-`origin/main` (2026-11-02). D2 (human test-set annotation app) is also
-done locally, STOP gate fully met, including post-hoc whole-branch-review
-fixes -- not yet pushed or CI-verified. Next up: push to `origin`, confirm
-CI green for D2, then start D3. See `STATE.md`.
+Master plan switched 2026-10-29 to milestones D0-D15 (see below). D0, D1,
+and D2 are all done, all STOP gates fully met including green CI runs on
+`origin/main` (2026-11-02). Next up: D3 (Normalization & SentencePiece).
+See `STATE.md`.
 
 ## Evidence and full plan
 
