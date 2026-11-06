@@ -5,14 +5,14 @@ where a sentence ends; `_parts_between` turns those offsets into the stripped,
 non-empty parts. A new family registers its splitter in `_SPLITTERS`.
 
 The Latin and Cyrillic families (`_SpacedFamily`) end a sentence only before
-whitespace and a sentence start; a lone "." after an abbreviation, an initial or
-an ordinal number does not end one.
+whitespace and a sentence start; a lone "." after an abbreviation (also one
+written with spaces, "z. B."), an initial or an ordinal number does not end one.
 """
 
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from functools import partial
 from itertools import pairwise
@@ -60,7 +60,8 @@ _CYRILLIC_START = (
     rf"[\p{{Lu}}&&\p{{Script=Cyrillic}}]|[{regex.escape(_CYRILLIC_OPENERS)}]"
 )
 
-# Entries are lowercase with the final dot removed, as `_is_suppressed` compares them.
+# Entries are lowercase and compact, as `_is_known_abbreviation` compares them: inner
+# dots kept, no whitespace, final dot removed ("z.b" also matches "z. B.").
 _ENGLISH_ABBREVIATIONS = frozenset(
     {
         # Titles: Mr. Mrs. Ms. Dr. Prof. St. Capt. Col. Gen. Gov. Lt. Mt. Rev. Sen. Sgt.
@@ -183,8 +184,13 @@ def _spaced_boundary(sentence_start: str) -> regex.Pattern[str]:
 
 _LATIN_BOUNDARY = _spaced_boundary(_LATIN_START)
 _CYRILLIC_BOUNDARY = _spaced_boundary(_CYRILLIC_START)
-# A single uppercase letter before a "." is a name initial ("J. K. Rowling").
-_INITIAL = regex.compile(r"\p{Lu}")
+# The token before a "." is a name initial when it is one uppercase letter or a dotted
+# chain of them ("J.K", whose final dot is the "." under test).
+_INITIALS = regex.compile(r"\p{Lu}(?:\.\p{Lu})*")
+
+# An abbreviation may be written across this many whitespace-separated tokens
+# ("i. d. R."); the bound also keeps the scan around each "." constant.
+_MAX_ABBREVIATION_TOKENS = 4
 
 
 def _parts_between(text: str, cut_offsets: Iterable[int]) -> list[str]:
@@ -211,7 +217,7 @@ class _SpacedFamily:
     """Rules for text whose sentences are separated by whitespace.
 
     A lone "." is ambiguous there. `abbreviations`, `exempts_initials` and
-    `exempts_ordinals` name the tokens before it that keep it from ending a sentence.
+    `exempts_ordinals` name the tokens around it that keep it from ending a sentence.
     """
 
     boundary: regex.Pattern[str]
@@ -233,27 +239,100 @@ _CYRILLIC = _SpacedFamily(
 )
 
 
-def _token_before(text: str, end: int) -> str:
-    """The whitespace-delimited token that ends at offset `end`."""
+def _token_start(text: str, end: int) -> int:
+    """Offset where the whitespace-delimited token that ends at `end` begins."""
     start = end
     while start > 0 and not text[start - 1].isspace():
         start -= 1
-    return text[start:end]
+    return start
 
 
-def _is_suppressed(token: str, family: _SpacedFamily) -> bool:
-    """Whether a lone "." after `token` abbreviates or numbers instead of ending."""
+def _dotted_tokens_before(text: str, start: int, limit: int) -> list[str]:
+    """Up to `limit` tokens ending in "." right before offset `start`, nearest first.
+
+    The scan stops at the first token that does not end in a dot.
+    """
+    tokens: list[str] = []
+    while len(tokens) < limit:
+        end = start
+        while end > 0 and text[end - 1].isspace():
+            end -= 1
+        if end == 0 or text[end - 1] != ".":
+            break
+        start = _token_start(text, end)
+        tokens.append(text[start:end])
+    return tokens
+
+
+def _dotted_tokens_after(text: str, end: int, limit: int) -> list[str]:
+    """Up to `limit` tokens ending in "." right after offset `end`, nearest first.
+
+    The scan stops at the first token that does not end in a dot.
+    """
+    tokens: list[str] = []
+    while len(tokens) < limit:
+        start = end
+        while start < len(text) and text[start].isspace():
+            start += 1
+        end = start
+        while end < len(text) and not text[end].isspace():
+            end += 1
+        if end == start or text[end - 1] != ".":
+            break
+        tokens.append(text[start:end])
+    return tokens
+
+
+def _windows_around(
+    before: list[str], current: str, after: list[str]
+) -> Iterator[list[str]]:
+    """Every run of up to `_MAX_ABBREVIATION_TOKENS` consecutive tokens with `current`.
+
+    `before` lists the tokens left of `current`, nearest first; `after`, those right.
+    """
+    for count_before in range(len(before) + 1):
+        room = _MAX_ABBREVIATION_TOKENS - 1 - count_before
+        for count_after in range(min(len(after), room) + 1):
+            yield [*reversed(before[:count_before]), current, *after[:count_after]]
+
+
+def _is_known_abbreviation(text: str, dot: int, family: _SpacedFamily) -> bool:
+    """Whether the lone "." at `dot` ends a listed abbreviation, however it is spaced.
+
+    A window of consecutive dotted tokens around the dot is joined without
+    whitespace and looked up, so "z. B." matches "z.b" from both of its dots.
+    Windows reach past the dot's own token only when whitespace follows the dot.
+    With a closer after it the token ends in the closer, the neighbouring dots
+    would not see the same window, and the abbreviation could be cut apart.
+    """
+    if not family.abbreviations:
+        return False
+    start = _token_start(text, dot)
+    current = text[start : dot + 1]
+    has_neighbours = text[dot + 1 : dot + 2].isspace()
+    room = _MAX_ABBREVIATION_TOKENS - 1
+    before = _dotted_tokens_before(text, start, room) if has_neighbours else []
+    after = _dotted_tokens_after(text, dot + 1, room) if has_neighbours else []
+    return any(
+        "".join(window)[:-1].lower() in family.abbreviations
+        for window in _windows_around(before, current, after)
+    )
+
+
+def _is_suppressed(text: str, dot: int, family: _SpacedFamily) -> bool:
+    """Whether the lone "." at `dot` abbreviates or numbers instead of ending."""
+    token = text[_token_start(text, dot) : dot]
     return (
-        token.lower() in family.abbreviations
-        or (family.exempts_initials and _INITIAL.fullmatch(token) is not None)
+        (family.exempts_initials and _INITIALS.fullmatch(token) is not None)
         or (family.exempts_ordinals and token.isdecimal())
+        or _is_known_abbreviation(text, dot, family)
     )
 
 
 def _ends_sentence(match: regex.Match[str], text: str, family: _SpacedFamily) -> bool:
     if match["terminator"] != ".":
         return True
-    return not _is_suppressed(_token_before(text, match.start()), family)
+    return not _is_suppressed(text, match.start(), family)
 
 
 def _split_spaced(family: _SpacedFamily, text: str) -> list[str]:

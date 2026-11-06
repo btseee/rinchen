@@ -17,6 +17,7 @@ from rinchen.split import split
 
 S1 = "\u1820\u1821"  # two traditional-script letters standing for a word
 S2 = "\u1822\u1823"
+NBSP = "\N{NO-BREAK SPACE}"  # spaced abbreviations may use it between tokens
 
 _SPLIT_LANGUAGES = (
     "khk_Cyrl",
@@ -116,6 +117,11 @@ _LATIN_AND_CYRILLIC_CASES = [
         "J. K. Rowling wrote it. Then left.",
         ["J. K. Rowling wrote it.", "Then left."],
     ),
+    (
+        "eng_Latn",
+        "J.K. Rowling wrote it. Then left.",
+        ["J.K. Rowling wrote it.", "Then left."],
+    ),
     ("eng_Latn", "Pi is 3.14 today. Ok.", ["Pi is 3.14 today.", "Ok."]),
     ("eng_Latn", "I have 3. Then go.", ["I have 3.", "Then go."]),
     ("eng_Latn", "Wait… Then go.", ["Wait…", "Then go."]),
@@ -137,6 +143,32 @@ _LATIN_AND_CYRILLIC_CASES = [
         "deu_Latn",
         "Das ist z.B. ein Test. Gut.",
         ["Das ist z.B. ein Test.", "Gut."],
+    ),
+    (
+        "deu_Latn",
+        "Das ist z. B. ein Test. Gut.",
+        ["Das ist z. B. ein Test.", "Gut."],
+    ),
+    (
+        "deu_Latn",
+        f"Das ist z.{NBSP}B. ein Test. Gut.",
+        [f"Das ist z.{NBSP}B. ein Test.", "Gut."],
+    ),
+    (
+        "deu_Latn",
+        "Wir kommen u. a. am Montag. Gut.",
+        ["Wir kommen u. a. am Montag.", "Gut."],
+    ),
+    (
+        "deu_Latn",
+        "Das gilt i. d. R. für alle. Gut.",
+        ["Das gilt i. d. R. für alle.", "Gut."],
+    ),
+    # A window of dotted tokens must not swallow a real sentence boundary.
+    (
+        "deu_Latn",
+        "Ich bin hier. B. kommt später.",
+        ["Ich bin hier.", "B. kommt später."],
     ),
     # Turkish and Korean use the base rule: no abbreviations, no initials.
     (
@@ -169,6 +201,11 @@ _LATIN_AND_CYRILLIC_CASES = [
         "khk_Cyrl",
         "Б. Баяр, Д. Дорж нар ирлээ. Дараа нь явав.",
         ["Б. Баяр, Д. Дорж нар ирлээ.", "Дараа нь явав."],
+    ),
+    (
+        "khk_Cyrl",
+        "А.Б. Баяр ирлээ. Дараа нь явав.",
+        ["А.Б. Баяр ирлээ.", "Дараа нь явав."],
     ),
     (
         "khk_Cyrl",
@@ -228,6 +265,21 @@ _LATIN_AND_CYRILLIC_CASES = [
 def test_latin_and_cyrillic_split_cases(
     lang: str, text: str, expected: list[str]
 ) -> None:
+    assert split(text, lang) == expected
+
+
+@pytest.mark.parametrize(
+    ("lang", "text", "expected"),
+    [
+        ("tur_Latn", "Bu z. B. gibi. Tamam.", ["Bu z.", "B.", "gibi.", "Tamam."]),
+        ("kor_Hang", "예: z. B. 안녕. 확인.", ["예: z.", "B.", "안녕.", "확인."]),
+    ],
+)
+def test_turkish_and_korean_have_no_abbreviation_handling(
+    lang: str, text: str, expected: list[str]
+) -> None:
+    # These families have no abbreviation set, so "z. B." is cut like any other
+    # sentence end; the spaced-abbreviation rule must not apply to them.
     assert split(text, lang) == expected
 
 
