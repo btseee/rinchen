@@ -3,6 +3,7 @@
 import importlib.metadata
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -125,6 +126,27 @@ def test_manifest_without_status_loads_with_an_empty_one(tmp_path):
 
     assert loaded is not None
     assert loaded.status == {}
+
+
+@pytest.mark.subprocess
+def test_importing_the_cli_raises_no_user_warning():
+    # The CLI imports the manifest model; a pydantic warning at class creation
+    # would print on every `rinchen` command.
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-W",
+            "error::UserWarning",
+            "-c",
+            "import rinchen.cli.main",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 @pytest.mark.subprocess
