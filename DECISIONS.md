@@ -422,8 +422,8 @@ initial exemption applies to eng, deu and the Cyrillic family only, not tur
 or kor (builder's call); German also exempts all-digit ordinals. Spaced
 multi-token abbreviations (`z. B.`, `d. h.`, `u. a.`, `i. d. R.`) and dotted
 initials (`J.K.`) are handled by a compact-form window of up to 4
-dot-terminated tokens, looking both ways (controller ruling after the Task 7
-review found German `z. B.` splitting mid-phrase). Neighbours are consulted
+dot-terminated tokens, looking both ways (added after a review found German
+`z. B.` splitting mid-phrase). Neighbours are consulted
 only when whitespace follows the dot directly, because otherwise a closer
 after the dot breaks the rejoin and idempotence contract. [EVIDENCE:
 `tests/unit/test_split_rules.py`, `tests/property/test_split_properties.py`,
@@ -449,10 +449,17 @@ word do not split. The pronoun "I" is swallowed by the single-initial
 exemption (`Neither did I. Then we left.` stays one part). The Latin start
 rule is letters only, so a quote or a digit after a period does not start a
 sentence; the Cyrillic rule excludes Latin uppercase and digits. In mn_Mong,
-ASCII `?` and `!` split even without following whitespace (brief-mandated),
-which cuts URL-like text. A very long run of one terminator is quadratic:
-10,000 terminators take about 0.1 s and 80,000 take 2 to 6 s on the dev
-machine. The cost is a mis-split or wrongly merged sentence in the cases
+ASCII `?` and `!` split even without following whitespace (the approved
+design specifies it), which cuts URL-like text such as a query string. A
+terminator that follows closing characters is split off as a lone terminator
+part: in the CJK families U+3002 U+300D U+FF01 gives `U+3002 U+300D` and
+`U+FF01`. A leading terminator run becomes a part of its own: U+3002 followed
+by U+4F60 U+597D gives `U+3002` and `U+4F60 U+597D` (the same holds in mn_Mong
+and the Latin family). A very long run of one terminator at the end of the
+text, or otherwise not followed by a sentence start, is quadratic: 10,000
+terminators take about 0.1 s and 80,000 take 2 to 6 s on the dev machine,
+while the same run followed by whitespace and a valid sentence start splits
+instantly. The cost is a mis-split or wrongly merged sentence in the cases
 named, which matters only if such text is common in the corpus.
 
 [DESIGN: SentencePiece policy is fixed in code, not config.] `unigram`,
@@ -465,7 +472,8 @@ config carries `vocab_size`, `input_sentence_size`, `character_coverage`,
 `input_sentence_size` values 100000, 10000000 and 20000000 are the builder's
 call. Sampling uses one RNG stream
 per language, `random.Random(f"{seed}-{lang}")` (independent of
-`PYTHONHASHSEED` and of language order). A language's quota is
+`PYTHONHASHSEED` and of language order; adding a language still changes every
+quota, because the weights are renormalised, so every sample is redrawn). A language's quota is
 `floor(weight * budget)` capped at its size; unused quota is not
 redistributed, so a sample can fall below the budget; if the whole corpus fits
 the budget, everything is used. Cost if wrong: retrain, with the budgets the
@@ -511,8 +519,9 @@ in its language's declared script. The committed files
 train to exactly 1000 pieces with the 118 reserved symbols, under
 SentencePiece's default hard vocabulary limit. A repetitive corpus of 30
 distinct words fails that limit at 1000 ("Vocabulary size too high"), which
-is why the fixture is varied. The mn_Mong lines use only basic-block
-U+1820..U+1841 letters. The fixture carries only the digits 0, 2, 3, 4 and 5, so a digit
-it lacks (1 was checked) encodes as a byte piece in the tiny model. [EVIDENCE:
+is why the fixture is varied. The mn_Mong lines use letters from the basic
+block U+1820..U+1841 plus spaces and a closing U+1803. The fixture carries
+only the digits 0, 2, 3, 4 and 5, so a digit it lacks (1 was checked) encodes
+as a byte piece in the tiny model. [EVIDENCE:
 `tests/unit/test_spm_fixture.py`; `SentencePieceProcessor.get_piece_size()`
 returned 1000 for the model trained in the STOP-gate run, 2026-11-06.]

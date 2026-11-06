@@ -153,7 +153,11 @@ is capped at its own size, the unused quota is not given to the others: in
 the 100,000,000 and 1,000,000 example with a 10,000,000-line budget, the
 quotas are 7,992,399 and 1,000,000, so the sample holds 8,992,399 lines.
 Each language is sampled from its own RNG stream seeded `f"{seed}-{lang}"`,
-so adding a language does not change the other languages' samples.
+so a language's draw does not depend on `PYTHONHASHSEED` or on the order of
+the languages. Adding a language still changes every language's quota (the
+weights are renormalised over all languages), so every sample is redrawn:
+for 1000 and 500 lines against a 600-line budget at `T=0.3`, the quotas are
+331 and 268; adding a third language of 300 lines makes them 239 and 194.
 
 ### Update the golden file
 
@@ -202,10 +206,13 @@ expected values are never generated from `normalize` output.
   text) are listed in `DECISIONS.md`.
 - **Memory.** `train_spm` reads every `<lang>.txt` in full
   (`read_lines`) before sampling, so memory follows the total corpus size,
-  not the budget. A Python `str` costs roughly 94 bytes for a short line
-  (real sentences cost more), and the configured budgets are 10 million
-  (student) and 20 million (teacher) lines. Size the machine for the corpus,
-  not for the sample.
+  not the budget. Measured on Python 3.14.10 with `sys.getsizeof`, a
+  37-character ASCII line is a 78-byte `str` and a 49-character Cyrillic line
+  a 156-byte one (two bytes per character), plus 8 bytes for its slot in the
+  list: roughly 90 to 160 bytes per short line, more for real sentences. The
+  configured budgets are 10 million (student) and 20 million (teacher) lines,
+  and every 10 million short lines held in memory cost roughly 0.9 to 1.6 GB.
+  Size the machine for the whole corpus, not for the sample.
 - **`spm check` reads whole files too.** It loads each corpus file to take
   the first N lines, so `--sample-lines` bounds the encoding work, not the
   reading. The first N lines are not a random sample.
