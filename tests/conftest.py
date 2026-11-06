@@ -4,6 +4,11 @@ from __future__ import annotations
 
 import sys
 
+from hypothesis import settings
+
+settings.register_profile("rinchen", derandomize=True, deadline=None, max_examples=200)
+settings.load_profile("rinchen")
+
 if sys.platform == "win32":
     # Windows' default console encoding (cp1252) can't print traditional
     # Mongol-script or other non-Latin-1 Unicode content. Without this, a
