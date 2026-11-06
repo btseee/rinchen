@@ -16,9 +16,12 @@ from rinchen.mine.embed import Embedder, SentenceTransformerEmbedder
 def apply(
     df: pl.LazyFrame, cfg: LabseConfig, *, embedder: Embedder | None = None
 ) -> pl.LazyFrame:
-    """Write `scores.labse` and reject rows below `cfg.min_cosine` as `labse`.
-    Without `embedder`, a LaBSE embedder is built from `cfg`; it loads its model
-    only when a row has to be scored."""
+    """Write `scores.labse` and reject rows below `cfg.min_cosine` as `labse`;
+    a NaN score is rejected too. Without `embedder`, a LaBSE embedder is built
+    from `cfg`; it loads its model only when a row has to be scored.
+
+    The stage embeds each side of all rows in one call, so it holds two
+    `n x d` float32 matrices at once, about 6 KB per row for LaBSE."""
     resolved = (
         embedder
         if embedder is not None
@@ -28,8 +31,10 @@ def apply(
     )
     scored = with_scores(df, labse=_cosine(resolved))
     floor = pl.lit(cfg.min_cosine, dtype=pl.Float32)
+    labse_score = pl.col("scores").struct.field("labse")
+    # Polars sorts NaN above every number, so `<` alone would keep a NaN row.
     return flag(
-        scored, pl.col("scores").struct.field("labse") < floor, FilterReason.LABSE
+        scored, labse_score.is_nan() | (labse_score < floor), FilterReason.LABSE
     )
 
 

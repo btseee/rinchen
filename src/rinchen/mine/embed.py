@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 import numpy as np
 from numpy.typing import NDArray
 
+from rinchen.errors import UpstreamError
+
 if TYPE_CHECKING:
     from sentence_transformers import SentenceTransformer
 
@@ -70,6 +72,13 @@ def _resolve_device(device: str) -> str:
 
 
 def _load_model(model_name: str, device: str) -> SentenceTransformer:
+    """Raises UpstreamError when the model cannot be fetched or read (OSError)
+    or the device is not usable, e.g. `cuda` without a GPU (RuntimeError)."""
     from sentence_transformers import SentenceTransformer
 
-    return SentenceTransformer(model_name, device=device)
+    try:
+        return SentenceTransformer(model_name, device=device)
+    except (OSError, RuntimeError) as exc:
+        raise UpstreamError(
+            f"could not load embedding model {model_name!r} on {device}: {exc}"
+        ) from exc

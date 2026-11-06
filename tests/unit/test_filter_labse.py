@@ -3,6 +3,7 @@ rejected as `labse`. Every row gets a score."""
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from typing import Any
 
@@ -14,6 +15,7 @@ from numpy.typing import NDArray
 from rinchen.config.filters import LabseConfig
 from rinchen.corpus.schema import CORPUS_SCHEMA, corpus_frame
 from rinchen.filter import labse
+from rinchen.mine import embed as embed_module
 from rinchen.mine.embed import Embedder
 from tests.support.embedders import ConceptEmbedder
 from tests.support.planted_corpus import PlantedCorpus, build_planted_corpus
@@ -32,6 +34,32 @@ class RecordingEmbedder:
     def embed(self, texts: Sequence[str]) -> NDArray[np.float32]:
         self.calls.append(list(texts))
         return self._inner.embed(texts)
+
+
+class RealShapeEmbedder:
+    """Like the real embedder, answers no texts with an array of shape (0, 0)."""
+
+    def __init__(self, inner: Embedder) -> None:
+        self._inner = inner
+
+    def embed(self, texts: Sequence[str]) -> NDArray[np.float32]:
+        if not texts:
+            return np.zeros((0, 0), dtype=np.float32)
+        return self._inner.embed(texts)
+
+
+class NanEmbedder:
+    """Embeds the text "nan" as a vector of NaN and everything else as `inner`."""
+
+    def __init__(self, inner: Embedder) -> None:
+        self._inner = inner
+
+    def embed(self, texts: Sequence[str]) -> NDArray[np.float32]:
+        vectors = self._inner.embed(texts)
+        for position, text in enumerate(texts):
+            if text == "nan":
+                vectors[position] = np.nan
+        return vectors
 
 
 def _row(src: str, tgt: str) -> dict[str, str]:
@@ -168,6 +196,18 @@ def test_a_score_exactly_at_the_threshold_is_not_flagged() -> None:
     assert _reasons(above) == [None, "labse"]
 
 
+def test_a_nan_score_is_flagged_not_kept() -> None:
+    embedder = NanEmbedder(_concepts(["a1", "a2"]))
+    frame = _frame(("a1", "a2"), ("nan", "a1"), ("a1", "nan"))
+
+    result = labse.apply(frame.lazy(), DEFAULT_CONFIG, embedder=embedder).collect()
+
+    scores = _scores(result)
+    assert scores[0] is not None
+    assert all(score is not None and math.isnan(score) for score in scores[1:])
+    assert _reasons(result) == [None, "labse", "labse"]
+
+
 def test_a_row_that_already_has_a_reason_keeps_it() -> None:
     embedder = _concepts(["a1"], ["b1"])
     df = _frame(("a1", "b1"), ("a1", "b1")).with_columns(
@@ -257,6 +297,36 @@ def test_apply_on_an_empty_frame_returns_an_empty_frame_of_the_same_schema() -> 
 
     assert result.height == 0
     assert result.schema == CORPUS_SCHEMA
+
+
+def test_an_embedder_that_answers_no_texts_with_shape_zero_by_zero_is_accepted() -> (
+    None
+):
+    embedder = RealShapeEmbedder(ConceptEmbedder({}))
+
+    result = labse.apply(
+        corpus_frame([]).lazy(), DEFAULT_CONFIG, embedder=embedder
+    ).collect()
+
+    assert result.height == 0
+    assert result.schema == CORPUS_SCHEMA
+
+
+def test_the_built_embedder_loads_no_model_for_an_empty_frame(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    loads: list[tuple[str, str]] = []
+
+    def load_model(model_name: str, device: str) -> None:
+        loads.append((model_name, device))
+
+    monkeypatch.setattr(embed_module, "_load_model", load_model)
+
+    result = labse.apply(corpus_frame([]).lazy(), LabseConfig(device="cpu")).collect()
+
+    assert result.height == 0
+    assert result.schema == CORPUS_SCHEMA
+    assert loads == []
 
 
 # --- batching across rows -----------------------------------------------------------

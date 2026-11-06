@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 
+from rinchen.errors import UpstreamError
 from rinchen.mine import embed as embed_module
 from rinchen.mine.embed import Embedder, SentenceTransformerEmbedder
 from tests.support.embedders import ConceptEmbedder, HashEmbedder
@@ -123,6 +124,31 @@ def test_embed_of_no_texts_is_an_empty_array_and_loads_nothing(
     assert loader.loads == []
 
 
+# --- load failures ------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [OSError("model files not found"), RuntimeError("No CUDA GPUs are available")],
+    ids=["os_error", "runtime_error"],
+)
+def test_a_model_that_cannot_be_loaded_is_an_upstream_error(
+    monkeypatch: pytest.MonkeyPatch, failure: Exception
+) -> None:
+    def failing_model(model_name: str, *, device: str) -> None:
+        raise failure
+
+    monkeypatch.setattr("sentence_transformers.SentenceTransformer", failing_model)
+    embedder = SentenceTransformerEmbedder("some/model", device="cpu")
+
+    with pytest.raises(UpstreamError, match="some/model") as caught:
+        embedder.embed(["a"])
+
+    assert "cpu" in str(caught.value)
+    assert str(failure) in str(caught.value)
+    assert caught.value.__cause__ is failure
+
+
 # --- the device ---------------------------------------------------------------------
 
 
@@ -179,7 +205,8 @@ def test_importing_the_embedder_stage_and_cli_does_not_import_torch() -> None:
         "import rinchen.mine.embed\n"
         "import rinchen.filter.labse\n"
         "import rinchen.cli.main\n"
-        "heavy = [m for m in ('torch', 'sentence_transformers') if m in sys.modules]\n"
+        "heavy = [m for m in ('torch', 'transformers', 'sentence_transformers')"
+        " if m in sys.modules]\n"
         "print(','.join(heavy))\n"
     )
 
@@ -187,9 +214,10 @@ def test_importing_the_embedder_stage_and_cli_does_not_import_torch() -> None:
         [sys.executable, "-I", "-c", snippet],
         capture_output=True,
         text=True,
-        check=True,
+        check=False,
     )
 
+    assert completed.returncode == 0, completed.stderr
     assert completed.stdout.strip() == ""
 
 
