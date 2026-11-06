@@ -37,16 +37,21 @@ NEVER:
 CLAUDE.md STATE.md DECISIONS.md pyproject.toml uv.lock justfile
 .pre-commit-config.yaml
 configs/base.yaml configs/profiles/{tiny,full}.yaml configs/{spm,eole,serve}/
+configs/languages.yaml configs/spm/{tiny_1k,student_64k,teacher_128k}.yaml
 configs/data/sources.yaml configs/data/sources.tiny.yaml
 docs/STACK.md docs/VERIFY.md
 docs/runbooks/00_environment.md docs/runbooks/01_acquisition.md
-docs/runbooks/02_human_testsets.md
+docs/runbooks/02_human_testsets.md docs/runbooks/03_tokenizer.md
 docs/research/  docs/superpowers/{specs,plans}/
-src/rinchen/{config,manifest,utils,cli,text,filter,synth,metrics,eval,serve}/
+src/rinchen/{config,manifest,utils,cli,text,lang,split,spm,filter,synth,metrics,eval,serve}/
 src/rinchen/acquire/{http,opus,hf,warc,commoncrawl,registry}.py
 src/rinchen/annotate/{db,export,agreement,app,routes,models}.py
+src/rinchen/spm/{symbols,corpus,train,check}.py src/rinchen/split/rules.py
+src/rinchen/text/normalize.py src/rinchen/lang/scripts.py
 src/rinchen/errors.py src/rinchen/__init__.py
 tests/ scripts/ plans/ reports/ manifests/
+tests/{unit,property,golden}/ tests/fixtures/{annot,golden,raw,spm}/
+scripts/build_spm_fixture.py (regenerates tests/fixtures/spm/tiny_corpus)
 data/{raw,clean,mined,synth,test}/ (gitignored content, tracked dirs)
 vendor/wheels/ (committed binary wheels with no cp314 upstream release)
 vendor/fasttext-wheel-shim/ (pure-Python shim package, see DECISIONS.md)
@@ -64,8 +69,10 @@ corpus construction, cleaning, or alignment, which are later milestones.
 
 Master plan switched 2026-10-29 to milestones D0-D15 (see below). D0, D1,
 and D2 are all done, all STOP gates fully met including green CI runs on
-`origin/main` (2026-11-02). Next up: D3 (Normalization & SentencePiece).
-See `STATE.md`.
+`origin/main` (2026-11-02). D3 (Normalization & SentencePiece) is done: its
+STOP gate was met locally (2026-11-06), but only `tiny_1k` was ever trained
+(`student_64k`/`teacher_128k` are schema-validated only) and no CI run of D3
+is recorded yet. Next up: D4 (Filtering & mining). See `STATE.md`.
 
 ## Evidence and full plan
 

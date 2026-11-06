@@ -355,3 +355,164 @@ that same task back on a subsequent claim (Finding 2) rather than a
 different, newly-prioritized one. See `claim_next_task`'s docstring in
 `src/rinchen/annotate/db.py` for the full eligibility rules.
 
+## 2026-11-06: D3 normalization and SentencePiece design decisions
+
+D3 (`src/rinchen/{lang,split,spm}/`, `src/rinchen/text/normalize.py`,
+`src/rinchen/cli/spm.py`) filled gaps in, or departed from, the approved spec
+(`docs/superpowers/specs/`) in the ways below, collected in one entry. "Builder's
+call" means the spec was silent and the implementer chose. Items marked FLAG
+need a human decision later; the known limitations are recorded so nobody
+rediscovers them as surprises. Procedures are in
+`docs/runbooks/03_tokenizer.md`.
+
+[DESIGN: The language registry (`configs/languages.yaml`) has 10 entries, not
+the spec's "9", and each entry carries a `scripts` list, not a single
+`script`.] The 10 are the 8 partner languages (eng_Latn, rus_Cyrl, zho_Hans,
+kor_Hang, jpn_Jpan, deu_Latn, kaz_Cyrl, tur_Latn) plus khk_Cyrl and mn_Mong.
+mn_Mong is an output variant of Mongolian, not a partner, so there are
+8 x 2 = 16 translation directions but 10 direction tags. `scripts` is a list
+because jpn_Jpan spans Han, Hiragana and Katakana. The reserved SentencePiece
+symbols are 10 tags + 8 structural tags + 100 placeholders = 118, and
+`<2mn_Mong>` comes from the registry like the other tags instead of being a
+separate hand-added symbol (builder's call). If the count or order of the
+registry is wrong, every SentencePiece model and everything trained on it must
+be retrained, which is cheap before D8 and expensive after.
+
+[DESIGN: `normalize` runs NFC, zero-width cleanup, whitespace, quotes,
+Cyrillic homoglyph repair, Fita fold, NFC again, in that order (builder's
+call).] The spec lists zero-width cleanup last. That breaks the spec's own
+idempotence property for `a ZWSP b` (stripping after whitespace collapsing
+leaves two spaces) and lets the fold and homoglyph steps create composable
+pairs that only the closing NFC pass repairs. Uppercase Latin lookalikes
+(A E O P C X Y) are repaired as well as lowercase (builder's call). The
+zero-width set is U+200B, U+200C, U+200D plus U+2060 and U+FEFF (builder's
+call). The Mongolian free variation selectors and vowel separator
+U+180B..U+180F are stripped outside mn_Mong and kept inside it. The Fita fold
+table is exactly U+0472 to U+04E8 and U+0473 to U+04E9; Kazakh U+04B0/U+04B1
+and Greek theta are never touched. [EVIDENCE:
+`tests/fixtures/golden/normalize_200.tsv`, 200 lines derived by hand from the
+rule table, never from `normalize` output; a reviewer independently
+re-derived all 200 with 0 disagreements. Hypothesis idempotence properties in
+`tests/property/test_normalize_properties.py`.] Cost if wrong: a golden-file
+update plus a reprocess of any corpus normalized so far.
+
+[DESIGN: FLAG: ZWNJ and ZWJ (U+200C, U+200D) are stripped in mn_Mong too
+(spec-literal).] Traditional Mongolian script shaping can rely on both
+characters, so stripping them may change how some words render or which
+glyph form a model sees. Revisit with a Mongolian shaping-aware reviewer
+before any large mn_Mong corpus is normalized. The only cost to change is a
+golden-file update and a normalization-rule edit; once corpora are built it
+is a reprocess.
+
+[DESIGN: KNOWN LIMITATION of `normalize`: it is not idempotent for Hangul
+jamo, a stripped zero-width character and trailing jamo inside a
+Cyrillic-majority token that also holds a Latin lookalike.] The final NFC
+merges the jamo and shifts the more-than-50%-Cyrillic gate on a second pass;
+kor_Hang is in the registry, so the combination is expressible. It is
+contrived, and no property test or golden line reaches it. It is not fixed
+because the fix (an NFC pass after the zero-width step) changes the pinned
+7-step pipeline above and its golden file.
+
+[DESIGN: The splitter's abbreviation sets are module-level frozensets in
+`src/rinchen/split/rules.py`; the master plan's `abbrev/*.txt` layout is not
+used, per the approved spec.] Sentence-start rules: the Latin family accepts
+any letter as a start (Hangul has no case); the Cyrillic family accepts an
+uppercase Cyrillic letter, an opening quote or a dash. The single-uppercase-
+initial exemption applies to eng, deu and the Cyrillic family only, not tur
+or kor (builder's call); German also exempts all-digit ordinals. Spaced
+multi-token abbreviations (`z. B.`, `d. h.`, `u. a.`, `i. d. R.`) and dotted
+initials (`J.K.`) are handled by a compact-form window of up to 4
+dot-terminated tokens, looking both ways (controller ruling after the Task 7
+review found German `z. B.` splitting mid-phrase). Neighbours are consulted
+only when whitespace follows the dot directly, because otherwise a closer
+after the dot breaks the rejoin and idempotence contract. [EVIDENCE:
+`tests/unit/test_split_rules.py`, `tests/property/test_split_properties.py`,
+commit `28088da`.]
+
+[DESIGN: FLAG: the Mongolian-specific and Kazakh-specific abbreviations in
+`_CYRILLIC_ABBREVIATIONS` were confirmed by web usage evidence, not by an
+orthographic authority.] They are the four Mongolian entries (glosses: "and so
+on", "for example", "in other words", "before the common era") and the three
+Kazakh entries ("and so on", "and the like", "before the common era"), in
+Cyrillic spelling in `src/rinchen/split/rules.py`. They need native-speaker
+review. A wrong entry costs a missed or a spurious sentence break around that
+abbreviation; the fix is a one-line edit to the set.
+
+[DESIGN: KNOWN LIMITATIONS of the splitter, all reproduced by reviewers; a
+few re-checked while writing this entry.] `split` expects already-normalized
+text: a zero-width character left after a terminator misplaces the boundary
+(in mn_Mong the next part starts with it; in the Latin and Cyrillic families
+it suppresses the split). Spaced abbreviations in brackets or after leading
+punctuation still split (`(z. B. dies)` gives `(z.` and `B. dies)`).
+Sentences ending in an initials chain, `U.S.` or `D.C.` followed by a capital
+word do not split. The pronoun "I" is swallowed by the single-initial
+exemption (`Neither did I. Then we left.` stays one part). The Latin start
+rule is letters only, so a quote or a digit after a period does not start a
+sentence; the Cyrillic rule excludes Latin uppercase and digits. In mn_Mong,
+ASCII `?` and `!` split even without following whitespace (brief-mandated),
+which cuts URL-like text. A very long run of one terminator is quadratic:
+10,000 terminators take about 0.1 s and 80,000 take 2 to 6 s on the dev
+machine. The cost is a mis-split or wrongly merged sentence in the cases
+named, which matters only if such text is common in the corpus.
+
+[DESIGN: SentencePiece policy is fixed in code, not config.] `unigram`,
+`byte_fallback=True`, `split_digits=True` and
+`normalization_rule_name=identity` are constants in `src/rinchen/spm/train.py`,
+because they are project-wide invariants, not per-profile choices, and
+`spm check` verifies byte fallback and the symbols on a trained model. The
+config carries `vocab_size`, `input_sentence_size`, `character_coverage`,
+`temperature`, `seed`, `corpus_dir` and `output_prefix`; the
+`input_sentence_size` values 100000, 10000000 and 20000000 are the builder's
+call. Sampling uses one RNG stream
+per language, `random.Random(f"{seed}-{lang}")` (independent of
+`PYTHONHASHSEED` and of language order). A language's quota is
+`floor(weight * budget)` capped at its size; unused quota is not
+redistributed, so a sample can fall below the budget; if the whole corpus fits
+the budget, everything is used. Cost if wrong: retrain, with the budgets the
+first thing to revisit once real corpora exist.
+
+[DESIGN: The default `add_dummy_prefix` is kept.] A tagged source therefore
+encodes with a leading standalone U+2581 piece before the tag, and
+`check_spm` defines "atomic" as `[symbol]` or `[U+2581, symbol]`. REVISIT
+before D8 (Eole training) whether `add_dummy_prefix=False` is wanted: changing
+it later means retraining the vocabulary and anything trained on it. The check
+verifies symbol atomicity and byte fallback only, not digit splitting or
+normalization, because the sentencepiece 0.2.1 Python API cannot tell
+user-defined pieces from ordinary ones, so atomicity is tested on the bare
+symbol. [EVIDENCE: live encode of a bare tag with the trained tiny model
+gave the two pieces U+2581 and `<2khk_Cyrl>`, 2026-11-06.]
+
+[DESIGN: `rinchen spm train` and `rinchen spm check` take `--config` and
+`--model`, not `--profile`, and write no manifest.] SPM config names are not
+profile names. The master plan says `train` prints a manifest path; D3 does
+not meet that, following the D1 and D2 precedent of writing no manifest from
+the CLI. The spm commands map `ConfigError` to exit 2, `DataError` to 3,
+`UpstreamError` to 4 and any other `RinchenError` to 1, printing `error: ...`
+on stderr; a `check` that reports `failed` exits 3. The mapping is
+implemented locally in `cli/spm.py`; the D1 and D2 CLIs remain unmapped.
+Cost if wrong: a model's provenance is not recorded automatically, so a later
+milestone that consumes a model must record its hash itself.
+
+[DESIGN: Scope is deliberately narrow: only `tiny_1k` is ever trained in D3.]
+`student_64k.yaml` and `teacher_128k.yaml` are schema-validated YAML only;
+their corpus directory (`data/clean/spm_corpus`) does not exist yet and no
+model has been trained on real data. Their `input_sentence_size` budgets, the
+memory the training step needs for them, and the sampling behaviour on real
+size ratios are untested assumptions until a later milestone supplies a
+corpus.
+
+[DESIGN: The tiny fixture is synthetic pseudo-words in genuine scripts, not
+real sentences.] Pseudo-words carry no meaning and no real-world text, so
+they cannot hold transliterated or Inner Mongolian material, and
+`tests/unit/test_spm_fixture.py` checks mechanically that each file is written
+in its language's declared script. The committed files
+(`tests/fixtures/spm/tiny_corpus/{khk_Cyrl,rus_Cyrl,eng_Latn,mn_Mong}.txt`,
+400/200/100/100 lines, reproducible with `scripts/build_spm_fixture.py`)
+train to exactly 1000 pieces with the 118 reserved symbols, under
+SentencePiece's default hard vocabulary limit. A repetitive corpus of 30
+distinct words fails that limit at 1000 ("Vocabulary size too high"), which
+is why the fixture is varied. The mn_Mong lines use only basic-block
+U+1820..U+1841 letters. The fixture carries only the digits 0, 2, 3, 4 and 5, so a digit
+it lacks (1 was checked) encodes as a byte piece in the tiny model. [EVIDENCE:
+`tests/unit/test_spm_fixture.py`; `SentencePieceProcessor.get_piece_size()`
+returned 1000 for the model trained in the STOP-gate run, 2026-11-06.]

@@ -68,7 +68,59 @@ files; `uv run pytest -q -m "not network"` -- **161 passed, 6 deselected**;
 `uv run pytest -q` -- **167 passed**. [EVIDENCE: live `just gate` /
 `uv run pytest -q` runs, 2026-11-02, commits `7ace665` through this one.]
 
-Next step: start D3 (Normalization & SentencePiece).
+**D3 (normalization, sentence splitting, SentencePiece) is done; its STOP
+gate is met on the one profile that was actually trained (`tiny_1k`).** Built:
+`rinchen.lang.scripts` (`script_of`), the 10-language registry
+(`configs/languages.yaml`, `rinchen.config.languages`), `rinchen.config.spm`
+and `configs/spm/{tiny_1k,student_64k,teacher_128k}.yaml`,
+`rinchen.utils.sampling.temperature_weights`, `rinchen.text.normalize`,
+`rinchen.split` (rules for mn_Mong, CJK, Latin and Cyrillic families),
+`rinchen.spm.{symbols,corpus,train,check}` (118 reserved symbols), the
+`rinchen spm train|check` CLI (`rinchen.cli.spm`), a synthetic 4-language
+tiny corpus (`tests/fixtures/spm/tiny_corpus/`, reproducible with
+`scripts/build_spm_fixture.py`), a 200-line golden normalization file, and
+`tests/{property,golden}/`. Commits `265476f` through `f5f6f45` (20 commits,
+3 of them `D3 fix:` and 2 plan-text corrections; design and plan in
+`076bb41`), plus the documentation commit that adds this paragraph,
+`docs/runbooks/03_tokenizer.md` and DECISIONS.md's 2026-11-06 entry.
+STOP gate, run for real on Linux with Python 3.14.10, 2026-11-06:
+`uv run pytest tests/golden -q` -- **289 passed** in 0.15 s (200 golden
+lines, 83 Cyrillic-label checks, 6 file-level checks);
+`time (uv run rinchen spm train --config configs/spm/tiny_1k.yaml && uv run
+rinchen spm check --model data/tiny/spm/tiny_1k.model --corpus-dir
+tests/fixtures/spm/tiny_corpus)` -- exit 0, **real 1.004 s** for the whole
+command (three reruns: 0.98 to 0.99 s), so the plan's "under 10 seconds" gate
+is met with a wide margin. That time is almost all start-up: `uv run rinchen
+--help` alone takes 0.48 s per invocation (the CLI imports every subcommand
+group, FastAPI under `rinchen.cli.annotate` the largest), while in-process
+`train_spm` took 0.045 to 0.055 s and `check_spm` 0.012 s (scratch timing
+script on a temp copy of the tiny config, three runs). The check printed
+coverage 1.0000 for all four languages, `byte_fallback: on`, `ok`; the model
+has exactly 1000 pieces. The `data/tiny/spm/` artifacts were deleted
+afterwards (gitignored). Full gate (the four commands run individually,
+`just` is not installed on this box): `ruff format --check .` -- 124 files
+already formatted; `ruff check .` -- all checks passed; `mypy src` -- no
+issues found in 63 source files; `pytest -m "not network" -q` -- **878
+passed, 6 deselected** (plus one unrelated pydantic UserWarning from
+`manifest/model.py`). What was and was not exercised: only `tiny_1k` was ever
+trained, on synthetic pseudo-word text, so its 1.0000 coverage says nothing
+about real data; `student_64k` and `teacher_128k` are schema-validated YAML
+only and `data/clean/spm_corpus` does not exist; no real corpus has been
+normalized, split or tokenized; no CI run of this branch is recorded here. The
+golden file's 200 expected values were derived by hand and independently
+re-derived by a reviewer with 0 disagreements across all 200 lines.
+`spm train` writes no manifest. Known limitations, two items flagged for human
+review (ZWNJ/ZWJ stripped in mn_Mong; the Mongolian and Kazakh abbreviation
+extras) and the `add_dummy_prefix` revisit-before-D8 note are in DECISIONS.md.
+Process gotcha: the editor tools (Write/Edit) convert backslash-u escapes into
+the raw characters, so any file that holds invisible or look-alike characters
+as escapes must be re-checked with `grep -nP '[^\x00-\x7F]'` after editing.
+[EVIDENCE: `docs/superpowers/plans/2026-11-06-d3-normalization-sentencepiece.md`,
+`docs/runbooks/03_tokenizer.md`, live `uv run pytest tests/golden -q`, timed
+`rinchen spm train` + `spm check`, and the four gate commands, 2026-11-06,
+commits `265476f` through `f5f6f45`.]
+
+Next step: D4 (Filtering & mining).
 
 D0 (environment, skeleton, doctor): `pyproject.toml` restructured to the
 master plan's toolchain (see `docs/STACK.md` for resolved versions),
