@@ -1,0 +1,7 @@
+vocab_size: 128000
+input_sentence_size: 20000000
+character_coverage: 0.9999
+temperature: 0.3
+seed: 1234
+corpus_dir: data/clean/spm_corpus
+output_prefix: models/spm/teacher_128k

@@ -1,0 +1,7 @@
+vocab_size: 64000
+input_sentence_size: 10000000
+character_coverage: 0.9999
+temperature: 0.3
+seed: 1234
+corpus_dir: data/clean/spm_corpus
+output_prefix: models/spm/student_64k

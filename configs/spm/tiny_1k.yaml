@@ -1,0 +1,7 @@
+vocab_size: 1000
+input_sentence_size: 100000
+character_coverage: 0.9999
+temperature: 0.3
+seed: 1234
+corpus_dir: tests/fixtures/spm/tiny_corpus
+output_prefix: data/tiny/spm/tiny_1k
