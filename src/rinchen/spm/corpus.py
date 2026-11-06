@@ -145,7 +145,7 @@ def _sample_language(
     # A stream per language: string seeding is SHA-512 based, so it ignores
     # PYTHONHASHSEED, and reordering the languages shifts no sample. Adding a
     # language still changes every quota (the weights are renormalised), so
-    # every sample is redrawn.
+    # every uncapped language's sample is redrawn.
     rng = random.Random(f"{seed}-{language}")
     chosen = sorted(rng.sample(range(len(lines)), quota))
     return [lines[index] for index in chosen]

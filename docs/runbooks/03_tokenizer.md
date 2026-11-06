@@ -155,7 +155,8 @@ quotas are 7,992,399 and 1,000,000, so the sample holds 8,992,399 lines.
 Each language is sampled from its own RNG stream seeded `f"{seed}-{lang}"`,
 so a language's draw does not depend on `PYTHONHASHSEED` or on the order of
 the languages. Adding a language still changes every language's quota (the
-weights are renormalised over all languages), so every sample is redrawn:
+weights are renormalised over all languages), so every uncapped language's
+sample is redrawn (a language capped at its own size keeps all its lines):
 for 1000 and 500 lines against a 600-line budget at `T=0.3`, the quotas are
 331 and 268; adding a third language of 300 lines makes them 239 and 194.
 
@@ -204,6 +205,14 @@ expected values are never generated from `normalize` output.
   abbreviations in brackets, sentences ending in `U.S.` followed by a capital
   word, the pronoun "I", ASCII `?` and `!` splitting inside mn_Mong URL-like
   text) are listed in `DECISIONS.md`.
+- **Order of use: normalize, split, tags, SentencePiece.** `normalize` runs
+  on raw text, before any reserved symbol is inserted, and the reserved
+  symbols (the `<2xx>` tags, `<doc>`, `<sep>`, `<t>`, the placeholders) must
+  be separated from text by whitespace. The homoglyph step works on
+  space-delimited tokens, so a tag glued to a Cyrillic word is rewritten:
+  `<sep>` glued to a Cyrillic word becomes `<s`, U+0435, U+0440 and `>`. So
+  insert tags and placeholders after `normalize` and `split`, and only then
+  hand the text to SentencePiece.
 - **Memory.** `train_spm` reads every `<lang>.txt` in full
   (`read_lines`) before sampling, so memory follows the total corpus size,
   not the budget. Measured on Python 3.14.10 with `sys.getsizeof`, a
@@ -213,9 +222,10 @@ expected values are never generated from `normalize` output.
   configured budgets are 10 million (student) and 20 million (teacher) lines,
   and every 10 million short lines held in memory cost roughly 0.9 to 1.6 GB.
   Size the machine for the whole corpus, not for the sample.
-- **`spm check` reads whole files too.** It loads each corpus file to take
-  the first N lines, so `--sample-lines` bounds the encoding work, not the
-  reading. The first N lines are not a random sample.
+- **`spm check` reads only its sample.** It takes the first N non-blank
+  lines of each corpus file and stops reading there, so `--sample-lines`
+  bounds both the reading and the encoding, and an undecodable byte further
+  into a file goes unnoticed. The first N lines are not a random sample.
 - **Dummy prefix.** The default `add_dummy_prefix` is kept: a bare tag
   encodes as a standalone U+2581 piece followed by the tag, not as the tag
   alone. `spm check` accepts both shapes. Whether to turn it off is to be

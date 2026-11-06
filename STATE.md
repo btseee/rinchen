@@ -79,10 +79,16 @@ and `configs/spm/{tiny_1k,student_64k,teacher_128k}.yaml`,
 `rinchen spm train|check` CLI (`rinchen.cli.spm`), a synthetic 4-language
 tiny corpus (`tests/fixtures/spm/tiny_corpus/`, reproducible with
 `scripts/build_spm_fixture.py`), a 200-line golden normalization file, and
-`tests/{property,golden}/`. Commits `265476f` through `f5f6f45` (20 commits,
-3 of them `D3 fix:` and 2 plan-text corrections; design and plan in
-`076bb41`), plus the documentation commit that adds this paragraph,
-`docs/runbooks/03_tokenizer.md` and DECISIONS.md's 2026-11-06 entry.
+`tests/{property,golden}/`. Commits `265476f` through `3623e4a` (24 commits,
+6 of them `D3 fix:` and 2 plan-text corrections; design and plan in
+`076bb41`; `ed45433` added this paragraph, `docs/runbooks/03_tokenizer.md`
+and DECISIONS.md's 2026-11-06 entry), plus this commit. The final fix wave
+after the whole-branch review (0 Critical; `f75d7d2`, `3623e4a` and this
+commit) guarded the splitter against quadratic terminator runs (a differential
+check over 250,000 random strings found no difference in splits or match
+spans), rejected a blank `corpus_dir`/`output_prefix`, bounded `spm check`'s
+reads to its sample, pinned the trainer options, the exit-4 mapping and the
+normalize-before-tags contract, and recorded the open gates in DECISIONS.md.
 STOP gate, run for real on Linux with Python 3.14.10, 2026-11-06:
 `uv run pytest tests/golden -q` -- **289 passed** in 0.15 s (200 golden
 lines, 83 Cyrillic-label checks, 6 file-level checks);
@@ -100,25 +106,39 @@ has exactly 1000 pieces. The `data/tiny/spm/` artifacts were deleted
 afterwards (gitignored). Full gate (the four commands run individually,
 `just` is not installed on this box): `ruff format --check .` -- 124 files
 already formatted; `ruff check .` -- all checks passed; `mypy src` -- no
-issues found in 63 source files; `pytest -m "not network" -q` -- **878
-passed, 6 deselected** (plus one unrelated pydantic UserWarning from
-`manifest/model.py`). What was and was not exercised: only `tiny_1k` was ever
-trained, on synthetic pseudo-word text, so its 1.0000 coverage says nothing
-about real data; `student_64k` and `teacher_128k` are schema-validated YAML
-only and `data/clean/spm_corpus` does not exist; no real corpus has been
-normalized, split or tokenized; no CI run of this branch is recorded here. The
-golden file's 200 expected values were derived by hand and independently
-re-derived by a reviewer with 0 disagreements across all 200 lines.
-`spm train` writes no manifest. Known limitations, two items flagged for human
-review (ZWNJ/ZWJ stripped in mn_Mong; the Mongolian and Kazakh abbreviation
-extras) and the `add_dummy_prefix` revisit-before-D8 note are in DECISIONS.md.
+issues found in 63 source files; `pytest -m "not network" -q` -- **912
+passed, 6 deselected** after the final fix wave (878 before it; plus one
+unrelated pydantic UserWarning from `manifest/model.py`). What was and was not
+exercised: only `tiny_1k` was ever trained, on synthetic pseudo-word text, so
+its 1.0000 coverage says nothing about real data; `student_64k` and
+`teacher_128k` are schema-validated YAML only and `data/clean/spm_corpus` does
+not exist; no real corpus has been normalized, split or tokenized; no CI run
+of this branch is recorded here. The golden file's 200 expected values were
+derived by hand and independently re-derived by a reviewer with 0
+disagreements across all 200 lines.
+`spm train` writes no manifest. Known limitations, three items flagged for
+human review (ZWNJ/ZWJ stripped in mn_Mong; the Mongolian and Kazakh
+abbreviation extras; the O-umlaut look-alikes `normalize` does not fold) and
+the `add_dummy_prefix` revisit-before-D8 note are in DECISIONS.md.
 Process gotcha: the editor tools (Write/Edit) convert backslash-u escapes into
 the raw characters, so any file that holds invisible or look-alike characters
 as escapes must be re-checked with `grep -nP '[^\x00-\x7F]'` after editing.
 [EVIDENCE: `docs/superpowers/plans/2026-11-06-d3-normalization-sentencepiece.md`,
 `docs/runbooks/03_tokenizer.md`, live `uv run pytest tests/golden -q`, timed
 `rinchen spm train` + `spm check`, and the four gate commands, 2026-11-06,
-commits `265476f` through `f5f6f45`.]
+commits `265476f` through `3623e4a`; the final fix wave's differential
+splitter check and gate run, same day.]
+
+**Notes for D4 (from D3's final review).** Run `normalize` on raw text first,
+before any reserved symbol is inserted. `split` assumes normalized input: the
+Cyrillic family under-splits before a Latin-uppercase or digit start and the
+Latin family can over-split before a lowercase start after an unlisted
+abbreviation, so log boundary errors by family on a ~1k-sentence sample before
+tuning. `read_lines` and `sample_balanced` materialise the corpus: budget the
+memory for it, or add a streaming reader before the student/teacher runs.
+Count the Fita-like substitutes, uppercase `Y` and U+200C/U+200D in the real
+corpora before freezing the vocabulary. Decide `add_dummy_prefix` before D8;
+`spm train` writes no manifest, so D8 must hash the model itself.
 
 Next step: D4 (Filtering & mining).
 

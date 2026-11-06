@@ -389,7 +389,13 @@ zero-width set is U+200B, U+200C, U+200D plus U+2060 and U+FEFF (builder's
 call). The Mongolian free variation selectors and vowel separator
 U+180B..U+180F are stripped outside mn_Mong and kept inside it. The Fita fold
 table is exactly U+0472 to U+04E8 and U+0473 to U+04E9; Kazakh U+04B0/U+04B1
-and Greek theta are never touched. [EVIDENCE:
+and Greek theta are never touched. `normalize` is meant for raw text, run
+before any reserved symbol is inserted, and reserved symbols must be
+whitespace-separated from text: the homoglyph step tokenises on spaces, so a
+tag glued to a Cyrillic word is rewritten (`<sep>` becomes `<s`, U+0435,
+U+0440, `>`). That contract is stated in the docstring and the runbook and
+pinned in `tests/unit/test_text_normalize.py`; no code guard, because one
+would couple `text/` to `spm/` and change the pinned pipeline. [EVIDENCE:
 `tests/fixtures/golden/normalize_200.tsv`, 200 lines derived by hand from the
 rule table, never from `normalize` output; a reviewer independently
 re-derived all 200 with 0 disagreements. Hypothesis idempotence properties in
@@ -402,7 +408,25 @@ characters, so stripping them may change how some words render or which
 glyph form a model sees. Revisit with a Mongolian shaping-aware reviewer
 before any large mn_Mong corpus is normalized. The only cost to change is a
 golden-file update and a normalization-rule edit; once corpora are built it
-is a reprocess.
+is a reprocess. Concrete gate: before any real mn_Mong corpus is normalized,
+count the U+200C and U+200D occurrences in the acquired text and their left
+and right neighbours. If ZWNJ is frequently used as the suffix separator
+(older web text), map ZWNJ to NNBSP (U+202F) for mn_Mong instead of stripping
+it; ZWJ-forced medial or isolated forms in abbreviations and glossaries are
+the other lossy case. A mn_Mong target that contains these characters would
+train D5 and D8 on the stripped forms.
+
+[DESIGN: FLAG: `normalize` repairs only some look-alikes of the Mongolian
+O-umlaut and U-umlaut.] Only Cyrillic Fita (U+0472/U+0473) is folded to
+U+04E8/U+04E9. Latin O-stroke (U+00D8/U+00F8), the barred-O letters U+019F
+and U+0275 and Greek theta (U+0398/U+03B8) are not folded and stay in the
+text. An uppercase Latin `Y` inside a Cyrillic-majority token is repaired to
+U+0423, as the pinned golden row for a Latin `Y` that starts a Cyrillic place
+name expects, never to U+04AE, which is wrong for a word that should start
+with U+04AE. A Mongolian-literate reviewer should say which of these matter;
+D4 should count these code points, and U+200C/U+200D, in real khk_Cyrl text
+before the vocabulary is frozen. [EVIDENCE: live `normalize` calls with each
+code point after a Cyrillic anchor, 2026-11-06.]
 
 [DESIGN: KNOWN LIMITATION of `normalize`: it is not idempotent for Hangul
 jamo, a stripped zero-width character and trailing jamo inside a
@@ -452,15 +476,18 @@ sentence; the Cyrillic rule excludes Latin uppercase and digits. In mn_Mong,
 ASCII `?` and `!` split even without following whitespace (the approved
 design specifies it), which cuts URL-like text such as a query string. A
 terminator that follows closing characters is split off as a lone terminator
-part: in the CJK families U+3002 U+300D U+FF01 gives `U+3002 U+300D` and
-`U+FF01`. A leading terminator run becomes a part of its own: U+3002 followed
-by U+4F60 U+597D gives `U+3002` and `U+4F60 U+597D` (the same holds in mn_Mong
-and the Latin family). A very long run of one terminator at the end of the
-text, or otherwise not followed by a sentence start, is quadratic: 10,000
-terminators take about 0.1 s and 80,000 take 2 to 6 s on the dev machine,
-while the same run followed by whitespace and a valid sentence start splits
-instantly. The cost is a mis-split or wrongly merged sentence in the cases
-named, which matters only if such text is common in the corpus.
+part only when those closing characters themselves follow an earlier
+terminator: in the CJK families U+3002 U+300D U+FF01 gives `U+3002 U+300D` and
+`U+FF01`, while U+4F60 U+597D U+300D U+FF01 stays one part. A leading
+terminator run becomes a part of its own: U+3002 followed by U+4F60 U+597D
+gives `U+3002` and `U+4F60 U+597D` (the same holds in mn_Mong, and in the
+Latin and Cyrillic families when whitespace follows the run: `. Hello` gives
+`.` and `Hello`, `.Hello` stays one part). A very long run of one terminator
+at the end of the text, or otherwise not followed by a sentence start, was
+quadratic in the first build (80,000 terminators took 2 to 6 s); the fix wave
+lets a match start only at the first terminator of a run, and 60,000 now split
+in 0.5 to 2.5 ms. The cost of the remaining cases is a mis-split or wrongly
+merged sentence, which matters only if such text is common in the corpus.
 
 [DESIGN: SentencePiece policy is fixed in code, not config.] `unigram`,
 `byte_fallback=True`, `split_digits=True` and
@@ -470,14 +497,14 @@ because they are project-wide invariants, not per-profile choices, and
 config carries `vocab_size`, `input_sentence_size`, `character_coverage`,
 `temperature`, `seed`, `corpus_dir` and `output_prefix`; the
 `input_sentence_size` values 100000, 10000000 and 20000000 are the builder's
-call. Sampling uses one RNG stream
-per language, `random.Random(f"{seed}-{lang}")` (independent of
-`PYTHONHASHSEED` and of language order; adding a language still changes every
-quota, because the weights are renormalised, so every sample is redrawn). A language's quota is
-`floor(weight * budget)` capped at its size; unused quota is not
-redistributed, so a sample can fall below the budget; if the whole corpus fits
-the budget, everything is used. Cost if wrong: retrain, with the budgets the
-first thing to revisit once real corpora exist.
+call. Sampling uses one RNG stream per language,
+`random.Random(f"{seed}-{lang}")` (independent of `PYTHONHASHSEED` and of
+language order; adding a language still changes every quota, because the
+weights are renormalised, so every uncapped language's sample is redrawn). A
+language's quota is `floor(weight * budget)` capped at its size; unused quota
+is not redistributed, so a sample can fall below the budget; if the whole
+corpus fits the budget, everything is used. Cost if wrong: retrain, with the
+budgets the first thing to revisit once real corpora exist.
 
 [DESIGN: The default `add_dummy_prefix` is kept.] A tagged source therefore
 encodes with a leading standalone U+2581 piece before the tag, and
