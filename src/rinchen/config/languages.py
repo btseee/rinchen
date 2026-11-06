@@ -47,12 +47,18 @@ _LIST_ADAPTER = TypeAdapter(list[LanguageEntry])
 
 def load_languages(path: Path = LANGUAGES_PATH) -> list[LanguageEntry]:
     """Load and validate a `languages.yaml`-shaped file. Raises ConfigError
-    on any violation (missing/extra field, unknown or empty scripts, wrong
-    direction tag, duplicate code, malformed top level, missing file)."""
+    on any violation (missing, unreadable or unparseable file, malformed top
+    level, missing/extra field, unknown or empty scripts, wrong direction
+    tag, duplicate code)."""
     if not path.is_file():
         raise ConfigError(f"language registry file not found: {path}")
-    with path.open(encoding="utf-8") as handle:
-        raw = yaml.safe_load(handle) or {}
+    try:
+        with path.open(encoding="utf-8") as handle:
+            raw = yaml.safe_load(handle) or {}
+    except (yaml.YAMLError, UnicodeDecodeError, OSError) as exc:
+        raise ConfigError(
+            f"invalid language registry {path}: cannot read or parse: {exc}"
+        ) from exc
     if not isinstance(raw, dict):
         raise ConfigError(
             f"invalid language registry {path}: top level must be a mapping "

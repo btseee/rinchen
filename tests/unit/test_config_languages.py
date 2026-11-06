@@ -4,6 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import yaml
 
 from rinchen.config.languages import (
     LANGUAGES_PATH,
@@ -137,6 +138,26 @@ def test_malformed_registry_raises_config_error(tmp_path: Path, yaml_text: str):
 
     with pytest.raises(ConfigError):
         load_languages(path)
+
+
+def test_yaml_syntax_error_raises_config_error_with_cause(tmp_path: Path):
+    path = tmp_path / "languages.yaml"
+    path.write_text("languages: [\n  - code: x", encoding="utf-8")
+
+    with pytest.raises(ConfigError, match="languages.yaml") as excinfo:
+        load_languages(path)
+
+    assert isinstance(excinfo.value.__cause__, yaml.YAMLError)
+
+
+def test_non_utf8_registry_raises_config_error_with_cause(tmp_path: Path):
+    path = tmp_path / "languages.yaml"
+    path.write_bytes(b"\xff\xfe\x00")
+
+    with pytest.raises(ConfigError, match="languages.yaml") as excinfo:
+        load_languages(path)
+
+    assert isinstance(excinfo.value.__cause__, UnicodeDecodeError)
 
 
 def test_missing_registry_file_raises_config_error(tmp_path: Path):
