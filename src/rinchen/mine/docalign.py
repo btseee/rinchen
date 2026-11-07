@@ -238,9 +238,12 @@ def _match_by_embedding(
     best_src = _best_row_per_column(similarity)
     pairs = []
     for row, column in enumerate(best_tgt.tolist()):
-        # Rounding can leave a float32 dot product a hair outside [-1, 1].
-        score = min(1.0, max(-1.0, float(similarity[row, column])))
-        if best_src[column] == row and score >= min_cosine:
+        raw = float(similarity[row, column])
+        # Rounding can leave a float32 dot product a hair outside [-1, 1]. A
+        # non-finite value is a pair the date window blocked (-inf): clipping
+        # must not turn it into a match for a low `min_cosine`.
+        score = min(1.0, max(-1.0, raw))
+        if best_src[column] == row and np.isfinite(raw) and score >= min_cosine:
             pairs.append(
                 _Pair(src_candidates[row], tgt_candidates[column], score, "embedding")
             )

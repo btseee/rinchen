@@ -274,6 +274,18 @@ def test_a_pair_below_min_cosine_is_rejected_and_above_it_accepted() -> None:
     ]
 
 
+def test_a_date_blocked_pair_never_matches_even_for_the_lowest_min_cosine() -> None:
+    src = [_doc("s1", BASE, date=date(2025, 1, 1))]
+    tgt = [_doc("t1", BASE, date=date(2025, 6, 1))]
+    for threshold in (-1.0, -1.5, -100.0):
+        assert (
+            match_documents(
+                src, tgt, HashEmbedder(), max_date_gap_days=2, min_cosine=threshold
+            )
+            == []
+        )
+
+
 def test_min_cosine_itself_is_accepted() -> None:
     src = [_doc("s1", BASE)]
     tgt = [_doc("t1", FIVE_OF_SIX)]
