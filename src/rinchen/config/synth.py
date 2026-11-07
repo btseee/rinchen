@@ -2,28 +2,33 @@
 that run them and the selection thresholds. Every number is an unvalidated
 prior until a real generator has run; a missing section or field keeps its
 default, but a `generators` or `jobs` table you supply replaces the default
-one instead of merging into it."""
+one instead of merging into it. The default jobs name the default generators,
+so supplying `generators` alone leaves `jobs` empty."""
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 import yaml
 from pydantic import (
     AfterValidator,
     BaseModel,
+    BeforeValidator,
     ConfigDict,
+    Discriminator,
     Field,
+    Tag,
     ValidationError,
     field_validator,
     model_validator,
 )
 
 from rinchen.config.filters import QeConfig
-from rinchen.config.languages import known_language_codes
-from rinchen.config.loader import REPO_ROOT
+from rinchen.config.languages import load_languages
+from rinchen.config.loader import REPO_ROOT, anchor_at_repo_root, reject_blank_path
 from rinchen.errors import ConfigError
+from rinchen.lang.scripts import Script
 
 SYNTH_CONFIG_PATH = REPO_ROOT / "configs" / "data" / "synth.yaml"
 
@@ -46,9 +51,12 @@ def _reject_blank(value: str) -> str:
     return value
 
 
-# A name, URL or path the operator fills in; relative paths are anchored at
-# the repo root by the CLI, not here.
+# A name or URL the operator fills in.
 _NonBlankString = Annotated[str, AfterValidator(_reject_blank)]
+# Relative paths mean the same thing from any working directory.
+_RepoPath = Annotated[
+    Path, BeforeValidator(reject_blank_path), AfterValidator(anchor_at_repo_root)
+]
 
 
 class _GeneratorBase(BaseModel):
@@ -90,19 +98,47 @@ class Ct2Config(_GeneratorBase):
     """A CTranslate2 translation model. It uses `n` as the number of
     hypotheses and `beam_size` for the search, and ignores `temperature`,
     `top_p` and `max_tokens`, which exist only so every generator has the
-    same fields."""
+    same fields. `n` may not exceed `beam_size`: CTranslate2 raises "The
+    number of hypotheses cannot be greater than beam_size * patience" on the
+    first batch, which would end a long run late."""
 
     kind: Literal["ct2"] = "ct2"
-    model_dir: _NonBlankString
-    spm_model: _NonBlankString
+    model_dir: _RepoPath
+    spm_model: _RepoPath
     family: Literal["nllb", "madlad"]
     device: Literal["cpu", "cuda", "auto"] = "cpu"
     beam_size: _PositiveInt = 4
     batch_size: _PositiveInt = 16
 
+    @model_validator(mode="after")
+    def _hypotheses_fit_the_beam(self) -> Ct2Config:
+        if self.n > self.beam_size:
+            raise ValueError(
+                f"n ({self.n}) cannot be greater than beam_size "
+                f"({self.beam_size}): CTranslate2 returns at most beam_size "
+                "hypotheses"
+            )
+        return self
 
+
+def _generator_kind(value: Any) -> Any:
+    """The `kind` of a generator given as a mapping or as a model; whatever it
+    is, the discriminator rejects a value that is not a known kind."""
+    if isinstance(value, dict):
+        return value.get("kind")
+    return getattr(value, "kind", None)
+
+
+# A callable discriminator, so a missing or unknown `kind` names the valid ones.
 GeneratorConfig = Annotated[
-    VllmConfig | LlamaCppConfig | Ct2Config, Field(discriminator="kind")
+    Annotated[VllmConfig, Tag("vllm")]
+    | Annotated[LlamaCppConfig, Tag("llamacpp")]
+    | Annotated[Ct2Config, Tag("ct2")],
+    Discriminator(
+        _generator_kind,
+        custom_error_type="generator_kind",
+        custom_error_message="kind must be one of vllm, llamacpp, ct2",
+    ),
 ]
 
 
@@ -112,11 +148,19 @@ def _default_generators() -> dict[str, GeneratorConfig]:
         "vllm_default": VllmConfig(),
         "llamacpp_default": LlamaCppConfig(),
         "ct2_nllb_default": Ct2Config(
-            model_dir="models/ct2/nllb-200-3.3B",
-            spm_model="models/ct2/nllb-200-3.3B/sentencepiece.bpe.model",
+            model_dir=Path("models/ct2/nllb-200-3.3B"),
+            spm_model=Path("models/ct2/nllb-200-3.3B/sentencepiece.bpe.model"),
             family="nllb",
         ),
     }
+
+
+def _supported_job_languages() -> frozenset[str]:
+    return frozenset(
+        entry.code
+        for entry in load_languages()
+        if Script.MONGOLIAN not in entry.scripts
+    )
 
 
 class JobConfig(BaseModel):
@@ -124,8 +168,10 @@ class JobConfig(BaseModel):
     monolingual text is the target of the pairs and the generator translates
     it into `other_lang` to make the source; for `ft` the monolingual text is
     the source and the generator translates it into `other_lang` to make the
-    target. The generator name is checked by `SynthConfig`, which owns the
-    generators."""
+    target. Both languages must be registry languages a generator can write:
+    the registry's Mongolian-script entries are left out, because the D5 script
+    converter owns that script. The generator name is checked by
+    `SynthConfig`, which owns the generators."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -137,11 +183,12 @@ class JobConfig(BaseModel):
 
     @field_validator("mono_lang", "other_lang")
     @classmethod
-    def _is_a_registry_language(cls, value: str) -> str:
-        if value not in known_language_codes():
+    def _is_a_supported_language(cls, value: str) -> str:
+        supported = _supported_job_languages()
+        if value not in supported:
             raise ValueError(
-                f"{value!r} is not a code in the language registry "
-                f"({sorted(known_language_codes())})"
+                f"{value!r} is not a supported job language; "
+                f"supported: {sorted(supported)}"
             )
         return value
 
@@ -195,6 +242,15 @@ class SynthConfig(BaseModel):
     generators: dict[str, GeneratorConfig] = Field(default_factory=_default_generators)
     jobs: dict[str, JobConfig] = Field(default_factory=_default_jobs)
     selection: SelectionConfig = SelectionConfig()
+
+    @model_validator(mode="before")
+    @classmethod
+    def _supplied_generators_replace_the_default_jobs(cls, data: Any) -> Any:
+        # The default jobs name the default generators; without this they
+        # would dangle as soon as `generators` is replaced.
+        if isinstance(data, dict) and "generators" in data and "jobs" not in data:
+            return {**data, "jobs": {}}
+        return data
 
     @model_validator(mode="after")
     def _jobs_name_configured_generators(self) -> SynthConfig:

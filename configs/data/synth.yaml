@@ -5,11 +5,15 @@
 # exactly the SynthConfig() defaults in src/rinchen/config/synth.py; change
 # both together.
 #
-# Relative paths are anchored at the repository root by the CLI.
+# Relative paths (model_dir, spm_model) are anchored at the repository root
+# when this file is loaded, so they mean the same thing from any working
+# directory; absolute paths are kept as written.
 #
 # Generators are used for inference only: nothing here trains or adapts a
 # model. Listing generators or jobs replaces the default table, it is not
-# merged into it, so a job must name a generator you list.
+# merged into it, so a job must name a generator you list. Listing generators
+# without jobs leaves jobs empty, because the default jobs name the default
+# generators.
 
 generators:
   # An OpenAI-compatible vLLM server.
@@ -44,8 +48,8 @@ generators:
     max_tokens: 256
 
   # A CTranslate2 translation model run in-process. It takes n as the number
-  # of hypotheses and beam_size for the search; temperature, top_p and
-  # max_tokens do not apply to it.
+  # of hypotheses, which may not exceed beam_size, and beam_size for the
+  # search; temperature, top_p and max_tokens do not apply to it.
   ct2_nllb_default:
     kind: ct2
     # Placeholders: nothing creates these paths.
@@ -61,7 +65,9 @@ generators:
     max_tokens: 256
 
 # One job turns one monolingual corpus into synthetic pairs. One of the two
-# languages must be khk_Cyrl, and both must be codes in configs/languages.yaml.
+# languages must be khk_Cyrl, and both must be codes in configs/languages.yaml
+# whose script a generator can write: entries written in Mongolian script are
+# not accepted, the D5 script converter owns that script.
 #   bt: the monolingual text is the target; the generator translates it into
 #       other_lang to make the source.
 #   ft: the monolingual text is the source; the generator translates it into
