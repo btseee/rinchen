@@ -143,8 +143,9 @@ with its source URL and sha256 recorded in a header comment and in `manifests/`.
 `segment(text) -> tuple[Segment, ...]`, `Segment(text: str, kind: Literal["cyrillic",
 "mongolian", "other"])`. A Cyrillic segment is a maximal run of Cyrillic letters (including
 combining marks inside it). A Mongolian segment is a maximal run of letters, FVS, MVS,
-joiners and NIRUGU, plus NNBSP only when it sits between two such characters. Everything else
-is "other". Concatenating the segments reproduces the input exactly. Split on U+0020 only;
+joiners and NIRUGU, plus NNBSP only when the character before it is such a character and the
+character after it is a letter. A run of only selectors or joiners (no letter) is still kind
+"mongolian"; callers that need a letter test for one. Everything else is "other". Concatenating the segments reproduces the input exactly. Split on U+0020 only;
 never call `str.split()` without an argument on `mn_Mong` text.
 
 ### `rules`
