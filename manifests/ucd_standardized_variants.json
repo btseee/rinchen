@@ -1,0 +1,9 @@
+{
+  "source_url": "https://www.unicode.org/Public/18.0.0/ucd/StandardizedVariants.txt",
+  "ucd_version": "18.0.0",
+  "retrieved": "2026-11-07",
+  "source_sha256": "c7ae634a7e2bb0932258548a1e81df984fbb38e30cecf4269391d6a4f94581ac",
+  "derived_file": "src/rinchen/script_conv/standardized_variants.tsv",
+  "derived_sha256": "7919cd226765061a47efc1ddad985f268ea802a0cb0c07dbdf3d4dad9d70a3f4",
+  "derived_rows": 45
+}

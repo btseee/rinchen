@@ -1,0 +1,52 @@
+# Mongolian letter / free variation selector pairs listed by the Unicode Character Database.
+# source_url: https://www.unicode.org/Public/18.0.0/ucd/StandardizedVariants.txt
+# ucd_version: 18.0.0
+# retrieved: 2026-11-07
+# source_sha256: c7ae634a7e2bb0932258548a1e81df984fbb38e30cecf4269391d6a4f94581ac
+# filter: base U+1820..U+1842 and selector U+180B, U+180C, U+180D or U+180F
+# format: base_hex, a tab, selector_hex
+1820	180B
+1820	180C
+1820	180D
+1821	180B
+1821	180C
+1822	180B
+1822	180C
+1822	180D
+1823	180B
+1823	180C
+1824	180B
+1824	180C
+1824	180D
+1825	180B
+1825	180C
+1825	180D
+1826	180B
+1826	180C
+1826	180D
+1828	180B
+1828	180C
+1828	180D
+182A	180B
+182C	180B
+182C	180C
+182C	180D
+182C	180F
+182D	180B
+182D	180C
+182D	180D
+182D	180F
+182F	180B
+1830	180B
+1830	180C
+1831	180B
+1831	180C
+1832	180B
+1832	180C
+1833	180B
+1833	180C
+1835	180B
+1836	180B
+1836	180C
+1836	180D
+1838	180B
