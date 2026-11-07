@@ -18,6 +18,7 @@ from rinchen.config.synth import Ct2Config
 from rinchen.errors import ConfigError, DataError, UpstreamError
 from rinchen.script_conv.char_model import load_char_processor
 from rinchen.synth._candidates import clean_candidates
+from rinchen.synth._texts import require_encodable
 
 _END_OF_SENTENCE = "</s>"
 
@@ -144,14 +145,19 @@ _FAMILIES: Mapping[str, _Family] = {"nllb": _Nllb(), "madlad": _Madlad()}
 
 class CT2Translator:
     """Translates with a CTranslate2 model of the family in `cfg`: `cfg.n`
-    hypotheses per text from a beam search of `cfg.beam_size`, all the texts of
-    a call in one batch that the library splits into `cfg.batch_size`.
-    Candidates are cleaned like the LLM clients' (stripped, never empty,
-    without duplicates), so a text may get fewer than `cfg.n`.
+    hypotheses per text from a beam search of `cfg.beam_size`, each at most
+    `cfg.max_tokens` tokens long (`max_decoding_length`; the library's default
+    would cut longer output silently), all the texts of a call in one batch that
+    the library splits into `cfg.batch_size`. The longest input stays at the
+    library's default (`max_input_length`, 1024 tokens). Candidates are cleaned
+    like the LLM clients' (stripped, never empty, without duplicates), so a text
+    may get fewer than `cfg.n`.
 
     A model that is not passed in is loaded from `cfg.model_dir` and
-    `cfg.spm_model`; passing both in is how tests avoid any real model. An
-    instance is not safe to share between threads that translate at once."""
+    `cfg.spm_model`; passing both in is how tests avoid any real model. The
+    translator keeps no state between calls; running calls concurrently is up
+    to CTranslate2, whose `Translator` accepts concurrent `translate_batch`
+    calls."""
 
     def __init__(
         self,
@@ -182,6 +188,8 @@ class CT2Translator:
         Raises:
             ConfigError: a language is not in the family's table, even when
                 `texts` is empty.
+            DataError: a text cannot be encoded as UTF-8 (a lone surrogate);
+                the message names its index.
             UpstreamError: the library fails, or returns a result count other
                 than `len(texts)`.
         """
@@ -189,6 +197,7 @@ class CT2Translator:
         target_code = self._code(tgt_lang)
         if not texts:
             return []
+        require_encodable(texts)
         source = [
             self._family.source_tokens(self._processor, text, source_code, target_code)
             for text in texts
@@ -216,6 +225,7 @@ class CT2Translator:
             "beam_size": self._cfg.beam_size,
             "num_hypotheses": self._cfg.n,
             "max_batch_size": self._cfg.batch_size,
+            "max_decoding_length": self._cfg.max_tokens,
             "return_scores": False,
         }
         prefix = self._family.target_prefix(target_code)

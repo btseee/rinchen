@@ -16,8 +16,9 @@ from typing import NamedTuple
 import httpx
 
 from rinchen.config.synth import LlamaCppConfig, VllmConfig
-from rinchen.errors import ConfigError, DataError, UpstreamError
+from rinchen.errors import ConfigError, UpstreamError
 from rinchen.synth._candidates import clean_candidates
+from rinchen.synth._texts import require_encodable
 from rinchen.synth.prompts import render_messages
 
 _SEED_MODULUS = 2**31
@@ -97,7 +98,7 @@ class ChatCompletionsTranslator[Config: (VllmConfig, LlamaCppConfig)](ABC):
     ) -> list[list[str]]:
         if not texts:
             return []
-        _require_encodable(texts)
+        require_encodable(texts)
         bodies = [
             body
             for text in texts
@@ -255,19 +256,6 @@ def _require_http_url(base_url: str, endpoint: str) -> None:
         raise ConfigError(
             f"base_url {base_url!r} must be an http or https URL with a host"
         )
-
-
-def _require_encodable(texts: Sequence[str]) -> None:
-    """A lone surrogate cannot go into a JSON body. The error names the text by
-    its index and never quotes it."""
-    for index, text in enumerate(texts):
-        try:
-            text.encode()
-        except UnicodeEncodeError as error:
-            raise DataError(
-                f"text {index} cannot be encoded as UTF-8: a lone surrogate at "
-                f"position {error.start}"
-            ) from error
 
 
 def _preview(response: httpx.Response) -> str:

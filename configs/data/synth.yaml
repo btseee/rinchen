@@ -48,8 +48,9 @@ generators:
     max_tokens: 256
 
   # A CTranslate2 translation model run in-process. It takes n as the number
-  # of hypotheses, which may not exceed beam_size, and beam_size for the
-  # search; temperature, top_p and max_tokens do not apply to it.
+  # of hypotheses, which may not exceed beam_size, beam_size for the search and
+  # max_tokens as the longest output in tokens; temperature and top_p do not
+  # apply to it.
   ct2_nllb_default:
     kind: ct2
     # Placeholders: nothing creates these paths.

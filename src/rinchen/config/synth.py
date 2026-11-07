@@ -96,11 +96,14 @@ class LlamaCppConfig(_ServerGeneratorBase):
 
 class Ct2Config(_GeneratorBase):
     """A CTranslate2 translation model. It uses `n` as the number of
-    hypotheses and `beam_size` for the search, and ignores `temperature`,
-    `top_p` and `max_tokens`, which exist only so every generator has the
-    same fields. `n` may not exceed `beam_size`: CTranslate2 raises "The
-    number of hypotheses cannot be greater than beam_size * patience" on the
-    first batch, which would end a long run late."""
+    hypotheses, `beam_size` for the search and `max_tokens` as the longest
+    output in tokens (`max_decoding_length`; the library's own default of 256
+    cuts longer output silently). It ignores `temperature` and `top_p`, which
+    exist only so every generator has the same fields; the longest input stays
+    at the library's default (`max_input_length`). `n` may not exceed
+    `beam_size`: CTranslate2 raises "The number of hypotheses cannot be greater
+    than beam_size * patience" on the first batch, which would end a long run
+    late."""
 
     kind: Literal["ct2"] = "ct2"
     model_dir: _RepoPath

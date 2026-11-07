@@ -57,7 +57,11 @@ def real_ctranslate2_is_unimportable(monkeypatch):
 
 class WordProcessor:
     """One piece per space-separated word, each with the dummy prefix, so what a
-    text and a tag encode to is readable in a literal. Records every encode."""
+    text and a tag encode to is readable in a literal. Records every encode.
+
+    A simplification: real SentencePiece with a user-defined symbol tokenises
+    "<2mn> text" as [SP, "<2mn>", SP, ...] (SP is the dummy prefix, U+2581),
+    not as one SP + "<2mn>" piece."""
 
     def __init__(self):
         self.encoded: list[str] = []
@@ -329,7 +333,13 @@ def test_madlad_removes_nothing_from_a_hypothesis():
 
 def test_the_search_and_batch_options_come_from_the_config():
     translator, stub, _ = _translator(
-        "nllb", beam_size=5, n=3, batch_size=7, temperature=1.5, max_tokens=9
+        "nllb",
+        beam_size=5,
+        n=3,
+        batch_size=7,
+        max_tokens=9,
+        temperature=1.5,
+        top_p=0.3,
     )
 
     translator.translate(["a", "b"], ENG, KHK)
@@ -340,12 +350,15 @@ def test_the_search_and_batch_options_come_from_the_config():
         "beam_size": 5,
         "num_hypotheses": 3,
         "max_batch_size": 7,
+        "max_decoding_length": 9,
         "return_scores": False,
     }
 
 
 def test_madlad_passes_the_same_options_without_a_prefix():
-    translator, stub, _ = _translator("madlad", beam_size=6, n=2, batch_size=3)
+    translator, stub, _ = _translator(
+        "madlad", beam_size=6, n=2, batch_size=3, max_tokens=33
+    )
 
     translator.translate(["a"], ENG, KHK)
 
@@ -354,8 +367,52 @@ def test_madlad_passes_the_same_options_without_a_prefix():
         "beam_size": 6,
         "num_hypotheses": 2,
         "max_batch_size": 3,
+        "max_decoding_length": 33,
         "return_scores": False,
     }
+
+
+@pytest.mark.parametrize("family", ["nllb", "madlad"])
+def test_the_default_config_allows_256_output_tokens(family):
+    translator, stub, _ = _translator(family)
+
+    translator.translate(["a"], ENG, KHK)
+
+    _, kwargs = _only_call(stub)
+    assert kwargs["max_decoding_length"] == 256
+
+
+@pytest.mark.parametrize("family", ["nllb", "madlad"])
+@pytest.mark.parametrize("max_tokens", [1, 512])
+def test_the_longest_output_is_max_tokens_not_the_library_default(family, max_tokens):
+    translator, stub, _ = _translator(family, max_tokens=max_tokens)
+
+    translator.translate(["a"], ENG, KHK)
+
+    _, kwargs = _only_call(stub)
+    assert kwargs["max_decoding_length"] == max_tokens
+
+
+@pytest.mark.parametrize("family", ["nllb", "madlad"])
+def test_a_text_that_cannot_be_encoded_names_its_index_before_any_work(family):
+    translator, stub, processor = _translator(family)
+
+    with pytest.raises(DataError, match="text 1 ") as raised:
+        translator.translate(["fine", "bad" + chr(0xD800), "ok"], ENG, KHK)
+
+    assert "bad" not in str(raised.value)
+    assert isinstance(raised.value.__cause__, UnicodeEncodeError)
+    assert stub.calls == []
+    assert processor.encoded == []
+
+
+def test_the_direction_is_checked_before_the_texts_are_encoded():
+    translator, stub, _ = _translator("nllb")
+
+    with pytest.raises(ConfigError, match="mn_Mong"):
+        translator.translate(["bad" + chr(0xD800)], "mn_Mong", KHK)
+
+    assert stub.calls == []
 
 
 def test_all_texts_go_to_the_library_in_one_batch():
