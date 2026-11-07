@@ -883,3 +883,216 @@ counts of o-like Latin substitutes and uppercase `Y` inside Cyrillic-majority to
 real khk_Cyrl; an audit of U+200C, U+200D, U+180A..U+180F and U+202F in real
 traditional-script text before D5. Also open: a real-data check of every threshold, a
 re-tune of `merge_penalty` on real embeddings, and a decision on a CometKiwi adapter.
+
+## 2026-11-07: D5 script converter - the rulings, made without a review round
+
+D5 (`src/rinchen/script_conv/`, `src/rinchen/cli/convert_script.py`,
+`configs/eole/converter.yaml`, `configs/eole/converter_tiny.yaml`,
+`configs/spm/converter_char.yaml`) filled gaps in the master plan with the rulings below.
+**They were made by the builder without a review round, because the user's instructions
+for this stretch were "continue dont stop" and "continue" (on top of the earlier "don't
+respond back until you finish everything related to coding").** None is an approved
+decision; each lists what it costs if wrong so that it can be undone. The design with the
+full wording is `docs/superpowers/specs/2026-11-07-d5-script-converter-design.md` (rulings
+1 to 13, amended to match the finished code, and the amendments A to U; the numbers and
+letters below are the same); procedures, measured numbers and the known limitations are in
+`docs/runbooks/05_script_converter.md`. The work lives on branch `d5-script-converter`, cut
+from `main` at `4eac98f`; it is not merged and not pushed.
+
+[DESIGN: 1. The engine half of the STOP gate becomes `ScriptConverter`.] The master plan
+says "served via engine with `script="Mong"`"; there is no engine until D11 and D12. Cost
+if wrong: the engine task adapts to this small interface. [DESIGN: 2. Word-level units.]
+The model converts one word per line; text is segmented, words are deduplicated and
+cached. Cost if wrong: homograph context is lost; a sentence-level model needs a different
+data layout. [DESIGN: 3. No suffix splitting in the rule baseline.] Case-suffix spelling
+depends on stem class and the reference holds lemmas only, so rules written here could not
+be checked and would put silently wrong suffixes into training data. Cost if wrong: the
+model gets no rule-made suffix gaps; real data has to teach them.
+
+[DESIGN: 4. NNBSP before separated suffixes, MVS only where lexical, ZWJ and ZWNJ never.]
+This follows the D3 follow-up decision and is not reopened. Cost if wrong: see that
+decision. [DESIGN: 5. Both directions in one model, tags `<2mn_Mong>` and `<2mn_Cyrl>`,
+one corpus per direction.] Amended while building: Eole takes one validation corpus, so
+`valid` holds the Cyrillic-to-script direction and the other direction is trained without
+a validation loss. Cost if wrong: the reverse direction is learned only from rule and
+reference pairs (many-to-one in the data) and is judged only by fixed-word checks.
+[DESIGN: 6. 1000 steps with dropout 0 for the tiny model, CER <= 0.15 unchanged, both
+directions, Noam learning rate 0.5.] The first version said 600 to 800 steps; with dropout
+0.1, 800 steps kept 54% of the words that carry an NNBSP or selector and 1500 steps were
+needed for 90%. Cost if wrong: a tiny test of about 35 s, and a hyperparameter that suits
+a memorization fixture only.
+
+[DESIGN: 7. Eole configs are rendered by code and validated.] The master plan's template is
+corrected for the three failures found (`tgt_prefix`, `word_vec_size`, `bucket_size`) and
+the validator also rejects the real forbidden Eole field names (16, with a drift test) and
+a `$` in any string. Cost if wrong: D7's `eole_cfg.render` should absorb `config.py`.
+[DESIGN: 8. CTranslate2 export always runs with CUDA hidden.] Cost if wrong: none on CPU
+export; an export that wants the GPU does not exist. [DESIGN: 9. Own character
+SentencePiece trainer] instead of extending `spm.train.train_spm`, which is unigram,
+byte-fallback and per-language by construction. Cost if wrong: about 30 lines of trainer
+wiring duplicated. [DESIGN: 10. An invalid neural output is replaced by the rule
+baseline's word and counted.] Judged per word (ruling M). Cost if wrong: some outputs are
+the phonographic guess instead of the model's.
+
+[DESIGN: 11. Reference provenance.] The Wiktionary harvest (2,029 rows from the English
+Wiktionary through the MediaWiki API on 2026-11-07, one revision id per row) is a held-out
+reference and the source of the lexicon and the tiny fixture, never training data for a
+real model. It carries no guarantee of Mongolia-only provenance; the harvest filters out
+entries labelled Inner Mongolia, Chakhar and China and reads only the Mongolian section,
+and a Mongolian reader has not checked it. Cost if wrong: a wrong lexicon entry is wrong
+training data for the tiny fixture only. [DESIGN: 12. Digits pass unchanged; `.` and `,`
+map to U+1803 and U+1802,] except directly between two ASCII letters or digits. Cost if
+wrong: one table and one pattern. [DESIGN: 13. Development and held-out halves of the
+reference by the parity of the SHA-256 of the word's UTF-8 bytes.] The rules were designed
+on the development half (1,005 words, the lexicon); the held-out half (1,022) was measured
+once. Cost if wrong: the held-out half is spent after that figure.
+
+[DESIGN: Amendment A. Every pairs TSV is headed `cyrillic<TAB>script`; the reference file
+keeps its own columns.] Avoids a silent column mix-up between tasks. Cost if wrong: one
+rename. [DESIGN: B. `CorpusFiles.files`, `rows` and `dropped` are keyed by file name and
+drop code.] Cost if wrong: none. [DESIGN: C. The integration fixtures `tiny_run` and
+`tiny_ct2` are session-scoped, in `tests/integration/conftest.py`.] One training per test
+session. Cost if wrong: none; a test that needs another model trains its own (the CLI
+chain test does). [DESIGN: D. If the held-out half gives fewer than 70 fallback-correct
+words, the golden is filled with lexicon rows to 100 and the shortfall is reported.] It was
+not needed (237 held-out words are fallback-correct; the golden is 30 lexicon plus 70
+fallback). Cost if wrong: a weaker fallback pin on a thin reference.
+
+[DESIGN: E. The validator accepts letter, FVS, NNBSP, letter.] A stem-final selector may
+precede the suffix gap, which is how `segments` reads it; the strict reading would flag
+legitimate stems. Cost if wrong: one helper (`_ends_with_stem_letter`). [DESIGN: F. `.`
+and `,` directly between two ASCII letters or digits stay unchanged.] `3.5`, `1,000`,
+`a.b` and URLs are not sentence punctuation. Cost if wrong: a mark between two non-ASCII
+letters or digits (full-width digits) still maps. [DESIGN: G. The data-free fallback lives
+in `fallback.py`; `rules.py` re-exports it and the fixture builder imports only
+`fallback`.] The builder can then regenerate a lost lexicon. Cost if wrong: one more file.
+
+[DESIGN: H. `rule_pairs` normalizes before the lookup; an empty train split is a
+`DataError` raised before any file is written; a side with a U+0020 is dropped under the
+new code `multiword`.] An empty valid split stays allowed. Cost if wrong: a very small
+`--pairs` input with a high valid fraction fails with an error naming the counts; a
+multiword pair is dropped, not split. [DESIGN: I. `converter_char.yaml` has `vocab_size`
+and `output_prefix` only.] The trainer is deterministic, so a `seed` would be dead config.
+Cost if wrong: adding one later is a schema change. [DESIGN: J. The character trainer
+reads a fixed `<prefix>.input.txt`; the `.vocab` hash is the portable identity.] The
+`.model` embeds its absolute prefix, so its hash holds per location only; manifests record
+both files; the protobuf is not scrubbed. Cost if wrong: a `.model` hash differs between
+locations.
+
+[DESIGN: K. The tiny profile uses dropout 0 and 1000 steps.] Chosen by a sweep over 800,
+1000, 1200 and 1500 steps: the smallest that keeps at least 93% of the marked words with
+both CERs at most 0.10 (the test gate is 90%); no gate was lowered. Cost if wrong: see
+ruling 6. [DESIGN: L. `Conversion` has three fields: `text`, `rule_fallbacks`,
+`invalid_outputs`.] `rule_fallbacks` counts outputs the rule baseline spelled;
+`invalid_outputs` counts occurrences that keep their source text because no usable output
+exists. Cost if wrong: the engine reads three fields. [DESIGN: M. A converted word is valid
+when `is_script_word` says so:] it passes the validator, holds a letter, and is made of
+letters, selectors, MVS, NIRUGU and NNBSP only; a Cyrillic word can convert only to such a
+text. Cost if wrong: an output with an ASCII character that someone wants would be
+replaced by the rule word.
+
+[DESIGN: N. `predict` pre-tokenises with the character model and runs Eole with
+`transforms: []`.] Eole copies the `valid` corpus's prefix into the checkpoint and the
+checkpoint overrides the prediction config (see the second finding below). Cost if wrong:
+`predict` must track the training-side transform chain by hand, and so must any D8 or D11
+per-direction evaluation. [DESIGN: O. A model directory is self-contained: `export` copies
+the character model into it as `converter_char.model`.] `apply` and `eval` need only
+`--model-dir`. Cost if wrong: a copy of the character model in every export (about 1 KB
+for the tiny one). [DESIGN: P. `train` owns the character model:] it trains and checks it
+on the corpus words, renders and validates the config and runs Eole; the manifest records
+the `.model` and `.vocab` hashes. Cost if wrong: every `train` retrains the character
+model, and a failure after that leaves it.
+
+[DESIGN: Q. No skip logic and no `--force`.] A rerun overwrites under the `begin_commit`
+and manifest-last protocol. Cost if wrong: a rerun always retrains (35 s for the tiny
+profile, GPU hours for the full one). [DESIGN: R. `apply` converts the whole input as one
+text and prints the counters on standard error; `eval` prints CER, word accuracy and `n`
+(then the two counters) and exits 3 on an empty pairs file.] Cost if wrong: the whole input
+is held in memory, in several copies. [DESIGN: S. The commands look up
+`train_char_model`, `run_training`, `export_ct2` and `load_converter` at call time.] Test
+seams. Cost if wrong: those module-level names are part of the test contract.
+[DESIGN: T. The profile is not recorded in `Manifest.status`.] The model has no free-form
+field. Cost if wrong: the manifest does not name the profile; the hash of `converter.yaml`
+identifies the rendering. [DESIGN: U. The character model is trained on the `cyrl2mong`
+files only.] The `mong2cyrl` files hold the same words with the sides swapped. Cost if
+wrong: none while both directions come from one pair list.
+
+[EVIDENCE: The spikes, 2026-11-07, this machine (Intel Core Ultra 7 265K, 46 GiB, RTX 5070
+Ti not used by training; Eole 0.6.4, CTranslate2 4.8.4, CPython 3.14.10). `eole build_vocab`
+and `eole train` run on CPU once `tgt_prefix: ""` is on every corpus (without it,
+`TypeError: object of type 'NoneType' has no len()`) and `word_vec_size` equals
+`hidden_size` (otherwise a layer-norm shape error at d64). With Eole's default
+`bucket_size` of 262144, 300 steps of a d64 model took more than 12 minutes (about 360
+tokens/s, 1.4 million log lines of "Weighted corpora loaded"); with `bucket_size` 1024,
+`num_workers` 1, `prefetch_factor` 8 and `OMP_NUM_THREADS=2` the same 300 steps took 20 s.
+Noam `learning_rate` 2.0 peaks near 0.025 at d64 and does not learn; 0.5 with 100 warmup
+steps gave CER 0.935 after 300 steps and 0.007 after 600 on a toy letter-map task (500
+words), so the master plan's "300 CPU steps reach CER <= 0.15" is false as written.
+CTranslate2 against Eole greedy decoding over the 500 words: 499 identical, the one
+difference a degenerate repetition stopped at different lengths. `str.split()` splits at
+U+202F, which would cut a script word from its suffix.]
+
+[EVIDENCE: The first upstream finding, `D-CT2-EOLE-CUDA`. `python -m
+ctranslate2.converters.eole_ct2` SEGFAULTS when a CUDA device is visible
+(`ctypes.string_at` on a device pointer in `ctranslate2/specs/model_spec.py:757`,
+`Variable.to_bytes`) and leaves an empty `model.bin`; with `CUDA_VISIBLE_DEVICES=""` it
+writes a valid model. Reproduced again on 2026-11-07 on the tiny checkpoint of the runbook
+example: exit 139 in a shell (signal 11), `model.bin` 0 bytes, `shared_vocabulary.json`
+1,043 bytes. Worked around, not fixed: `export_environment()` hides the GPU; the probe is a
+test behind `RINCHEN_CT2_CUDA_PROBE=1`.]
+
+[EVIDENCE: The second upstream finding, `D-EOLE-PREFIX-OVERRIDE`. Eole 0.6.4
+(`train_single.ValidationConfigurer`) copies the `valid` corpus's `src_prefix`
+(`<2mn_Mong>`) into `transforms_configs.prefix` of the checkpoint's `config.json`, and
+`config/run.py` (`_update_with_model_config`) lets the checkpoint's `transforms_configs`
+override the prediction config per transform name. Every `eole predict` with the `prefix`
+transform therefore ran under the Cyrillic-to-script tag, whatever the config said: the
+forward direction was right by coincidence and the reverse wrong (67 of 448 words differed
+from CTranslate2, agreement 0.85, reverse CER 0.0533). Evidence: CTranslate2 fed the wrong
+tag equals the old Eole output on 448/448; patching the checkpoint's tag makes Eole equal
+CTranslate2 on 448/448; Eole with the source pre-tokenised as tag plus pieces and
+`transforms: []` equals CTranslate2 on 448/448 in both directions, and the reverse CER
+falls to 0.0128. Reproduced again on 2026-11-07 on the runbook example's checkpoint: the
+checkpoint holds `prefix.src_prefix` `<2mn_Mong>`; `<2mn_Cyrl>` and `<2mn_Mong>` give the
+same output on 448 of 448 lines; 382 lines match the reference against 428 for the
+pre-tokenised `predict`. Consequence for D8 and D11: any per-direction Eole evaluation must
+bypass the transforms, or a parity gate fails spuriously.]
+
+[EVIDENCE: The rule baseline, measured once after the rules were frozen. Reference: 2,029
+rows, 2,027 valid, 1,005 development and 1,022 held-out. Development: letter map alone 129
+of 1,005 (12.84%), then five contextual rules, 231 (22.99%), CER 0.2345. Held-out: 237 of
+1,022 exact (0.2319), CER 0.2342. The spellings are dictionary spellings (median script
+length 1.17 times the Cyrillic length), so about three words in four differ from a
+phonographic spelling. Length ratio of script over Cyrillic over the 2,027 reference pairs,
+quantiles 0.01, 0.05, 0.5, 0.95, 0.99: 0.8333, 1.0000, 1.1667, 1.5000, 1.9480 (lexicon,
+1,005 pairs: 0.8343, 1.0000, 1.1667, 1.5000, 1.9920); not wired into
+`configs/data/filters.yaml`.]
+
+[EVIDENCE: The tiny model, 1000 steps, dropout 0, `--threads 2`: CER 0.0051 (Cyrillic to
+script) and 0.0128 (script to Cyrillic) on 448 training words; marks kept 78 of 81 words;
+CTranslate2 against Eole 448/448 in both directions; `ScriptConverter` word exact match 441
+of 448 (0.9844) and 448/448 against Eole in both directions, no rule fallback and no invalid
+output; training 34.8 s to 37.4 s over five runs (gate 150 s), export 2.3 s to 3.5 s; the real
+CLI chain gives CER 0.0051 and word accuracy 0.9844. On the 52 words the corpus builder held
+out as validation, the model gets CER 0.2444 and 0.2982 and 17 and 14 of 52 words exactly:
+it memorises, it does not generalise. Throughput, CPU, new process per run, median of ten:
+0.715 s for a one-word text, 0.790 s for 500 words, 0.820 s for 1,000 words (1,220 words/s
+end to end); about 10,000 words/s once the model is loaded.]
+
+[EVIDENCE: Not verified. No Mongolian reader judged the lexicon, the golden words, the
+fallback or any output; the render check in the target fonts was not done (no shaping
+library installed); the audit of U+200B, U+200C, U+200D, U+2060, U+FEFF, U+180A..U+180F and
+U+202F in real traditional-script text was not done (no real text); the Wiktionary
+reference may not be wholly independent of mechanical derivation and cannot be guaranteed
+Mongolia-only; the GPU and the full profile were never run; Windows and macOS were not run
+(the process-group kill and several tests are Linux only); every threshold is a prior; the
+script-to-Cyrillic direction has no validation loss; the wheel was not built to confirm
+that the two data files ship.]
+
+[DESIGN: Gates.] Open, because they need real data or a reader: the audit of the control
+and joiner characters in real traditional-script text (assigned to D5 by the D3 follow-up),
+the render check in Noto Sans Mongolian 2.001 and 3.103, the review of the lexicon, golden
+words and fallback by a Mongolian reader, the `mn_Mong` length-ratio bounds for the D4
+filter (measured, not wired), and the training of the full profile on real parallel script
+data. The D3 gates assigned to D4 (abbreviation induction, o-like substitute counts) stay
+open as recorded there.

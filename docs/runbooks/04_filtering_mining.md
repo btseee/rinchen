@@ -319,7 +319,16 @@ direction might need one, not a measured expectation.**
 | `deu_Latn` | Latin | 1.0 | as above | As English; German compounds lengthen words, and whether sentences get longer in letters is unmeasured |
 | `kaz_Cyrl` | Cyrillic | 1.0 | as above | As Russian; Kazakh is agglutinative like Mongolian |
 | `tur_Latn` | Latin | 1.0 | as above | As English; Turkish is agglutinative like Mongolian |
-| `mn_Mong` | Mongolian script | 1.0 | as above | Not a translation: the pair is the same text in two scripts (D5 will produce these pairs). The letter-count ratio is unknown until converter output exists, so look at it before trusting any bound |
+| `mn_Mong` | Mongolian script | 1.0 | as above | Not a translation: the pair is the same text in two scripts (D5's converter produces these pairs). The letter-count ratio is measured for single words only (next paragraph); look at it on sentences before trusting any bound |
+
+**Measured `mn_Mong` ratios (D5, not wired in).** D5 measured the length of a
+traditional-script word over the length of its Cyrillic word on its 2,027-pair
+dictionary reference: quantiles 0.01, 0.05, 0.5, 0.95 and 0.99 are 0.83, 1.00,
+1.17, 1.50 and 1.95 (`docs/runbooks/05_script_converter.md`, "Length ratio of
+script over Cyrillic", which also says how NNBSP changes the 0.99 quantile).
+They are word-level figures from dictionary spellings, no sentence-level
+measurement exists, and **they are not wired into `configs/data/filters.yaml`**:
+the `mn_Mong` row still uses the stage-wide priors.
 
 To override a direction, add its key to `length.by_direction`; a side left
 unset keeps the stage-wide bounds, at least one of `char_ratio` and

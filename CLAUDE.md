@@ -39,12 +39,13 @@ CLAUDE.md STATE.md DECISIONS.md pyproject.toml uv.lock justfile
 configs/base.yaml configs/profiles/{tiny,full}.yaml configs/{spm,eole,serve}/
 configs/languages.yaml configs/spm/{tiny_1k,student_64k,teacher_128k}.yaml
 configs/data/sources.yaml configs/data/sources.tiny.yaml configs/data/filters.yaml
+configs/eole/converter{,_tiny}.yaml configs/spm/converter_char.yaml
 docs/STACK.md docs/VERIFY.md
 docs/runbooks/00_environment.md docs/runbooks/01_acquisition.md
 docs/runbooks/02_human_testsets.md docs/runbooks/03_tokenizer.md
-docs/runbooks/04_filtering_mining.md
+docs/runbooks/04_filtering_mining.md docs/runbooks/05_script_converter.md
 docs/research/  docs/superpowers/{specs,plans}/
-src/rinchen/{config,manifest,utils,cli,text,lang,split,spm,corpus,filter,mine,synth,metrics,eval,serve}/
+src/rinchen/{config,manifest,utils,cli,text,lang,split,spm,corpus,filter,mine,script_conv,synth,metrics,eval,serve}/
 src/rinchen/acquire/{http,opus,hf,warc,commoncrawl,registry}.py
 src/rinchen/annotate/{db,export,agreement,app,routes,models}.py
 src/rinchen/spm/{symbols,corpus,train,check}.py src/rinchen/split/rules.py
@@ -52,11 +53,17 @@ src/rinchen/text/normalize.py src/rinchen/lang/scripts.py
 src/rinchen/corpus/{schema,readers,writers}.py src/rinchen/config/filters.py
 src/rinchen/filter/{reasons,script_ratio,numbers,length,lid,minhash,labse,qe,qe_eole,pipeline}.py
 src/rinchen/mine/{embed,align,docalign,pairs}.py src/rinchen/cli/{filter,mine,errors}.py
+src/rinchen/script_conv/{alphabet,validate,segments,eval,fallback,rules,data,char_model,config,train,export,runtime,_subprocess}.py
+src/rinchen/script_conv/{lexicon,standardized_variants}.tsv (package data)
+src/rinchen/cli/convert_script.py
 src/rinchen/errors.py src/rinchen/__init__.py
 tests/ scripts/ plans/ reports/ manifests/
-tests/{unit,property,golden}/ tests/fixtures/{annot,golden,raw,spm}/
-tests/support/ (planted corpus and alignments, fake embedders, tiny LID model)
+manifests/ucd_standardized_variants.json
+tests/{unit,property,golden,integration}/ tests/fixtures/{annot,golden,raw,spm,script_conv}/
+tests/support/ (planted corpus and alignments, fake embedders, tiny LID model,
+  tiny_converter, stub_runtime, fake_process, script_reference)
 scripts/build_spm_fixture.py (regenerates tests/fixtures/spm/tiny_corpus)
+scripts/build_script_conv_fixtures.py (reference TSV -> lexicon, golden words, tiny fixture)
 data/{raw,clean,mined,synth,test}/ (gitignored content, tracked dirs)
 vendor/wheels/ (committed binary wheels with no cp314 upstream release)
 vendor/fasttext-wheel-shim/ (pure-Python shim package, see DECISIONS.md)
@@ -82,7 +89,15 @@ mining) is done: its STOP gate was met locally (2026-11-07) and branch
 is an unvalidated prior because no real data exists, and the D3 gates assigned to
 D4 (abbreviation induction, o-like substitute counts, the traditional-script
 control-character audit) stay open. `main` is unpushed and no CI run covers D3
-or D4. Next up: D5 (Cyrillic/traditional converter). See `STATE.md`.
+or D4. D5 (Cyrillic/traditional converter) is done locally on branch
+`d5-script-converter`, cut from `main` at `4eac98f`: its STOP gate (the tiny
+converter exported and served through `ScriptConverter`) is met on the tiny
+fixture, and the branch is not merged, not pushed and covered by no CI run. It is
+a scaffold, not a quality converter: the rule baseline spells 237 of 1,022
+held-out dictionary words exactly, the tiny model memorises a 500-word fixture,
+the full profile was never trained, and the gates that need real script text or a
+Mongolian reader (the control-character audit, the render check, the review of the
+lexicon and the fallback) stay open. Next up: D6 (Synthetic data). See `STATE.md`.
 
 ## Evidence and full plan
 

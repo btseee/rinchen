@@ -282,20 +282,94 @@ config; the runbook and the spec were corrected. The 24-row smoke run was
 repeated with the release in place (exit 0, `kept 16 of 24 rows`), and `uv run
 pytest -m network -q` passed again (10 passed, 12.4 s).
 
-Branch status (updated 2026-11-07, after the D4 merge): `main` holds D3, the D3
-research follow-up and D4. Both topic branches were fast-forwarded into it and
-deleted (`2346cea` was the D3 end, `b38eaae` is the D4 merge tip; no
-`d3-research-followup` or `d4-filtering-mining` ref remains). At the merge `main`
-was 55 commits ahead of `origin/main` (`9e7b0ec`); it is unpushed, and no CI run
-covers D3 or D4. The full local gate was rerun on the merged tree: 1702 passed,
-10 deselected.
+**D5 (script converter) is done on branch `d5-script-converter`; its STOP gate (tiny
+converter exported and served) is met locally.** The branch was cut from `main` at
+`4eac98f` on 2026-11-07; it is not merged, not pushed, and no CI run covers it. It is a
+scaffold, not a quality converter: the rule baseline spells 237 of 1,022 held-out dictionary
+words exactly, the tiny model memorises a 500-word fixture (and gets 17 of 52 held-out
+fixture words right), the full profile was never trained, and there is no real parallel
+script data or Mongolian reader behind any of it.
+Built: `rinchen.script_conv` (`alphabet`, `validate` with `is_script_word`, `segments`,
+`eval`, `fallback`, `rules`, `data`, `char_model`, `config`, `_subprocess`, `train`,
+`export`, `runtime`, plus the package data `lexicon.tsv` and `standardized_variants.tsv`),
+the `rinchen convert-script` commands `build-data`, `train`, `export`, `apply` and `eval`
+(`rinchen.cli.convert_script`), the rendered Eole configs `configs/eole/converter.yaml` and
+`converter_tiny.yaml`, `configs/spm/converter_char.yaml`,
+`scripts/build_script_conv_fixtures.py`, the Wiktionary reference and the fixtures built from
+it (`tests/fixtures/script_conv/`), `tests/integration/` with its helpers in `tests/support/`,
+`manifests/ucd_standardized_variants.json`, and `docs/runbooks/05_script_converter.md`.
+19 commits before this one (`ed7ead9` design and plan; `2186b83` through `7517915`
+the code and its review fixes), then the records commit. The design is
+`docs/superpowers/specs/2026-11-07-d5-script-converter-design.md` (updated to the finished
+code); its 13 rulings and the 21 amendments A to U, made without a review round because the
+user asked for no check-ins, are condensed in DECISIONS.md ("2026-11-07: D5 script
+converter"). Gates, run for real on Linux, CPython 3.14.10, 2026-11-07 (`just` is not
+installed here, so the four gate commands were run as one chain, on the tree of the records
+commit): `ruff format --check .` -- 223 files already formatted; `ruff check .` -- all
+checks passed; `mypy src` -- no issues found in 99 source files; `pytest -m "not
+network" -q` -- **2663 passed, 1 skipped, 10 deselected** in 172 s (176 s for the four commands)
+(1702 passed on `main`; the integration tests train real Eole models and make the suite
+slower).
+Numeric gates, tiny profile (2/2 layers, d64, 1000 steps, dropout 0, `--threads 2`),
+CPU only: CER 0.0051 (Cyrillic to script) and 0.0128 (script to Cyrillic) on the 448
+training words (gate 0.15); NNBSP, MVS and selector counts kept in 78 of the 81 words that
+carry them (gate 90%); CTranslate2 against Eole on 448 of 448 words in both directions (gate
+0.99); `ScriptConverter` word exact match 441 of 448 = 0.984 (gate 0.90) and 448/448
+against Eole in both directions, with no rule fallback and no invalid output; training 34.8
+s to 37.4 s over five runs (gate 150 s); export 2.3 s to 3.5 s; the real `rinchen` binary
+ran `build-data`, `train --profile tiny`, `export`, `apply` and `eval` in a temporary
+directory (CER 0.0051, word accuracy 0.9844). Rule baseline, measured once after the rules
+were frozen: the fallback (one letter map and five contextual rules) spells 237 of 1,022
+held-out words exactly (0.2319, CER 0.2342; development 231 of 1,005 = 22.99%, CER 0.2345),
+against dictionary spellings that are not letter for letter. On the 52 fixture words the
+corpus builder held out as validation the tiny model reaches CER 0.2444 and 0.2982 (17 and
+14 of 52 words exact): it memorises. Throughput, CPU, a new process per run, median of ten:
+`apply` takes 0.715 s for one word, 0.79 s for 500 and 0.82 s for 1,000 (about 1,200 words/s
+end to end, about 10,000 words/s once the model is loaded). Length ratio of script over
+Cyrillic over the 2,027 reference pairs, quantiles 0.01, 0.05, 0.5, 0.95 and 0.99: 0.83,
+1.00, 1.17, 1.50 and 1.95; they are word-level and NOT wired into
+`configs/data/filters.yaml`.
+Findings worth knowing: two upstream defects, both worked around and recorded in
+`docs/VERIFY.md`. `D-CT2-EOLE-CUDA`: the CTranslate2 `eole_ct2` converter segfaults (exit
+-11, empty `model.bin`) when a CUDA device is visible, so the export always hides the GPU.
+`D-EOLE-PREFIX-OVERRIDE`: Eole copies the `valid` corpus's prefix into the checkpoint and the
+checkpoint overrides the prediction config, so `eole predict` ignored the requested tag
+(reverse direction: 67 of 448 words wrong, CER 0.0533 against 0.0128); `predict`
+pre-tokenises and runs Eole with no transforms, and D8 and D11 per-direction Eole
+evaluations must do the same or their parity gate fails spuriously. Also: Eole takes one
+validation corpus (the script-to-Cyrillic direction has no validation loss); the master
+plan's forbidden key names are not Eole fields (the real ones are `heads_kv`,
+`sliding_window`, `relative_positions_buckets` and the rotary fields); Eole expands `$` over
+the config text; `python -m eole` does not run; the master plan's "300 CPU steps reach CER
+<= 0.15" is false as written (the tiny profile needs 1000 steps, dropout 0).
+Open gates (none can be done without real data or a reader): the audit of U+200B, U+200C,
+U+200D, U+2060, U+FEFF, U+180A..U+180F and U+202F in real traditional-script text, before the
+joiner-stripping policy is frozen; the render check in Noto Sans Mongolian 2.001 and 3.103;
+the review of the lexicon, the golden words and the fallback by a Mongolian reader; `mn_Mong`
+length-ratio bounds for the D4 filter; training the full profile on real parallel script
+data. NOT verified: any output by a Mongolian reader; the Wiktionary reference's
+independence of mechanical derivation and its Mongolia-only provenance; the GPU path and the
+full profile (its YAML never went through Eole's own config class); Windows and macOS; the
+built wheel (that the two data files ship); every threshold on real data; throughput beyond
+1,000 words on one machine. [EVIDENCE: the four gate commands, the integration runs, the
+worked example, the measurement scripts and the reproductions of both upstream defects
+described in the runbook and in `docs/VERIFY.md`, 2026-11-07, commits `ed7ead9` through
+`7517915`.]
 
-Next step: D5 (Cyrillic and traditional-script converter). Its inputs from D3
-and D4: the converter never emits ZWJ or ZWNJ (a validator enforces it), emits
-NNBSP before separated suffixes and is render-checked in the target fonts; the
-audit of U+200C, U+200D, U+180A..U+180F and U+202F in real traditional-script
-text has to be done before the strip-the-joiners policy is frozen; `mn_Mong`
-pairs will need their own length-ratio bounds once converter output exists.
+Branch status (updated 2026-11-07, after the D5 build): `main` holds D3, the D3
+research follow-up and D4, and is at `4eac98f` (the commit that records the D4
+merge; `2346cea` was the D3 end and `b38eaae` the D4 merge tip, and no
+`d3-research-followup` or `d4-filtering-mining` ref remains). `main` is 56 commits
+ahead of `origin/main` (`9e7b0ec`); it is unpushed, and no CI run covers D3, D4 or
+D5. The full local gate was rerun on the merged tree: 1702 passed, 10 deselected.
+`d5-script-converter` is a separate branch cut from `main` at `4eac98f`, 19
+commits ahead before the records commit; it is not merged into `main` and not pushed.
+
+Next step: D6 (Synthetic data). Nothing in D5 blocks it. Its inputs from D5: the converter
+is a scaffold, so no output of `ScriptConverter` should be treated as real `mn_Mong` data;
+the D3 gates assigned to D4 and the D5 gates that need real text or a reader stay open;
+`mn_Mong` length-ratio bounds stay unwired in `configs/data/filters.yaml` until real
+script pairs exist.
 
 D0 (environment, skeleton, doctor): `pyproject.toml` restructured to the
 master plan's toolchain (see `docs/STACK.md` for resolved versions),
