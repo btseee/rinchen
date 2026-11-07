@@ -188,9 +188,11 @@ records) and a last commit that corrects provenance and wording found in
 review. [EVIDENCE: live runs of the four gate commands and of the harness
 scripts, 2026-11-06.]
 
-**D4 (filtering and mining) is done on branch `d4-filtering-mining`; its STOP
-gate ("tiny filter run green") is met locally.** The branch is cut from `main`
-at `2346cea`, is not merged into `main` and is not pushed; no CI run covers it.
+**D4 (filtering and mining) is done and merged into `main` locally; its STOP
+gate ("tiny filter run green") is met locally.** It was built on branch
+`d4-filtering-mining`, cut from `main` at `2346cea`, which was fast-forwarded
+into `main` on 2026-11-07 (merge tip `b38eaae`) and then deleted. `main` is not
+pushed and no CI run covers D4.
 Built: the corpus Parquet contract (`rinchen.corpus`: `CORPUS_SCHEMA`,
 `corpus_frame`, `scan_corpus`, `write_corpus`), `rinchen.config.filters` and
 `configs/data/filters.yaml`, the seven filter stages and `run_pipeline`
@@ -280,11 +282,13 @@ config; the runbook and the spec were corrected. The 24-row smoke run was
 repeated with the release in place (exit 0, `kept 16 of 24 rows`), and `uv run
 pytest -m network -q` passed again (10 passed, 12.4 s).
 
-Branch status (corrected 2026-11-07): `main` is at `2346cea`; it holds D3 and
-the D3 research follow-up (the follow-up branch was fast-forwarded into it, and
-no `d3-research-followup` ref remains), is 30 commits ahead of `origin/main`
-(`9e7b0ec`) and unpushed, and no CI run covers D3 or D4. `d4-filtering-mining`
-is `main` plus the D4 commits, not merged and not pushed.
+Branch status (updated 2026-11-07, after the D4 merge): `main` holds D3, the D3
+research follow-up and D4. Both topic branches were fast-forwarded into it and
+deleted (`2346cea` was the D3 end, `b38eaae` is the D4 merge tip; no
+`d3-research-followup` or `d4-filtering-mining` ref remains). At the merge `main`
+was 55 commits ahead of `origin/main` (`9e7b0ec`); it is unpushed, and no CI run
+covers D3 or D4. The full local gate was rerun on the merged tree: 1702 passed,
+10 deselected.
 
 Next step: D5 (Cyrillic and traditional-script converter). Its inputs from D3
 and D4: the converter never emits ZWJ or ZWNJ (a validator enforces it), emits

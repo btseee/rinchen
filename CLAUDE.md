@@ -77,9 +77,9 @@ and D2 are all done, all STOP gates fully met including green CI runs on
 `origin/main` (2026-11-02). D3 (Normalization & SentencePiece) is done: its
 STOP gate was met locally (2026-11-06), but only `tiny_1k` was ever trained
 (`student_64k`/`teacher_128k` are schema-validated only). D4 (Filtering &
-mining) is done: its STOP gate was met locally (2026-11-07) on branch
-`d4-filtering-mining`, which is not merged and not pushed; every threshold is
-an unvalidated prior because no real data exists, and the D3 gates assigned to
+mining) is done: its STOP gate was met locally (2026-11-07) and branch
+`d4-filtering-mining` was fast-forwarded into `main` (unpushed); every threshold
+is an unvalidated prior because no real data exists, and the D3 gates assigned to
 D4 (abbreviation induction, o-like substitute counts, the traditional-script
 control-character audit) stay open. `main` is unpushed and no CI run covers D3
 or D4. Next up: D5 (Cyrillic/traditional converter). See `STATE.md`.

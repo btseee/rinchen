@@ -774,7 +774,7 @@ so that it can be undone. The design with the full wording is
 `docs/superpowers/specs/2026-11-06-d4-filtering-mining-design.md` (rulings 1 to 17;
 the numbers below are the same); procedures, measured numbers and the known
 limitations are in `docs/runbooks/04_filtering_mining.md`. The work lives on branch
-`d4-filtering-mining`, which is not merged and not pushed.
+`d4-filtering-mining`, which was fast-forwarded into `main` on 2026-11-07 (not pushed).
 
 [DESIGN: 1. Twelve tasks on one branch, the pipeline last among the filters.] Cost if
 wrong: re-slicing, no code impact. [DESIGN: 2. `corpus/` (schema, readers, writers) is
