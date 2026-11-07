@@ -244,7 +244,9 @@ len(cyrillic)`, linear interpolation as `numpy.quantile`).
   check it fails, in this order, counted per code: `empty` (a side of only U+0020, or a Cyrillic
   side empty once normalized), `multiword` (a side that still holds U+0020 after its outer spaces
   are stripped, because a corpus line is one word; ruling H), the code of the first
-  `validate_traditional` violation on the raw script side, `duplicate`. It splits train and
+  `validate_traditional` violation on the raw script side, `not_script_word` (the normalized
+  script side is not one script word, `validate.is_script_word`: it has no letter, or holds an
+  ASCII letter, a digit, punctuation or a space), `duplicate`. It splits train and
   valid by the SHA-256 of `"{seed}:{normalized Cyrillic word}"` read as a fraction of 2**256, so
   equal Cyrillic words never straddle the split, and writes, under `out_dir`,
   `cyrl2mong.{train,valid}.{src,tgt}` and `mong2cyrl.{train,valid}.{src,tgt}` (the second four
@@ -287,11 +289,15 @@ dict[str, Any]` returns the Eole config, every path a POSIX string;
 only; no key of `FORBIDDEN_KEYS` at any depth, even with a neutral value (16 real Eole field
 names: `rope_config` and the other rotary fields, `relative_positions_buckets`,
 `sliding_window`, `layer_types`, `heads_kv`, `global_heads_kv`; a drift test imports Eole);
-`position_encoding_type == "SinusoidalInterleaved"` wherever it appears; `word_vec_size ==
-hidden_size`; `tgt_prefix == ""` on every corpus; the corpora `cyrl2mong`, `mong2cyrl` and
+`position_encoding_type == "SinusoidalInterleaved"` wherever it appears, and an
+`embeddings.position_encoding` that is present is `true`; `word_vec_size == hidden_size`, and so
+does a `hidden_size` set on the encoder or the decoder; no string-valued `encoder` or `decoder`
+(Eole evaluates such a string as code); `tgt_prefix == ""` on every corpus; the `transforms` of
+every corpus list `sentencepiece` before `prefix`; the corpora `cyrl2mong`, `mong2cyrl` and
 `valid` present, each direction with its target-script tag as `src_prefix`; `share_vocab`; no
-`$` in any string value (Eole expands `$NAME` over the YAML text); and, with `profile="tiny"`,
-CPU only (`gpu_ranks == []`, `compute_dtype fp32`). `dump_config(cfg, path)` writes it as YAML
+`$` in any key or string value (Eole expands `$NAME` over the YAML text); and, with
+`profile="tiny"`, CPU only (`gpu_ranks == []`, `compute_dtype fp32`; without `profile` these two
+checks are skipped). `dump_config(cfg, path)` writes it as YAML
 through a temporary file; `read_converter_paths(cfg_path) -> ConverterPaths(checkpoint_dir,
 char_model)` reads the two paths `export` needs back from a rendered file.
 
@@ -341,7 +347,9 @@ from its file.
   `transforms: []` and no `transforms_configs`, and decodes the raw token lines with the character
   model. Side files go next to the output (`predict_side_paths(out_file)` returns the named tuple
   `PredictSidePaths(log, config, token_source, token_output)`: `<out>.log`, `.predict.yaml`,
-  `.tokens.src`, `.tokens.out`). `ConfigError` for an unknown tag or a `$`; `DataError` for an
+  `.tokens.src`, `.tokens.out`). `ConfigError` for a `tag` that is not one of `CONVERTER_TAGS` (or
+  not a piece of the model) or a `$` in `ckpt_dir` or `out_file` (the two paths its config names;
+  `$` is fine in `src_file` and `spm_model`); `DataError` for an
   unloadable model or an unreadable or empty source; `UpstreamError` as for training, or for a
   line count that differs from the source's. There is no command for it.
 - `export_ct2(ckpt_dir, out_dir, *, timeout=None) -> Path` runs `python -I -W ignore -m
@@ -456,8 +464,8 @@ threshold):
 - `segments`: concatenation reproduces the input (`hypothesis`); an NNBSP between letters does
   not split the word; splitting on U+0020 only.
 - Corpus: counts exact on a planted list (duplicates, a violating pair, a multiword pair, an
-  empty pair); train and valid disjoint; deterministic for a seed; an empty train split is an
-  error.
+  empty pair, a pair whose script side is not one script word); train and valid disjoint;
+  deterministic for a seed; an empty train split is an error.
 - Char model: tags single pieces (by id); the training words round-trip, letters, FVS, MVS and
   NNBSP included; the same texts into the same prefix give identical files.
 - Config: rendered YAML equals the checked-in files; every forbidden key and every violated
@@ -530,7 +538,7 @@ Each is the builder's call; "cost" is what a wrong ruling costs.
 7. **Eole configs are rendered by code and validated** (`config.py`), not hand-edited; the
    master plan's template is corrected for the three failures found (`tgt_prefix`,
    `word_vec_size`, `bucket_size`), and the validator also rejects the real forbidden Eole field
-   names and a `$` in any string (Eole expands it). Cost: D7's `eole_cfg.render` should absorb
+   names and a `$` in any key or string (Eole expands it). Cost: D7's `eole_cfg.render` should absorb
    `config.py`.
 8. **CTranslate2 export always runs with CUDA hidden.** Cost: none on CPU export; an export
    that wants the GPU does not exist.

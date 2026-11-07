@@ -127,7 +127,9 @@ first check it fails, in this order: `empty`; `multiword` (a side still holds a
 U+0020 after its outer spaces are stripped, because a corpus line is one word);
 a violation on the raw script side, counted under its code (`joiner`,
 `foreign_character`, `orphan_selector`, `misplaced_nnbsp`, `invalid_variant`);
-`duplicate`. A pair goes to the valid split when the SHA-256 of
+`not_script_word` (the normalized script side holds no letter, or an ASCII
+letter, a digit, punctuation or a space); `duplicate`. A pair goes to the valid
+split when the SHA-256 of
 `"{seed}:{normalized Cyrillic word}"`, read as a fraction of 2**256, is below
 `--valid-fraction`, so equal Cyrillic words never straddle the split. An empty
 train split is an error; an empty valid split writes empty files.
@@ -496,7 +498,7 @@ above. The spec's "Evidence from the spikes" holds the original measurements.
 | `training.bucket_size` must be small for a tiny corpus | With the default 262144, 300 steps of a d64 model took more than 12 minutes (about 360 tokens/s, 1.4 million log lines of "Weighted corpora loaded"): the loader cycles a 500-line corpus to fill the bucket | Tiny profile: `bucket_size` 1024, `num_workers` 1, `prefetch_factor` 8 and `OMP_NUM_THREADS=2` made the same 300 steps take 20 s. The full profile keeps Eole's defaults, untested |
 | The Noam learning rate of the template is too high for d64 | `learning_rate: 2.0` peaks near 0.025 and the model does not learn | Tiny profile: `learning_rate` 0.5, `warmup_steps` 100: CER 0.935 after 300 steps and 0.007 after 600 on the toy letter-map task (500 words). The master plan's "300 CPU steps reach CER <= 0.15" is false as written |
 | `python -m eole` does not run | `No module named eole.__main__; 'eole' is a package and cannot be directly executed` | `train.py` runs the console script that sits next to the interpreter (`.venv/bin/eole`) |
-| Eole expands `$NAME` over the text of the YAML file | A `$` in a path or a string is silently replaced by an environment variable's value | The validator, `run_training` and `predict` reject a `$` in any path or rendered string (ConfigError, exit 2) |
+| Eole expands `$NAME` over the text of the YAML file | A `$` in a path or a string is silently replaced by an environment variable's value | The validator rejects a `$` in any key or string of the config, `run_training` in the config text, and `predict` in the checkpoint directory and the output path (ConfigError, exit 2) |
 | Eole reads ONE validation corpus, the one named `valid`, and trains on every other corpus name | A second validation corpus named `valid_mong2cyrl` would be TRAINED on | `valid` holds the Cyrillic-to-script direction only; the script-to-Cyrillic direction is trained but has no validation loss |
 | The master plan's forbidden key names are not Eole fields | `model.max_relative_positions`, `model.alibi` and `model.num_kv` are rejected by Eole as unknown; the real fields `heads_kv`, `sliding_window` and `relative_positions_buckets` are accepted silently | `FORBIDDEN_KEYS` holds 16 real field names (rotary, relative position buckets, sliding window, layer types, grouped-query heads); a drift test imports Eole and checks that each is a real field and that no rotary, relative, sliding-window or grouped-query field of the installed Eole is missing |
 | `eole_ct2` export SEGFAULTS when a CUDA device is visible | Exit code -11 (139 in a shell) and an empty `model.bin`; the fault is `ctypes.string_at` on a device pointer in `ctranslate2/specs/model_spec.py:757` (`Variable.to_bytes`) | `export_environment()` sets `CUDA_VISIBLE_DEVICES=""`. Reproduced again on 2026-11-07 on the tiny checkpoint: exit 139, `model.bin` 0 bytes. `RINCHEN_CT2_CUDA_PROBE=1` runs the probe as a test |
