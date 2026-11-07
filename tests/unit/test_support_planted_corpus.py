@@ -9,6 +9,7 @@ the corpus cannot hide behind a matching mistake in a stage.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import subprocess
 import sys
@@ -578,6 +579,43 @@ def test_hash_embedder_of_a_concatenation_is_close_to_the_sum(
     total = total / np.linalg.norm(total)
 
     assert _unit_cosine(joined, total.astype(np.float32)) > 0.9
+
+
+def _raw_token_vector(token: str, dim: int = 128) -> NDArray[np.float64]:
+    """The documented token vector, recomputed here on purpose instead of
+    imported: a standard-normal draw seeded by the first eight bytes of the
+    token's SHA-256. Its norm is not 1, so an embedding of several tokens is
+    the sum of these raw vectors, not of the unit vectors `embed` returns for
+    single tokens."""
+    seed = int.from_bytes(hashlib.sha256(token.encode("utf-8")).digest()[:8], "big")
+    return np.random.default_rng(seed).standard_normal(dim)
+
+
+def _unit(vector: NDArray[np.float64]) -> NDArray[np.float32]:
+    return (vector / np.linalg.norm(vector)).astype(np.float32)
+
+
+@pytest.mark.parametrize(
+    ("text", "counts"),
+    [
+        ("alpha", {"alpha": 1}),
+        ("alpha beta", {"alpha": 1, "beta": 1}),
+        ("beta alpha", {"alpha": 1, "beta": 1}),
+        ("alpha alpha beta", {"alpha": 2, "beta": 1}),
+        ("alpha beta beta beta", {"alpha": 1, "beta": 3}),
+        ("alpha beta gamma", {"alpha": 1, "beta": 1, "gamma": 1}),
+    ],
+)
+def test_hash_embedder_is_the_normalised_sum_of_raw_token_vectors(
+    text: str, counts: dict[str, int]
+) -> None:
+    expected = _unit(
+        sum(count * _raw_token_vector(token) for token, count in counts.items())
+    )
+
+    (vector,) = HashEmbedder().embed([text])
+
+    assert _unit_cosine(vector, expected) == pytest.approx(1.0, abs=1e-6)
 
 
 @pytest.mark.parametrize(
