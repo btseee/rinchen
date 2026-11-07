@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import dataclasses
 import re
+import sys
 import threading
 from collections.abc import Callable
 from pathlib import Path
@@ -27,6 +28,9 @@ from rinchen.synth.shards import (
 
 NNBSP = chr(0x202F)
 NON_BMP = chr(0x1F600)
+NUL = chr(0)
+LONE_SURROGATE = chr(0xD800)
+GOLDEN_DIGEST = "d47bc26907d18c0d81db55c6712b9f874d96e7c0a4639d9aa2a4c82acced45b4"
 
 JOB = JobConfig(
     kind="bt", mono_lang="khk_Cyrl", other_lang="eng_Latn", generator="vllm_default"
@@ -720,8 +724,9 @@ def test_the_round_trip_keeps_hard_strings_exactly(store: ShardStore) -> None:
         [f"left{NNBSP}right", "line one\nline two\r\n", NON_BMP * 3],
         ["  padded  ", "", "tab\there"],
         ["Өдрийн мэнд", "x" * 5000],
+        [f"nul{NUL}inside", NUL],
     ]
-    ids = ["a", "b", "c"]
+    ids = ["a", "b", "c", "d"]
 
     store.write(0, ids, candidates)
 
@@ -789,11 +794,53 @@ def test_a_negative_index_has_no_path_and_nothing_to_read(store: ShardStore) -> 
         store.read(-2, ["a"])
 
 
-def test_write_rejects_a_candidate_that_is_not_a_string(store: ShardStore) -> None:
-    with pytest.raises(ValueError, match=r"id 'b'"):
-        store.write(0, ["a", "b"], [["x"], [None, "y"]])  # type: ignore[list-item]
+def test_write_rejects_a_candidate_that_is_not_a_string(
+    shards_dir: Path, store: ShardStore
+) -> None:
+    with pytest.raises(ValueError, match=r"shard 4.*id 'b'"):
+        store.write(4, ["a", "b"], [["x"], [None, "y"]])  # type: ignore[list-item]
 
-    assert not store.path_for(0).exists()
+    assert not shards_dir.exists()
+
+
+def test_write_rejects_a_plain_string_as_a_candidate_list(
+    shards_dir: Path, store: ShardStore
+) -> None:
+    # list("abc") would silently become three candidates.
+    with pytest.raises(ValueError, match=r"shard 3.*id 'b'.*not a string"):
+        store.write(3, ["a", "b"], [["x"], "abc"])
+
+    assert not shards_dir.exists()
+
+
+@pytest.mark.parametrize(
+    "candidate",
+    [
+        pytest.param(LONE_SURROGATE, id="lone high surrogate"),
+        pytest.param(f"secret{chr(0xDFFF)}", id="lone low surrogate"),
+        pytest.param(f"secret{chr(0xD83D)}{chr(0xDE00)}", id="split surrogate pair"),
+    ],
+)
+def test_write_rejects_a_candidate_utf8_cannot_encode_naming_the_shard_and_id(
+    shards_dir: Path, store: ShardStore, candidate: str
+) -> None:
+    with pytest.raises(DataError, match=r"shard 7.*id 'b'") as caught:
+        store.write(7, ["a", "b"], [["fine"], ["ok", candidate]])
+
+    assert "secret" not in str(caught.value)
+    assert candidate not in str(caught.value)
+    assert not shards_dir.exists()  # rejected before the disk is touched
+
+
+def test_write_keeps_the_earlier_file_when_a_candidate_is_unencodable(
+    store: ShardStore,
+) -> None:
+    store.write(0, ["a"], [["old"]])
+
+    with pytest.raises(DataError):
+        store.write(0, ["a"], [[LONE_SURROGATE]])
+
+    assert store.read(0, ["a"]) == [["old"]]
 
 
 # --- ShardStore: atomic writes ------------------------------------------------
@@ -1190,3 +1237,208 @@ def test_completed_counts_a_shard_the_plan_never_had_as_missing(
     store.write(0, plan[0].ids, [["x"]] * 2)
 
     assert store.completed(plan[:2]) == frozenset({0})
+
+
+# --- ShardStore: invalid ------------------------------------------------------
+
+
+def _count_reads(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Patch the Parquet reader to record the name of every file it opens."""
+    opened: list[str] = []
+    real_read = pl.read_parquet
+
+    def counting_read(source: Any, *args: Any, **kwargs: Any) -> pl.DataFrame:
+        opened.append(Path(source).name)
+        return real_read(source, *args, **kwargs)
+
+    monkeypatch.setattr(pl, "read_parquet", counting_read)
+    return opened
+
+
+def _mixed_store(store: ShardStore) -> tuple[Shard, ...]:
+    """Shard 0 valid, 1 corrupt, 2 missing, 3 short, 4 foreign ids, 5 valid."""
+    plan = _plan(5)
+    plan = plan + (Shard(5, ("y", "z"), ("text-y", "text-z")),)
+    store.write(0, plan[0].ids, [["ok"]] * 2)
+    store.path_for(1).write_bytes(b"garbage")
+    store.write(3, plan[3].ids[:1], [["short"]])
+    store.write(4, ["not", "these"], [["foreign"]] * 2)
+    store.write(5, plan[5].ids, [[], ["fine"]])
+    return plan
+
+
+def test_invalid_lists_the_files_that_exist_but_fail_validation(
+    store: ShardStore,
+) -> None:
+    plan = _mixed_store(store)
+
+    assert store.invalid(plan) == frozenset({1, 3, 4})
+    assert store.completed(plan) == frozenset({0, 5})
+
+
+def test_invalid_returns_a_frozenset(store: ShardStore) -> None:
+    assert isinstance(store.invalid(_plan(1)), frozenset)
+
+
+def test_a_missing_shard_is_neither_completed_nor_invalid(store: ShardStore) -> None:
+    plan = _plan(3)
+
+    assert store.invalid(plan) == frozenset()
+    assert store.completed(plan) == frozenset()
+
+
+def test_a_stale_part_file_beside_a_missing_shard_is_ignored(
+    store: ShardStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    plan = _plan(2)
+    store.write(0, plan[0].ids, [["ok"]] * 2)
+    stale = store.path_for(1).with_name("shard-00001.parquet.0123abcd.part")
+    stale.write_bytes(b"half a file")
+    opened = _count_reads(monkeypatch)
+
+    assert store.completed(plan) == frozenset({0})
+    assert store.invalid(plan) == frozenset()
+    assert stale.read_bytes() == b"half a file"
+    assert opened == ["shard-00000.parquet", "shard-00000.parquet"]
+
+
+def test_a_valid_file_is_neither_invalid_nor_missing(store: ShardStore) -> None:
+    plan = _plan(1)
+    store.write(0, plan[0].ids, [["ok"]] * 2)
+
+    assert store.invalid(plan) == frozenset()
+    assert store.completed(plan) == frozenset({0})
+
+
+def test_completed_decodes_each_existing_shard_once(
+    store: ShardStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    plan = _mixed_store(store)
+    opened = _count_reads(monkeypatch)
+
+    store.completed(plan)
+
+    assert sorted(opened) == [
+        "shard-00000.parquet",
+        "shard-00001.parquet",
+        "shard-00003.parquet",
+        "shard-00004.parquet",
+        "shard-00005.parquet",
+    ]  # the missing shard 2 is not opened, none is opened twice
+
+
+def test_invalid_decodes_each_existing_shard_once(
+    store: ShardStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    plan = _mixed_store(store)
+    opened = _count_reads(monkeypatch)
+
+    store.invalid(plan)
+
+    assert sorted(opened) == [
+        "shard-00000.parquet",
+        "shard-00001.parquet",
+        "shard-00003.parquet",
+        "shard-00004.parquet",
+        "shard-00005.parquet",
+    ]
+
+
+def test_a_later_write_moves_an_invalid_shard_to_completed(store: ShardStore) -> None:
+    plan = _plan(2)
+    store.write(0, plan[0].ids, [["ok"]] * 2)
+    store.path_for(1).write_bytes(b"garbage")
+    assert store.invalid(plan) == frozenset({1})
+
+    store.write(1, plan[1].ids, [["fresh"]] * 2)
+
+    assert store.invalid(plan) == frozenset()
+    assert store.completed(plan) == frozenset({0, 1})
+
+
+# --- paths that look like glob patterns ---------------------------------------
+
+
+def test_a_shard_directory_with_brackets_in_its_name_round_trips(
+    tmp_path: Path,
+) -> None:
+    # `pl.read_parquet` would read `out[1]/...` as a glob matching `out1/...`.
+    bracketed = ShardStore(tmp_path / "out[1]")
+    neighbour = ShardStore(tmp_path / "out1")
+    plan = _plan(2)
+    neighbour.write(0, plan[0].ids, [["neighbour"]] * 2)
+    bracketed.write(0, plan[0].ids, [["mine"]] * 2)
+    bracketed.write(1, plan[1].ids, [["mine too"]] * 2)
+
+    assert bracketed.read(0, plan[0].ids) == [["mine"], ["mine"]]
+    assert bracketed.completed(plan) == frozenset({0, 1})
+    assert bracketed.invalid(plan) == frozenset()
+
+
+def test_a_shard_directory_of_wildcards_is_read_literally(tmp_path: Path) -> None:
+    if sys.platform == "win32":
+        pytest.skip("Windows file names cannot hold * or ?")
+    wild = ShardStore(tmp_path / "out*?")
+    other = ShardStore(tmp_path / "outXY")
+    plan = _plan(1)
+    other.write(0, ["other-1", "other-2"], [["elsewhere"]] * 2)
+    wild.write(0, plan[0].ids, [["mine"]] * 2)
+
+    assert wild.read(0, plan[0].ids) == [["mine"], ["mine"]]
+    assert wild.completed(plan) == frozenset({0})
+
+
+def test_read_monolingual_reads_a_file_with_brackets_in_its_name(
+    tmp_path: Path,
+) -> None:
+    literal = _write_parquet(tmp_path / "mono[1].parquet", _letters("ab"))
+    _write_parquet(tmp_path / "mono1.parquet", _letters("xy"))  # what [1] would match
+
+    assert read_monolingual(literal)["id"].to_list() == ["a", "b"]
+
+
+def test_read_monolingual_reads_a_file_with_wildcards_in_its_name(
+    tmp_path: Path,
+) -> None:
+    if sys.platform == "win32":
+        pytest.skip("Windows file names cannot hold * or ?")
+    literal = _write_parquet(tmp_path / "mono[1]*?.parquet", _letters("ab"))
+    _write_parquet(tmp_path / "mono1xy.parquet", _letters("xy"))  # matches the pattern
+
+    assert read_monolingual(literal)["id"].to_list() == ["a", "b"]
+
+
+# --- the canonical form of the fingerprint ------------------------------------
+
+
+def test_the_fingerprint_of_a_fixed_input_is_a_known_digest() -> None:
+    # Pins the canonical form (key order, separators, ASCII escapes of non-ASCII
+    # text, one JSON array per row). A new config field changes every digest, and
+    # with it every shard directory name: update the literal on purpose.
+    frame = _mono(
+        [
+            ("б2", "khk_Cyrl", f"Хоёр{NNBSP}дахь\n{NON_BMP}"),
+            ("a1", "khk_Cyrl", "Сайн байна уу"),
+        ]
+    )
+    job = JobConfig(
+        kind="bt",
+        mono_lang="khk_Cyrl",
+        other_lang="eng_Latn",
+        generator="vllm_default",
+        shard_size=512,
+    )
+    generator = VllmConfig(
+        base_url="http://127.0.0.1:8000/v1",
+        model="Hy-MT2-7B",
+        n=4,
+        temperature=0.7,
+        top_p=0.95,
+        max_tokens=256,
+        concurrency=32,
+        timeout_s=120.0,
+        retries=4,
+        backoff_s=1.0,
+    )
+
+    assert job_fingerprint(frame, job, generator, 16, 42) == GOLDEN_DIGEST

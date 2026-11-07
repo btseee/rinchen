@@ -617,6 +617,44 @@ def test_a_choice_without_content_is_dropped_like_an_empty_string(message):
     assert sleeps == []
 
 
+def _two_choices(first: str, second: str) -> bytes:
+    """A reply whose contents are given as JSON text, escapes and all."""
+    choices = ", ".join(
+        f'{{"index": {index}, "message": {{"role": "assistant", "content": "{content}"}}}}'
+        for index, content in enumerate((first, second))
+    )
+    return f'{{"choices": [{choices}]}}'.encode("ascii")
+
+
+def test_a_choice_with_a_lone_surrogate_escape_is_dropped_like_an_empty_one():
+    # A misbehaving server can send a JSON escape for a lone surrogate; the text
+    # it decodes to cannot be written to a file, so the candidate counts as a
+    # malformed generation.
+    reply = _two_choices(r"bad \ud800", "kept")
+    server = FakeLlmServer(echo_responder(), failures=[_body_of(200, reply)])
+    translator, sleeps = _translator(server)
+
+    assert translator.translate(["a"], ENG, KHK) == [["kept"]]
+    assert len(server.requests) == 1
+    assert sleeps == []
+
+
+def test_every_choice_a_lone_surrogate_gives_an_empty_list_for_that_text():
+    reply = _two_choices(r"\udfff", r"x \ud83d")
+    server = FakeLlmServer(echo_responder(), failures=[_body_of(200, reply)])
+    translator, _ = _translator(server)
+
+    assert translator.translate(["a"], ENG, KHK) == [[]]
+
+
+def test_a_surrogate_pair_escape_is_one_valid_character_and_is_kept():
+    reply = _two_choices(r"smile \ud83d\ude00", "kept")
+    server = FakeLlmServer(echo_responder(), failures=[_body_of(200, reply)])
+    translator, _ = _translator(server)
+
+    assert translator.translate(["a"], ENG, KHK) == [[f"smile {chr(0x1F600)}", "kept"]]
+
+
 def test_a_refusal_in_every_choice_gives_an_empty_list_for_that_text():
     refusal = {"role": "assistant", "content": None}
     server = FakeLlmServer(

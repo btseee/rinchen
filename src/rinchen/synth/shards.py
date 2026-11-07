@@ -10,18 +10,25 @@ import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
-from typing import Any
 
 import polars as pl
 
 from rinchen.config.synth import GeneratorConfig, JobConfig
 from rinchen.errors import DataError
+from rinchen.synth._candidates import is_utf8_encodable
 from rinchen.utils.part_file import unique_part_path
 
 _MONOLINGUAL_COLUMNS = ("id", "lang", "text")
 _SHARD_SCHEMA = pl.Schema({"id": pl.String(), "candidates": pl.List(pl.String())})
 _LANGUAGES_SHOWN = 5
+
+
+class _ShardState(Enum):
+    MISSING = "missing"
+    VALID = "valid"
+    INVALID = "invalid"
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,11 +44,13 @@ class Shard:
 def _read_parquet(path: Path, what: str) -> pl.DataFrame:
     """The file as a frame, or a DataError when it is missing or is not
     readable Parquet. A truncated or damaged file can make the Parquet reader
-    panic, which polars raises as a BaseException: it is a bad file too."""
+    panic, which polars raises as a BaseException: it is a bad file too. The
+    path is a file name, never a glob: `[`, `*` and `?` in a directory or file
+    name must not match some other file."""
     if not path.is_file():
         raise DataError(f"{what} not found: {path}")
     try:
-        return pl.read_parquet(path)
+        return pl.read_parquet(path, glob=False)
     except (pl.exceptions.PolarsError, pl.exceptions.PanicException, OSError) as exc:
         raise DataError(f"cannot read {what} {path}: {exc}") from exc
 
@@ -142,11 +151,11 @@ def plan_shards(frame: pl.DataFrame, shard_size: int) -> tuple[Shard, ...]:
     )
 
 
-def _feed(digest: Any, value: Any) -> None:
-    """Add `value` as canonical JSON (sorted keys, no spaces, ASCII only). The
-    values here are objects and arrays, so no value can run into the next."""
-    canonical = json.dumps(value, sort_keys=True, separators=(",", ":"))
-    digest.update(canonical.encode("ascii"))
+def _canonical_json(value: object) -> bytes:
+    """`value` as canonical JSON (sorted keys, no spaces, ASCII only). The
+    values hashed here are objects and arrays, so one cannot run into the next
+    when the bytes are concatenated."""
+    return json.dumps(value, sort_keys=True, separators=(",", ":")).encode("ascii")
 
 
 def job_fingerprint(
@@ -163,17 +172,15 @@ def job_fingerprint(
     hashed one at a time: a large input never becomes one string."""
     rows = _sorted_by_id(frame)
     digest = hashlib.sha256()
-    _feed(
-        digest,
-        {
-            "job": job.model_dump(mode="json"),
-            "generator": generator.model_dump(mode="json"),
-            "shard_size": shard_size,
-            "seed": seed,
-        },
-    )
+    header = {
+        "job": job.model_dump(mode="json"),
+        "generator": generator.model_dump(mode="json"),
+        "shard_size": shard_size,
+        "seed": seed,
+    }
+    digest.update(_canonical_json(header))
     for row in rows.iter_rows():
-        _feed(digest, row)
+        digest.update(_canonical_json(row))
     return digest.hexdigest()
 
 
@@ -208,15 +215,20 @@ class ShardStore:
         """Store `candidates[i]` for `ids[i]` as shard `index`, replacing any
         earlier file. A text without candidates keeps its empty list. Two
         writers for one index never corrupt each other: each renames its own
-        complete file and the last rename wins."""
+        complete file and the last rename wins.
+
+        Raises ValueError for a caller's mistake (ids and candidates of
+        different lengths, a string where a list of candidates belongs, a
+        candidate that is not a string) and DataError for a candidate UTF-8
+        cannot encode (a lone surrogate), before the disk is touched. The
+        messages name the shard and the id, never a text."""
         if len(ids) != len(candidates):
             raise ValueError(
                 f"ids and candidates differ in length ({len(ids)} vs {len(candidates)})"
             )
-        for id_, texts in zip(ids, candidates, strict=True):
-            if not all(isinstance(text, str) for text in texts):
-                raise ValueError(f"a candidate for id {id_!r} is not a string")
         path = self.path_for(index)
+        for id_, texts in zip(ids, candidates, strict=True):
+            self._require_storable(index, id_, texts)
         frame = pl.DataFrame(
             {"id": list(ids), "candidates": [list(texts) for texts in candidates]},
             schema=_SHARD_SCHEMA,
@@ -230,6 +242,23 @@ class ShardStore:
         finally:
             part_path.unlink(missing_ok=True)
         return path
+
+    @staticmethod
+    def _require_storable(index: int, id_: str, texts: Sequence[str]) -> None:
+        # ValueError for every bad argument, as `write` documents, although
+        # ruff would prefer TypeError for the type checks.
+        where = f"shard {index}: candidates for id {id_!r}"
+        if isinstance(texts, str):
+            raise ValueError(  # noqa: TRY004
+                f"{where} must be a sequence of strings, not a string"
+            )
+        for text in texts:
+            if not isinstance(text, str):
+                raise ValueError(  # noqa: TRY004
+                    f"{where} include a value that is not a string"
+                )
+            if not is_utf8_encodable(text):
+                raise DataError(f"{where} include one UTF-8 cannot encode")
 
     def read(self, index: int, expected_ids: Sequence[str]) -> list[list[str]]:
         """The candidate lists of shard `index`, one per expected id in order.
@@ -267,15 +296,30 @@ class ShardStore:
             raise DataError(f"{path}: null candidates: {null_candidates}")
         return lists
 
+    def _state(self, shard: Shard) -> _ShardState:
+        """The single place a shard's file is judged: one decode at most."""
+        if not self.path_for(shard.index).is_file():
+            return _ShardState.MISSING
+        try:
+            self.read(shard.index, shard.ids)
+        except DataError:
+            return _ShardState.INVALID
+        return _ShardState.VALID
+
+    def _indexes_in_state(
+        self, shards: Sequence[Shard], state: _ShardState
+    ) -> frozenset[int]:
+        return frozenset(shard.index for shard in shards if self._state(shard) is state)
+
     def completed(self, shards: Sequence[Shard]) -> frozenset[int]:
         """The indexes of the shards whose file passes `read` against the
         shard's own ids. A missing, corrupt, short or foreign file is not
-        completed; it stays on disk until the next `write` replaces it."""
-        done: set[int] = set()
-        for shard in shards:
-            try:
-                self.read(shard.index, shard.ids)
-            except DataError:
-                continue
-            done.add(shard.index)
-        return frozenset(done)
+        completed; an invalid one stays on disk until the next `write` replaces
+        it."""
+        return self._indexes_in_state(shards, _ShardState.VALID)
+
+    def invalid(self, shards: Sequence[Shard]) -> frozenset[int]:
+        """The indexes of the shards whose file exists but fails `read`: the
+        files a rerun will replace. A shard without a file is not invalid (a
+        stale `.part` file beside it does not count as one)."""
+        return self._indexes_in_state(shards, _ShardState.INVALID)

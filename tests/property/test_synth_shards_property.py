@@ -3,7 +3,7 @@ shard store hold for arbitrary rows, not only the hand-picked ones.
 
 Ids are unique by construction (a dictionary keyed by id), as `read_monolingual`
 guarantees. Texts and candidates avoid lone surrogates, which Parquet cannot
-hold, and NUL. The hypothesis profile is loaded in `tests/conftest.py`."""
+hold; NUL is allowed. The hypothesis profile is loaded in `tests/conftest.py`."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from hypothesis import strategies as st
 from rinchen.config.synth import JobConfig, VllmConfig
 from rinchen.synth.shards import ShardStore, job_fingerprint, plan_shards
 
-_CHARACTERS = st.characters(blacklist_categories=("Cs",), blacklist_characters="\x00")
+_CHARACTERS = st.characters(blacklist_categories=("Cs",))
 _TEXTS = st.text(_CHARACTERS, max_size=12)
 _IDS = st.text(_CHARACTERS, min_size=1, max_size=6)
 _ROWS = st.dictionaries(_IDS, _TEXTS, max_size=40)  # id -> text
