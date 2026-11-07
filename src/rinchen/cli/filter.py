@@ -4,15 +4,18 @@ manifest only; the work happens in `rinchen.filter`."""
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, NoReturn
+from typing import Annotated
 
 import polars as pl
 import typer
 
+from rinchen.cli.errors import (
+    FAILURE_EXIT_CODE,
+    exit_with_error,
+    rinchen_errors_as_exit_codes,
+)
 from rinchen.config.filters import (
     FILTERS_CONFIG_PATH,
     FilterConfig,
@@ -23,7 +26,7 @@ from rinchen.config.filters import (
 from rinchen.config.loader import REPO_ROOT
 from rinchen.corpus.readers import scan_corpus
 from rinchen.corpus.writers import write_corpus
-from rinchen.errors import ConfigError, DataError, RinchenError, UpstreamError
+from rinchen.errors import ConfigError, RinchenError
 from rinchen.filter import qe
 from rinchen.filter.pipeline import PipelineResult, kept_rows, run_pipeline
 from rinchen.filter.qe import QEScorer
@@ -42,14 +45,6 @@ from rinchen.utils.logging import get as get_logger
 
 app = typer.Typer(no_args_is_help=True)
 
-# The master plan's CLI exit codes. A RinchenError of any other kind, or an
-# output-side OSError, is a plain failure.
-_EXIT_CODE_BY_ERROR_TYPE: dict[type[RinchenError], int] = {
-    ConfigError: 2,
-    DataError: 3,
-    UpstreamError: 4,
-}
-_FAILURE_EXIT_CODE = 1
 # Polars appends this note, naming the failing expression, to an exception
 # raised inside a stage.
 _POLARS_EXPRESSION_NOTE = "\n\nThis error occurred in the following expression"
@@ -84,35 +79,14 @@ def build_qe_scorer(cfg: QeConfig) -> QEScorer | None:
     return EoleMetricXQEScorer() if cfg.scorer == "metricx_qe" else None
 
 
-def _exit_with_error(message: str, exit_code: int) -> NoReturn:
-    typer.echo(f"error: {message}", err=True)
-    raise typer.Exit(code=exit_code)
-
-
-@contextmanager
-def _rinchen_errors_as_exit_codes() -> Iterator[None]:
-    try:
-        yield
-    except RinchenError as exc:
-        # The error classes are siblings, so the order of this lookup does not
-        # matter; a subclass would have to be listed before its parent.
-        exit_code = next(
-            (
-                code
-                for error_type, code in _EXIT_CODE_BY_ERROR_TYPE.items()
-                if isinstance(exc, error_type)
-            ),
-            _FAILURE_EXIT_CODE,
-        )
-        text = str(exc)
-        message = _without_polars_note(text)
-        if message != text:
-            get_logger(__name__).error("filter_error_detail", detail=text)
-        _exit_with_error(message, exit_code)
-
-
-def _without_polars_note(text: str) -> str:
-    return text.split(_POLARS_EXPRESSION_NOTE, 1)[0]
+def _error_message(error: RinchenError) -> str:
+    """The text of an error without polars' note naming the failing expression,
+    which is logged instead."""
+    text = str(error)
+    message = text.split(_POLARS_EXPRESSION_NOTE, 1)[0]
+    if message != text:
+        get_logger(__name__).error("filter_error_detail", detail=text)
+    return message
 
 
 @app.command("run")
@@ -160,7 +134,7 @@ def run(
     """Score a corpus with the configured stages and split it into the scored
     corpus (every row, with its filter reason) and the kept corpus. The corpus
     is held in memory: budget two to three times its size."""
-    with _rinchen_errors_as_exit_codes():
+    with rinchen_errors_as_exit_codes(message_of=_error_message):
         cfg = load_filter_config(config)
         _require_model_files(cfg)
         frame = scan_corpus(corpus)
@@ -185,9 +159,9 @@ def run(
                 result, kept, target, config_sha256, seed, input_files
             )
         except OSError as exc:
-            _exit_with_error(
+            exit_with_error(
                 f"cannot write the filter outputs under {target}: {exc}",
-                _FAILURE_EXIT_CODE,
+                FAILURE_EXIT_CODE,
             )
         typer.echo(f"kept {kept.height} of {result.frame.height} rows")
         typer.echo(f"manifest: {manifest_path}")

@@ -3,53 +3,25 @@ invariants. Presentation only; the work happens in `rinchen.spm`."""
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from contextlib import contextmanager
 from pathlib import Path
-from typing import Annotated, NoReturn
+from typing import Annotated
 
 import typer
 
+from rinchen.cli.errors import (
+    DATA_ERROR_EXIT_CODE,
+    FAILURE_EXIT_CODE,
+    exit_with_error,
+    rinchen_errors_as_exit_codes,
+)
 from rinchen.config.spm import load_spm_config
-from rinchen.errors import ConfigError, DataError, RinchenError, UpstreamError
 from rinchen.spm.check import SpmCheckReport, check_spm
 from rinchen.spm.corpus import discover_corpus
 from rinchen.spm.train import train_spm
 
 app = typer.Typer(no_args_is_help=True)
 
-# The master plan's CLI exit codes. A RinchenError of any other kind, or an
-# output-side OSError, is a plain failure.
-_EXIT_CODE_BY_ERROR_TYPE: dict[type[RinchenError], int] = {
-    ConfigError: 2,
-    DataError: 3,
-    UpstreamError: 4,
-}
-_FAILURE_EXIT_CODE = 1
-_FAILED_CHECK_EXIT_CODE = _EXIT_CODE_BY_ERROR_TYPE[DataError]
-
-
-def _exit_with_error(message: str, exit_code: int) -> NoReturn:
-    typer.echo(f"error: {message}", err=True)
-    raise typer.Exit(code=exit_code)
-
-
-@contextmanager
-def _rinchen_errors_as_exit_codes() -> Iterator[None]:
-    try:
-        yield
-    except RinchenError as exc:
-        # The error classes are siblings, so the order of this lookup does not
-        # matter; a subclass would have to be listed before its parent.
-        exit_code = next(
-            (
-                code
-                for error_type, code in _EXIT_CODE_BY_ERROR_TYPE.items()
-                if isinstance(exc, error_type)
-            ),
-            _FAILURE_EXIT_CODE,
-        )
-        _exit_with_error(str(exc), exit_code)
+_FAILED_CHECK_EXIT_CODE = DATA_ERROR_EXIT_CODE
 
 
 def _report_lines(report: SpmCheckReport) -> list[str]:
@@ -68,14 +40,14 @@ def train(
         Path, typer.Option("--config", help="SentencePiece config, e.g. tiny_1k.yaml.")
     ],
 ) -> None:
-    with _rinchen_errors_as_exit_codes():
+    with rinchen_errors_as_exit_codes():
         cfg = load_spm_config(config)
         try:
             model_path = train_spm(cfg)
         except OSError as exc:
-            _exit_with_error(
+            exit_with_error(
                 f"cannot write SentencePiece outputs for {config}: {exc}",
-                _FAILURE_EXIT_CODE,
+                FAILURE_EXIT_CODE,
             )
     typer.echo(f"trained {model_path}")
 
@@ -96,7 +68,7 @@ def check(
         ),
     ] = 1000,
 ) -> None:
-    with _rinchen_errors_as_exit_codes():
+    with rinchen_errors_as_exit_codes():
         report = check_spm(
             model, discover_corpus(corpus_dir), sample_lines=sample_lines
         )
