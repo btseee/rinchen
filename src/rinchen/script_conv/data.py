@@ -40,6 +40,14 @@ _MAX_VALID_FRACTION = 0.5
 _LINE_BREAK_OR_TAB = re.compile(r"[\n\r\t]")
 _HASH_SPACE = 2**256
 
+# The files `build_corpus` writes, in the order it writes them.
+CORPUS_FILE_NAMES = tuple(
+    f"{direction}.{split}.{side}"
+    for split in ("train", "valid")
+    for direction in ("cyrl2mong", "mong2cyrl")
+    for side in ("src", "tgt")
+)
+
 
 @dataclass(frozen=True)
 class WordPair:

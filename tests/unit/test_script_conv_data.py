@@ -20,6 +20,7 @@ import pytest
 from rinchen.errors import ConfigError, DataError
 from rinchen.script_conv.alphabet import LETTERS, MVS, NNBSP
 from rinchen.script_conv.data import (
+    CORPUS_FILE_NAMES,
     CorpusFiles,
     WordPair,
     align_words,
@@ -367,6 +368,17 @@ def test_build_corpus_writes_the_eight_files_and_reports_their_rows(
     for name, path in result.files.items():
         assert path == out_dir / name
         assert result.rows[name] == len(_lines(path))
+
+
+def test_the_corpus_file_names_are_the_eight_files_build_corpus_writes_in_order(
+    tmp_path: Path,
+) -> None:
+    planted, _ = _planted_pairs()
+
+    result = build_corpus(planted, tmp_path, valid_fraction=VALID_FRACTION, seed=SEED)
+
+    assert set(CORPUS_FILE_NAMES) == FILE_NAMES
+    assert list(CORPUS_FILE_NAMES) == list(result.files)
 
 
 def test_corpus_files_is_a_frozen_value_with_read_only_mappings(

@@ -23,9 +23,11 @@ import sentencepiece
 import yaml
 
 from rinchen.errors import ConfigError, DataError, UpstreamError
+from rinchen.script_conv import train as train_module
 from rinchen.script_conv.char_model import train_char_model
 from rinchen.script_conv.config import dump_config, render_converter_config
 from rinchen.script_conv.train import (
+    eole_commands,
     predict,
     predict_side_paths,
     run_training,
@@ -210,6 +212,55 @@ def test_run_training_rejects_fewer_than_one_thread_before_it_launches_anything(
 
 
 # ---- run_training: commands and environment -------------------------------------
+
+
+def test_eole_commands_are_the_two_commands_run_training_runs(
+    fake_eole: FakeEole, tiny_config: Path, run_dir: Path
+) -> None:
+    build_vocab, train = eole_commands(tiny_config)
+
+    run_training(tiny_config, run_dir)
+
+    assert [list(build_vocab), list(train)] == [argv for argv, _ in fake_eole.calls]
+
+
+def test_eole_commands_name_the_config_and_count_the_whole_corpus(
+    tiny_config: Path,
+) -> None:
+    build_vocab, train = eole_commands(tiny_config)
+
+    assert Path(build_vocab[0]).parent == Path(sys.executable).parent
+    assert build_vocab[1:] == (
+        "build_vocab",
+        "-config",
+        str(tiny_config),
+        "-n_sample",
+        "-1",
+    )
+    assert train[1:] == ("train", "-config", str(tiny_config))
+    assert train[0] == build_vocab[0]
+
+
+def test_eole_commands_report_a_missing_eole_script_and_launch_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_eole: FakeEole,
+    tmp_path: Path,
+    tiny_config: Path,
+) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    monkeypatch.setattr(sys, "executable", str(bin_dir / "python"))
+
+    with pytest.raises(UpstreamError, match="eole"):
+        eole_commands(tiny_config)
+
+    assert fake_eole.calls == []
+
+
+def test_the_public_checkpoint_name_is_the_file_eole_links_to_its_newest_checkpoint() -> (
+    None
+):
+    assert train_module.CHECKPOINT_FILE == CHECKPOINT_FILE
 
 
 def test_run_training_runs_build_vocab_then_train_with_the_config(

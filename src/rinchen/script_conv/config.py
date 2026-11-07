@@ -19,7 +19,7 @@ import copy
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Final, Literal, NoReturn
+from typing import Any, Final, Literal, NamedTuple, NoReturn
 
 import yaml
 
@@ -292,6 +292,48 @@ def dump_config(cfg: dict[str, Any], path: Path) -> None:
         part_path.replace(path)
     finally:
         part_path.unlink(missing_ok=True)
+
+
+class ConverterPaths(NamedTuple):
+    """The two paths a trained converter is exported from, as its config names them."""
+
+    checkpoint_dir: Path  # training.model_path
+    char_model: Path  # transforms_configs.sentencepiece.src_subword_model
+
+
+def read_converter_paths(cfg_path: Path) -> ConverterPaths:
+    """The checkpoint directory and the character model that the config file at
+    `cfg_path` (a rendering `dump_config` wrote) names, as the config spells them.
+
+    Raises:
+        ConfigError: the file is missing, cannot be read or parsed, or is not a
+            mapping; or one of the two paths is missing or not a non-empty string
+            (the message names its key path).
+    """
+    if not cfg_path.is_file():
+        raise ConfigError(f"converter config file not found: {cfg_path}")
+    try:
+        cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+    except (yaml.YAMLError, UnicodeDecodeError, OSError) as exc:
+        raise ConfigError(
+            f"invalid converter config {cfg_path}: cannot read or parse: {exc}"
+        ) from exc
+    if not isinstance(cfg, Mapping):
+        raise ConfigError(
+            f"invalid converter config {cfg_path}: top level must be a mapping, "
+            f"got {type(cfg).__name__}"
+        )
+    return ConverterPaths(
+        checkpoint_dir=_path_at(cfg, "training.model_path"),
+        char_model=_path_at(cfg, "transforms_configs.sentencepiece.src_subword_model"),
+    )
+
+
+def _path_at(cfg: Mapping[str, Any], dotted: str) -> Path:
+    value = _lookup(cfg, dotted)
+    if not isinstance(value, str) or not value:
+        _fail(dotted, f"must be a non-empty path, got {value!r}")
+    return Path(value)
 
 
 def validate_converter_config(

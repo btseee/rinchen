@@ -27,7 +27,7 @@ _PREDICT_BATCH_SIZE = 64
 # Eole keeps its newest checkpoint under this name in `model_path` (a link to the file
 # in a step directory), so a run that trained leaves it there with a fresh
 # modification time.
-_CHECKPOINT_FILE = "model.00.safetensors"
+CHECKPOINT_FILE = "model.00.safetensors"
 # File systems with coarse timestamps can round a modification time down.
 _MTIME_SLACK_SECONDS = 2.0
 
@@ -74,34 +74,51 @@ def run_training(
     cfg = _load_config(cfg_path)
     validate_converter_config(cfg)
     model_path = _model_path_inside(cfg, run_dir)
-    eole = _eole_command()
+    build_vocab_command, train_command = eole_commands(cfg_path)
     training = cfg["training"]
     trains_on_gpu = isinstance(training, Mapping) and bool(training.get("gpu_ranks"))
     env = training_environment(threads, hide_gpu=not trains_on_gpu)
 
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    def run_eole(subcommand: str, *options: str) -> None:
+    def run_eole(command: tuple[str, ...]) -> None:
+        subcommand = command[1]
         run_logged(
-            [eole, subcommand, "-config", str(cfg_path), *options],
+            list(command),
             env=env,
             log_path=run_dir / f"{subcommand}.log",
             what=f"eole {subcommand}",
             timeout=timeout,
         )
 
-    run_eole("build_vocab", "-n_sample", "-1")  # -1: count the whole corpus
+    run_eole(build_vocab_command)
     launched = time.time()
-    run_eole("train")
+    run_eole(train_command)
     if not _written_since(
-        model_path / _CHECKPOINT_FILE, launched - _MTIME_SLACK_SECONDS
+        model_path / CHECKPOINT_FILE, launched - _MTIME_SLACK_SECONDS
     ):
         raise UpstreamError(
             f"eole train exited with code 0 but wrote no new checkpoint under "
-            f"{model_path}: expected a fresh {_CHECKPOINT_FILE}; see "
+            f"{model_path}: expected a fresh {CHECKPOINT_FILE}; see "
             f"{run_dir / 'train.log'}"
         )
     return model_path
+
+
+def eole_commands(cfg_path: Path) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """The commands `run_training` runs on the config at `cfg_path`, as argument
+    vectors: `eole build_vocab` (counting the whole corpus), then `eole train`.
+
+    Raises:
+        UpstreamError: the `eole` command is not installed next to the interpreter.
+    """
+    eole = _eole_command()
+    config = ("-config", str(cfg_path))
+    # -n_sample -1: count the whole corpus.
+    return (
+        (eole, "build_vocab", *config, "-n_sample", "-1"),
+        (eole, "train", *config),
+    )
 
 
 class PredictSidePaths(NamedTuple):

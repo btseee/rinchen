@@ -31,7 +31,9 @@ from rinchen.errors import ConfigError
 from rinchen.script_conv.char_model import CONVERTER_TAGS, train_char_model
 from rinchen.script_conv.config import (
     FORBIDDEN_KEYS,
+    ConverterPaths,
     dump_config,
+    read_converter_paths,
     render_converter_config,
     validate_converter_config,
 )
@@ -906,3 +908,68 @@ def test_eole_reads_only_the_corpus_named_valid_for_validation(
         "valid_mong2cyrl",
     }
     assert set(get_corpora(config, task=CorpusTask.VALID)) == {"valid"}
+
+
+# --- read_converter_paths ----------------------------------------------------------
+
+
+def _write_rendered(tmp_path: Path, profile: Profile = "tiny") -> Path:
+    path = tmp_path / "converter.yaml"
+    dump_config(_render(profile), path)
+    return path
+
+
+@pytest.mark.parametrize("profile", PROFILES)
+def test_the_converter_paths_are_the_checkpoint_directory_and_the_character_model(
+    tmp_path: Path, profile: Profile
+) -> None:
+    paths = read_converter_paths(_write_rendered(tmp_path, profile))
+
+    assert paths == ConverterPaths(
+        checkpoint_dir=RUN_DIR / "ckpt", char_model=SPM_MODEL
+    )
+
+
+def test_reading_converter_paths_of_a_missing_file_is_a_config_error(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ConfigError, match="not found"):
+        read_converter_paths(tmp_path / "absent.yaml")
+
+
+@pytest.mark.parametrize("text", ["- a\n- b\n", "just text\n", "a: [unclosed\n"])
+def test_reading_converter_paths_of_text_that_is_not_a_config_is_a_config_error(
+    tmp_path: Path, text: str
+) -> None:
+    path = tmp_path / "converter.yaml"
+    path.write_text(text, encoding="utf-8")
+
+    with pytest.raises(ConfigError, match="converter.yaml"):
+        read_converter_paths(path)
+
+
+@pytest.mark.parametrize(
+    "dotted",
+    [
+        "training.model_path",
+        "transforms_configs.sentencepiece.src_subword_model",
+    ],
+)
+@pytest.mark.parametrize("problem", ["missing", "not_a_path"])
+def test_reading_converter_paths_names_the_key_that_is_missing_or_not_a_path(
+    tmp_path: Path, dotted: str, problem: str
+) -> None:
+    cfg = _render("tiny")
+    *parents, leaf = dotted.split(".")
+    node = cfg
+    for part in parents:
+        node = node[part]
+    if problem == "missing":
+        del node[leaf]
+    else:
+        node[leaf] = ["a", "list"]
+    path = tmp_path / "converter.yaml"
+    dump_config(cfg, path)
+
+    with pytest.raises(ConfigError, match=re.escape(dotted)):
+        read_converter_paths(path)
