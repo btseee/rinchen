@@ -10,6 +10,7 @@ as `chr()` calls; the Cyrillic words are written out.
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import importlib.metadata
 import json
@@ -40,6 +41,7 @@ from rinchen.script_conv.config import (
     validate_converter_config,
 )
 from rinchen.script_conv.data import build_corpus, read_pairs_tsv, rule_pairs
+from rinchen.script_conv.export import export_log_path
 from rinchen.script_conv.rules import LEXICON, transliterate_word
 from rinchen.script_conv.runtime import Conversion, ScriptConverter
 from tests.support.script_reference import FIXTURE_DIR
@@ -606,14 +608,39 @@ def test_a_run_that_keeps_no_pair_is_a_data_error_that_leaves_no_manifest(
     assert not store.manifest_path(data_workspace.out_dir).exists()
 
 
-def test_a_valid_fraction_the_library_rejects_is_a_config_error(
+def test_a_valid_fraction_the_library_rejects_is_a_config_error_that_keeps_an_intact_manifest(
     data_workspace: DataWorkspace,
 ) -> None:
+    _run_ok(*data_workspace.args())
+    before = _tree(data_workspace.out_dir)
+
     result = _run(*data_workspace.args("--valid-fraction", "0.9"))
 
     assert result.exit_code == 2, result.output
     assert "valid_fraction" in result.stderr
-    assert not store.manifest_path(data_workspace.out_dir).exists()
+    assert _tree(data_workspace.out_dir) == before
+
+
+def test_build_data_manifest_holds_the_input_hash_from_before_the_work(
+    data_workspace: DataWorkspace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    before = _sha256(data_workspace.pairs)
+    real_build_corpus = convert_script.build_corpus
+
+    def rewrite_the_input_then_build(*args: Any, **kwargs: Any) -> Any:
+        with data_workspace.pairs.open("a", encoding="utf-8") as handle:
+            handle.write("а\tб\n")
+        return real_build_corpus(*args, **kwargs)
+
+    monkeypatch.setattr(convert_script, "build_corpus", rewrite_the_input_then_build)
+
+    _run_ok(*data_workspace.args())
+
+    assert _sha256(data_workspace.pairs) != before
+    manifest = _manifest(data_workspace.out_dir)
+    assert [(item.path, item.sha256) for item in manifest.inputs] == [
+        (str(data_workspace.pairs), before)
+    ]
 
 
 # ---- train ---------------------------------------------------------------------------
@@ -638,7 +665,9 @@ class TrainWorkspace:
     def config(self) -> Path:
         return self.run_dir / "converter.yaml"
 
-    def args(self, *extra: str, profile: str = "tiny") -> list[str]:
+    def args(
+        self, *extra: str, profile: str = "tiny", run_dir: Path | None = None
+    ) -> list[str]:
         return [
             "train",
             "--profile",
@@ -646,7 +675,7 @@ class TrainWorkspace:
             "--data-dir",
             str(self.data_dir),
             "--run-dir",
-            str(self.run_dir),
+            str(self.run_dir if run_dir is None else run_dir),
             "--spm-config",
             str(self.spm_config),
             *extra,
@@ -656,7 +685,15 @@ class TrainWorkspace:
         return [self.data_dir / name for name in CORPUS_NAMES]
 
     def expected_texts(self) -> list[str]:
-        return [line for path in self.corpus_files() for line in _lines(path)]
+        """What the character model is trained on: both sides of the train and valid
+        files of the Cyrillic-to-script direction, in file order. The other direction
+        holds the same words with the sides swapped."""
+        return [
+            line
+            for path in self.corpus_files()
+            if path.name.startswith("cyrl2mong.")
+            for line in _lines(path)
+        ]
 
 
 @pytest.fixture
@@ -693,6 +730,10 @@ class TrainSeams:
     configs_at_training: list[dict[str, Any]] = field(default_factory=list)
     vocab_sizes: list[int] = field(default_factory=list)
     threads: list[int] = field(default_factory=list)
+    timeouts: list[float | None] = field(default_factory=list)
+    # Called when the named seam is entered, after it is recorded: a test uses one
+    # to change a file during the work or to make the seam fail with another error.
+    hooks: dict[str, Callable[[], None]] = field(default_factory=dict)
     fail_at: str | None = None
     error: RinchenError = field(default_factory=lambda: UpstreamError("boom"))
     writes_checkpoint: bool = True
@@ -702,6 +743,8 @@ class TrainSeams:
         self.manifest_present.append(
             store.manifest_path(self.workspace.run_dir).exists()
         )
+        if name in self.hooks:
+            self.hooks[name]()
         if self.fail_at == name:
             raise self.error
 
@@ -732,6 +775,7 @@ class TrainSeams:
         cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
         self.configs_at_training.append(cfg)
         self.threads.append(threads)
+        self.timeouts.append(timeout)
         checkpoint_dir = Path(cfg["training"]["model_path"])
         if self.writes_checkpoint:
             checkpoint_dir.mkdir(parents=True, exist_ok=True)
@@ -778,14 +822,14 @@ def test_train_trains_and_checks_the_char_model_on_the_same_materialised_texts(
     _run_ok(*train_workspace.args())
 
     expected = train_workspace.expected_texts()
-    assert len(expected) > 200
+    assert len(expected) > 100
     assert seams.text_types == {"train": list, "check": list}
     assert seams.trained_texts == expected
     assert seams.checked_texts == expected
     assert seams.vocab_sizes == [200]
 
 
-def test_train_reads_every_side_of_every_corpus_file_but_no_blank_line(
+def test_train_reads_both_sides_of_the_cyrl2mong_files_but_no_blank_line(
     train_workspace: TrainWorkspace, seams: TrainSeams
 ) -> None:
     for name in ("cyrl2mong.valid.src", "cyrl2mong.valid.tgt"):
@@ -795,6 +839,26 @@ def test_train_reads_every_side_of_every_corpus_file_but_no_blank_line(
 
     assert "" not in seams.trained_texts
     assert seams.trained_texts == train_workspace.expected_texts()
+
+
+def test_train_leaves_the_mong2cyrl_files_unread_but_keeps_them_as_inputs(
+    train_workspace: TrainWorkspace, seams: TrainSeams
+) -> None:
+    # Swapped copies of the other direction: not read for the character model (so
+    # bytes that are not UTF-8 do no harm), yet Eole trains on them.
+    unread = train_workspace.data_dir / "mong2cyrl.valid.tgt"
+    unread.write_bytes(b"\xff\xfe\n")
+
+    _run_ok(*train_workspace.args())
+
+    assert seams.trained_texts == train_workspace.expected_texts()
+    assert seams.checked_texts == train_workspace.expected_texts()
+    inputs = [item.path for item in _manifest(train_workspace.run_dir).inputs]
+    assert inputs == [
+        *map(str, train_workspace.corpus_files()),
+        str(train_workspace.spm_config),
+    ]
+    assert str(unread) in inputs
 
 
 def test_train_writes_the_converter_config_before_it_trains(
@@ -856,7 +920,7 @@ def test_train_manifest_records_inputs_outputs_and_environment(
     assert manifest.config_sha256 == _sha256(train_workspace.config)
     assert manifest.seed == 1234
     assert manifest.metrics == {"threads": 3.0}
-    assert manifest.status == {"profile": "tiny"}
+    assert manifest.status == {}
     assert list(manifest.tool_versions) == TRAIN_TOOLS
     assert manifest.tool_versions["eole"] == importlib.metadata.version("eole")
     assert manifest.code_version
@@ -889,7 +953,11 @@ def test_train_with_the_full_profile_renders_the_full_config(
         run_dir=train_workspace.run_dir,
     )
     assert seams.configs_at_training == [expected]
-    assert _manifest(train_workspace.run_dir).status == {"profile": "full"}
+    manifest = _manifest(train_workspace.run_dir)
+    assert manifest.status == {}
+    # The rendered config is a hashed output, and its hash is the config hash.
+    assert manifest.config_sha256 == _sha256(train_workspace.config)
+    assert str(train_workspace.config) in [item.path for item in manifest.outputs]
 
 
 def test_train_full_profile_is_an_operator_step_without_confirmation(
@@ -1083,9 +1151,179 @@ def test_a_training_that_leaves_no_checkpoint_is_a_failure_without_a_manifest(
     result = _run(*train_workspace.args())
 
     assert result.exit_code == 1, result.output
-    assert result.stderr.startswith("error: cannot write the training outputs under ")
+    assert result.stderr.startswith(
+        f"error: cannot write the training outputs under {train_workspace.run_dir}: "
+    )
+    # The missing file is named, as the operating system reports it.
+    assert str(train_workspace.run_dir / "ckpt" / CHECKPOINT_FILE) in result.stderr
     assert not store.manifest_path(train_workspace.run_dir).exists()
     _no_part_files(train_workspace.run_dir.parent)
+
+
+def test_a_failed_write_of_train_names_the_path_the_error_reports(
+    train_workspace: TrainWorkspace, seams: TrainSeams
+) -> None:
+    def disk_full() -> None:
+        raise OSError(errno.ENOSPC, "No space left on device", "/disk/ckpt/model.bin")
+
+    seams.hooks["run_training"] = disk_full
+
+    result = _run(*train_workspace.args())
+
+    assert result.exit_code == 1, result.output
+    assert result.stderr == (
+        f"error: cannot write the training outputs under {train_workspace.run_dir}: "
+        "No space left on device: /disk/ckpt/model.bin\n"
+    )
+
+
+def test_a_failed_write_of_train_without_a_path_gives_the_generic_text(
+    train_workspace: TrainWorkspace, seams: TrainSeams
+) -> None:
+    def disk_full() -> None:
+        raise OSError("disk full")
+
+    seams.hooks["run_training"] = disk_full
+
+    result = _run(*train_workspace.args())
+
+    assert result.exit_code == 1, result.output
+    assert result.stderr == (
+        f"error: cannot write the training outputs under {train_workspace.run_dir}: "
+        "disk full\n"
+    )
+
+
+def test_train_keeps_the_old_manifest_when_a_corpus_file_cannot_be_read(
+    train_workspace: TrainWorkspace, seams: TrainSeams
+) -> None:
+    _run_ok(*train_workspace.args())
+    manifest_before = store.manifest_path(train_workspace.run_dir).read_bytes()
+    events_before = list(seams.events)
+    (train_workspace.data_dir / "cyrl2mong.train.src").write_bytes(b"\xff\xfe\n")
+
+    result = _run(*train_workspace.args())
+
+    assert result.exit_code == 3, result.output
+    assert "not valid UTF-8" in result.stderr
+    assert seams.events == events_before
+    assert store.manifest_path(train_workspace.run_dir).read_bytes() == manifest_before
+
+
+def test_train_manifest_holds_the_hashes_from_before_the_work(
+    train_workspace: TrainWorkspace, seams: TrainSeams
+) -> None:
+    """A corpus file, the character model config and the rendered config rewritten
+    while Eole runs: the manifest vouches for what the run was given."""
+    corpus_file = train_workspace.data_dir / "mong2cyrl.valid.src"
+    spm_config = train_workspace.spm_config
+    config = train_workspace.config
+    before: dict[Path, str] = {}
+
+    def rewrite_during_training() -> None:
+        for path in (corpus_file, spm_config, config):
+            before[path] = _sha256(path)
+        corpus_file.write_text("changed\n", encoding="utf-8")
+        spm_config.write_text("changed: true\n", encoding="utf-8")
+        config.write_text(config.read_text(encoding="utf-8") + "# edited\n")
+
+    seams.hooks["run_training"] = rewrite_during_training
+
+    _run_ok(*train_workspace.args())
+
+    manifest = _manifest(train_workspace.run_dir)
+    recorded_inputs = {item.path: item.sha256 for item in manifest.inputs}
+    assert recorded_inputs[str(corpus_file)] == before[corpus_file]
+    assert recorded_inputs[str(spm_config)] == before[spm_config]
+    assert manifest.config_sha256 == before[config]
+    # The output entry describes the file as it is when the manifest is written.
+    recorded_outputs = {item.path: item.sha256 for item in manifest.outputs}
+    assert recorded_outputs[str(config)] == _sha256(config) != before[config]
+
+
+def test_train_passes_the_timeout_on_and_defaults_to_none(
+    train_workspace: TrainWorkspace, seams: TrainSeams
+) -> None:
+    _run_ok(*train_workspace.args())
+    _run_ok(*train_workspace.args("--timeout", "30"))
+
+    assert seams.timeouts == [None, 30.0]
+
+
+def test_train_resolves_the_data_and_run_directories_before_it_renders_the_config(
+    train_workspace: TrainWorkspace,
+    seams: TrainSeams,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    args = [
+        "train",
+        "--profile",
+        "tiny",
+        "--data-dir",
+        "corpus",
+        "--run-dir",
+        "run",
+        "--spm-config",
+        str(train_workspace.spm_config),
+    ]
+
+    _run_ok(*args)
+
+    expected = render_converter_config(
+        "tiny",
+        data_dir=tmp_path / "corpus",
+        spm_model=train_workspace.char_model,
+        run_dir=tmp_path / "run",
+    )
+    assert (
+        yaml.safe_load(train_workspace.config.read_text(encoding="utf-8")) == expected
+    )
+    manifest = _manifest(tmp_path / "run")
+    assert all(Path(item.path).is_absolute() for item in manifest.inputs)
+    assert all(Path(item.path).is_absolute() for item in manifest.outputs)
+    dry_run = _run_ok(*args, "--dry-run")
+    assert dry_run.stdout.splitlines()[1] == str(train_workspace.config)
+
+
+@pytest.mark.parametrize("extra", [[], ["--dry-run"]])
+def test_train_fails_before_any_work_when_the_eole_script_is_missing(
+    train_workspace: TrainWorkspace,
+    no_seam_runs: None,
+    monkeypatch: pytest.MonkeyPatch,
+    extra: list[str],
+) -> None:
+    def not_installed(cfg_path: Path) -> NoReturn:
+        raise UpstreamError("the `eole` command is not installed in /nowhere/bin")
+
+    monkeypatch.setattr(convert_script, "eole_commands", not_installed)
+    store.write(train_workspace.run_dir, _same_stage_manifest(TRAIN_STAGE))
+    before = _tree(train_workspace.run_dir)
+
+    result = _run(*train_workspace.args(*extra))
+
+    assert result.exit_code == 4, result.output
+    assert "eole" in result.stderr
+    assert _tree(train_workspace.run_dir) == before
+    assert not train_workspace.char_prefix.parent.exists()
+
+
+@pytest.mark.parametrize("extra", [[], ["--dry-run"]])
+def test_train_rejects_a_dollar_sign_in_the_run_dir_before_any_work(
+    train_workspace: TrainWorkspace,
+    no_seam_runs: None,
+    tmp_path: Path,
+    extra: list[str],
+) -> None:
+    run_dir = tmp_path / "run$x"
+
+    result = _run(*train_workspace.args(*extra, run_dir=run_dir))
+
+    assert result.exit_code == 2, result.output
+    assert "$" in result.stderr
+    assert not run_dir.exists()
+    assert not train_workspace.char_prefix.parent.exists()
 
 
 # ---- export --------------------------------------------------------------------------
@@ -1141,11 +1379,17 @@ class ExportSeam:
     calls: list[tuple[Path, Path, float | None]] = field(default_factory=list)
     error: RinchenError | None = None
     blocks_the_char_model: bool = False
+    # Called as the export starts: a test uses it to change a file during the work.
+    during: Callable[[], None] | None = None
 
     def __call__(
         self, ckpt_dir: Path, out_dir: Path, *, timeout: float | None = None
     ) -> Path:
         self.calls.append((ckpt_dir, out_dir, timeout))
+        if self.during is not None:
+            self.during()
+        # The real export writes its log beside the model directory, then the model.
+        export_log_path(out_dir).write_text("converter log\n", encoding="utf-8")
         out_dir.mkdir(parents=True)
         (out_dir / "model.bin").write_bytes(b"ct2 weights")
         if self.error is not None:
@@ -1170,7 +1414,7 @@ def test_export_converts_the_checkpoint_the_config_names(
     result = _run_ok(*export_workspace.args())
 
     out_dir = export_workspace.default_out_dir
-    assert export_seam.calls == [(export_workspace.checkpoint_dir, out_dir, None)]
+    assert export_seam.calls == [(export_workspace.checkpoint_dir, out_dir, 3600.0)]
     assert result.stdout.splitlines()[-1] == f"manifest: {out_dir / 'manifest.json'}"
 
 
@@ -1209,6 +1453,72 @@ def test_export_manifest_lists_the_inputs_and_every_file_of_the_model_directory(
     _no_part_files(export_workspace.run_dir)
 
 
+def test_export_manifest_inputs_name_the_resolved_checkpoint_and_the_files_beside_it(
+    export_workspace: ExportWorkspace, export_seam: ExportSeam
+) -> None:
+    # Eole links its newest checkpoint to a file in a step directory, and the
+    # converter reads the whole checkpoint directory.
+    step_dir = export_workspace.checkpoint_dir / "step_1"
+    step_dir.mkdir()
+    real = step_dir / CHECKPOINT_FILE
+    export_workspace.checkpoint.rename(real)
+    export_workspace.checkpoint.symlink_to(Path("step_1") / CHECKPOINT_FILE)
+    config_json = export_workspace.checkpoint_dir / "config.json"
+    vocab_json = export_workspace.checkpoint_dir / "vocab.json"
+    config_json.write_text('{"model": 1}\n', encoding="utf-8")
+    vocab_json.write_text('["a"]\n', encoding="utf-8")
+
+    _run_ok(*export_workspace.args())
+
+    manifest = _manifest(export_workspace.default_out_dir)
+    assert [(item.path, item.sha256) for item in manifest.inputs] == [
+        (str(path), _sha256(path))
+        for path in (
+            real.resolve(),
+            export_workspace.char_model,
+            config_json,
+            vocab_json,
+        )
+    ]
+
+
+def test_export_lists_only_the_checkpoint_files_that_exist(
+    export_workspace: ExportWorkspace, export_seam: ExportSeam
+) -> None:
+    only_vocab = export_workspace.checkpoint_dir / "vocab.json"
+    only_vocab.write_text('["a"]\n', encoding="utf-8")
+
+    _run_ok(*export_workspace.args())
+
+    inputs = [item.path for item in _manifest(export_workspace.default_out_dir).inputs]
+    assert inputs == [
+        str(export_workspace.checkpoint.resolve()),
+        str(export_workspace.char_model),
+        str(only_vocab),
+    ]
+
+
+def test_export_manifest_holds_the_hashes_from_before_the_work(
+    export_workspace: ExportWorkspace, export_seam: ExportSeam
+) -> None:
+    files = [export_workspace.checkpoint, export_workspace.char_model]
+    before = {path: _sha256(path) for path in (*files, export_workspace.config)}
+
+    def rewrite_during_export() -> None:
+        for path in before:
+            path.write_bytes(path.read_bytes() + b" edited")
+
+    export_seam.during = rewrite_during_export
+
+    _run_ok(*export_workspace.args())
+
+    manifest = _manifest(export_workspace.default_out_dir)
+    assert {item.path: item.sha256 for item in manifest.inputs} == {
+        str(path): before[path] for path in files
+    }
+    assert manifest.config_sha256 == before[export_workspace.config]
+
+
 def test_export_takes_the_config_and_the_out_dir_from_its_options(
     export_workspace: ExportWorkspace, export_seam: ExportSeam, tmp_path: Path
 ) -> None:
@@ -1219,10 +1529,18 @@ def test_export_takes_the_config_and_the_out_dir_from_its_options(
 
     _run_ok(*export_workspace.args("--config", str(moved), "--out-dir", str(out_dir)))
 
-    assert export_seam.calls == [(export_workspace.checkpoint_dir, out_dir, None)]
+    assert export_seam.calls == [(export_workspace.checkpoint_dir, out_dir, 3600.0)]
     assert (out_dir / "manifest.json").is_file()
     assert not export_workspace.default_out_dir.exists()
     assert _manifest(out_dir).config_sha256 == _sha256(moved)
+
+
+def test_export_gives_the_converter_an_hour_unless_told_otherwise(
+    export_workspace: ExportWorkspace, export_seam: ExportSeam
+) -> None:
+    _run_ok(*export_workspace.args())
+
+    assert export_seam.calls[0][2] == 3600.0
 
 
 def test_export_passes_the_timeout_on(
@@ -1250,18 +1568,38 @@ def test_export_refuses_an_out_dir_that_exists_and_touches_nothing(
     assert _tree(export_workspace.run_dir) == before
 
 
-def test_a_failed_export_leaves_no_manifest_and_no_part_file(
+def test_a_failed_export_removes_the_directory_it_created_and_keeps_the_log(
     export_workspace: ExportWorkspace, export_seam: ExportSeam
 ) -> None:
     export_seam.error = UpstreamError("converter exited with code 1")
+    out_dir = export_workspace.default_out_dir
+    log = export_log_path(out_dir)
 
     result = _run(*export_workspace.args())
 
     assert result.exit_code == 4, result.output
-    assert result.stderr == "error: converter exited with code 1\n"
-    assert not store.manifest_path(export_workspace.default_out_dir).exists()
-    assert not (export_workspace.default_out_dir / CHAR_MODEL_FILE).exists()
+    assert result.stderr.startswith("error: converter exited with code 1\n")
+    assert str(log) in result.stderr
+    assert "removed" in result.stderr
+    assert not out_dir.exists()
+    assert log.read_text(encoding="utf-8") == "converter log\n"
     _no_part_files(export_workspace.run_dir)
+
+
+def test_a_failed_export_does_not_touch_a_directory_that_was_there_before(
+    export_workspace: ExportWorkspace, export_seam: ExportSeam, tmp_path: Path
+) -> None:
+    earlier = tmp_path / "earlier_model"
+    earlier.mkdir()
+    (earlier / "model.bin").write_bytes(b"earlier")
+    export_seam.error = UpstreamError("never reached")
+    before = _tree(earlier)
+
+    result = _run(*export_workspace.args("--out-dir", str(earlier)))
+
+    assert result.exit_code == 2, result.output
+    assert export_seam.calls == []
+    assert _tree(earlier) == before
 
 
 def test_a_failed_copy_of_the_char_model_leaves_no_manifest_and_no_part_file(
@@ -1273,7 +1611,7 @@ def test_a_failed_copy_of_the_char_model_leaves_no_manifest_and_no_part_file(
 
     assert result.exit_code == 1, result.output
     assert result.stderr.startswith("error: cannot write the export outputs under ")
-    assert not store.manifest_path(export_workspace.default_out_dir).exists()
+    assert not export_workspace.default_out_dir.exists()
     _no_part_files(export_workspace.run_dir)
 
 
@@ -1308,6 +1646,12 @@ def test_export_rejects_a_missing_checkpoint_or_char_model_before_it_converts(
 
 
 # ---- apply ---------------------------------------------------------------------------
+
+
+def test_apply_help_warns_that_the_whole_input_is_held_in_memory() -> None:
+    result = _run("apply", "--help")
+
+    assert "memory" in " ".join(result.stdout.split())
 
 
 class StubConverter:
@@ -1550,15 +1894,21 @@ def test_load_converter_loads_the_char_model_that_sits_in_the_model_directory(
 
 
 class MappingConverter:
-    """Converts a word by lookup and records every call."""
+    """Converts each line of a text by lookup, as the real converter converts the
+    words of a text and leaves its line breaks alone, and records every call.
+    `counts` are the fallback and invalid counts it reports for every call."""
 
-    def __init__(self, answers: dict[str, str]) -> None:
+    def __init__(
+        self, answers: dict[str, str], counts: tuple[int, int] = (0, 0)
+    ) -> None:
         self.answers = answers
+        self.counts = counts
         self.calls: list[tuple[str, str]] = []
 
     def convert(self, text: str, target: str) -> Conversion:
         self.calls.append((text, target))
-        return Conversion(self.answers[text], 0, 0)
+        converted = "\n".join(self.answers[line] for line in text.split("\n"))
+        return Conversion(converted, *self.counts)
 
 
 PAIRS = [
@@ -1586,7 +1936,7 @@ def test_eval_scores_the_conversion_of_the_cyrillic_side_by_default(
         "нан": NA + A + NA,
         "ааа": A + A,
     }
-    converter = MappingConverter(answers)
+    converter = MappingConverter(answers, counts=(3, 2))
     seam = _load_seam(monkeypatch, converter)
 
     result = _run_ok(
@@ -1597,9 +1947,16 @@ def test_eval_scores_the_conversion_of_the_cyrillic_side_by_default(
         str(_pairs_file(tmp_path)),
     )
 
-    assert result.stdout.splitlines() == ["cer 0.1667", "word_accuracy 0.5000", "n 4"]
+    assert result.stdout.splitlines() == [
+        "cer 0.1667",
+        "word_accuracy 0.5000",
+        "n 4",
+        "rule_fallbacks 3",
+        "invalid_outputs 2",
+    ]
     assert seam.loaded == [tmp_path / "m"]
-    assert converter.calls == [(cyrillic, "Mong") for cyrillic, _ in PAIRS]
+    # The whole file in one call, one word per line.
+    assert converter.calls == [("\n".join(c for c, _ in PAIRS), "Mong")]
 
 
 def test_eval_of_the_cyrillic_direction_converts_the_script_side(
@@ -1620,8 +1977,32 @@ def test_eval_of_the_cyrillic_direction_converts_the_script_side(
         "Cyrl",
     )
 
-    assert result.stdout.splitlines() == ["cer 0.0833", "word_accuracy 0.7500", "n 4"]
-    assert converter.calls == [(script, "Cyrl") for _, script in PAIRS]
+    assert result.stdout.splitlines() == [
+        "cer 0.0833",
+        "word_accuracy 0.7500",
+        "n 4",
+        "rule_fallbacks 0",
+        "invalid_outputs 0",
+    ]
+    assert converter.calls == [("\n".join(s for _, s in PAIRS), "Cyrl")]
+
+
+def test_eval_reports_a_converter_that_changes_the_number_of_lines(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    class JoiningConverter:
+        def convert(self, text: str, target: str) -> Conversion:
+            return Conversion(text.replace("\n", " "), 0, 0)
+
+    _load_seam(monkeypatch, JoiningConverter())
+
+    result = _run(
+        "eval", "--model-dir", str(tmp_path), "--pairs", str(_pairs_file(tmp_path))
+    )
+
+    assert result.exit_code == 4, result.output
+    assert "4" in result.stderr
+    assert result.stdout == ""
 
 
 def test_eval_rejects_an_unknown_target_before_it_loads_the_model(

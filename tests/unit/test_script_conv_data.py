@@ -25,6 +25,7 @@ from rinchen.script_conv.data import (
     WordPair,
     align_words,
     build_corpus,
+    check_valid_fraction,
     read_pairs_tsv,
     rule_pairs,
 )
@@ -802,6 +803,21 @@ def test_valid_fraction_outside_zero_to_one_half_is_a_config_error(
     with pytest.raises(ConfigError, match="valid_fraction"):
         build_corpus(planted, tmp_path, valid_fraction=valid_fraction, seed=SEED)
     assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    "valid_fraction", [0.0, -0.1, 0.5000001, 1.0, math.nan, math.inf]
+)
+def test_check_valid_fraction_rejects_what_build_corpus_rejects(
+    valid_fraction: float,
+) -> None:
+    with pytest.raises(ConfigError, match="valid_fraction"):
+        check_valid_fraction(valid_fraction)
+
+
+@pytest.mark.parametrize("valid_fraction", [0.5, 0.1, 0.01])
+def test_check_valid_fraction_accepts_the_allowed_range(valid_fraction: float) -> None:
+    check_valid_fraction(valid_fraction)
 
 
 @pytest.mark.parametrize("valid_fraction", [0.5, 0.01])

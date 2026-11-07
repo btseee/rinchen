@@ -27,7 +27,7 @@ from rinchen.cli.errors import (
     rinchen_errors_as_exit_codes,
 )
 from rinchen.config.loader import REPO_ROOT
-from rinchen.errors import ConfigError, DataError
+from rinchen.errors import ConfigError, DataError, UpstreamError
 from rinchen.manifest import store
 from rinchen.manifest.model import Manifest, ManifestFile
 from rinchen.manifest.stage import (
@@ -58,11 +58,12 @@ from rinchen.script_conv.data import (
     CorpusFiles,
     WordPair,
     build_corpus,
+    check_valid_fraction,
     read_pairs_tsv,
     rule_pairs,
 )
 from rinchen.script_conv.eval import score_conversions
-from rinchen.script_conv.export import export_ct2
+from rinchen.script_conv.export import export_ct2, export_log_path
 from rinchen.script_conv.runtime import ScriptConverter, Target
 from rinchen.script_conv.train import CHECKPOINT_FILE, eole_commands, run_training
 from rinchen.utils.part_file import unique_part_path
@@ -78,12 +79,19 @@ _EXPORT_STAGE = "script_conv_export"
 _DEFAULT_VALID_FRACTION = 0.1
 _DEFAULT_SEED = 1234
 _DEFAULT_THREADS = 2
+# A hung converter must not hang the command for ever.
+_DEFAULT_EXPORT_TIMEOUT_SECONDS = 3600.0
 _TRAIN_PACKAGES = ("eole", "torch", "sentencepiece", "ctranslate2")
 _EXPORT_PACKAGES = ("ctranslate2", "eole")
 # The rendered Eole config of a run, in its run directory.
 _CONVERTER_CONFIG = "converter.yaml"
 # The CTranslate2 model directory `export` writes inside the run directory.
 _CT2_DIR = "ct2"
+# What Eole saves beside its checkpoint and the CTranslate2 converter reads with it.
+_CHECKPOINT_SIDE_FILES = ("config.json", "vocab.json")
+# The two directions' corpus files hold the same words with the sides swapped, so the
+# character model is trained on one direction's files only.
+_CHAR_MODEL_CORPUS_PREFIX = "cyrl2mong."
 # The character model's name inside a model directory: with it there, `apply` and
 # `eval` need only the directory.
 _CHAR_MODEL_FILE = "converter_char.model"
@@ -166,6 +174,8 @@ def build_data(
         # Before anything is read: a run must not write into its own input's folder.
         _require_out_apart_from_input(target, source)
         refuse_foreign_manifest(target, _DATA_STAGE)
+        # Before the old manifest is removed: a typo must not erase an intact one.
+        check_valid_fraction(valid_fraction)
         run = _CorpusRun(source_kind, valid_fraction, seed, allow_fallback)
         input_files = _hash_inputs([source])
         loaded = _load_pairs(run, source)
@@ -177,7 +187,7 @@ def build_data(
             )
         except OSError as exc:
             exit_with_error(
-                f"cannot write the corpus files under {target}: {exc}",
+                f"cannot write the corpus files under {target}: {_describe_os_error(exc)}",
                 FAILURE_EXIT_CODE,
             )
         typer.echo(
@@ -333,13 +343,30 @@ def train_converter(
             help="Allow a real run of the full profile, which takes GPU hours.",
         ),
     ] = False,
+    timeout: Annotated[
+        float | None,
+        typer.Option(
+            "--timeout",
+            help=(
+                "Seconds after which each Eole command (the vocabulary, then the "
+                "training) is killed; no limit by default."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Train the character model, then the converter: the character model is
     trained and checked on the corpus words, the Eole config is rendered, and
     Eole builds the vocabulary and trains from random initialisation."""
     with rinchen_errors_as_exit_codes():
         run = _plan_training(
-            profile, data_dir, run_dir, spm_config, threads, dry_run, confirm_full
+            profile,
+            data_dir,
+            run_dir,
+            spm_config,
+            threads,
+            timeout,
+            dry_run=dry_run,
+            confirm_full=confirm_full,
         )
         # A dry run that passes must not be followed by a refusal for this.
         refuse_foreign_manifest(run.run_dir, _TRAIN_STAGE)
@@ -351,7 +378,8 @@ def train_converter(
             checkpoint, manifest_path = _commit_training(run)
         except OSError as exc:
             exit_with_error(
-                f"cannot write the training outputs under {run.run_dir}: {exc}",
+                f"cannot write the training outputs under {run.run_dir}: "
+                f"{_describe_os_error(exc)}",
                 FAILURE_EXIT_CODE,
             )
         typer.echo(f"trained {run.profile}: checkpoint {checkpoint}")
@@ -371,7 +399,9 @@ class _TrainingRun:
     corpus_files: list[Path]
     run_dir: Path
     threads: int
+    timeout: float | None
     cfg: dict[str, Any]
+    commands: tuple[tuple[str, ...], tuple[str, ...]]  # build_vocab, then train
 
     @property
     def config_path(self) -> Path:
@@ -384,14 +414,22 @@ def _plan_training(
     run_dir: Path,
     spm_config: Path,
     threads: int,
+    timeout: float | None,
+    *,
     dry_run: bool,
     confirm_full: bool,
 ) -> _TrainingRun:
-    """Everything a run needs to be known good before it starts, none of it written.
+    """Everything a run needs to be known good before it starts, none of it written:
+    the same checks for a dry run and a real one, so that a real run does not fail
+    on something its dry run passed, nor after the character model is trained.
+
+    The directories are made absolute, so that `converter.yaml` means the same from
+    any working directory.
 
     Raises ConfigError for an unknown profile, an unconfirmed full run, a character
-    model config or an Eole config that does not hold, and DataError for a missing
-    corpus file."""
+    model config or an Eole config that does not hold (a `$` in a path included),
+    DataError for a missing corpus file and UpstreamError when `eole` is not
+    installed."""
     selected = _profile(profile)
     if selected == "full" and not (dry_run or confirm_full):
         raise ConfigError(
@@ -399,6 +437,7 @@ def _plan_training(
             "--confirm-full to run it, or --dry-run to see what it would run"
         )
     char_config = load_char_model_config(spm_config)
+    data_dir, run_dir = data_dir.resolve(), run_dir.resolve()
     corpus_files = _require_corpus_files(data_dir)
     prefix = char_config.output_prefix
     char_model, char_vocab = Path(f"{prefix}.model"), Path(f"{prefix}.vocab")
@@ -406,6 +445,7 @@ def _plan_training(
         selected, data_dir=data_dir, spm_model=char_model, run_dir=run_dir
     )
     validate_converter_config(cfg, profile=selected)
+    commands = eole_commands(run_dir / _CONVERTER_CONFIG)
     return _TrainingRun(
         selected,
         spm_config,
@@ -415,14 +455,16 @@ def _plan_training(
         corpus_files,
         run_dir,
         threads,
+        timeout,
         cfg,
+        commands,
     )
 
 
 def _planned_lines(run: _TrainingRun) -> list[str]:
     """What a real run would write and run: the character model path, the config
     path and the two Eole commands."""
-    build_vocab_command, train_command = eole_commands(run.config_path)
+    build_vocab_command, train_command = run.commands
     return [
         str(run.char_model),
         str(run.config_path),
@@ -434,27 +476,32 @@ def _planned_lines(run: _TrainingRun) -> list[str]:
 def _commit_training(run: _TrainingRun) -> tuple[Path, Path]:
     """Train the character model, then the converter, and write the manifest last.
     Returns the checkpoint file and the manifest."""
-    # The old manifest goes first, so that a failure part-way leaves none.
-    begin_commit(run.run_dir, _TRAIN_STAGE)
     # Hashed before it is read, so that the manifest vouches for the bytes that are
     # read below.
     input_files = _hash_inputs([*run.corpus_files, run.spm_config])
     # A list, not a generator: the check reads the texts again.
     texts = _corpus_texts(run.corpus_files)
+    # Just before the first write, and after everything that can fail on bad input:
+    # the old manifest goes first, so that a failure part-way leaves none.
+    begin_commit(run.run_dir, _TRAIN_STAGE)
     train_char_model(
         texts, run.char_config.output_prefix, vocab_size=run.char_config.vocab_size
     )
     check_char_model(run.char_model, texts)
     run.run_dir.mkdir(parents=True, exist_ok=True)
     dump_config(run.cfg, run.config_path)
+    # The config Eole is given, hashed before it runs.
+    config_sha256 = sha256_of(run.config_path)
     checkpoint = (
-        run_training(run.config_path, run.run_dir, threads=run.threads)
+        run_training(
+            run.config_path, run.run_dir, threads=run.threads, timeout=run.timeout
+        )
         / CHECKPOINT_FILE
     )
     manifest_path = _write_manifest(
         run.run_dir,
         _TRAIN_STAGE,
-        config_sha256=sha256_of(run.config_path),
+        config_sha256=config_sha256,
         seed=int(run.cfg["seed"]),
         inputs=input_files,
         # Both character model files: the `.vocab` hash is the identity that holds
@@ -465,9 +512,6 @@ def _commit_training(run: _TrainingRun) -> tuple[Path, Path]:
         ],
         metrics={"threads": float(run.threads)},
         packages=_TRAIN_PACKAGES,
-        # `status` is the only manifest field that holds text; the profile tells a
-        # reader which of the two configs the run used.
-        status={"profile": run.profile},
     )
     return checkpoint, manifest_path
 
@@ -496,11 +540,12 @@ def _require_corpus_files(data_dir: Path) -> list[Path]:
 
 
 def _corpus_texts(corpus_files: Sequence[Path]) -> list[str]:
-    """Every non-blank line of every corpus file: the words of both sides, in the
-    order of the files."""
+    """Every non-blank line of the train and valid files of the Cyrillic-to-script
+    direction: the words of both sides, in the order of the files."""
     return [
         line
         for path in corpus_files
+        if path.name.startswith(_CHAR_MODEL_CORPUS_PREFIX)
         for line in _decode_utf8(_read_bytes(path), str(path)).split("\n")
         if line
     ]
@@ -534,11 +579,12 @@ def export_model(
         ),
     ] = None,
     timeout: Annotated[
-        float | None,
+        float,
         typer.Option(
-            "--timeout", help="Seconds after which the CTranslate2 converter is killed."
+            "--timeout",
+            help="Seconds after which the CTranslate2 converter is killed.",
         ),
-    ] = None,
+    ] = _DEFAULT_EXPORT_TIMEOUT_SECONDS,
 ) -> None:
     """Convert the trained checkpoint to a CTranslate2 model directory and copy
     the character model into it, so that the directory is all `apply` and `eval`
@@ -549,7 +595,8 @@ def export_model(
             manifest_path = _commit_export(run)
         except OSError as exc:
             exit_with_error(
-                f"cannot write the export outputs under {run.target}: {exc}",
+                f"cannot write the export outputs under {run.target}: "
+                f"{_describe_os_error(exc)}",
                 FAILURE_EXIT_CODE,
             )
         typer.echo(f"exported to {run.target}")
@@ -561,15 +608,28 @@ class _ExportRun:
     config_path: Path
     paths: ConverterPaths
     target: Path
-    timeout: float | None
+    timeout: float
 
     @property
     def checkpoint(self) -> Path:
-        return self.paths.checkpoint_dir / CHECKPOINT_FILE
+        """The newest checkpoint file itself: Eole links it to a file in a step
+        directory, and the manifest names the file that holds the weights."""
+        return (self.paths.checkpoint_dir / CHECKPOINT_FILE).resolve()
+
+    @property
+    def input_paths(self) -> list[Path]:
+        """What the model directory is made from: the checkpoint, the character model
+        and the config and vocabulary the converter reads beside the checkpoint."""
+        beside = [self.paths.checkpoint_dir / name for name in _CHECKPOINT_SIDE_FILES]
+        return [
+            self.checkpoint,
+            self.paths.char_model,
+            *(path for path in beside if path.is_file()),
+        ]
 
 
 def _plan_export(
-    run_dir: Path, config: Path | None, out_dir: Path | None, timeout: float | None
+    run_dir: Path, config: Path | None, out_dir: Path | None, timeout: float
 ) -> _ExportRun:
     """Raises ConfigError for a missing or unusable config or a model directory that
     exists, and DataError for a checkpoint or character model that is not a file."""
@@ -590,21 +650,34 @@ def _plan_export(
 
 def _commit_export(run: _ExportRun) -> Path:
     """Convert the checkpoint, put the character model beside the result and write
-    the manifest last."""
+    the manifest last. A failure removes the model directory, which this run created:
+    `_plan_export` saw that it did not exist."""
+    # Hashed before the work, so that the manifest vouches for what was converted.
     # The converter refuses an existing directory, so none can hold a manifest to
     # erase: no commit start is needed.
-    input_files = _hash_inputs([run.checkpoint, run.paths.char_model])
-    export_ct2(run.paths.checkpoint_dir, run.target, timeout=run.timeout)
-    _copy_into_place(run.paths.char_model, run.target / _CHAR_MODEL_FILE)
-    return _write_manifest(
-        run.target,
-        _EXPORT_STAGE,
-        config_sha256=sha256_of(run.config_path),
-        seed=0,
-        inputs=input_files,
-        outputs=[output_file(path, None) for path in _files_below(run.target)],
-        packages=_EXPORT_PACKAGES,
-    )
+    config_sha256 = sha256_of(run.config_path)
+    input_files = _hash_inputs(run.input_paths)
+    try:
+        export_ct2(run.paths.checkpoint_dir, run.target, timeout=run.timeout)
+        _copy_into_place(run.paths.char_model, run.target / _CHAR_MODEL_FILE)
+        return _write_manifest(
+            run.target,
+            _EXPORT_STAGE,
+            config_sha256=config_sha256,
+            seed=0,
+            inputs=input_files,
+            outputs=[output_file(path, None) for path in _files_below(run.target)],
+            packages=_EXPORT_PACKAGES,
+        )
+    except UpstreamError as exc:
+        shutil.rmtree(run.target, ignore_errors=True)
+        raise UpstreamError(
+            f"{exc}\nthe unfinished model directory {run.target} was removed; "
+            f"the converter's log is {export_log_path(run.target)}"
+        ) from exc
+    except BaseException:
+        shutil.rmtree(run.target, ignore_errors=True)
+        raise
 
 
 def _copy_into_place(source: Path, destination: Path) -> None:
@@ -648,7 +721,7 @@ def apply_script(
     """Convert a text to the target script and write it to standard output
     exactly, with no newline added. The whole input is one text, its line breaks
     included. A summary of the words the model could not convert goes to standard
-    error."""
+    error. The whole input is held in memory, in several copies."""
     with rinchen_errors_as_exit_codes():
         script = _target(target)
         text = _read_input(file)
@@ -711,12 +784,21 @@ def evaluate(
         else:
             sources = [pair.script for pair in word_pairs]
             references = [pair.cyrillic for pair in word_pairs]
-        # One word per call: a word is never joined to its neighbour.
-        hypotheses = [converter.convert(word, script).text for word in sources]
+        # One call for the whole file: its line breaks are text between words, which
+        # the converter leaves alone, so each word is converted as if alone.
+        conversion = converter.convert("\n".join(sources), script)
+        hypotheses = conversion.text.split("\n")
+        if len(hypotheses) != len(sources):
+            raise UpstreamError(
+                f"the converter returned {len(hypotheses)} lines for "
+                f"{len(sources)} words"
+            )
         scores = score_conversions(references, hypotheses)
         typer.echo(f"cer {scores.cer:.4f}")
         typer.echo(f"word_accuracy {scores.word_accuracy:.4f}")
         typer.echo(f"n {scores.n}")
+        typer.echo(f"rule_fallbacks {conversion.rule_fallbacks}")
+        typer.echo(f"invalid_outputs {conversion.invalid_outputs}")
 
 
 # ---- shared ---------------------------------------------------------------------------
@@ -739,6 +821,13 @@ def _hash_inputs(paths: list[Path]) -> list[ManifestFile]:
         return build_inputs(paths)
     except OSError as exc:
         raise DataError(f"cannot read the input files: {exc}") from exc
+
+
+def _describe_os_error(exc: OSError) -> str:
+    """The failure with the path the operating system reported, when it did."""
+    if exc.filename is None or not exc.strerror:
+        return str(exc)
+    return f"{exc.strerror}: {exc.filename}"
 
 
 def _read_bytes(path: Path) -> bytes:
@@ -767,7 +856,6 @@ def _write_manifest(
     outputs: list[ManifestFile],
     metrics: dict[str, float] | None = None,
     packages: Sequence[str] = (),
-    status: dict[str, str] | None = None,
 ) -> Path:
     """Write the manifest of `stage`. It comes last in every command, so that it
     never describes outputs that are not there."""
@@ -781,6 +869,5 @@ def _write_manifest(
         outputs=outputs,
         metrics=metrics or {},
         tool_versions=tool_versions(packages),
-        status=status or {},
     )
     return store.write(stage_dir, manifest)

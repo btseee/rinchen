@@ -251,6 +251,16 @@ def _write_lines(path: Path, lines: Sequence[str]) -> None:
         part_path.unlink(missing_ok=True)
 
 
+def check_valid_fraction(valid_fraction: float) -> None:
+    """Raises ConfigError unless `valid_fraction` is in (0, 0.5]; `build_corpus`
+    checks it first, and a caller that must not touch its outputs for a bad value
+    checks it before."""
+    if not 0 < valid_fraction <= _MAX_VALID_FRACTION:
+        raise ConfigError(
+            f"valid_fraction must be in (0, {_MAX_VALID_FRACTION}], got {valid_fraction}"
+        )
+
+
 def build_corpus(
     pairs: Sequence[WordPair], out_dir: Path, *, valid_fraction: float, seed: int
 ) -> CorpusFiles:
@@ -288,10 +298,7 @@ def build_corpus(
         DataError: a side holds a line break or tab (it names the pair's index in
             `pairs`), no pair is left after dropping, or the train split is empty.
     """
-    if not 0 < valid_fraction <= _MAX_VALID_FRACTION:
-        raise ConfigError(
-            f"valid_fraction must be in (0, {_MAX_VALID_FRACTION}], got {valid_fraction}"
-        )
+    check_valid_fraction(valid_fraction)
     kept, dropped = _screen_pairs(pairs)
     if not kept:
         raise DataError(

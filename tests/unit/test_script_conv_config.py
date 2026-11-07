@@ -910,6 +910,49 @@ def test_eole_reads_only_the_corpus_named_valid_for_validation(
     assert set(get_corpora(config, task=CorpusTask.VALID)) == {"valid"}
 
 
+# --- validation: no variable references -------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("render_arguments", "key_path"),
+    [
+        ({"data_dir": Path("work/corp$us")}, "data.cyrl2mong.path_src"),
+        ({"spm_model": Path("work/$HOME.model")}, "transforms_configs.sentencepiece"),
+        ({"run_dir": Path("work/run$x")}, "save_data"),
+    ],
+    ids=["data_dir", "spm_model", "run_dir"],
+)
+def test_a_dollar_sign_in_a_rendered_path_is_rejected_with_its_key_path(
+    render_arguments: dict[str, Path], key_path: str
+) -> None:
+    arguments = {"data_dir": DATA_DIR, "spm_model": SPM_MODEL, "run_dir": RUN_DIR}
+    arguments.update(render_arguments)
+    cfg = render_converter_config("tiny", **arguments)
+
+    with pytest.raises(ConfigError, match=re.escape(key_path)) as raised:
+        validate_converter_config(cfg)
+
+    assert "$" in str(raised.value)
+
+
+def test_a_dollar_sign_in_a_list_item_is_rejected_with_its_index() -> None:
+    cfg = _render("tiny")
+    cfg["data"]["cyrl2mong"]["transforms"][1] = "pre$fix"
+
+    with pytest.raises(ConfigError, match=re.escape("data.cyrl2mong.transforms[1]")):
+        validate_converter_config(cfg)
+
+
+def test_a_dollar_sign_in_a_key_or_a_non_string_value_is_not_a_variable_reference() -> (
+    None
+):
+    cfg = _render("tiny")
+    cfg["training"]["note"] = 5
+    cfg["training"]["cost$"] = 1
+
+    validate_converter_config(cfg)
+
+
 # --- read_converter_paths ----------------------------------------------------------
 
 

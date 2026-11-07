@@ -342,7 +342,8 @@ def validate_converter_config(
     """Check `cfg` against the converter's invariants; return None when it holds.
 
     Always checked: only the known top-level keys, all present; no key of
-    `FORBIDDEN_KEYS` at any depth; `position_encoding_type` is
+    `FORBIDDEN_KEYS` at any depth; no `$` in any string value (Eole expands it as an
+    environment variable); `position_encoding_type` is
     `SinusoidalInterleaved` wherever it appears and is set on the embeddings;
     `word_vec_size` equals `hidden_size`; the corpora `cyrl2mong`, `mong2cyrl` and
     `valid` exist, each has `tgt_prefix` `""`, and each direction has its target
@@ -359,6 +360,7 @@ def validate_converter_config(
         _fail("config", f"expected a mapping, got {type(cfg).__name__}")
     _check_top_level_keys(cfg)
     _check_no_forbidden_keys(cfg)
+    _check_no_variable_references(cfg)
     _check_position_encoding(cfg)
     _check_embedding_size(cfg)
     _check_corpora(cfg)
@@ -411,6 +413,27 @@ def _check_no_forbidden_keys(cfg: Mapping[str, Any]) -> None:
     for path, key, _ in _entries(cfg, ""):
         if key in FORBIDDEN_KEYS:
             _fail(path, "is not allowed: the converter uses full multi-head attention")
+
+
+def _strings(node: object, path: str) -> Iterator[tuple[str, str]]:
+    """Every string value below `node` as (key path, value), through nested
+    mappings and lists; a list item's path carries its index."""
+    if isinstance(node, str):
+        yield path, node
+    elif isinstance(node, Mapping):
+        for key, value in node.items():
+            yield from _strings(value, f"{path}.{key}" if path else str(key))
+    elif isinstance(node, list | tuple):
+        for index, item in enumerate(node):
+            yield from _strings(item, f"{path}[{index}]")
+
+
+def _check_no_variable_references(cfg: Mapping[str, Any]) -> None:
+    # Eole runs `os.path.expandvars` over the text of the YAML file, so a `$NAME`
+    # anywhere in a value would be replaced by an environment variable's value.
+    for path, value in _strings(cfg, ""):
+        if "$" in value:
+            _fail(path, f"holds '$', which Eole would expand as a variable: {value!r}")
 
 
 def _check_position_encoding(cfg: Mapping[str, Any]) -> None:
