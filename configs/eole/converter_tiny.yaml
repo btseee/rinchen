@@ -1,0 +1,83 @@
+seed: 1234
+save_data: data/script_conv/run/data
+src_vocab: data/script_conv/run/vocab.src
+tgt_vocab: data/script_conv/run/vocab.tgt
+share_vocab: true
+src_vocab_size: 200
+tgt_vocab_size: 200
+overwrite: true
+data:
+  cyrl2mong:
+    path_src: data/script_conv/corpus/cyrl2mong.train.src
+    path_tgt: data/script_conv/corpus/cyrl2mong.train.tgt
+    transforms:
+    - sentencepiece
+    - prefix
+    - filtertoolong
+    src_prefix: <2mn_Mong>
+    tgt_prefix: ''
+    weight: 1
+  mong2cyrl:
+    path_src: data/script_conv/corpus/mong2cyrl.train.src
+    path_tgt: data/script_conv/corpus/mong2cyrl.train.tgt
+    transforms:
+    - sentencepiece
+    - prefix
+    - filtertoolong
+    src_prefix: <2mn_Cyrl>
+    tgt_prefix: ''
+    weight: 1
+  valid:
+    path_src: data/script_conv/corpus/cyrl2mong.valid.src
+    path_tgt: data/script_conv/corpus/cyrl2mong.valid.tgt
+    transforms:
+    - sentencepiece
+    - prefix
+    src_prefix: <2mn_Mong>
+    tgt_prefix: ''
+transforms_configs:
+  sentencepiece:
+    src_subword_model: data/script_conv/converter_char.model
+    tgt_subword_model: data/script_conv/converter_char.model
+  filtertoolong:
+    src_seq_length: 64
+    tgt_seq_length: 64
+model:
+  architecture: transformer
+  hidden_size: 64
+  encoder:
+    layers: 2
+  decoder:
+    layers: 2
+  heads: 4
+  transformer_ff: 128
+  embeddings:
+    word_vec_size: 64
+    position_encoding_type: SinusoidalInterleaved
+  share_embeddings: true
+  share_decoder_embeddings: true
+training:
+  model_path: data/script_conv/run/ckpt
+  batch_type: tokens
+  accum_count:
+  - 1
+  dropout:
+  - 0.1
+  attention_dropout:
+  - 0.1
+  optim: adamw
+  decay_method: noam
+  label_smoothing: 0.1
+  world_size: 1
+  train_steps: 800
+  valid_steps: 200
+  save_checkpoint_steps: 800
+  keep_checkpoint: 2
+  batch_size: 1024
+  learning_rate: 0.5
+  warmup_steps: 100
+  compute_dtype: fp32
+  gpu_ranks: []
+  bucket_size: 1024
+  prefetch_factor: 8
+  num_workers: 1
