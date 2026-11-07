@@ -99,11 +99,18 @@ Layering: `mbr` depends on `metrics.bleu_chrf` and numpy only. `translator` is t
   `temperature` (0.7), `top_p` (0.95), `max_tokens` (256). `VllmConfig`: `base_url`
   (default `http://127.0.0.1:8000/v1`), `model`, `concurrency` (32), `timeout_s` (120), `retries` (4),
   `backoff_s` (1.0). `LlamaCppConfig`: the same with default `base_url http://127.0.0.1:8080/v1`
-  and `concurrency` 8. `Ct2Config`: `model_dir`, `spm_model`, `family` (`nllb` | `madlad`), `device`
-  (`cpu`), `beam_size` (4), `batch_size` (16).
+  and `concurrency` 8. `Ct2Config`: `model_dir`, `spm_model` (both `Path`s anchored at the repo
+  root when relative, exactly as the D4 configs do, blank rejected), `family` (`nllb` | `madlad`),
+  `device` (`cpu`), `beam_size` (4), `batch_size` (16); `n` may not exceed `beam_size`
+  (libctranslate2 raises "The number of hypotheses cannot be greater than beam_size * patience" on
+  the first batch), so such a config is rejected at load; the CT2 backend ignores `temperature`,
+  `top_p` and `max_tokens`. A `kind` that is missing or not one of `vllm`, `llamacpp`, `ct2` is
+  reported as such. When a config supplies `generators` but not `jobs`, `jobs` is empty (the default
+  jobs would otherwise name generators the user replaced).
 - `jobs: dict[str, JobConfig]`: `kind` (`bt` | `ft`), `mono_lang`, `other_lang` (both must be
-  language registry codes and one of the two must be `khk_Cyrl`), `generator` (a key of
-  `generators`), `shard_size` (512). For `bt`, the monolingual text is the target of the pairs
+  language registry codes whose scripts do not include Mongolian script (ruling 12) and exactly one
+  of the two must be `khk_Cyrl`; they differ), `generator` (a key of `generators`), `shard_size`
+  (512). For `bt`, the monolingual text is the target of the pairs
   and the generator translates it into `other_lang` to make the source; for `ft`, the monolingual
   text is the source and the generator translates it into `other_lang` to make the target.
 - `selection`: `min_script_share` (0.9, the share of the synthetic side's letters that must belong
@@ -291,6 +298,11 @@ Tests first. Fakes only: no network, no model, no GPU.
 11. **No `--force` skip logic beyond shard reuse.** A rerun reuses valid shards and recomputes
     selection; `--force` ignores existing shards. Cost: selection is recomputed on every run (cheap
     next to generation).
+
+12. **A job never involves traditional script.** `JobConfig` rejects any registry language whose
+    scripts include Mongolian script on either side: a generator produces Cyrillic Mongolian and the
+    D5 converter owns traditional script, and prompts never mention it. Cost: no direct synthetic
+    `mn_Mong` data; it has to come from the converter, which is a scaffold.
 
 ## Open gates and limitations (not done by D6)
 
