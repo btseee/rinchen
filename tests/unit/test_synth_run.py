@@ -1,0 +1,890 @@
+"""The job runner: it cuts the monolingual frame into shards, generates the
+shards a crashed or earlier run did not finish, reads every shard back and
+selects, returning the corpus rows and the counts. The generator is a scripted
+fake and the QE scorer a fake, so no test needs a server, a model or a GPU."""
+
+from __future__ import annotations
+
+import dataclasses
+import math
+from collections.abc import Callable, Sequence
+from pathlib import Path
+from typing import Any
+
+import polars as pl
+import pytest
+
+from rinchen.config.filters import QeConfig
+from rinchen.config.synth import JobConfig, SelectionConfig, SynthConfig, VllmConfig
+from rinchen.corpus.schema import CORPUS_SCHEMA, make_row_id
+from rinchen.errors import ConfigError, DataError, UpstreamError
+from rinchen.synth.run import RunResult, ShardProgress, run_job
+from rinchen.synth.select import Kind
+from rinchen.synth.shards import (
+    ShardStore,
+    job_fingerprint,
+    shard_directory,
+)
+from tests.support.planted_synth import (
+    FakeScorer,
+    ScriptedTranslator,
+    planted_monolingual,
+    planted_scorer,
+    planted_script,
+)
+
+GENERATOR = "vllm_default"
+SEED = 7
+SHARD_SIZE = 8
+SHARD_FILES = [f"shard-{index:05d}.parquet" for index in range(5)]
+
+
+def _job(kind: Kind = "bt", shard_size: int = SHARD_SIZE) -> JobConfig:
+    return JobConfig(
+        kind=kind,
+        mono_lang="khk_Cyrl",
+        other_lang="eng_Latn",
+        generator=GENERATOR,
+        shard_size=shard_size,
+    )
+
+
+def _run(out_dir: Path, kind: Kind = "bt", **overrides: Any) -> RunResult:
+    """`run_job` over the planted 40-row frame with the planted translator and
+    scorer, 5 shards of 8 rows; `overrides` replace any of the inputs."""
+    frame = overrides.pop("frame", planted_monolingual())
+    cfg = overrides.pop("cfg", SynthConfig())
+    name = overrides.pop("generator_name", GENERATOR)
+    return run_job(
+        overrides.pop("job", _job(kind)),
+        name,
+        overrides.pop("generator_cfg", cfg.generators.get(name)),
+        overrides.pop("translator", ScriptedTranslator(planted_script(frame))),
+        frame,
+        out_dir=out_dir,
+        cfg=cfg,
+        scorer=overrides.pop("scorer", planted_scorer(frame, kind)),
+        seed=overrides.pop("seed", SEED),
+        **overrides,
+    )
+
+
+def _shard_dir(
+    out_dir: Path,
+    kind: Kind = "bt",
+    *,
+    frame: pl.DataFrame | None = None,
+    shard_size: int = SHARD_SIZE,
+    cfg: SynthConfig | None = None,
+    seed: int = SEED,
+) -> Path:
+    """Where the shards of a `_run` live, computed through the public shard
+    functions rather than read from the result."""
+    cfg = cfg or SynthConfig()
+    frame = planted_monolingual() if frame is None else frame
+    job = _job(kind, shard_size)
+    fingerprint = job_fingerprint(
+        frame, job, cfg.generators[GENERATOR], shard_size, seed
+    )
+    return shard_directory(out_dir, fingerprint)
+
+
+def _files(directory: Path) -> list[str]:
+    return sorted(path.name for path in directory.iterdir())
+
+
+def _shard_texts(*indexes: int) -> list[tuple[str, ...]]:
+    texts = planted_monolingual()["text"].to_list()
+    return [tuple(texts[index * 8 : index * 8 + 8]) for index in indexes]
+
+
+def _without_created(frame: pl.DataFrame) -> pl.DataFrame:
+    return frame.drop("created")
+
+
+def _number(row_index: int) -> str:
+    return f"{row_index:03d}"
+
+
+# What the selection keeps from the planted frame: rows of the classes 0, 6 and 7
+# (modulo 8), the winner of each as the planted script and the chrF consensus
+# make it.
+def _expected_winner(row_index: int) -> str | None:
+    number = _number(row_index)
+    return {
+        0: f"The state of Mongolia {number} stands",
+        6: f"Mongolia is edge {number}",
+        7: f"Mongolia is a country {number} indeed",
+    }.get(row_index % 8)
+
+
+SELECTED_ROWS = [index for index in range(40) if _expected_winner(index) is not None]
+
+PLANTED_COUNTS = {
+    "sources": 40,
+    "candidates": 60,
+    "dropped_empty": 5,
+    "dropped_purity": 10,
+    "dropped_qe": 10,
+    "dropped_copy": 0,
+    "no_candidates": 5,
+    "no_survivor": 20,
+    "selected": 15,
+}
+FIRST_RUN_STATS = {
+    "planned": 5,
+    "reused": 0,
+    "generated": 5,
+    "regenerated_invalid": 0,
+}
+
+
+# --- the rows and the counts -------------------------------------------------
+
+
+def test_a_back_translation_run_returns_the_selected_rows_with_the_synthetic_side_as_source(
+    tmp_path: Path,
+) -> None:
+    result = _run(tmp_path, "bt")
+
+    corpus = result.corpus
+    assert corpus.schema == CORPUS_SCHEMA
+    assert corpus.height == 15
+    assert corpus["src"].to_list() == [_expected_winner(i) for i in SELECTED_ROWS]
+    assert corpus["tgt"].to_list() == [
+        f"Монгол улс {_number(i)}" for i in SELECTED_ROWS
+    ]
+    assert corpus["src_lang"].unique().to_list() == ["eng_Latn"]
+    assert corpus["tgt_lang"].unique().to_list() == ["khk_Cyrl"]
+    assert corpus["origin"].cast(pl.String).unique().to_list() == ["bt"]
+    assert corpus["corpus"].unique().to_list() == ["bt:vllm_default"]
+    assert corpus["split"].cast(pl.String).unique().to_list() == ["train"]
+
+
+def test_a_back_translation_run_records_purity_and_qe_with_the_exact_first_row(
+    tmp_path: Path,
+) -> None:
+    corpus = _run(tmp_path, "bt").corpus
+
+    assert corpus.row(0, named=True) == {
+        "id": make_row_id(
+            "eng_Latn",
+            "khk_Cyrl",
+            "The state of Mongolia 000 stands",
+            "Монгол улс 000",
+        ),
+        "src_lang": "eng_Latn",
+        "tgt_lang": "khk_Cyrl",
+        "src": "The state of Mongolia 000 stands",
+        "tgt": "Монгол улс 000",
+        "origin": "bt",
+        "corpus": "bt:vllm_default",
+        "doc_id": None,
+        "seg_idx": None,
+        "split": "train",
+        "scores": {
+            "lid_src": None,
+            "lid_tgt": None,
+            "script_src": 1.0,
+            "script_tgt": None,
+            "len_ratio": None,
+            "num_ok": None,
+            "labse": None,
+            "metricx_qe": 1.0,
+            "cometkiwi": None,
+        },
+        "filter_reason": None,
+        "created": corpus["created"][0],
+    }
+    scores = corpus["scores"].struct
+    assert scores.field("metricx_qe").to_list() == [1.0, 8.0, 1.0] * 5
+    assert scores.field("script_src").to_list() == [1.0] * 15
+    assert scores.field("script_tgt").null_count() == 15
+
+
+def test_a_forward_translation_run_returns_the_synthetic_side_as_target(
+    tmp_path: Path,
+) -> None:
+    corpus = _run(tmp_path, "ft").corpus
+
+    assert corpus.schema == CORPUS_SCHEMA
+    assert corpus["src"].to_list() == [
+        f"Монгол улс {_number(i)}" for i in SELECTED_ROWS
+    ]
+    assert corpus["tgt"].to_list() == [_expected_winner(i) for i in SELECTED_ROWS]
+    assert corpus["src_lang"].unique().to_list() == ["khk_Cyrl"]
+    assert corpus["tgt_lang"].unique().to_list() == ["eng_Latn"]
+    assert corpus["origin"].cast(pl.String).unique().to_list() == ["synth_llm"]
+    assert corpus["corpus"].unique().to_list() == ["ft:vllm_default"]
+    scores = corpus["scores"].struct
+    assert scores.field("script_tgt").to_list() == [1.0] * 15
+    assert scores.field("script_src").null_count() == 15
+    assert scores.field("metricx_qe").to_list() == [1.0, 8.0, 1.0] * 5
+
+
+def test_a_forward_translation_run_exact_first_row(tmp_path: Path) -> None:
+    row = _run(tmp_path, "ft").corpus.row(0, named=True)
+
+    assert row["id"] == make_row_id(
+        "khk_Cyrl", "eng_Latn", "Монгол улс 000", "The state of Mongolia 000 stands"
+    )
+    assert (row["src"], row["tgt"]) == (
+        "Монгол улс 000",
+        "The state of Mongolia 000 stands",
+    )
+
+
+@pytest.mark.parametrize("kind", ["bt", "ft"])
+def test_the_counts_of_the_planted_run_are_exact_for_both_kinds(
+    tmp_path: Path, kind: Kind
+) -> None:
+    result = _run(tmp_path, kind)
+
+    assert dict(result.counts) == PLANTED_COUNTS
+    assert result.qe_status == "ok"
+
+
+def test_the_generator_is_asked_to_translate_the_monolingual_language_into_the_other(
+    tmp_path: Path,
+) -> None:
+    for kind in ("bt", "ft"):
+        translator = ScriptedTranslator(planted_script(planted_monolingual()))
+
+        _run(tmp_path / kind, kind, translator=translator)
+
+        assert {(src, tgt) for _, src, tgt in translator.calls} == {
+            ("khk_Cyrl", "eng_Latn")
+        }
+
+
+def test_a_ctranslate2_generator_makes_neural_origin_rows(tmp_path: Path) -> None:
+    cfg = SynthConfig()
+    job = JobConfig(
+        kind="ft",
+        mono_lang="khk_Cyrl",
+        other_lang="eng_Latn",
+        generator="ct2_nllb_default",
+        shard_size=SHARD_SIZE,
+    )
+
+    corpus = _run(
+        tmp_path,
+        "ft",
+        job=job,
+        cfg=cfg,
+        generator_name="ct2_nllb_default",
+    ).corpus
+
+    assert corpus["origin"].cast(pl.String).unique().to_list() == ["synth_nmt"]
+    assert corpus["corpus"].unique().to_list() == ["ft:ct2_nllb_default"]
+
+
+def test_a_run_without_a_scorer_skips_the_qe_floor_and_says_so(
+    tmp_path: Path,
+) -> None:
+    result = _run(tmp_path, "bt", scorer=None)
+
+    assert dict(result.counts) == {
+        "sources": 40,
+        "candidates": 60,
+        "dropped_empty": 5,
+        "dropped_purity": 10,
+        "dropped_qe": 0,
+        "dropped_copy": 0,
+        "no_candidates": 5,
+        "no_survivor": 10,
+        "selected": 25,
+    }
+    assert result.qe_status == "skipped: no scorer"
+    assert result.corpus["scores"].struct.field("metricx_qe").null_count() == 25
+    assert result.corpus["scores"].struct.field("cometkiwi").null_count() == 25
+
+
+def test_the_qe_score_goes_to_the_column_of_the_configured_scorer(
+    tmp_path: Path,
+) -> None:
+    cfg = SynthConfig(selection=SelectionConfig(qe=QeConfig(scorer="cometkiwi")))
+    frame = planted_monolingual(8)
+
+    result = _run(
+        tmp_path,
+        "bt",
+        frame=frame,
+        cfg=cfg,
+        scorer=FakeScorer({}, default=0.9),
+    )
+
+    scores = result.corpus["scores"].struct
+    assert result.corpus.height == 5
+    assert scores.field("cometkiwi").to_list() == pytest.approx([0.9] * 5, abs=1e-6)
+    assert scores.field("metricx_qe").null_count() == 5
+
+
+def test_a_real_text_in_the_synthetic_script_that_the_generator_copies_is_counted_as_a_copy(
+    tmp_path: Path,
+) -> None:
+    frame = pl.DataFrame({"id": ["a"], "lang": ["khk_Cyrl"], "text": ["Hello world"]})
+    translator = ScriptedTranslator({"Hello world": ["Hello world", "Hello there"]})
+
+    result = _run(tmp_path, "bt", frame=frame, translator=translator, scorer=None)
+
+    assert result.counts["dropped_copy"] == 1
+    assert result.counts["selected"] == 1
+    assert result.corpus["src"].to_list() == ["Hello there"]
+
+
+def test_refusals_are_counted_and_a_run_of_nothing_but_refusals_gives_no_rows(
+    tmp_path: Path,
+) -> None:
+    frame = planted_monolingual(3)
+    translator = ScriptedTranslator({text: [] for text in frame["text"]})
+
+    result = _run(tmp_path, "bt", frame=frame, translator=translator)
+
+    assert dict(result.counts) == {
+        "sources": 3,
+        "candidates": 0,
+        "dropped_empty": 0,
+        "dropped_purity": 0,
+        "dropped_qe": 0,
+        "dropped_copy": 0,
+        "no_candidates": 3,
+        "no_survivor": 0,
+        "selected": 0,
+    }
+    assert result.corpus.schema == CORPUS_SCHEMA
+    assert result.corpus.height == 0
+
+
+def test_the_frame_order_does_not_change_the_corpus_or_the_fingerprint(
+    tmp_path: Path,
+) -> None:
+    frame = planted_monolingual()
+
+    straight = _run(tmp_path / "straight", "bt", frame=frame)
+    # The planted outcomes belong to the rows, not to their position in the frame.
+    reversed_ = _run(
+        tmp_path / "reversed",
+        "bt",
+        frame=frame.reverse(),
+        translator=ScriptedTranslator(planted_script(frame)),
+        scorer=planted_scorer(frame, "bt"),
+    )
+
+    assert straight.fingerprint == reversed_.fingerprint
+    assert _without_created(straight.corpus).equals(_without_created(reversed_.corpus))
+
+
+# --- shards, fingerprint, stats ----------------------------------------------
+
+
+def test_a_first_run_generates_every_shard_into_the_directory_of_its_fingerprint(
+    tmp_path: Path,
+) -> None:
+    out_dir = tmp_path / "synth"
+
+    result = _run(out_dir)
+
+    fingerprint = job_fingerprint(
+        planted_monolingual(),
+        _job(),
+        SynthConfig().generators[GENERATOR],
+        SHARD_SIZE,
+        SEED,
+    )
+    assert result.fingerprint == fingerprint
+    assert result.shard_directory == out_dir / f"shards-{fingerprint[:12]}"
+    assert _files(result.shard_directory) == SHARD_FILES
+    assert dict(result.shard_stats) == FIRST_RUN_STATS
+
+
+def test_the_translator_gets_each_shard_once_in_order(tmp_path: Path) -> None:
+    translator = ScriptedTranslator(planted_script(planted_monolingual()))
+
+    _run(tmp_path, translator=translator)
+
+    assert translator.calls == [
+        (texts, "khk_Cyrl", "eng_Latn") for texts in _shard_texts(0, 1, 2, 3, 4)
+    ]
+
+
+def test_a_crash_leaves_the_finished_shards_and_names_the_failed_one(
+    tmp_path: Path,
+) -> None:
+    failure = UpstreamError("server gone")
+    translator = ScriptedTranslator(
+        planted_script(planted_monolingual()), fail_on_call={2: failure}
+    )
+
+    with pytest.raises(
+        UpstreamError, match=r"^shard 2 of 5 failed: server gone$"
+    ) as info:
+        _run(tmp_path, translator=translator)
+
+    assert info.value.__cause__ is failure
+    assert _files(_shard_dir(tmp_path)) == SHARD_FILES[:2]
+    assert len(translator.calls) == 3
+
+
+def test_a_crash_on_the_first_shard_leaves_no_shard_files(tmp_path: Path) -> None:
+    translator = ScriptedTranslator(
+        planted_script(planted_monolingual()), fail_on_call={0: UpstreamError("down")}
+    )
+
+    with pytest.raises(UpstreamError, match=r"shard 0 of 5 failed: down"):
+        _run(tmp_path, translator=translator)
+
+    directory = _shard_dir(tmp_path)
+    assert not directory.exists() or _files(directory) == []
+
+
+def test_an_error_that_is_not_an_upstream_error_propagates_unchanged(
+    tmp_path: Path,
+) -> None:
+    broken = RuntimeError("bug in the translator")
+    translator = ScriptedTranslator(
+        planted_script(planted_monolingual()), fail_on_call={1: broken}
+    )
+
+    with pytest.raises(RuntimeError, match="bug in the translator") as info:
+        _run(tmp_path, translator=translator)
+
+    assert info.value is broken
+    assert _files(_shard_dir(tmp_path)) == SHARD_FILES[:1]
+
+
+def test_a_rerun_after_a_crash_asks_only_for_the_unfinished_shards(
+    tmp_path: Path,
+) -> None:
+    crashing = ScriptedTranslator(
+        planted_script(planted_monolingual()), fail_on_call={2: UpstreamError("down")}
+    )
+    with pytest.raises(UpstreamError):
+        _run(tmp_path / "resumed", translator=crashing)
+    resuming = ScriptedTranslator(planted_script(planted_monolingual()))
+
+    resumed = _run(tmp_path / "resumed", translator=resuming)
+
+    assert resuming.calls == [
+        (texts, "khk_Cyrl", "eng_Latn") for texts in _shard_texts(2, 3, 4)
+    ]
+    assert dict(resumed.shard_stats) == {
+        "planned": 5,
+        "reused": 2,
+        "generated": 3,
+        "regenerated_invalid": 0,
+    }
+    uninterrupted = _run(tmp_path / "uninterrupted")
+    assert _without_created(resumed.corpus).equals(
+        _without_created(uninterrupted.corpus)
+    )
+    assert dict(resumed.counts) == dict(uninterrupted.counts) == PLANTED_COUNTS
+
+
+def test_a_rerun_of_a_finished_run_makes_no_request(tmp_path: Path) -> None:
+    first = _run(tmp_path)
+    translator = ScriptedTranslator(planted_script(planted_monolingual()))
+
+    second = _run(tmp_path, translator=translator)
+
+    assert translator.calls == []
+    assert dict(second.shard_stats) == {
+        "planned": 5,
+        "reused": 5,
+        "generated": 0,
+        "regenerated_invalid": 0,
+    }
+    assert _without_created(second.corpus).equals(_without_created(first.corpus))
+
+
+def _garbage(path: Path) -> None:
+    path.write_bytes(b"this is not parquet")
+
+
+def _truncated(path: Path) -> None:
+    path.write_bytes(path.read_bytes()[:40])
+
+
+def _empty_file(path: Path) -> None:
+    path.write_bytes(b"")
+
+
+def _another_shards_ids(path: Path) -> None:
+    ShardStore(path.parent).write(3, [f"x{index}" for index in range(8)], [["a"]] * 8)
+
+
+@pytest.mark.parametrize(
+    "damage", [_garbage, _truncated, _empty_file, _another_shards_ids]
+)
+def test_a_damaged_shard_file_is_regenerated_and_counted(
+    tmp_path: Path, damage: Callable[[Path], None]
+) -> None:
+    first = _run(tmp_path)
+    damage(first.shard_directory / SHARD_FILES[3])
+    translator = ScriptedTranslator(planted_script(planted_monolingual()))
+
+    second = _run(tmp_path, translator=translator)
+
+    assert translator.calls == [
+        (texts, "khk_Cyrl", "eng_Latn") for texts in _shard_texts(3)
+    ]
+    assert dict(second.shard_stats) == {
+        "planned": 5,
+        "reused": 4,
+        "generated": 1,
+        "regenerated_invalid": 1,
+    }
+    assert _without_created(second.corpus).equals(_without_created(first.corpus))
+    third = _run(tmp_path, translator=ScriptedTranslator({}))
+    assert dict(third.shard_stats)["reused"] == 5
+
+
+def test_force_regenerates_every_shard_and_reuses_none(tmp_path: Path) -> None:
+    first = _run(tmp_path)
+    _garbage(first.shard_directory / SHARD_FILES[1])
+    translator = ScriptedTranslator(planted_script(planted_monolingual()))
+
+    forced = _run(tmp_path, translator=translator, force=True)
+
+    assert translator.calls == [
+        (texts, "khk_Cyrl", "eng_Latn") for texts in _shard_texts(0, 1, 2, 3, 4)
+    ]
+    assert dict(forced.shard_stats) == FIRST_RUN_STATS
+    assert _without_created(forced.corpus).equals(_without_created(first.corpus))
+
+
+def test_a_changed_shard_size_uses_a_new_directory_and_leaves_the_old_one_alone(
+    tmp_path: Path,
+) -> None:
+    first = _run(tmp_path)
+    before = {path.name: path.read_bytes() for path in first.shard_directory.iterdir()}
+    translator = ScriptedTranslator(planted_script(planted_monolingual()))
+
+    second = _run(tmp_path, job=_job("bt", shard_size=10), translator=translator)
+
+    assert second.shard_directory != first.shard_directory
+    assert second.shard_directory == _shard_dir(tmp_path, shard_size=10)
+    assert _files(second.shard_directory) == [
+        f"shard-0000{i}.parquet" for i in range(4)
+    ]
+    assert dict(second.shard_stats) == {
+        "planned": 4,
+        "reused": 0,
+        "generated": 4,
+        "regenerated_invalid": 0,
+    }
+    assert len(translator.calls) == 4
+    assert before == {
+        path.name: path.read_bytes() for path in first.shard_directory.iterdir()
+    }
+    assert _without_created(second.corpus).equals(_without_created(first.corpus))
+
+
+def test_a_changed_generator_config_uses_a_new_directory_and_leaves_the_old_one_alone(
+    tmp_path: Path,
+) -> None:
+    first = _run(tmp_path)
+    before = {path.name: path.read_bytes() for path in first.shard_directory.iterdir()}
+    changed = SynthConfig(generators={GENERATOR: VllmConfig(n=3)}, jobs={})
+    translator = ScriptedTranslator(planted_script(planted_monolingual()))
+
+    second = _run(tmp_path, cfg=changed, translator=translator)
+
+    assert second.shard_directory != first.shard_directory
+    assert second.shard_directory == _shard_dir(tmp_path, cfg=changed)
+    assert len(translator.calls) == 5
+    assert dict(second.shard_stats)["reused"] == 0
+    assert before == {
+        path.name: path.read_bytes() for path in first.shard_directory.iterdir()
+    }
+
+
+def test_the_seed_names_the_shard_directory_but_does_not_change_the_corpus(
+    tmp_path: Path,
+) -> None:
+    first = _run(tmp_path, seed=1)
+    other = _run(tmp_path, seed=2)
+
+    assert first.fingerprint != other.fingerprint
+    assert first.shard_directory != other.shard_directory
+    assert other.shard_directory == _shard_dir(tmp_path, seed=2)
+    assert dict(other.shard_stats)["reused"] == 0
+    assert _without_created(first.corpus).equals(_without_created(other.corpus))
+
+
+def test_the_corpus_is_deterministic_for_a_seed(tmp_path: Path) -> None:
+    first = _run(tmp_path / "first", seed=3)
+    second = _run(tmp_path / "second", seed=3)
+
+    assert first.fingerprint == second.fingerprint
+    assert _without_created(first.corpus).equals(_without_created(second.corpus))
+    assert dict(first.counts) == dict(second.counts)
+
+
+def test_the_translator_is_never_called_with_an_empty_batch(tmp_path: Path) -> None:
+    for rows in (1, 16, 17, 39, 40):
+        translator = ScriptedTranslator(planted_script(planted_monolingual(rows)))
+
+        _run(
+            tmp_path / str(rows),
+            frame=planted_monolingual(rows),
+            translator=translator,
+        )
+
+        sizes = [len(texts) for texts, _, _ in translator.calls]
+        assert sizes == [8] * (rows // 8) + ([rows % 8] if rows % 8 else [])
+        assert all(sizes)
+
+
+def test_a_run_over_a_single_row_makes_one_shard_and_one_request(
+    tmp_path: Path,
+) -> None:
+    frame = planted_monolingual(1)
+
+    result = _run(tmp_path, frame=frame)
+
+    assert dict(result.shard_stats) == {
+        "planned": 1,
+        "reused": 0,
+        "generated": 1,
+        "regenerated_invalid": 0,
+    }
+    assert result.corpus.height == 1
+
+
+# --- progress ------------------------------------------------------------------
+
+
+def test_progress_is_reported_once_per_shard_in_order(tmp_path: Path) -> None:
+    events: list[ShardProgress] = []
+
+    _run(tmp_path, progress=events.append)
+
+    assert events == [ShardProgress(index, 5, False) for index in range(5)]
+
+
+def test_progress_marks_the_reused_shards_after_a_crash(tmp_path: Path) -> None:
+    crashed: list[ShardProgress] = []
+    crashing = ScriptedTranslator(
+        planted_script(planted_monolingual()), fail_on_call={2: UpstreamError("down")}
+    )
+    with pytest.raises(UpstreamError):
+        _run(tmp_path, translator=crashing, progress=crashed.append)
+    resumed: list[ShardProgress] = []
+
+    _run(tmp_path, progress=resumed.append)
+
+    assert crashed == [ShardProgress(0, 5, False), ShardProgress(1, 5, False)]
+    assert resumed == [
+        ShardProgress(0, 5, True),
+        ShardProgress(1, 5, True),
+        ShardProgress(2, 5, False),
+        ShardProgress(3, 5, False),
+        ShardProgress(4, 5, False),
+    ]
+
+
+def test_a_generated_shard_is_on_disk_when_its_progress_is_reported(
+    tmp_path: Path,
+) -> None:
+    directory = _shard_dir(tmp_path)
+    on_disk: list[bool] = []
+
+    def record(event: ShardProgress) -> None:
+        on_disk.append((directory / SHARD_FILES[event.index]).is_file())
+
+    _run(tmp_path, progress=record)
+
+    assert on_disk == [True] * 5
+
+
+def test_selection_reads_the_shards_back_from_disk(tmp_path: Path) -> None:
+    frame = planted_monolingual(8)
+    directory = _shard_dir(tmp_path, frame=frame)
+
+    def replace_candidates_on_disk(event: ShardProgress) -> None:
+        ShardStore(directory).write(
+            event.index,
+            frame["id"].to_list(),
+            [[f"On disk {index}"] for index in range(8)],
+        )
+
+    result = _run(tmp_path, frame=frame, progress=replace_candidates_on_disk)
+
+    assert result.corpus["src"].to_list() == [f"On disk {index}" for index in range(8)]
+
+
+def test_progress_is_optional(tmp_path: Path) -> None:
+    assert _run(tmp_path, progress=None).corpus.height == 15
+
+
+def test_progress_and_run_result_are_frozen(tmp_path: Path) -> None:
+    event = ShardProgress(0, 5, False)
+    result = _run(tmp_path)
+
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        event.index = 1  # type: ignore[misc]
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        result.fingerprint = "x"  # type: ignore[misc]
+    assert (event.index, event.total, event.reused) == (0, 5, False)
+
+
+# --- what the translator may return --------------------------------------------
+
+
+class _AlteredOnCall(ScriptedTranslator):
+    """Answers like `ScriptedTranslator`, but passes the reply of the call
+    number `call` through `alter` first."""
+
+    def __init__(
+        self,
+        script: dict[str, list[str]],
+        call: int,
+        alter: Callable[[list[list[str]]], list[list[str]]],
+    ) -> None:
+        super().__init__(script)
+        self._call = call
+        self._alter = alter
+
+    def translate(
+        self, texts: Sequence[str], src_lang: str, tgt_lang: str
+    ) -> list[list[str]]:
+        reply = super().translate(texts, src_lang, tgt_lang)
+        return self._alter(reply) if len(self.calls) - 1 == self._call else reply
+
+
+@pytest.mark.parametrize(
+    ("alter", "lists"),
+    [
+        (lambda reply: reply[:-1], 7),
+        (lambda reply: [*reply, ["extra"]], 9),
+    ],
+)
+def test_a_wrong_number_of_candidate_lists_is_a_data_error_and_writes_nothing(
+    tmp_path: Path,
+    alter: Callable[[list[list[str]]], list[list[str]]],
+    lists: int,
+) -> None:
+    translator = _AlteredOnCall(planted_script(planted_monolingual()), 1, alter)
+
+    with pytest.raises(
+        DataError, match=rf"shard 1.*{lists} candidate lists for 8 texts"
+    ):
+        _run(tmp_path, translator=translator)
+
+    assert _files(_shard_dir(tmp_path)) == SHARD_FILES[:1]
+    assert len(translator.calls) == 2
+
+
+@pytest.mark.parametrize("bad", [None, "a string", ("x",), [None], [1]])
+def test_a_reply_that_is_not_a_list_of_candidate_strings_is_a_data_error(
+    tmp_path: Path, bad: Any
+) -> None:
+    frame = planted_monolingual(2)
+
+    class Bad:
+        def translate(self, texts: Any, src_lang: str, tgt_lang: str) -> list[Any]:
+            return [["fine"], bad]
+
+    with pytest.raises(DataError, match=r"shard 0.*text 1"):
+        _run(tmp_path, frame=frame, translator=Bad())
+
+    directory = _shard_dir(tmp_path, frame=frame)
+    assert not directory.exists() or _files(directory) == []
+
+
+def test_a_candidate_list_that_is_empty_is_stored_as_a_refusal(tmp_path: Path) -> None:
+    frame = planted_monolingual(2)
+    translator = ScriptedTranslator({text: [] for text in frame["text"]})
+
+    result = _run(tmp_path, frame=frame, translator=translator, scorer=None)
+
+    store = ShardStore(result.shard_directory)
+    assert store.read(0, frame["id"].to_list()) == [[], []]
+
+
+# --- the inputs the runner refuses ----------------------------------------------
+
+
+def test_a_generator_name_outside_the_config_is_a_config_error(tmp_path: Path) -> None:
+    translator = ScriptedTranslator({})
+    out_dir = tmp_path / "synth"
+
+    with pytest.raises(ConfigError, match=r"'nope' is not in the config"):
+        _run(
+            out_dir,
+            generator_name="nope",
+            generator_cfg=VllmConfig(),
+            translator=translator,
+        )
+
+    assert translator.calls == []
+    assert not out_dir.exists()
+
+
+def test_a_generator_config_that_differs_from_the_named_one_is_a_config_error(
+    tmp_path: Path,
+) -> None:
+    translator = ScriptedTranslator({})
+    out_dir = tmp_path / "synth"
+
+    with pytest.raises(ConfigError, match="'vllm_default'"):
+        _run(out_dir, generator_cfg=VllmConfig(n=3), translator=translator)
+
+    assert translator.calls == []
+    assert not out_dir.exists()
+
+
+def test_a_frame_in_another_language_than_the_job_is_a_data_error(
+    tmp_path: Path,
+) -> None:
+    translator = ScriptedTranslator({})
+    out_dir = tmp_path / "synth"
+
+    with pytest.raises(DataError, match="'eng_Latn'"):
+        _run(
+            out_dir,
+            frame=planted_monolingual(3, lang="eng_Latn"),
+            translator=translator,
+        )
+
+    assert translator.calls == []
+    assert not out_dir.exists()
+
+
+def test_a_frame_without_rows_is_a_data_error(tmp_path: Path) -> None:
+    with pytest.raises(DataError, match="no monolingual rows"):
+        _run(tmp_path, frame=planted_monolingual(1).clear())
+
+
+# --- failures after generation ---------------------------------------------------
+
+
+class _RaisingScorer:
+    requires_cuda = False
+
+    def score(self, sources: Any, translations: Any) -> list[float]:
+        raise RuntimeError("scorer out of memory")
+
+
+def test_a_scorer_that_fails_leaves_every_shard_so_the_rerun_generates_nothing(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(RuntimeError, match="scorer out of memory"):
+        _run(tmp_path, scorer=_RaisingScorer())
+    translator = ScriptedTranslator({})
+
+    rerun = _run(tmp_path, translator=translator)
+
+    assert translator.calls == []
+    assert dict(rerun.shard_stats)["reused"] == 5
+    assert dict(rerun.counts) == PLANTED_COUNTS
+
+
+def test_a_scorer_that_returns_nan_for_every_pair_drops_every_candidate(
+    tmp_path: Path,
+) -> None:
+    result = _run(tmp_path, scorer=FakeScorer({}, default=math.nan))
+
+    assert result.corpus.height == 0
+    assert result.counts["dropped_qe"] == 45
