@@ -28,6 +28,7 @@ from rinchen.utils.part_file import unique_part_path
 PairOrigin = Literal["reference", "rule", "parallel"]
 
 EMPTY = "empty"
+MULTIWORD = "multiword"
 DUPLICATE = "duplicate"
 
 _CYRILLIC = "khk_Cyrl"
@@ -55,7 +56,7 @@ class CorpusFiles:
 
     `files` and `rows` are keyed by file name (`cyrl2mong.train.src`, ...); `rows`
     counts lines. `dropped` is keyed by drop code and lists only the codes that
-    fired: `empty`, `duplicate` and each code of
+    fired: `empty`, `multiword`, `duplicate` and each code of
     `rinchen.script_conv.validate.VIOLATION_CODES`.
     """
 
@@ -100,10 +101,12 @@ def rule_pairs(
 
     Only a word the lexicon holds yields a pair, unless `allow_fallback` also admits
     the phonographic guess. A word that spells to nothing (only dropped letters) is
-    skipped either way. Words must be NFC, as `transliterate_word` requires.
+    skipped either way. Each word is normalized (`khk_Cyrl`) first, so the lookup and
+    the pair both carry the normalized word.
     """
     pairs: list[WordPair] = []
-    for word in words:
+    for raw_word in words:
+        word = normalize(raw_word, _CYRILLIC)
         result = transliterate_word(word)
         if result.text and (allow_fallback or result.source == "lexicon"):
             pairs.append(WordPair(word, result.text, "rule"))
@@ -157,27 +160,29 @@ def _reject_line_breaks(index: int, pair: WordPair) -> None:
     for side, text in (("cyrillic", pair.cyrillic), ("script", pair.script)):
         if _LINE_BREAK_OR_TAB.search(text):
             raise DataError(
-                f"pair {index}: the {side} side holds a line break or tab: {text!r}"
+                f"pair index {index}: the {side} side holds a line break or tab:"
+                f" {text!r}"
             )
 
 
 def _screen_pair(pair: WordPair) -> WordPair | _Drop:
     """The normalized pair, or the first check it fails.
 
-    The checks run in order: empty, a script-side violation, then (in the caller)
-    duplicate. The validator reads the raw script side because `normalize` strips
-    joiners, which would hide them.
+    The checks run in order: empty, multiword, a script-side violation, then (in the
+    caller) duplicate. The validator reads the raw script side because `normalize`
+    strips joiners, which would hide them. A Cyrillic side is normalized first because
+    normalization turns other whitespace into spaces. A script side that passes the
+    validator is never empty once normalized: it holds a character `normalize` keeps.
     """
-    if _is_blank(pair.cyrillic) or _is_blank(pair.script):
+    cyrillic = normalize(pair.cyrillic, _CYRILLIC)
+    if not cyrillic or _is_blank(pair.script):
         return _Drop(EMPTY)
+    if " " in cyrillic or " " in pair.script.strip(" "):
+        return _Drop(MULTIWORD)
     violations = validate_traditional(pair.script)
     if violations:
         return _Drop(violations[0].code)
-    cyrillic = normalize(pair.cyrillic, _CYRILLIC)
-    script = normalize(pair.script, _SCRIPT)
-    if not cyrillic or not script:
-        return _Drop(EMPTY)
-    return WordPair(cyrillic, script, pair.origin)
+    return WordPair(cyrillic, normalize(pair.script, _SCRIPT), pair.origin)
 
 
 def _screen_pairs(pairs: Sequence[WordPair]) -> tuple[list[WordPair], Counter[str]]:
@@ -246,22 +251,34 @@ def build_corpus(
     Files: `cyrl2mong.{train,valid}.{src,tgt}` and the same four for `mong2cyrl`,
     whose columns are the swapped ones. Each is UTF-8, LF, one word per line.
 
-    A pair is dropped on the first check it fails: an empty side (nothing but U+0020,
-    or nothing left once normalized), a violation on the raw script side, a repeat
-    of an earlier pair once both sides are normalized (the first is kept). The drop
-    is counted under `empty`, the first violation's code or `duplicate`. Cyrillic
-    sides go through `normalize(..., "khk_Cyrl")` and script sides through
+    A pair is dropped on the first check it fails, in this order, and counted under
+    the code in brackets:
+    1. an empty side: nothing but U+0020, or (Cyrillic side) nothing left once
+       normalized [`empty`];
+    2. a side that still holds U+0020 after its outer spaces are stripped, because a
+       corpus line is one word (NNBSP does not count) [`multiword`];
+    3. a violation on the raw script side, counted under the first one's code;
+    4. a repeat of an earlier pair once both sides are normalized, the first is kept
+       [`duplicate`].
+    Cyrillic sides go through `normalize(..., "khk_Cyrl")` and script sides through
     `normalize(..., "mn_Mong")`, which leaves NNBSP, MVS and FVS alone.
 
     A pair goes to valid when the SHA-256 of `"{seed}:{normalized Cyrillic word}"`,
     read as a fraction of 2**256, is below `valid_fraction`; so equal Cyrillic words
     never straddle the split. Output keeps input order. A small input can leave
-    valid with no pair; its files are then written empty.
+    valid with no pair; its files are then written empty. An empty train split is an
+    error.
+
+    Each of the eight files appears whole, through a temporary file, but they are
+    not written atomically as a set: a failure part-way leaves the files finished so
+    far (written split by split, a src and its tgt together) and no temporary file.
+    The caller owns the commit marker: call `begin_commit(out_dir, stage)` before
+    this function and write the manifest last.
 
     Raises:
         ConfigError: `valid_fraction` is outside (0, 0.5].
         DataError: a side holds a line break or tab (it names the pair's index in
-            `pairs`), or no pair is left after dropping.
+            `pairs`), no pair is left after dropping, or the train split is empty.
     """
     if not 0 < valid_fraction <= _MAX_VALID_FRACTION:
         raise ConfigError(
@@ -274,6 +291,11 @@ def build_corpus(
             f" ({dict(dropped)})"
         )
     train, valid = _split(kept, valid_fraction, seed)
+    if not train:
+        raise DataError(
+            f"train split is empty: {len(kept)} pairs, valid_fraction"
+            f" {valid_fraction}, seed {seed}"
+        )
     out_dir.mkdir(parents=True, exist_ok=True)
     lines_by_name = _corpus_lines(train, valid)
     for name, lines in lines_by_name.items():

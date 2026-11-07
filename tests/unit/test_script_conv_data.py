@@ -11,6 +11,7 @@ import codecs
 import dataclasses
 import hashlib
 import math
+import unicodedata
 from collections import defaultdict
 from pathlib import Path
 
@@ -40,6 +41,8 @@ FVS_FIFTH = chr(0x180F)  # not a listed variant of A
 ZWJ = chr(0x200D)
 CYRILLIC_A = chr(0x0430)
 CYRILLIC_O = chr(0x043E)
+CYRILLIC_SHORT_I = chr(0x0439)
+LATIN_A = chr(0x0061)
 LATIN_O = chr(0x006F)
 # Mongolian "ongol" (the word MONGOL) and the genitive suffix after an NNBSP.
 MONGOL = "".join(
@@ -72,6 +75,17 @@ FILE_NAMES = {
 LEXICON_WORD = next(word for word in sorted(LEXICON) if len(word) > 3)
 FALLBACK_WORD = "абвгд"
 DROPPED_LETTER_WORD = "ъ"
+# Lexicon words that only a normalized lookup finds once they are spelled the other
+# way: a word with a letter that decomposes (short i), and one with a letter that has
+# a Latin lookalike.
+SHORT_I_WORD = next(
+    word
+    for word in sorted(LEXICON)
+    if CYRILLIC_SHORT_I in word and word != LEXICON_WORD
+)
+LOOKALIKE_WORD = next(
+    word for word in sorted(LEXICON) if CYRILLIC_A in word and len(word) > 3
+)
 
 
 def _cyrillic_word(index: int) -> str:
@@ -99,10 +113,10 @@ def _in_valid(
 
 
 def _planted_pairs() -> tuple[list[WordPair], list[WordPair]]:
-    """The 40 planted pairs and the 34 of them that must survive, in input order.
+    """The 42 planted pairs and the 34 of them that must survive, in input order.
 
-    Six are bad: three exact duplicates, one ZWJ in the script, one empty side, one
-    Cyrillic letter in the script.
+    Eight are bad: three exact duplicates, one ZWJ in the script, one empty side, one
+    Cyrillic letter in the script, and two with a space inside a side.
     """
     # Stepping by 7 (coprime to 34) keeps the words distinct but out of sorted order.
     kept = [_pair(index * 7 % 34) for index in range(34)]
@@ -112,15 +126,21 @@ def _planted_pairs() -> tuple[list[WordPair], list[WordPair]]:
     zwj = WordPair(_cyrillic_word(40), A + ZWJ + NA, "reference")
     empty = WordPair("   ", _script_word(41), "reference")
     foreign = WordPair(_cyrillic_word(42), A + CYRILLIC_A + NA, "reference")
+    spaced_cyrillic = WordPair(
+        _cyrillic_word(43) + " " + _cyrillic_word(44), _script_word(43), "reference"
+    )
+    spaced_script = WordPair(
+        _cyrillic_word(45), _script_word(43) + " " + _script_word(44), "reference"
+    )
     planted = (
         kept[:20]
         + [kept[0], zwj]
         + kept[20:30]
         + [kept[1], empty, foreign]
         + kept[30:]
-        + [kept[2]]
+        + [spaced_cyrillic, kept[2], spaced_script]
     )
-    assert len(planted) == 40
+    assert len(planted) == 42
     return planted, kept
 
 
@@ -222,6 +242,35 @@ def test_rule_pairs_with_fallback_keeps_the_fallback_spelling_too() -> None:
 def test_rule_pairs_skips_a_word_that_spells_to_nothing() -> None:
     assert transliterate_word(DROPPED_LETTER_WORD).text == ""
     assert rule_pairs([DROPPED_LETTER_WORD], allow_fallback=True) == ()
+
+
+@pytest.mark.parametrize("allow_fallback", [False, True])
+@pytest.mark.parametrize(
+    ("raw_word", "word"),
+    [
+        pytest.param(
+            unicodedata.normalize("NFD", SHORT_I_WORD), SHORT_I_WORD, id="decomposed"
+        ),
+        pytest.param(
+            LOOKALIKE_WORD.replace(CYRILLIC_A, LATIN_A, 1),
+            LOOKALIKE_WORD,
+            id="latin-lookalike",
+        ),
+        pytest.param(" " + LEXICON_WORD + " ", LEXICON_WORD, id="padded"),
+    ],
+)
+def test_rule_pairs_normalizes_a_word_before_looking_it_up(
+    raw_word: str, word: str, allow_fallback: bool
+) -> None:
+    assert raw_word != word
+    assert word in LEXICON
+    assert rule_pairs([raw_word], allow_fallback=allow_fallback) == (
+        WordPair(word, LEXICON[word], "rule"),
+    )
+
+
+def test_rule_pairs_skips_a_word_that_normalizes_to_nothing() -> None:
+    assert rule_pairs([" ", chr(0x200B)], allow_fallback=True) == ()
 
 
 def test_rule_pairs_accepts_any_iterable_of_words() -> None:
@@ -350,6 +399,7 @@ def test_build_corpus_counts_rows_and_drops_exactly_on_the_planted_list(
         "joiner": 1,
         "empty": 1,
         "foreign_character": 1,
+        "multiword": 2,
     }
     assert dict(result.rows) == {
         "cyrl2mong.train.src": 26,
@@ -487,6 +537,35 @@ def test_a_failed_write_leaves_no_part_file(
     assert list(tmp_path.iterdir()) == []
 
 
+def test_a_write_that_fails_part_way_leaves_the_finished_files_whole(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    planted, _ = _planted_pairs()
+    original_replace = Path.replace
+    replaced: list[Path] = []
+
+    def fail_on_the_fifth(self: Path, target: Path) -> Path:
+        if len(replaced) == 4:
+            raise OSError("disk full")
+        replaced.append(self)
+        return original_replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", fail_on_the_fifth)
+    with pytest.raises(OSError, match="disk full"):
+        build_corpus(planted, tmp_path, valid_fraction=VALID_FRACTION, seed=SEED)
+
+    # Files are written split by split, a src and its tgt back to back, so a failure
+    # after four files leaves the train corpora of both directions complete.
+    assert {path.name for path in tmp_path.iterdir()} == {
+        f"{direction}.train.{side}" for direction in DIRECTIONS for side in SIDES
+    }
+    for direction in DIRECTIONS:
+        source = _lines(tmp_path / f"{direction}.train.src")
+        target = _lines(tmp_path / f"{direction}.train.tgt")
+        assert source
+        assert len(source) == len(target)
+
+
 def test_an_empty_valid_split_is_written_as_empty_files(tmp_path: Path) -> None:
     train_word = next(
         word
@@ -576,6 +655,54 @@ def test_empty_outranks_a_violation_on_the_script_side(
 ) -> None:
     pair = WordPair(cyrillic, A + ZWJ + NA, "reference")
     assert _dropped(tmp_path, [pair]) == {"empty": 1}
+
+
+@pytest.mark.parametrize(
+    "pair",
+    [
+        pytest.param(WordPair("аб вг", A, "reference"), id="cyrillic-space"),
+        pytest.param(WordPair("аб", A + " " + NA, "reference"), id="script-space"),
+        pytest.param(
+            WordPair("аб" + chr(0x00A0) + "вг", A, "reference"), id="cyrillic-nbsp"
+        ),
+    ],
+)
+def test_a_side_with_a_space_inside_is_dropped_as_multiword(
+    tmp_path: Path, pair: WordPair
+) -> None:
+    assert _dropped(tmp_path, [pair]) == {"multiword": 1}
+
+
+def test_padding_spaces_do_not_make_a_pair_multiword(tmp_path: Path) -> None:
+    pair = WordPair("  аб  ", "  " + A + NA + "  ", "reference")
+    result = build_corpus(
+        [pair, _pair(99)], tmp_path, valid_fraction=VALID_FRACTION, seed=SEED
+    )
+    assert dict(result.dropped) == {}
+    assert "аб" in _splits_by_cyrillic_word(result)
+    assert A + NA in _lines(result.files["cyrl2mong.train.tgt"]) + _lines(
+        result.files["cyrl2mong.valid.tgt"]
+    )
+
+
+def test_empty_outranks_multiword(tmp_path: Path) -> None:
+    assert _dropped(tmp_path, [WordPair("аб вг", "", "reference")]) == {"empty": 1}
+    assert _dropped(tmp_path, [WordPair("", A + " " + NA, "reference")]) == {"empty": 1}
+
+
+@pytest.mark.parametrize(
+    "pair",
+    [
+        pytest.param(WordPair("аб вг", A + ZWJ + NA, "reference"), id="cyrillic-space"),
+        pytest.param(
+            WordPair("аб", A + " " + ZWJ + NA, "reference"), id="script-space"
+        ),
+    ],
+)
+def test_multiword_outranks_a_violation_on_the_script_side(
+    tmp_path: Path, pair: WordPair
+) -> None:
+    assert _dropped(tmp_path, [pair]) == {"multiword": 1}
 
 
 def test_the_validator_sees_the_raw_script_side_before_normalization(
@@ -685,6 +812,26 @@ def test_no_pair_left_after_dropping_is_a_data_error(tmp_path: Path) -> None:
     assert list(tmp_path.iterdir()) == []
 
 
+def test_an_empty_train_split_is_a_data_error_raised_before_any_file(
+    tmp_path: Path,
+) -> None:
+    valid_word = next(
+        word for word in map(_cyrillic_word, range(100)) if _in_valid(word)
+    )
+    out_dir = tmp_path / "corpus"
+    with pytest.raises(
+        DataError,
+        match="train split is empty: 1 pairs, valid_fraction 0.25, seed 7",
+    ):
+        build_corpus(
+            [WordPair(valid_word, A, "reference")],
+            out_dir,
+            valid_fraction=VALID_FRACTION,
+            seed=SEED,
+        )
+    assert not out_dir.exists()
+
+
 def test_no_pairs_at_all_is_a_data_error(tmp_path: Path) -> None:
     with pytest.raises(DataError, match="no pair"):
         build_corpus([], tmp_path, valid_fraction=VALID_FRACTION, seed=SEED)
@@ -700,7 +847,7 @@ def test_a_line_break_or_tab_in_a_side_is_a_data_error_not_a_drop(
         cyrillic = "а" + separator + "б"
     else:
         script = A + separator + NA
-    with pytest.raises(DataError, match="pair 1"):
+    with pytest.raises(DataError, match="pair index 1"):
         build_corpus(
             [_pair(0), WordPair(cyrillic, script, "reference")],
             tmp_path,
@@ -713,7 +860,7 @@ def test_a_line_break_or_tab_in_a_side_is_a_data_error_not_a_drop(
 def test_a_line_break_is_an_error_even_in_a_pair_that_would_be_dropped(
     tmp_path: Path,
 ) -> None:
-    with pytest.raises(DataError, match="pair 0"):
+    with pytest.raises(DataError, match="pair index 0"):
         build_corpus(
             [WordPair("", A + "\n", "reference"), _pair(0)],
             tmp_path,
