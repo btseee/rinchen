@@ -19,7 +19,7 @@ from rinchen.script_conv.alphabet import JOINERS, NNBSP
 from rinchen.script_conv.eval import cer
 from rinchen.script_conv.runtime import ScriptConverter
 from rinchen.script_conv.segments import segment
-from rinchen.script_conv.validate import validate_traditional
+from rinchen.script_conv.validate import is_script_word
 from tests.support.tiny_converter import TinyRun
 
 MIN_WORD_EXACT_MATCH = 0.90
@@ -100,28 +100,35 @@ def test_training_words_convert_to_their_reference_script_spelling(
     )
     assert exact >= MIN_WORD_EXACT_MATCH, f"exact match {exact:.4f}"
     assert not any(joiner in word for word in converted.words for joiner in JOINERS)
-    assert all(validate_traditional(word) == () for word in converted.words)
+    assert all(is_script_word(word) for word in converted.words)
 
 
 @pytest.mark.subprocess
+@pytest.mark.parametrize(
+    ("direction", "target"), [("cyrl2mong", "Mong"), ("mong2cyrl", "Cyrl")]
+)
 def test_the_runtime_agrees_with_eole_on_the_same_checkpoint(
-    tiny_run: TinyRun, converter: ScriptConverter, record_property: RecordProperty
+    tiny_run: TinyRun,
+    converter: ScriptConverter,
+    record_property: RecordProperty,
+    direction: str,
+    target: Literal["Mong", "Cyrl"],
 ) -> None:
-    sources = tiny_run.lines("cyrl2mong.train.src")
-    eole_lines = tiny_run.predictions["cyrl2mong"]
+    sources = tiny_run.lines(f"{direction}.train.src")
+    eole_lines = tiny_run.predictions[direction]
 
-    converted = _convert_in_groups(converter, sources, "Mong", words_per_call=1)
+    converted = _convert_in_groups(converter, sources, target, words_per_call=1)
 
     agreement = _exact_share(eole_lines, converted.words)
-    record_property("agreement_with_eole", agreement)
+    record_property(f"agreement_with_eole_{direction}", agreement)
     assert agreement >= MIN_AGREEMENT_WITH_EOLE, f"agreement {agreement:.4f}"
 
 
 def _words_the_model_reproduces(
-    tiny_run: TinyRun, direction: str, wanted: Callable[[str, str], bool]
+    tiny_run: TinyRun, direction: str
 ) -> list[tuple[str, str]]:
-    """(source, reference) of the training words of `direction` that satisfy
-    `wanted(source, reference)` and that Eole's prediction reproduces exactly."""
+    """(source, reference) of the training words of `direction` that Eole's prediction
+    reproduces exactly."""
     return [
         (source, reference)
         for source, reference, prediction in zip(
@@ -130,20 +137,54 @@ def _words_the_model_reproduces(
             tiny_run.predictions[direction],
             strict=True,
         )
-        if prediction == reference and wanted(source, reference)
+        if prediction == reference
     ]
+
+
+def _reproduced_words_with_a_suffix_gap(
+    tiny_run: TinyRun, direction: str, gap_side: Literal["source", "reference"]
+) -> list[tuple[str, str]]:
+    """(source, reference) of the training words of `direction` whose `gap_side`
+    holds an NNBSP and that Eole's prediction reproduces exactly.
+
+    Fails, never skips: the fixture must hold such words, and the trained model must
+    know at least one of them, or there is no right answer for the runtime to be held
+    to. The check is on Eole's prediction, not on the runtime's, so a model that
+    simply lost every gap word is reported as that, not as a runtime defect.
+    """
+    rows = list(
+        zip(
+            tiny_run.lines(f"{direction}.train.src"),
+            tiny_run.lines(f"{direction}.train.tgt"),
+            tiny_run.predictions[direction],
+            strict=True,
+        )
+    )
+    with_gap = [
+        (source, reference, prediction)
+        for source, reference, prediction in rows
+        if NNBSP in (source if gap_side == "source" else reference)
+    ]
+    assert with_gap, f"the {direction} training fixture has no word with a suffix gap"
+    reproduced = [
+        (source, reference)
+        for source, reference, prediction in with_gap
+        if prediction == reference
+    ]
+    assert reproduced, (
+        f"Eole reproduced none of the {len(with_gap)} {direction} words "
+        "with a suffix gap"
+    )
+    return reproduced
 
 
 @pytest.mark.subprocess
 def test_a_script_word_with_a_suffix_gap_comes_back_as_one_word_with_its_gap(
     tiny_run: TinyRun, converter: ScriptConverter
 ) -> None:
-    candidates = _words_the_model_reproduces(
-        tiny_run, "cyrl2mong", lambda source, reference: NNBSP in reference
-    )
-    if not candidates:
-        pytest.skip("no training word has a suffix gap that the model reproduces")
-    source, reference = candidates[0]
+    source, reference = _reproduced_words_with_a_suffix_gap(
+        tiny_run, "cyrl2mong", "reference"
+    )[0]
 
     alone = converter.convert(source, "Mong")
     in_a_line = converter.convert(f"{source} {source}", "Mong")
@@ -157,12 +198,9 @@ def test_a_script_word_with_a_suffix_gap_comes_back_as_one_word_with_its_gap(
 def test_a_script_word_with_a_suffix_gap_is_converted_back_as_one_word(
     tiny_run: TinyRun, converter: ScriptConverter
 ) -> None:
-    candidates = _words_the_model_reproduces(
-        tiny_run, "mong2cyrl", lambda source, reference: NNBSP in source
-    )
-    if not candidates:
-        pytest.skip("no script word with a suffix gap that the model reproduces")
-    script, cyrillic = candidates[0]
+    script, cyrillic = _reproduced_words_with_a_suffix_gap(
+        tiny_run, "mong2cyrl", "source"
+    )[0]
 
     result = converter.convert(f"{script} {script}", "Cyrl")
 
@@ -181,11 +219,6 @@ def test_script_words_convert_back_to_cyrillic_with_a_low_character_error_rate(
 
     error_rate = cer(references, converted.words)
     record_property("reverse_cer", error_rate)
-    # Measured, not gated: the export's parity gate covers the script direction only.
-    record_property(
-        "reverse_agreement_with_eole",
-        _exact_share(tiny_run.predictions["mong2cyrl"], converted.words),
-    )
     record_property("reverse_invalid_outputs", converted.invalid_outputs)
     assert converted.rule_fallbacks == 0
     assert error_rate <= MAX_CER, f"CER {error_rate:.4f}"
@@ -197,11 +230,10 @@ def test_a_mixed_line_converts_its_words_and_marks_and_keeps_the_numbers(
 ) -> None:
     reproduced = [
         (source, reference)
-        for source, reference in _words_the_model_reproduces(
-            tiny_run, "cyrl2mong", lambda source, reference: True
-        )
+        for source, reference in _words_the_model_reproduces(tiny_run, "cyrl2mong")
         if converter.convert(source, "Mong").text == reference
     ]
+    assert len(reproduced) >= 2, "fewer than two words are reproduced by both runtimes"
     (first_source, first), (second_source, second) = reproduced[:2]
     fresh = ScriptConverter(tiny_ct2, tiny_run.spm_model)
 

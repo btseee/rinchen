@@ -14,16 +14,17 @@ from typing import Any
 import pytest
 import sentencepiece
 
-from rinchen.errors import ConfigError, DataError
+from rinchen.errors import ConfigError, DataError, UpstreamError
 from rinchen.script_conv import runtime
 from rinchen.script_conv.alphabet import NNBSP
 from rinchen.script_conv.char_model import train_char_model
 from rinchen.script_conv.rules import transliterate_word
 from rinchen.script_conv.runtime import Conversion, ScriptConverter
-from rinchen.script_conv.validate import validate_traditional
+from rinchen.script_conv.validate import is_script_word
 from tests.support.stub_runtime import (
     DUMMY_PREFIX,
     StubProcessor,
+    StubTranslation,
     StubTranslator,
 )
 
@@ -195,7 +196,9 @@ def test_the_batch_is_decoded_greedily_with_a_limit_from_the_longest_word() -> N
 
     converter.convert("а улс", "Mong")
 
-    assert _call_options(translator) == [{"beam_size": 1, "max_decoding_length": 20}]
+    assert _call_options(translator) == [
+        {"beam_size": 1, "max_decoding_length": 20, "max_batch_size": 1024}
+    ]
 
 
 @pytest.mark.parametrize(
@@ -270,6 +273,10 @@ INVALID_SCRIPT_OUTPUTS = {
     "selector with no letter": FVS_FIRST + A,
     "newline": A + "\n" + NA,
     "empty": "",
+    "ascii letters": "abc",
+    "script letter with an ascii letter": A + "b" + NA,
+    "digit": A + "1" + NA,
+    "space": A + " " + NA,
 }
 
 
@@ -282,7 +289,7 @@ def test_an_invalid_output_is_replaced_by_the_rule_word_for_each_occurrence(
     converter, _ = _converter({"улс": bad_output})
     rule_word = transliterate_word("улс").text
     assert rule_word
-    assert validate_traditional(rule_word) == ()
+    assert is_script_word(rule_word)
 
     result = converter.convert("улс, улс", "Mong")
 
@@ -443,6 +450,27 @@ def test_the_cache_is_dropped_when_it_would_pass_its_bound(
     ]
 
 
+def test_a_call_larger_than_the_bound_is_converted_but_neither_cached_nor_evicting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(runtime, "_MAX_CACHED_WORDS", 2)
+    converter, translator = _to_script()
+    converter.convert("монгол улс", "Mong")  # fills the cache to its bound
+
+    big = converter.convert("ном оны н р", "Mong")  # four words: more than the bound
+    warm = converter.convert("монгол улс", "Mong")  # the warm entries survived
+    again = converter.convert("ном", "Mong")  # the big call cached nothing
+
+    assert big.text == f"{NOM_SCRIPT} {NA + A} {A} {NA}"
+    assert warm.text == f"{MONGOL_SCRIPT} {ULS_SCRIPT}"
+    assert again.text == NOM_SCRIPT
+    assert _sent_per_call(translator) == [
+        ["монгол", "улс"],
+        ["ном", "оны", "н", "р"],
+        ["ном"],
+    ]
+
+
 def _sent_per_call(translator: StubTranslator) -> list[list[str]]:
     return [
         ["".join(tokens[2:]) for tokens in source] for source, _ in translator.calls
@@ -468,7 +496,9 @@ def test_script_words_become_cyrillic_and_the_marks_map_back() -> None:
     result = converter.convert(text, "Cyrl")
 
     assert result == Conversion("монгол, улс. 3.5 a.b", 0, 0)
-    assert _call_options(translator) == [{"beam_size": 1, "max_decoding_length": 32}]
+    assert _call_options(translator) == [
+        {"beam_size": 1, "max_decoding_length": 32, "max_batch_size": 1024}
+    ]
 
 
 def test_cyrillic_words_stay_when_converting_to_cyrillic() -> None:
@@ -645,6 +675,27 @@ def test_a_missing_model_directory_is_a_data_error_chained_to_the_library_error(
     assert isinstance(raised.value.__cause__, RuntimeError)
 
 
+def test_an_unsupported_device_is_a_config_error_chained_to_the_library_error(
+    spm_model: Path, tmp_path: Path
+) -> None:
+    with pytest.raises(ConfigError, match="bogus") as raised:
+        ScriptConverter(tmp_path / "ct2", spm_model, device="bogus")
+
+    assert isinstance(raised.value.__cause__, ValueError)
+
+
+def test_a_device_the_translator_rejects_is_a_config_error_with_its_cause(
+    monkeypatch: pytest.MonkeyPatch, spm_model: Path, tmp_path: Path
+) -> None:
+    failure = ValueError("unsupported device cuda")
+    monkeypatch.setattr(runtime.ctranslate2, "Translator", _TranslatorFactory(failure))
+
+    with pytest.raises(ConfigError, match="unsupported device cuda") as raised:
+        ScriptConverter(tmp_path, spm_model, device="cuda")
+
+    assert raised.value.__cause__ is failure
+
+
 def test_a_translator_that_fails_to_load_is_a_data_error_with_its_cause(
     monkeypatch: pytest.MonkeyPatch, spm_model: Path, tmp_path: Path
 ) -> None:
@@ -664,6 +715,7 @@ def test_a_missing_character_model_is_a_data_error_chained_to_the_library_error(
         ScriptConverter(tmp_path, tmp_path / "missing.model")
 
     assert isinstance(raised.value.__cause__, OSError)
+    assert factory.built == []  # the cheap model is checked before the big one loads
 
 
 def test_a_directory_as_the_character_model_is_a_data_error(
@@ -671,3 +723,90 @@ def test_a_directory_as_the_character_model_is_a_data_error(
 ) -> None:
     with pytest.raises(DataError, match="directory"):
         ScriptConverter(tmp_path, tmp_path)
+
+
+# ---- A translator that misbehaves -------------------------------------------------
+
+
+class _ScriptedTranslator:
+    """A translator whose `behaviour` decides each call's answer, and which records
+    the words of each call."""
+
+    def __init__(self, behaviour: Any) -> None:
+        self.behaviour = behaviour
+        self.sent: list[list[str]] = []
+
+    def translate_batch(self, source: list[list[str]], **kwargs: Any) -> Any:
+        self.sent.append(["".join(tokens[2:]) for tokens in source])
+        return self.behaviour(source)
+
+
+class _EmptyTranslation:
+    def __init__(self) -> None:
+        self.hypotheses: list[list[str]] = []
+
+
+def _answers(source: list[list[str]]) -> list[StubTranslation]:
+    return [StubTranslation([DUMMY_PREFIX, A]) for _ in source]
+
+
+def _scripted(behaviour: Any) -> tuple[ScriptConverter, _ScriptedTranslator]:
+    translator = _ScriptedTranslator(behaviour)
+    return ScriptConverter.from_parts(translator, StubProcessor()), translator  # type: ignore[arg-type]
+
+
+def test_fewer_results_than_words_is_an_upstream_error_naming_both_counts() -> None:
+    converter, _ = _scripted(lambda source: _answers(source)[:-1])
+
+    with pytest.raises(UpstreamError, match="1 results for 2 words"):
+        converter.convert("монгол улс", "Mong")
+
+
+def test_a_result_without_a_hypothesis_is_an_upstream_error_naming_the_word() -> None:
+    converter, _ = _scripted(lambda source: [_EmptyTranslation() for _ in source])
+
+    with pytest.raises(UpstreamError, match="no hypothesis for word 'улс'"):
+        converter.convert("улс", "Mong")
+
+
+def test_a_translator_runtime_error_is_an_upstream_error_with_its_cause() -> None:
+    failure = RuntimeError("out of memory")
+
+    def fail(source: list[list[str]]) -> list[StubTranslation]:
+        raise failure
+
+    converter, _ = _scripted(fail)
+
+    with pytest.raises(UpstreamError, match="out of memory") as raised:
+        converter.convert("улс", "Mong")
+
+    assert raised.value.__cause__ is failure
+
+
+@pytest.mark.parametrize(
+    "failing",
+    [
+        lambda source: _answers(source)[:-1],
+        lambda source: [*_answers(source)[:-1], _EmptyTranslation()],
+    ],
+    ids=["fewer results", "a missing hypothesis"],
+)
+def test_a_failed_batch_leaves_nothing_in_the_cache(failing: Any) -> None:
+    converter, translator = _scripted(failing)
+    with pytest.raises(UpstreamError):
+        converter.convert("монгол улс", "Mong")
+    translator.behaviour = _answers
+
+    result = converter.convert("монгол улс", "Mong")
+
+    assert translator.sent == [["монгол", "улс"], ["монгол", "улс"]]
+    assert result.text == f"{A} {A}"
+
+
+def test_an_empty_hypothesis_string_is_a_normal_invalid_output_not_an_error() -> None:
+    converter, _ = _scripted(lambda source: [StubTranslation([]) for _ in source])
+    rule_word = transliterate_word("улс").text
+
+    result = converter.convert("улс", "Mong")
+
+    assert result == Conversion(rule_word, 1, 0)

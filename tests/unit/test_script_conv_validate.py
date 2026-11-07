@@ -14,11 +14,13 @@ from pathlib import Path
 
 import pytest
 
-from rinchen.script_conv.alphabet import FVS, LETTERS, MVS, NNBSP
+from rinchen.script_conv.alphabet import FVS, LETTERS, MVS, NIRUGU, NNBSP
+from rinchen.script_conv.rules import LEXICON
 from rinchen.script_conv.validate import (
     VARIANT_TABLE,
     VIOLATION_CODES,
     Violation,
+    is_script_word,
     validate_traditional,
 )
 
@@ -319,3 +321,63 @@ def test_manifest_carries_the_same_hashes_as_the_table() -> None:
     assert manifest["retrieved"] == header["retrieved"]
     table_bytes = _table_text().encode("utf-8")
     assert manifest["derived_sha256"] == hashlib.sha256(table_bytes).hexdigest()
+
+
+# --- is_script_word ---------------------------------------------------------
+
+SCRIPT_COMMA = chr(0x1802)
+SCRIPT_FULL_STOP = chr(0x1803)
+NOT_SCRIPT_WORDS = {
+    "empty": "",
+    "ascii letters": "abc",
+    "ascii letters with a space": "a b",
+    "letter then ascii letter": A + "b",
+    "letter then digit": A + "1",
+    "digit only": "7",
+    "two letters with a space": A + " " + NA,
+    "ascii punctuation": A + "." + NA,
+    "script full stop": A + SCRIPT_FULL_STOP + NA,
+    "script comma": SCRIPT_COMMA,
+    "newline": A + "\n" + NA,
+    "cyrillic letter": A + CYRILLIC_A,
+    "only a selector": FVS_SECOND,
+    "only a vowel separator": MVS,
+    "only a nirugu": NIRUGU,
+    "only a suffix gap": NNBSP,
+    "zero width joiner": A + ZWJ + NA,
+    "zero width non-joiner": A + ZWNJ + NA,
+    "selector first": FVS_SECOND + A,
+    "unlisted variant": A + FVS_FIFTH,
+    "vowel separator at the end": A + MVS,
+    "suffix gap at the end": MONGOL + NNBSP,
+}
+SCRIPT_WORDS = {
+    "one letter": A,
+    "a word": MONGOL,
+    "a word with a suffix gap": MONGOL + NNBSP + SUFFIX_UN,
+    "a word with a selector": A + FVS_SECOND + NA,
+    "a word with a selector and a vowel separator": A + FVS_SECOND + NA + MVS + A,
+    "a word with a stem-final selector before the gap": A + FVS_SECOND + NNBSP + A,
+    "a word with a nirugu": A + NIRUGU + NA,
+}
+
+
+@pytest.mark.parametrize("text", NOT_SCRIPT_WORDS.values(), ids=list(NOT_SCRIPT_WORDS))
+def test_text_that_is_not_one_script_word_is_rejected(text: str) -> None:
+    assert not is_script_word(text)
+
+
+@pytest.mark.parametrize("text", SCRIPT_WORDS.values(), ids=list(SCRIPT_WORDS))
+def test_a_run_of_letters_with_their_selectors_and_gaps_is_a_script_word(
+    text: str,
+) -> None:
+    assert is_script_word(text)
+
+
+def test_every_lexicon_spelling_is_a_script_word() -> None:
+    assert LEXICON
+    assert all(is_script_word(script) for script in LEXICON.values())
+
+
+def test_a_script_word_passes_the_validator_too() -> None:
+    assert all(validate_traditional(text) == () for text in SCRIPT_WORDS.values())

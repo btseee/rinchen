@@ -36,6 +36,11 @@ VIOLATION_CODES: frozenset[str] = frozenset(
 
 _VARIANT_TABLE_FILE = "standardized_variants.tsv"
 
+# What one converted word may be made of: letters, their selectors, the vowel
+# separator, the stroke and the suffix gap. `_ALLOWED` is wider because it checks
+# running text.
+_SCRIPT_WORD_CHARACTERS = LETTERS | FVS | {MVS, NIRUGU, NNBSP}
+
 # Outside the script, ASCII text passes: a Latin run, digits and punctuation.
 _ALLOWED = (
     LETTERS
@@ -165,3 +170,19 @@ def validate_traditional(text: str) -> tuple[Violation, ...]:
     """Every violation in `text`, in index order; empty when the text is clean."""
     violations = (_check_character(text, index) for index in range(len(text)))
     return tuple(violation for violation in violations if violation is not None)
+
+
+def is_script_word(text: str) -> bool:
+    """Whether `text` is one converted traditional-script word.
+
+    It must pass `validate_traditional`, hold at least one letter, and be made of
+    letters, free variation selectors, the vowel separator, the nirugu stroke and
+    NNBSP only. A Cyrillic word can convert only to such a text, so ASCII letters,
+    digits, punctuation (the script's own marks too) and spaces inside the word are
+    defects even where running text may hold them.
+    """
+    return (
+        not LETTERS.isdisjoint(text)
+        and _SCRIPT_WORD_CHARACTERS.issuperset(text)
+        and not validate_traditional(text)
+    )
