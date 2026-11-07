@@ -73,8 +73,9 @@ from where.
 | `runtime.py` | `ScriptConverter`: CTranslate2 plus the character model, a word cache, validation of every output, rule fallback |
 
 `src/rinchen/cli/convert_script.py` holds the five commands. It is the only module
-that writes manifests. The layering is: `alphabet` is the leaf; `validate`,
-`segments` and `eval` depend on it; `fallback` on nothing of the package; `rules`
+that writes manifests. The layering is: `alphabet` is the leaf; `validate` and
+`segments` depend on it; `eval` depends on nothing of the package (it imports only
+numpy); `fallback` on nothing of the package; `rules`
 on `fallback`, `segments` and `alphabet`; `data` on `rules`, `validate`, `alphabet`
 and `rinchen.text.normalize`; `config` on `char_model`'s tags (it hard-codes the
 file layout of `data` by convention, and a test pins it against

@@ -298,7 +298,8 @@ the `rinchen convert-script` commands `build-data`, `train`, `export`, `apply` a
 `scripts/build_script_conv_fixtures.py`, the Wiktionary reference and the fixtures built from
 it (`tests/fixtures/script_conv/`), `tests/integration/` with its helpers in `tests/support/`,
 `manifests/ucd_standardized_variants.json`, and `docs/runbooks/05_script_converter.md`.
-24 commits ahead of `main` as of the final review fixes (`ed7ead9` design and plan,
+24 commits ahead of `main` as of `f79de26`, the final review fixes (later documentation-only
+commits are not counted; `ed7ead9` design and plan,
 `2186b83` through `7517915` the code and its review fixes, `14e04ba` the runbook and
 records, then the parked minors, the final review fixes and their docs; the last commit is the
 one that records this). A whole-branch review found no Critical issue and four Important ones,
@@ -369,7 +370,8 @@ merge; `2346cea` was the D3 end and `b38eaae` the D4 merge tip, and no
 ahead of `origin/main` (`9e7b0ec`); it is unpushed, and no CI run covers D3, D4 or
 D5. The full local gate was rerun on the merged tree: 1702 passed, 10 deselected.
 `d5-script-converter` is a separate branch cut from `main` at `4eac98f`, 24 commits
-ahead as of the final review fixes (counting the commit that records this); it is not
+ahead as of `f79de26`, the final review fixes (later documentation-only commits are not
+counted); it is not
 merged into `main` and not pushed.
 
 Next step: D6 (Synthetic data). Nothing in D5 blocks it. Its inputs from D5: the converter

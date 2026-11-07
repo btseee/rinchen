@@ -141,7 +141,8 @@ manifests/ucd_standardized_variants.json
 docs/runbooks/05_script_converter.md
 ```
 
-Layering: `alphabet` is the leaf; `validate`, `segments`, `eval` depend on it; `fallback` on
+Layering: `alphabet` is the leaf; `validate` and `segments` depend on it; `eval` depends on
+nothing of the package (it imports only numpy); `fallback` on
 nothing of the package; `rules` on `fallback`, `segments`, `alphabet`; `data` on `rules`,
 `validate`, `alphabet`, `text.normalize`; `config` on `char_model`'s tags (and it hard-codes
 `data`'s file layout by convention, which a test pins against `CORPUS_FILE_NAMES`); `train` on
