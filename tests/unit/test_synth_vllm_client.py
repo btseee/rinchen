@@ -4,11 +4,13 @@ test runs against `FakeLlmServer`; nothing opens a socket."""
 
 from __future__ import annotations
 
+import threading
+
 import httpx
 import pytest
 
 from rinchen.config.synth import VllmConfig
-from rinchen.errors import ConfigError, UpstreamError
+from rinchen.errors import ConfigError, DataError, UpstreamError
 from rinchen.synth import _chat_completions as chat_module
 from rinchen.synth.prompts import render_messages
 from rinchen.synth.vllm_client import OpenAICompatTranslator
@@ -16,6 +18,7 @@ from tests.support.fake_llm_server import (
     FakeLlmServer,
     chat_reply,
     echo_responder,
+    rendezvous_responder,
     source_text,
     table_responder,
 )
@@ -202,7 +205,10 @@ def test_the_same_text_twice_is_translated_twice():
 
 
 def test_no_more_requests_are_in_flight_than_the_configured_concurrency():
-    server = FakeLlmServer(echo_responder(), delay_s=0.05)
+    # Two requests always rendezvous, so `max_in_flight == 2` is a certainty for
+    # a client that runs two at a time; the delay keeps requests in flight long
+    # enough for a client that ran more to show it.
+    server = FakeLlmServer(rendezvous_responder(2, echo_responder()), delay_s=0.05)
     translator, _ = _translator(server, concurrency=2)
 
     result = translator.translate([f"t{i}" for i in range(6)], ENG, KHK)
@@ -212,7 +218,7 @@ def test_no_more_requests_are_in_flight_than_the_configured_concurrency():
 
 
 def test_a_concurrency_larger_than_the_number_of_texts_is_fine():
-    server = FakeLlmServer(echo_responder(), delay_s=0.05)
+    server = FakeLlmServer(rendezvous_responder(2, echo_responder()))
     translator, _ = _translator(server, concurrency=32)
 
     result = translator.translate(["a", "b"], ENG, KHK)
@@ -406,51 +412,46 @@ def test_exhausted_transport_errors_name_the_exception_class_and_keep_the_cause(
             id="no-choices-key",
         ),
         pytest.param(
-            lambda _request: httpx.Response(200, json={"choices": []}),
-            "without choices",
-            id="empty-choices",
-        ),
-        pytest.param(
             lambda _request: httpx.Response(200, json={"choices": "text"}),
             "without choices",
             id="choices-not-a-list",
         ),
         pytest.param(
             lambda _request: httpx.Response(200, json={"choices": ["text"]}),
-            "message.content",
+            "message object",
             id="choice-not-an-object",
         ),
         pytest.param(
             lambda _request: httpx.Response(200, json={"choices": [{"index": 0}]}),
-            "message.content",
+            "message object",
             id="choice-without-message",
         ),
         pytest.param(
             lambda _request: httpx.Response(
-                200, json={"choices": [{"message": {"role": "assistant"}}]}
+                200, json={"choices": [{"message": "text"}]}
             ),
-            "message.content",
-            id="message-without-content",
-        ),
-        pytest.param(
-            lambda _request: httpx.Response(
-                200, json={"choices": [{"message": {"content": None}}]}
-            ),
-            "message.content",
-            id="content-null",
+            "message object",
+            id="message-not-an-object",
         ),
         pytest.param(
             lambda _request: httpx.Response(
                 200, json={"choices": [{"message": {"content": 7}}]}
             ),
             "message.content",
-            id="content-not-a-string",
+            id="content-a-number",
+        ),
+        pytest.param(
+            lambda _request: httpx.Response(
+                200, json={"choices": [{"message": {"content": ["a"]}}]}
+            ),
+            "message.content",
+            id="content-a-list",
         ),
         pytest.param(
             lambda _request: httpx.Response(
                 200, json={"choices": chat_reply(["fine"])["choices"] + [{"index": 1}]}
             ),
-            "message.content",
+            "message object",
             id="one-good-one-bad-choice",
         ),
     ],
@@ -581,3 +582,329 @@ def test_a_client_the_translator_made_is_closed_when_the_call_fails(monkeypatch)
         translator.translate(["a"], ENG, KHK)
 
     assert made[0].is_closed is True
+
+
+def _ok(body: dict, status: int = 200):
+    return lambda _request: httpx.Response(status, json=body)
+
+
+def _body_of(status: int, content: bytes):
+    return lambda _request: httpx.Response(status, content=content)
+
+
+def _no_content_choice(index: int, message: dict) -> dict:
+    return {"index": index, "message": message}
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        pytest.param({"role": "assistant"}, id="content-absent"),
+        pytest.param({"role": "assistant", "content": None}, id="content-null"),
+        pytest.param({"role": "assistant", "content": ""}, id="content-empty"),
+    ],
+)
+def test_a_choice_without_content_is_dropped_like_an_empty_string(message):
+    good = chat_reply(["kept"])["choices"][0]
+    server = FakeLlmServer(
+        echo_responder(),
+        failures=[_ok({"choices": [good, _no_content_choice(1, message)]})],
+    )
+    translator, sleeps = _translator(server)
+
+    assert translator.translate(["a"], ENG, KHK) == [["kept"]]
+    assert len(server.requests) == 1
+    assert sleeps == []
+
+
+def test_a_refusal_in_every_choice_gives_an_empty_list_for_that_text():
+    refusal = {"role": "assistant", "content": None}
+    server = FakeLlmServer(
+        echo_responder(),
+        failures=[_ok({"choices": [_no_content_choice(0, refusal)]})],
+    )
+    translator, _ = _translator(server)
+
+    assert translator.translate(["a", "b"], ENG, KHK) == [[], ["b/0"]]
+
+
+def test_an_empty_choices_list_gives_no_candidates_for_that_text_and_no_error():
+    server = FakeLlmServer(table_responder({"a": [], "b": ["kept"]}))
+    translator, sleeps = _translator(server)
+
+    assert translator.translate(["a", "b"], ENG, KHK) == [[], ["kept"]]
+    assert sleeps == []
+
+
+def test_a_null_error_next_to_valid_choices_is_ignored():
+    server = FakeLlmServer(
+        echo_responder(), failures=[_ok(chat_reply(["fine"]) | {"error": None})]
+    )
+    translator, _ = _translator(server)
+
+    assert translator.translate(["a"], ENG, KHK) == [["fine"]]
+
+
+def test_a_real_error_next_to_valid_choices_still_fails_the_call():
+    reply = chat_reply(["fine"]) | {"error": {"message": "partial failure"}}
+    server = FakeLlmServer(echo_responder(), failures=[_ok(reply)])
+    translator, _ = _translator(server)
+
+    with pytest.raises(UpstreamError, match="error body"):
+        translator.translate(["a"], ENG, KHK)
+
+
+def test_a_generation_cut_at_max_tokens_is_kept():
+    cut = {
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": "cut off mid"},
+                "finish_reason": "length",
+            }
+        ]
+    }
+    server = FakeLlmServer(echo_responder(), failures=[_ok(cut)])
+    translator, _ = _translator(server)
+
+    assert translator.translate(["a"], ENG, KHK) == [["cut off mid"]]
+
+
+def test_any_2xx_with_a_valid_body_is_accepted():
+    server = FakeLlmServer(
+        echo_responder(), failures=[_ok(chat_reply(["created"]), status=201)]
+    )
+    translator, sleeps = _translator(server)
+
+    assert translator.translate(["a"], ENG, KHK) == [["created"]]
+    assert sleeps == []
+
+
+def test_the_request_is_sent_as_json():
+    server = FakeLlmServer(echo_responder())
+    translator, _ = _translator(server)
+
+    translator.translate(["a"], ENG, KHK)
+
+    headers = server.http_requests[0].headers
+    assert headers["content-type"] == "application/json"
+
+
+@pytest.mark.parametrize(
+    "junk",
+    [
+        chr(0x200B),
+        chr(0xFEFF),
+        chr(0x180E),
+        chr(0x00A0),
+        "...",
+        "\u2014",
+        "?!",
+        " . ",
+    ],
+    ids=[
+        "zwsp",
+        "bom",
+        "mongolian-vowel-separator",
+        "nbsp",
+        "dots",
+        "dash",
+        "marks",
+        "spaced-dot",
+    ],
+)
+def test_a_candidate_with_no_letter_or_digit_is_dropped(junk):
+    server = FakeLlmServer(table_responder({"a": [junk, "kept", junk * 3]}))
+    translator, _ = _translator(server, n=3)
+
+    assert translator.translate(["a"], ENG, KHK) == [["kept"]]
+
+
+def test_candidates_with_a_letter_or_a_digit_are_kept_and_nnbsp_is_stripped():
+    narrow = chr(0x202F)
+    server = FakeLlmServer(
+        table_responder({"a": ["5", "a.", "Сайн", "#1", narrow + "word" + narrow]})
+    )
+    translator, _ = _translator(server, n=5)
+
+    assert translator.translate(["a"], ENG, KHK) == [["5", "a.", "Сайн", "#1", "word"]]
+
+
+def test_a_huge_retry_count_cannot_overflow_the_backoff():
+    server = FakeLlmServer(echo_responder(), failures=[503] * 1100)
+    translator, sleeps = _translator(server, retries=1100)
+
+    assert translator.translate(["a"], ENG, KHK) == [["a/0"]]
+    assert len(sleeps) == 1100
+    assert sleeps[:6] == [1.0, 2.0, 4.0, 8.0, 16.0, 30.0]
+    assert set(sleeps[5:]) == {30.0}
+
+
+def test_exhaustion_previews_the_last_response_body():
+    server = FakeLlmServer(
+        echo_responder(), failures=[_body_of(503, b"overloaded, try later")] * 2
+    )
+    translator, _ = _translator(server, retries=1)
+
+    with pytest.raises(UpstreamError) as raised:
+        translator.translate(["secret source text"], ENG, KHK)
+
+    assert "HTTP 503 (overloaded, try later)" in str(raised.value)
+    assert "secret source text" not in str(raised.value)
+
+
+def test_a_status_that_is_not_retried_previews_the_response_body():
+    reply = {"error": {"message": "model not found"}}
+    server = FakeLlmServer(echo_responder(), failures=[_ok(reply, status=404)])
+    translator, _ = _translator(server)
+
+    with pytest.raises(UpstreamError, match="HTTP 404 .*model not found"):
+        translator.translate(["a"], ENG, KHK)
+
+
+def test_the_preview_is_cut_at_200_characters():
+    server = FakeLlmServer(echo_responder(), failures=[_body_of(400, b"x" * 500)])
+    translator, _ = _translator(server)
+
+    with pytest.raises(UpstreamError) as raised:
+        translator.translate(["a"], ENG, KHK)
+
+    assert "x" * 200 in str(raised.value)
+    assert "x" * 201 not in str(raised.value)
+
+
+def test_the_preview_collapses_whitespace():
+    body = b"line one\n\n   line two\t\tend\r\n"
+    server = FakeLlmServer(echo_responder(), failures=[_body_of(400, body)])
+    translator, _ = _translator(server)
+
+    with pytest.raises(UpstreamError, match=r"\(line one line two end\)"):
+        translator.translate(["a"], ENG, KHK)
+
+
+def test_the_preview_survives_a_body_that_is_not_utf8():
+    server = FakeLlmServer(
+        echo_responder(), failures=[_body_of(400, b"bad \xff\xfe bytes")]
+    )
+    translator, _ = _translator(server)
+
+    with pytest.raises(UpstreamError) as raised:
+        translator.translate(["a"], ENG, KHK)
+
+    assert "bad " + chr(0xFFFD) in str(raised.value)
+
+
+def test_an_empty_response_body_adds_no_preview():
+    server = FakeLlmServer(echo_responder(), failures=[_body_of(400, b"")])
+    translator, _ = _translator(server)
+
+    with pytest.raises(UpstreamError) as raised:
+        translator.translate(["a"], ENG, KHK)
+
+    assert str(raised.value).endswith("answered HTTP 400, not retried")
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        pytest.param("localhost:8000/v1", id="no-scheme"),
+        pytest.param("/v1", id="path-only"),
+        pytest.param("ftp://llm.test/v1", id="not-http"),
+        pytest.param("http:///v1", id="no-host"),
+        pytest.param("http://", id="nothing-after-the-scheme"),
+        pytest.param("http://llm.test/v1" + chr(0), id="control-character"),
+    ],
+)
+def test_a_base_url_that_is_not_an_http_url_with_a_host_is_rejected_at_once(base_url):
+    with pytest.raises(ConfigError) as raised:
+        OpenAICompatTranslator(VllmConfig(base_url=base_url))
+
+    assert repr(base_url) in str(raised.value)
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "http://llm.test/v1",
+        "https://llm.test:8443/v1/",
+        "http://127.0.0.1:8000/v1",
+        "http://[::1]:8000/v1",
+    ],
+)
+def test_http_and_https_base_urls_with_a_host_are_accepted(base_url):
+    OpenAICompatTranslator(VllmConfig(base_url=base_url))
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        httpx.DecodingError("bad gzip"),
+        httpx.TooManyRedirects("loop"),
+        httpx.InvalidURL("bad"),
+    ],
+    ids=lambda error: type(error).__name__,
+)
+def test_other_httpx_errors_fail_the_call_at_once_naming_the_class_and_attempt(error):
+    server = FakeLlmServer(echo_responder(), failures=[503, error])
+    translator, sleeps = _translator(server)
+
+    with pytest.raises(UpstreamError) as raised:
+        translator.translate(["a"], ENG, KHK)
+
+    message = str(raised.value)
+    assert type(error).__name__ in message
+    assert "attempts: 2" in message
+    assert URL in message
+    assert raised.value.__cause__ is error
+    assert len(server.requests) == 2
+    assert sleeps == [1.0]
+
+
+def test_a_text_that_cannot_be_encoded_names_its_index_before_any_request():
+    server = FakeLlmServer(echo_responder())
+    translator, _ = _translator(server)
+
+    with pytest.raises(DataError, match="text 1 ") as raised:
+        translator.translate(["fine", "bad" + chr(0xD800)], ENG, KHK)
+
+    assert "bad" not in str(raised.value)
+    assert server.requests == []
+
+
+@pytest.mark.timeout(30)
+def test_an_interrupt_while_waiting_cancels_the_requests_still_queued(monkeypatch):
+    started = threading.Event()
+
+    def responder(body: dict) -> dict:
+        started.set()
+        return chat_reply(["ok"])
+
+    def interrupted_wait(futures, **_kwargs):
+        assert started.wait(5)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(chat_module, "wait", interrupted_wait)
+    server = FakeLlmServer(responder, delay_s=0.1)
+    translator, _ = _translator(server, concurrency=2)
+
+    with pytest.raises(KeyboardInterrupt):
+        translator.translate([f"t{i}" for i in range(50)], ENG, KHK)
+
+    assert len(server.requests) <= 8
+
+
+def test_a_client_the_translator_made_is_limited_to_its_concurrency(monkeypatch):
+    server = FakeLlmServer(echo_responder())
+    real_client = httpx.Client
+    seen: list[dict] = []
+
+    def make_client(*args, **kwargs):
+        seen.append(kwargs)
+        return real_client(transport=server.transport)
+
+    monkeypatch.setattr(chat_module.httpx, "Client", make_client)
+    translator = OpenAICompatTranslator(VllmConfig(base_url=BASE_URL, concurrency=7))
+
+    translator.translate(["a"], ENG, KHK)
+
+    assert seen[0]["limits"].max_connections == 7

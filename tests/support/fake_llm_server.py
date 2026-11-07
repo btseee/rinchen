@@ -34,8 +34,12 @@ def source_text(body: dict) -> str:
 
 
 def chat_reply(candidates: Sequence[str]) -> dict:
-    """The JSON body of a successful chat completion with one choice each."""
+    """The JSON body of a successful chat completion with one choice each, with
+    the extra fields a real server sends (a client must ignore them)."""
     return {
+        "id": "chatcmpl-fake",
+        "object": "chat.completion",
+        "model": "fake-model",
         "choices": [
             {
                 "index": index,
@@ -43,7 +47,8 @@ def chat_reply(candidates: Sequence[str]) -> dict:
                 "finish_reason": "stop",
             }
             for index, candidate in enumerate(candidates)
-        ]
+        ],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
     }
 
 
@@ -63,6 +68,23 @@ def table_responder(candidates: Mapping[str, Sequence[str]]) -> Responder:
 
     def respond(body: dict) -> dict:
         return chat_reply(candidates[source_text(body)])
+
+    return respond
+
+
+def rendezvous_responder(
+    parties: int, responder: Responder, *, timeout_s: float = 5.0
+) -> Responder:
+    """Hold every request until `parties` are waiting together, then answer them
+    with `responder`. That makes "N requests are in flight at once" a certainty
+    instead of a timing window; if they never gather, `BrokenBarrierError`
+    surfaces out of the transport. The request count has to be a multiple of
+    `parties`."""
+    barrier = threading.Barrier(parties, timeout=timeout_s)
+
+    def respond(body: dict) -> dict:
+        barrier.wait()
+        return responder(body)
 
     return respond
 

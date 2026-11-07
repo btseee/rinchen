@@ -13,6 +13,7 @@ from tests.support.fake_llm_server import (
     FakeLlmServer,
     chat_reply,
     echo_responder,
+    rendezvous_responder,
     source_text,
 )
 
@@ -30,6 +31,19 @@ def _body(text: str) -> dict:
 def _post(server: FakeLlmServer, text: str) -> httpx.Response:
     client = httpx.Client(transport=server.transport)
     return client.post(URL, json=_body(text), timeout=3.0)
+
+
+def test_chat_reply_carries_the_fields_a_real_server_adds():
+    reply = chat_reply(["a"])
+
+    assert reply["object"] == "chat.completion"
+    assert reply["id"].startswith("chatcmpl-")
+    assert reply["model"] == "fake-model"
+    assert reply["usage"] == {
+        "prompt_tokens": 1,
+        "completion_tokens": 1,
+        "total_tokens": 2,
+    }
 
 
 def test_chat_reply_has_one_choice_per_candidate_in_order():
@@ -164,20 +178,26 @@ def test_the_order_key_can_be_any_function_of_the_request_body():
     assert server.answered == [2, 1]
 
 
-def test_max_in_flight_counts_requests_inside_the_server_at_the_same_time():
-    barrier = threading.Barrier(3, timeout=5)
-
-    def responder(body: dict) -> dict:
-        barrier.wait()
-        return chat_reply(["ok"])
-
-    server = FakeLlmServer(responder)
+def test_a_rendezvous_responder_answers_only_once_enough_requests_are_waiting():
+    server = FakeLlmServer(rendezvous_responder(3, echo_responder()))
 
     with ThreadPoolExecutor(max_workers=3) as pool:
-        for future in [pool.submit(_post, server, str(i)) for i in range(3)]:
-            future.result()
+        futures = [pool.submit(_post, server, str(i)) for i in range(3)]
+        replies = [future.result().json() for future in futures]
 
     assert server.max_in_flight == 3
+    assert sorted(r["choices"][0]["message"]["content"] for r in replies) == [
+        "0/0",
+        "1/0",
+        "2/0",
+    ]
+
+
+def test_a_rendezvous_that_never_gathers_fails_loudly():
+    server = FakeLlmServer(rendezvous_responder(2, echo_responder(), timeout_s=0.05))
+
+    with pytest.raises(threading.BrokenBarrierError):
+        _post(server, "alone")
 
 
 def test_delay_keeps_requests_in_flight_long_enough_to_overlap():

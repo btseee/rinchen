@@ -17,6 +17,7 @@ from tests.support.fake_llm_server import (
     FakeLlmServer,
     chat_reply,
     echo_responder,
+    rendezvous_responder,
     source_text,
 )
 
@@ -149,23 +150,44 @@ def test_merged_candidates_are_stripped_and_deduplicated_across_requests():
 
 
 def test_total_concurrency_over_all_requests_is_bounded_by_the_config():
-    server = FakeLlmServer(_seed_echo, delay_s=0.05)
-    translator, _ = _translator(server, n=4, concurrency=3)
+    # Three texts of two candidates each: six requests, three at a time, so a
+    # group of three has to mix the candidates of different texts.
+    server = FakeLlmServer(rendezvous_responder(3, _seed_echo), delay_s=0.05)
+    translator, _ = _translator(server, n=2, concurrency=3)
 
-    result = translator.translate(["a", "b"], ENG, KHK)
+    result = translator.translate(["a", "b", "c"], ENG, KHK)
 
-    assert len(result) == 2
-    assert len(server.requests) == 8
+    assert len(result) == 3
+    assert len(server.requests) == 6
     assert server.max_in_flight == 3
 
 
 def test_one_text_can_use_the_whole_concurrency_for_its_candidates():
-    server = FakeLlmServer(_seed_echo, delay_s=0.05)
+    server = FakeLlmServer(rendezvous_responder(4, _seed_echo))
     translator, _ = _translator(server, n=4, concurrency=8)
 
     translator.translate(["a"], ENG, KHK)
 
     assert server.max_in_flight == 4
+
+
+def test_refusals_and_empty_choices_are_dropped_from_the_merge():
+    refusal = {"choices": [{"index": 0, "message": {"role": "assistant"}}]}
+
+    def respond(body: dict) -> dict:
+        k = body["seed"] - HELLO_SEED
+        if k == 1:
+            return refusal
+        if k == 2:
+            return {"choices": []}
+        return _seed_echo(body)
+
+    server = FakeLlmServer(respond)
+    translator, _ = _translator(server, n=4)
+
+    result = translator.translate(["Hello world"], ENG, KHK)
+
+    assert result == [[f"Hello world@{HELLO_SEED}", f"Hello world@{HELLO_SEED + 3}"]]
 
 
 def test_empty_texts_make_no_request():
