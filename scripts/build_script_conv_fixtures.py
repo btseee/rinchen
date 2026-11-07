@@ -13,11 +13,15 @@ Reads tests/fixtures/script_conv/wiktionary_reference.tsv and writes three files
 - tests/fixtures/script_conv/tiny_words.tsv: the first 500 reference rows by sorted
   Cyrillic word, the training fixture of the tiny converter model.
 
-Rows whose script form fails `validate_traditional` are dropped before anything
-else. The output is a pure function of the reference, so rerunning it rewrites the
-same bytes; tests/unit/test_script_conv_fixtures.py compares the committed files
-with this output. The fallback rules were developed on the development half only;
-this script reads the held-out half, so it must be run after they are frozen.
+The builder imports the fallback but not `rinchen.script_conv.rules`, so it can
+regenerate a lexicon that is missing or corrupt. It raises DataError when the
+reference cannot supply 100 golden rows. Rows whose script form fails
+`validate_traditional` are dropped before anything else.
+
+The output is a pure function of the reference, so rerunning it rewrites the same
+bytes; tests/unit/test_script_conv_fixtures.py compares the committed files with
+this output. The fallback rules were developed on the development half only; this
+script reads the held-out half, so it must be run after they are frozen.
 """
 
 from __future__ import annotations
@@ -27,7 +31,8 @@ import sys
 from collections.abc import Iterable, Sequence
 from pathlib import Path
 
-from rinchen.script_conv.rules import (
+from rinchen.errors import DataError
+from rinchen.script_conv.fallback import (
     FALLBACK_LETTERS,
     development_split,
     transliterate_fallback,
@@ -91,7 +96,14 @@ def _golden_rows(
         (cyrillic, script, "lexicon")
         for cyrillic, script in _lexicon_candidates(development)[:lexicon_count]
     ]
-    return sorted(lexicon_rows) + fallback_rows
+    rows = sorted(lexicon_rows) + fallback_rows
+    if len(rows) != GOLDEN_ROWS:
+        raise DataError(
+            f"the reference gives {len(rows)} golden rows ({len(fallback_rows)}"
+            f" fallback, {len(lexicon_rows)} lexicon), {GOLDEN_ROWS} golden rows"
+            " are needed"
+        )
+    return rows
 
 
 def build(reference_path: Path, lexicon_path: Path, fixtures_dir: Path) -> None:

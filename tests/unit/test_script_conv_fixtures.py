@@ -14,7 +14,8 @@ import pytest
 from build_script_conv_fixtures import build
 
 from rinchen.config.loader import REPO_ROOT
-from rinchen.script_conv.rules import LEXICON, transliterate_fallback
+from rinchen.script_conv.fallback import transliterate_fallback
+from rinchen.script_conv.rules import LEXICON
 from rinchen.script_conv.validate import validate_traditional
 from tests.support.script_reference import (
     FIXTURE_DIR,
