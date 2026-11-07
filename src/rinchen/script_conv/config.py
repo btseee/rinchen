@@ -134,9 +134,13 @@ _PROFILES: Final[Mapping[str, _ProfileSettings]] = {
         heads=4,
         transformer_ff=128,
         training={
-            "train_steps": 800,
+            # Measured on the tiny reference list (tests/integration): 800 steps pass
+            # the CER gate but keep the NNBSP and selector counts in only 54% of the
+            # words that have them; 1400 steps keep 88% and 1500 keep 90%, the gate.
+            # Raise the steps, never the gate.
+            "train_steps": 1500,
             "valid_steps": 200,
-            "save_checkpoint_steps": 800,
+            "save_checkpoint_steps": 1500,
             "keep_checkpoint": 2,
             "batch_size": 1024,
             # The Noam factor of 2.0 peaks near 0.025 at d64 and does not learn.

@@ -151,9 +151,9 @@ FULL_MODEL = {
 # The tiny values are the spike's (Eole 0.6.4, CPU), except the step counts.
 TINY_TRAINING = {
     "model_path": "work/run/ckpt",
-    "train_steps": 800,
+    "train_steps": 1500,
     "valid_steps": 200,
-    "save_checkpoint_steps": 800,
+    "save_checkpoint_steps": 1500,
     "keep_checkpoint": 2,
     "batch_type": "tokens",
     "batch_size": 1024,
@@ -839,7 +839,7 @@ def test_eole_loads_the_rendered_tiny_config_and_keeps_every_value(
     assert config.model.encoder.layers == 2
     assert config.model.decoder.layers == 2
     assert config.training.learning_rate == 0.5
-    assert config.training.train_steps == 800
+    assert config.training.train_steps == 1500
     assert config.training.bucket_size == 1024
     assert config.training.gpu_ranks == []
     assert config.share_vocab is True
