@@ -8,7 +8,7 @@ from __future__ import annotations
 import hashlib
 import time
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Sequence
 from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, wait
 from itertools import chain
 from typing import NamedTuple
@@ -17,6 +17,7 @@ import httpx
 
 from rinchen.config.synth import LlamaCppConfig, VllmConfig
 from rinchen.errors import ConfigError, DataError, UpstreamError
+from rinchen.synth._candidates import clean_candidates
 from rinchen.synth.prompts import render_messages
 
 _SEED_MODULUS = 2**31
@@ -105,7 +106,7 @@ class ChatCompletionsTranslator[Config: (VllmConfig, LlamaCppConfig)](ABC):
         replies = self._send_all(bodies)
         per_text = len(self._request_shapes())
         return [
-            _clean(chain.from_iterable(replies[start : start + per_text]))
+            clean_candidates(chain.from_iterable(replies[start : start + per_text]))
             for start in range(0, len(replies), per_text)
         ]
 
@@ -287,18 +288,3 @@ def _retry_after_seconds(response: httpx.Response) -> float | None:
     other value is ignored."""
     value = response.headers.get("Retry-After", "").strip()
     return float(value) if value.isascii() and value.isdigit() else None
-
-
-def _clean(candidates: Iterable[str]) -> list[str]:
-    """Stripped, in first-seen order, without duplicates. A candidate with no
-    letter or digit at all (only whitespace, punctuation or invisible characters
-    such as a zero-width space or a byte order mark) counts as empty and is
-    dropped."""
-    stripped = (candidate.strip() for candidate in candidates)
-    return list(
-        dict.fromkeys(
-            candidate
-            for candidate in stripped
-            if any(char.isalnum() for char in candidate)
-        )
-    )
