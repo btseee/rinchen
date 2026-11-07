@@ -22,6 +22,7 @@ from rinchen.synth.shards import (
     Loaded,
     Missing,
     Shard,
+    ShardLoad,
     ShardStore,
     job_fingerprint,
     plan_shards,
@@ -1397,7 +1398,7 @@ def test_load_of_a_damaged_file_is_invalid(
     store.write(0, IDS, CANDIDATES)
     damage(store.path_for(0))
 
-    assert store.load(0, IDS) == Invalid()
+    assert isinstance(store.load(0, IDS), Invalid)
 
 
 def test_load_of_a_valid_file_for_other_ids_or_another_size_is_invalid(
@@ -1405,8 +1406,8 @@ def test_load_of_a_valid_file_for_other_ids_or_another_size_is_invalid(
 ) -> None:
     store.write(0, IDS, CANDIDATES)
 
-    assert store.load(0, ["a", "c", "b"]) == Invalid()
-    assert store.load(0, ["a", "b"]) == Invalid()
+    assert isinstance(store.load(0, ["a", "c", "b"]), Invalid)
+    assert isinstance(store.load(0, ["a", "b"]), Invalid)
 
 
 def test_load_turns_a_reader_panic_into_invalid(
@@ -1415,7 +1416,68 @@ def test_load_turns_a_reader_panic_into_invalid(
     store.write(0, IDS, CANDIDATES)
     monkeypatch.setattr(pl, "read_parquet", _panicking_reader)
 
-    assert store.load(0, IDS) == Invalid()
+    assert isinstance(store.load(0, IDS), Invalid)
+
+
+def _invalid_reason(load: ShardLoad) -> str:
+    assert isinstance(load, Invalid), load
+    return load.reason
+
+
+def test_an_invalid_load_gives_the_message_of_the_validation_that_failed(
+    store: ShardStore,
+) -> None:
+    store.write(0, IDS, CANDIDATES)
+    path = store.path_for(0)
+
+    assert _invalid_reason(store.load(0, ["a", "c", "b"])) == (
+        f"{path}: id at index 1 is 'b', expected 'c'"
+    )
+    assert _invalid_reason(store.load(0, ["a", "b"])) == (
+        f"{path}: row count is 3, expected 2"
+    )
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        lambda path: path.write_bytes(b"this is not parquet"),
+        lambda path: path.write_bytes(b""),
+        lambda path: path.write_bytes(path.read_bytes()[:30]),
+    ],
+    ids=["garbage", "empty", "truncated"],
+)
+def test_the_reason_of_an_unreadable_file_names_the_file(
+    store: ShardStore, damage: Callable[[Path], None]
+) -> None:
+    store.write(0, IDS, CANDIDATES)
+    damage(store.path_for(0))
+
+    assert _invalid_reason(store.load(0, IDS)).startswith(
+        f"cannot read shard file {store.path_for(0)}: "
+    )
+
+
+def test_the_reason_of_a_reader_panic_names_the_file_and_the_panic(
+    store: ShardStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store.write(0, IDS, CANDIDATES)
+    monkeypatch.setattr(pl, "read_parquet", _panicking_reader)
+
+    assert _invalid_reason(store.load(0, IDS)) == (
+        f"cannot read shard file {store.path_for(0)}: "
+        "assertion failed in the parquet reader"
+    )
+
+
+def test_the_reason_never_holds_a_candidate_text(store: ShardStore) -> None:
+    secret = "a secret candidate"
+    store.write(0, IDS, [[secret], [secret], [secret]])
+
+    reason = _invalid_reason(store.load(0, ["a", "b", "other"]))
+
+    assert reason == f"{store.path_for(0)}: id at index 2 is 'c', expected 'other'"
+    assert secret not in reason
 
 
 def test_load_tells_the_valid_the_damaged_and_the_missing_shards_apart(
@@ -1479,7 +1541,7 @@ def test_a_later_write_turns_an_invalid_load_into_a_loaded_one(
     plan = _plan(1)
     store.write(0, plan[0].ids, [["ok"]] * 2)
     store.path_for(0).write_bytes(b"garbage")
-    assert store.load(0, plan[0].ids) == Invalid()
+    assert isinstance(store.load(0, plan[0].ids), Invalid)
 
     store.write(0, plan[0].ids, [["fresh"]] * 2)
 
@@ -1489,9 +1551,12 @@ def test_a_later_write_turns_an_invalid_load_into_a_loaded_one(
 def test_the_load_outcomes_are_frozen_values() -> None:
     with pytest.raises(dataclasses.FrozenInstanceError):
         Loaded([]).candidates = [["x"]]  # type: ignore[misc]
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        Invalid("why").reason = "other"  # type: ignore[misc]
     assert Missing() == Missing()
-    assert Invalid() == Invalid()
-    assert Missing() != Invalid()
+    assert Invalid("why") == Invalid("why")
+    assert Invalid("why") != Invalid("another reason")
+    assert Missing() != Invalid("why")
     assert Loaded([["a"]]) != Loaded([["b"]])
 
 

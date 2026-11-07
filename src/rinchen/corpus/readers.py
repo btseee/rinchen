@@ -16,7 +16,8 @@ def scan_corpus(path: Path) -> pl.LazyFrame:
     if not path.is_file():
         raise DataError(f"corpus file not found: {path}")
     try:
-        lazy = pl.scan_parquet(path)
+        # A file name, never a glob: `[`, `*` and `?` in the path are literal.
+        lazy = pl.scan_parquet(path, glob=False)
         schema = lazy.collect_schema()
     except pl.exceptions.PolarsError as exc:
         raise DataError(f"cannot read corpus file {path}: {exc}") from exc

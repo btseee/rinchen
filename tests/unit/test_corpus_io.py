@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -152,6 +153,23 @@ def test_scan_unreadable_file_is_data_error(tmp_path: Path) -> None:
 
     with pytest.raises(DataError, match="junk.parquet"):
         scan_corpus(path)
+
+
+@pytest.mark.parametrize(
+    ("name", "neighbour"),
+    [("a[1].parquet", "a1.parquet"), ("a*.parquet", "ab.parquet")],
+)
+def test_scan_reads_the_file_named_not_one_a_glob_in_its_name_matches(
+    tmp_path: Path, name: str, neighbour: str
+) -> None:
+    if "*" in name and sys.platform == "win32":
+        pytest.skip("Windows file names cannot hold *")
+    path = tmp_path / name
+    _frame().write_parquet(path)
+    # A file the name would match as a pattern, with other rows.
+    _frame().head(1).write_parquet(tmp_path / neighbour)
+
+    assert scan_corpus(path).collect().equals(_frame())
 
 
 def test_write_accepts_a_lazyframe(tmp_path: Path) -> None:

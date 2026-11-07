@@ -48,7 +48,11 @@ class Missing:
 
 @dataclass(frozen=True, slots=True)
 class Invalid:
-    """A shard whose file exists but fails `ShardStore.read`."""
+    """A shard whose file exists but fails `ShardStore.read`. `reason` is the
+    message of the DataError that read raised: it names the file and the
+    problem, never a text."""
+
+    reason: str
 
 
 ShardLoad = Loaded | Missing | Invalid
@@ -319,8 +323,8 @@ class ShardStore:
             return Missing()
         try:
             return Loaded(self.read(index, expected_ids))
-        except DataError:
-            return Invalid()
+        except DataError as error:
+            return Invalid(str(error))
 
     def _indexes_loading_as(
         self, shards: Sequence[Shard], outcome: type[Loaded | Invalid]

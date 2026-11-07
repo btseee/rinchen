@@ -5,6 +5,7 @@ and the input they refuse."""
 from __future__ import annotations
 
 import dataclasses
+import re
 from collections.abc import Callable
 
 import polars as pl
@@ -136,3 +137,18 @@ def test_a_planner_refuses_a_frame_without_a_language_column() -> None:
 
     with pytest.raises(DataError, match="'lang' column"):
         bt.plan(DEFAULT_JOBS["bt_eng_khk"], frame)
+
+
+@pytest.mark.parametrize(
+    ("planner", "job_name"), [(bt.plan, "bt_eng_khk"), (ft.plan, "ft_khk_eng")]
+)
+@pytest.mark.parametrize("missing", [["id"], ["text"], ["id", "text"]])
+def test_a_planner_refuses_a_frame_without_an_id_or_text_column_naming_them(
+    planner: Planner, job_name: str, missing: list[str]
+) -> None:
+    frame = planted_monolingual(2).drop(missing)
+
+    with pytest.raises(
+        DataError, match=rf"required columns: {re.escape(str(missing))}"
+    ):
+        planner(DEFAULT_JOBS[job_name], frame)

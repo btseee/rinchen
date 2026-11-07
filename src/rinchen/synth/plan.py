@@ -13,6 +13,9 @@ from rinchen.config.synth import JobConfig
 from rinchen.errors import ConfigError, DataError
 from rinchen.synth.select import Kind
 
+# What the shards and the fingerprint are made of; `lang` is checked on its own.
+_SHARDED_COLUMNS = ("id", "text")
+
 
 @dataclass(frozen=True, slots=True)
 class Plan:
@@ -35,9 +38,13 @@ def plan_job(kind: Kind, job: JobConfig, frame: pl.DataFrame) -> Plan:
     monolingual text into `job.other_lang`.
 
     Raises ConfigError for a job of another kind and DataError for a frame
-    without rows, without a `lang` column or with rows in another language."""
+    without an `id` or `text` column, without rows, without a `lang` column or
+    with rows in another language."""
     if job.kind != kind:
         raise ConfigError(f"a {job.kind!r} job cannot be planned as {kind!r}")
+    missing = [name for name in _SHARDED_COLUMNS if name not in frame.columns]
+    if missing:
+        raise DataError(f"the monolingual frame lacks the required columns: {missing}")
     if frame.is_empty():
         raise DataError("no monolingual rows to translate")
     _require_language(frame, job.mono_lang)

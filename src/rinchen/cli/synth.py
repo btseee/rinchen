@@ -10,10 +10,12 @@ manifest that vouches for them comes last.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, NamedTuple
+from typing import Annotated, NamedTuple, NoReturn
 
 import polars as pl
 import typer
@@ -36,7 +38,7 @@ from rinchen.config.synth import (
     load_synth_config,
 )
 from rinchen.corpus.writers import write_corpus
-from rinchen.errors import ConfigError
+from rinchen.errors import ConfigError, DataError
 from rinchen.filter import qe
 from rinchen.filter.qe import QEScorer
 from rinchen.filter.qe_eole import EoleMetricXQEScorer
@@ -48,20 +50,14 @@ from rinchen.manifest.stage import (
     code_version,
     output_file,
     refuse_foreign_manifest,
-    sha256_of,
     tool_versions,
 )
+from rinchen.mine.embed import Releasable
 from rinchen.synth.ct2_baselines import CT2Translator
 from rinchen.synth.llamacpp_client import LlamaCppTranslator
-from rinchen.synth.run import RunResult, ShardProgress, run_job
+from rinchen.synth.run import RunResult, ShardProgress, plan_run, run_job
 from rinchen.synth.select import QE_SKIPPED_NO_SCORER
-from rinchen.synth.shards import (
-    ShardStore,
-    job_fingerprint,
-    plan_shards,
-    read_monolingual,
-    shard_directory,
-)
+from rinchen.synth.shards import ShardStore, read_monolingual
 from rinchen.synth.translator import Translator
 from rinchen.synth.vllm_client import OpenAICompatTranslator
 from rinchen.utils.part_file import unique_part_path
@@ -72,7 +68,15 @@ _STAGE_NAME = "synth"
 DEFAULT_OUT_ROOT = REPO_ROOT / "data" / "synth"
 _CORPUS_FILE = "corpus.parquet"
 _COUNTS_FILE = "counts.json"
-_TOOL_PACKAGES = ("httpx", "polars", "sacrebleu", "ctranslate2", "sentencepiece")
+_TOOL_PACKAGES = (
+    "httpx",
+    "polars",
+    "sacrebleu",
+    "ctranslate2",
+    "sentencepiece",
+    "eole",
+    "torch",
+)
 _NO_QE_STATUS = "skipped: --no-qe"
 
 
@@ -156,6 +160,9 @@ def run(
     generated (kept in <out-dir>/shards-<fingerprint>/). The monolingual rows are
     held in memory."""
     with rinchen_errors_as_exit_codes():
+        # Each input is hashed before it is read, so that the manifest vouches
+        # for the bytes the run started from.
+        config_file = _hash_input(config, what="synth config file", missing=ConfigError)
         cfg = load_synth_config(config)
         job_cfg = _job_named(cfg, job)
         target = out_dir if out_dir is not None else DEFAULT_OUT_ROOT / job
@@ -163,47 +170,48 @@ def run(
         # must not be followed by a refusal for this.
         refuse_foreign_manifest(target, _STAGE_NAME)
         _require_out_apart_from_input(target, monolingual)
+        monolingual_file = _hash_input(
+            monolingual, what="monolingual file", missing=DataError
+        )
         frame = read_monolingual(monolingual, lang=job_cfg.mono_lang)
         generator_cfg = cfg.generators[job_cfg.generator]
         if dry_run:
             for line in _plan_lines(
-                job, job_cfg, generator_cfg, frame, target, seed=seed
+                job, job_cfg, generator_cfg, frame, target, cfg=cfg, seed=seed
             ):
                 typer.echo(line)
             return
 
-        # The inputs are hashed before the work, so that the manifest vouches
-        # for the bytes the run started from.
+        # Before any model is built or any text is generated.
+        _create_out_dir(target)
         record = _RunRecord(
             job=job,
             generator=job_cfg.generator,
             seed=seed,
-            config_sha256=sha256_of(config),
-            inputs=build_inputs([monolingual, config]),
+            config_sha256=config_file.sha256,
+            inputs=[monolingual_file, config_file],
         )
         translator = build_translator(generator_cfg)
         scorer, skipped_status = _qe_scorer_of(cfg, no_qe=no_qe)
         try:
-            result = run_job(
-                job_cfg,
-                job_cfg.generator,
-                generator_cfg,
-                translator,
-                frame,
-                out_dir=target,
-                cfg=cfg,
-                scorer=scorer,
-                seed=seed,
-                force=force,
-                progress=_report_shard,
-            )
+            with _released_after(scorer):
+                result = run_job(
+                    job_cfg,
+                    job_cfg.generator,
+                    generator_cfg,
+                    translator,
+                    frame,
+                    out_dir=target,
+                    cfg=cfg,
+                    scorer=scorer,
+                    seed=seed,
+                    force=force,
+                    progress=_report_shard,
+                )
             qe_status = skipped_status or result.qe_status
             written = _commit(target, record, result, qe_status)
         except OSError as exc:
-            exit_with_error(
-                f"cannot write the synth outputs under {target}: {exc}",
-                FAILURE_EXIT_CODE,
-            )
+            _exit_cannot_write(target, exc)
         typer.echo(f"corpus: {written.corpus}")
         typer.echo(f"counts: {written.counts}")
         typer.echo(f"manifest: {written.manifest}")
@@ -228,27 +236,60 @@ def _plan_lines(
     frame: pl.DataFrame,
     out_dir: Path,
     *,
+    cfg: SynthConfig,
     seed: int,
 ) -> list[str]:
     """What a run would do with `frame`: the job, its generator, the rows, the
     shards (and how many are already on disk) and the fingerprint that names
-    their directory."""
-    fingerprint = job_fingerprint(
-        frame, job_cfg, generator_cfg, job_cfg.shard_size, seed
+    their directory, all as `plan_run` plans them for the run."""
+    run_plan = plan_run(
+        job_cfg,
+        job_cfg.generator,
+        generator_cfg,
+        frame,
+        out_dir=out_dir,
+        cfg=cfg,
+        seed=seed,
     )
-    shards = plan_shards(frame, job_cfg.shard_size)
-    directory = shard_directory(out_dir, fingerprint)
+    valid = ShardStore(run_plan.shard_directory).completed(run_plan.shards)
     return [
         f"job: {job}",
         f"kind: {job_cfg.kind}",
         f"generator: {job_cfg.generator} ({generator_cfg.kind})",
         f"input rows: {frame.height}",
-        f"shards: {len(shards)} (shard_size {job_cfg.shard_size})",
-        f"fingerprint: {fingerprint}",
-        f"shard directory: {directory}",
-        f"valid shards present: {len(ShardStore(directory).completed(shards))}",
+        f"shards: {len(run_plan.shards)} (shard_size {job_cfg.shard_size})",
+        f"fingerprint: {run_plan.fingerprint}",
+        f"shard directory: {run_plan.shard_directory}",
+        f"valid shards present: {len(valid)}",
         f"out dir: {out_dir}",
     ]
+
+
+def _hash_input(
+    path: Path, *, what: str, missing: type[ConfigError | DataError]
+) -> ManifestFile:
+    """The manifest entry of the input file `path`, taken before anything reads
+    it. A path that is not a file is `missing`, with the message of the loader
+    that would have refused it; a file that cannot be read is a DataError."""
+    if not path.is_file():
+        raise missing(f"{what} not found: {path}")
+    try:
+        return build_inputs([path])[0]
+    except OSError as exc:
+        raise DataError(f"cannot read {what} {path}: {exc}") from exc
+
+
+def _create_out_dir(out_dir: Path) -> None:
+    try:
+        out_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        _exit_cannot_write(out_dir, exc)
+
+
+def _exit_cannot_write(out_dir: Path, exc: OSError) -> NoReturn:
+    exit_with_error(
+        f"cannot write the synth outputs under {out_dir}: {exc}", FAILURE_EXIT_CODE
+    )
 
 
 def _require_out_apart_from_input(out_dir: Path, source: Path) -> None:
@@ -277,6 +318,16 @@ def _qe_scorer_of(
     if reason is not None:
         return None, f"skipped: {reason}"
     return scorer, None
+
+
+@contextmanager
+def _released_after(scorer: QEScorer | None) -> Iterator[None]:
+    """Give the scorer's model back after the block, also after a failure."""
+    try:
+        yield
+    finally:
+        if isinstance(scorer, Releasable):
+            scorer.release()
 
 
 def _report_shard(progress: ShardProgress) -> None:
@@ -322,8 +373,11 @@ def _commit(
         inputs=record.inputs,
         outputs=[output_file(corpus_path, rows), output_file(counts_path, None)],
         metrics={
-            key: float(value)
-            for key, value in (*result.counts.items(), *result.shard_stats.items())
+            **{f"count.{key}": float(value) for key, value in result.counts.items()},
+            **{
+                f"shards.{key}": float(value)
+                for key, value in result.shard_stats.items()
+            },
         },
         tool_versions=tool_versions(_TOOL_PACKAGES),
         status={"qe": qe_status},

@@ -38,6 +38,22 @@ MAX_ROWS = 1000  # ids `s000`..`s999` sort in row order
 # the scorer's default.
 _PLANTED_QE = {4: 9.0, 5: math.nan, 6: 8.0}
 
+# What a run of the 40 planted rows with the planted scorer keeps and drops, in
+# either direction (the counts of `Selection`), and the shard statistics of such
+# a run in 5 shards when nothing was on disk.
+PLANTED_COUNTS = {
+    "sources": 40,
+    "candidates": 60,
+    "dropped_empty": 5,
+    "dropped_purity": 10,
+    "dropped_qe": 10,
+    "dropped_copy": 0,
+    "no_candidates": 5,
+    "no_survivor": 20,
+    "selected": 15,
+}
+FIRST_RUN_STATS = {"planned": 5, "reused": 0, "generated": 5, "regenerated_invalid": 0}
+
 
 def planted_monolingual(n: int = 40, lang: str = "khk_Cyrl") -> pl.DataFrame:
     """`n` rows `id`, `lang`, `text`: ids `s000`.., distinct Cyrillic Mongolian

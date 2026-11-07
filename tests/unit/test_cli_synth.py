@@ -14,7 +14,6 @@ import hashlib
 import importlib.metadata
 import json
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, NoReturn
@@ -43,10 +42,11 @@ from rinchen.filter.qe_eole import EoleMetricXQEScorer
 from rinchen.manifest import store
 from rinchen.manifest.model import Manifest
 from rinchen.synth.llamacpp_client import LlamaCppTranslator
-from rinchen.synth.run import run_job
-from rinchen.synth.shards import job_fingerprint
+from rinchen.synth.run import RunPlan, run_job
 from rinchen.synth.vllm_client import OpenAICompatTranslator
 from tests.support.planted_synth import (
+    FIRST_RUN_STATS,
+    PLANTED_COUNTS,
     FakeScorer,
     ScriptedTranslator,
     planted_monolingual,
@@ -57,26 +57,17 @@ from tests.support.synth_cli import (
     BT_JOB,
     FT_JOB,
     GENERATOR,
+    SEED,
+    SHARD_SIZE,
     Seams,
+    Workspace,
     install_seams,
+    make_workspace,
     write_job_config,
 )
 
 runner = CliRunner()
 
-SEED = 0
-SHARD_SIZE = 8
-PLANTED_COUNTS = {
-    "sources": 40,
-    "candidates": 60,
-    "dropped_empty": 5,
-    "dropped_purity": 10,
-    "dropped_qe": 10,
-    "dropped_copy": 0,
-    "no_candidates": 5,
-    "no_survivor": 20,
-    "selected": 15,
-}
 # What the planted run gives without a QE scorer: the ten QE drops survive.
 UNSCORED_COUNTS = {
     **PLANTED_COUNTS,
@@ -84,8 +75,15 @@ UNSCORED_COUNTS = {
     "no_survivor": 10,
     "selected": 25,
 }
-FIRST_RUN_STATS = {"planned": 5, "reused": 0, "generated": 5, "regenerated_invalid": 0}
-TOOL_PACKAGES = ["httpx", "polars", "sacrebleu", "ctranslate2", "sentencepiece"]
+TOOL_PACKAGES = [
+    "httpx",
+    "polars",
+    "sacrebleu",
+    "ctranslate2",
+    "sentencepiece",
+    "eole",
+    "torch",
+]
 OPTIONS = [
     "--input",
     "--config",
@@ -98,89 +96,9 @@ OPTIONS = [
 OUTPUT_NAMES = ["corpus.parquet", "counts.json", "manifest.json"]
 
 
-@dataclass(frozen=True, slots=True)
-class Workspace:
-    monolingual: Path
-    config: Path
-    out_dir: Path
-    frame: pl.DataFrame
-
-    @property
-    def corpus(self) -> Path:
-        return self.out_dir / "corpus.parquet"
-
-    @property
-    def counts(self) -> Path:
-        return self.out_dir / "counts.json"
-
-    @property
-    def manifest(self) -> Path:
-        return self.out_dir / "manifest.json"
-
-    def args(
-        self,
-        job: str = BT_JOB,
-        *extra: str,
-        monolingual: Path | None = None,
-        out_dir: Path | None = None,
-        config: Path | None = None,
-    ) -> list[str]:
-        return [
-            *self.args_without_out_dir(job, monolingual=monolingual, config=config),
-            "--out-dir",
-            str(self.out_dir if out_dir is None else out_dir),
-            *extra,
-        ]
-
-    def args_without_out_dir(
-        self,
-        job: str = BT_JOB,
-        *,
-        monolingual: Path | None = None,
-        config: Path | None = None,
-    ) -> list[str]:
-        return [
-            "synth",
-            "run",
-            job,
-            "--input",
-            str(self.monolingual if monolingual is None else monolingual),
-            "--config",
-            str(self.config if config is None else config),
-        ]
-
-    def shard_directories(self) -> list[Path]:
-        return sorted(self.out_dir.glob("shards-*"))
-
-    def shard_texts(self, *indexes: int) -> list[tuple[str, ...]]:
-        texts = self.frame["text"].to_list()
-        return [
-            tuple(texts[index * SHARD_SIZE : (index + 1) * SHARD_SIZE])
-            for index in indexes
-        ]
-
-    def counts_document(self) -> dict[str, Any]:
-        return json.loads(self.counts.read_text(encoding="utf-8"))
-
-    def fingerprint(self, job: str = BT_JOB, seed: int = SEED) -> str:
-        cfg = load_synth_config(self.config)
-        job_cfg = cfg.jobs[job]
-        generator = cfg.generators[job_cfg.generator]
-        return job_fingerprint(self.frame, job_cfg, generator, job_cfg.shard_size, seed)
-
-
 @pytest.fixture
 def workspace(tmp_path: Path) -> Workspace:
-    frame = planted_monolingual()
-    monolingual = tmp_path / "in" / "mono.parquet"
-    monolingual.parent.mkdir()
-    frame.write_parquet(monolingual)
-    return Workspace(
-        monolingual=monolingual,
-        config=write_job_config(tmp_path / "synth.yaml", shard_size=SHARD_SIZE),
-        out_dir=tmp_path / "out",
-        frame=frame,
-    )
+    return make_workspace(tmp_path)
 
 
 def _planted_seams(
@@ -317,6 +235,41 @@ def test_dry_run_prints_the_plan_and_creates_nothing(
     assert seams.generators_built == []
     assert seams.selections_built == []
     assert _calls(seams) == []
+
+
+def test_dry_run_prints_what_plan_run_returns(
+    workspace: Workspace, seams: Seams, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    planned: list[RunPlan] = []
+    real_plan_run = synth_cli.plan_run
+
+    def spying_plan_run(*args: Any, **kwargs: Any) -> RunPlan:
+        planned.append(real_plan_run(*args, **kwargs))
+        return planned[-1]
+
+    monkeypatch.setattr(synth_cli, "plan_run", spying_plan_run)
+
+    lines = _run_ok(workspace.args(BT_JOB, "--dry-run")).stdout.splitlines()
+
+    (run_plan,) = planned
+    assert f"shards: {len(run_plan.shards)} (shard_size 8)" in lines
+    assert f"fingerprint: {run_plan.fingerprint}" in lines
+    assert f"shard directory: {run_plan.shard_directory}" in lines
+
+
+def test_the_dry_run_names_the_fingerprint_and_the_directory_the_real_run_uses(
+    workspace: Workspace, seams: Seams, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lines = _run_ok(
+        workspace.args(BT_JOB, "--dry-run", "--seed", "3")
+    ).stdout.splitlines()
+    _planted_seams(monkeypatch, workspace)
+
+    _run_ok(workspace.args(BT_JOB, "--seed", "3"))
+
+    (directory,) = workspace.shard_directories()
+    assert f"shard directory: {directory}" in lines
+    assert f"fingerprint: {workspace.counts_document()['fingerprint']}" in lines
 
 
 def test_dry_run_of_a_forward_job_names_its_kind(
@@ -460,12 +413,24 @@ def test_the_manifest_records_inputs_outputs_config_and_environment(
         for path, rows in ((workspace.corpus, 15), (workspace.counts, None))
     ]
     assert manifest.metrics == {
-        **{key: float(value) for key, value in PLANTED_COUNTS.items()},
-        **{key: float(value) for key, value in FIRST_RUN_STATS.items()},
+        "count.sources": 40.0,
+        "count.candidates": 60.0,
+        "count.dropped_empty": 5.0,
+        "count.dropped_purity": 10.0,
+        "count.dropped_qe": 10.0,
+        "count.dropped_copy": 0.0,
+        "count.no_candidates": 5.0,
+        "count.no_survivor": 20.0,
+        "count.selected": 15.0,
+        "shards.planned": 5.0,
+        "shards.reused": 0.0,
+        "shards.generated": 5.0,
+        "shards.regenerated_invalid": 0.0,
     }
     assert list(manifest.tool_versions) == TOOL_PACKAGES
     assert manifest.tool_versions["polars"] == pl.__version__
-    assert manifest.tool_versions["httpx"] == importlib.metadata.version("httpx")
+    for package in ("httpx", "eole", "torch"):
+        assert manifest.tool_versions[package] == importlib.metadata.version(package)
     assert manifest.status == {"qe": "ok"}
 
 
@@ -605,6 +570,81 @@ def test_the_manifest_is_absent_while_the_seams_run_and_the_inputs_are_hashed_fi
     manifest = _manifest(workspace)
     assert [item.sha256 for item in manifest.inputs] == hashes_before_the_work
     assert manifest.config_sha256 == hashes_before_the_work[1]
+
+
+def _rewrite_config(path: Path) -> None:
+    path.write_text(path.read_text(encoding="utf-8") + "# edited\n", encoding="utf-8")
+
+
+def _rewrite_monolingual(path: Path) -> None:
+    pl.read_parquet(path).write_parquet(path, compression="uncompressed")
+
+
+@pytest.mark.parametrize(
+    ("loader", "which", "rewrite"),
+    [
+        ("load_synth_config", "config", _rewrite_config),
+        ("read_monolingual", "monolingual", _rewrite_monolingual),
+    ],
+)
+def test_the_manifest_vouches_for_the_bytes_an_input_had_before_it_was_read(
+    workspace: Workspace,
+    seams: Seams,
+    monkeypatch: pytest.MonkeyPatch,
+    loader: str,
+    which: str,
+    rewrite: Callable[[Path], None],
+) -> None:
+    path = workspace.config if which == "config" else workspace.monolingual
+    before = {
+        "monolingual": _sha256(workspace.monolingual),
+        "config": _sha256(workspace.config),
+    }
+    real_loader = getattr(synth_cli, loader)
+
+    def loader_after_a_change(*args: Any, **kwargs: Any) -> Any:
+        rewrite(path)  # the file changes just before the loader reads it
+        return real_loader(*args, **kwargs)
+
+    monkeypatch.setattr(synth_cli, loader, loader_after_a_change)
+
+    _run_ok(workspace.args())
+
+    assert _sha256(path) != before[which]
+    manifest = _manifest(workspace)
+    assert [item.sha256 for item in manifest.inputs] == [
+        before["monolingual"],
+        before["config"],
+    ]
+    assert manifest.config_sha256 == before["config"]
+
+
+@pytest.mark.parametrize(
+    ("which", "what"),
+    [("monolingual", "monolingual file"), ("config", "synth config file")],
+)
+def test_an_input_that_cannot_be_read_is_a_data_error_naming_it(
+    workspace: Workspace,
+    seams: Seams,
+    monkeypatch: pytest.MonkeyPatch,
+    which: str,
+    what: str,
+) -> None:
+    unreadable = workspace.config if which == "config" else workspace.monolingual
+    real_open = Path.open
+
+    def open_unless_unreadable(self: Path, mode: str = "r", *args: Any, **kwargs: Any):
+        if self == unreadable and "b" in mode:
+            raise PermissionError(13, "Permission denied", str(self))
+        return real_open(self, mode, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", open_unless_unreadable)
+
+    result = runner.invoke(app, workspace.args())
+
+    _assert_one_error(result, 3, f"cannot read {what} {unreadable}: ")
+    assert not workspace.out_dir.exists()
+    assert seams.generators_built == []
 
 
 def test_the_manifest_is_written_after_both_outputs_are_complete(
@@ -758,6 +798,11 @@ def test_an_out_dir_that_cannot_be_created_is_a_plain_failure(
     _assert_one_error(
         result, 1, f"cannot write the synth outputs under {blocker / 'out'}: "
     )
+    # It fails before the paid work: no model is built, nothing is generated.
+    assert seams.generators_built == []
+    assert seams.selections_built == []
+    assert _calls(seams) == []
+    assert not (blocker / "out").exists()
 
 
 def test_two_runs_into_one_out_dir_leave_a_manifest_that_matches_the_files(
@@ -883,6 +928,106 @@ def test_a_damaged_shard_file_is_generated_again_on_the_rerun(
         "generated": 4,
         "regenerated_invalid": 1,
     }
+
+
+class _ReleasingScorer:
+    """The planted scorer, which records its calls and its `release()`, and can
+    fail on its first call."""
+
+    requires_cuda = False
+
+    def __init__(self, inner: FakeScorer, *, fail: bool = False) -> None:
+        self._inner = inner
+        self._fail = fail
+        self.events: list[str] = []
+
+    def score(self, sources: Sequence[str], translations: Sequence[str]) -> list[float]:
+        self.events.append("score")
+        if self._fail:
+            raise RuntimeError("scorer out of memory")
+        return self._inner.score(sources, translations)
+
+    def release(self) -> None:
+        self.events.append("release")
+
+
+def test_the_scorer_is_released_once_after_the_run(
+    workspace: Workspace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    scorer = _ReleasingScorer(planted_scorer(workspace.frame, "bt"))
+    install_seams(
+        monkeypatch,
+        translator=ScriptedTranslator(planted_script(workspace.frame)),
+        scorer=scorer,
+    )
+
+    _run_ok(workspace.args())
+
+    assert scorer.events == ["score"] * 5 + ["release"]
+
+
+def test_the_scorer_is_released_when_the_generator_fails(
+    workspace: Workspace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    scorer = _ReleasingScorer(planted_scorer(workspace.frame, "bt"))
+    install_seams(
+        monkeypatch,
+        translator=ScriptedTranslator(
+            planted_script(workspace.frame), fail_on_call={2: UpstreamError("down")}
+        ),
+        scorer=scorer,
+    )
+
+    result = runner.invoke(app, workspace.args())
+
+    assert result.exit_code == 4, result.output
+    assert scorer.events == ["score", "score", "release"]
+
+
+def test_the_scorer_is_released_when_it_fails(
+    workspace: Workspace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    scorer = _ReleasingScorer(planted_scorer(workspace.frame, "bt"), fail=True)
+    install_seams(
+        monkeypatch,
+        translator=ScriptedTranslator(planted_script(workspace.frame)),
+        scorer=scorer,
+    )
+
+    result = runner.invoke(app, workspace.args())
+
+    assert isinstance(result.exception, RuntimeError)
+    assert scorer.events == ["score", "release"]
+    assert not workspace.manifest.exists()
+
+
+def test_an_interrupt_exits_130_and_leaves_the_finished_shards_and_the_old_manifest(
+    workspace: Workspace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _planted_seams(monkeypatch, workspace)
+    _run_ok(workspace.args())
+    committed = {
+        path: path.read_bytes()
+        for path in (workspace.corpus, workspace.counts, workspace.manifest)
+    }
+    translator = ScriptedTranslator(
+        planted_script(workspace.frame), fail_on_call={2: KeyboardInterrupt()}
+    )
+    _planted_seams(monkeypatch, workspace, translator=translator)
+
+    # Another seed is another shard directory, so nothing is reused.
+    result = runner.invoke(app, workspace.args(BT_JOB, "--seed", "1"))
+
+    assert result.exit_code == 130, result.output
+    assert result.stdout == ""
+    assert result.stderr.splitlines() == ["shard 1/5 generated", "shard 2/5 generated"]
+    interrupted = workspace.out_dir / f"shards-{workspace.fingerprint(seed=1)[:12]}"
+    assert sorted(path.name for path in interrupted.iterdir()) == [
+        "shard-00000.parquet",
+        "shard-00001.parquet",
+    ]
+    assert _part_files(workspace.out_dir) == []
+    assert {path: path.read_bytes() for path in committed} == committed
 
 
 # --- QE ----------------------------------------------------------------------

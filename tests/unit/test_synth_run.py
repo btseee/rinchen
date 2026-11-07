@@ -1,6 +1,7 @@
-"""The job runner: it cuts the monolingual frame into shards, generates the
-shards a crashed or earlier run did not finish, reads every shard back and
-selects, returning the corpus rows and the counts. The generator is a scripted
+"""The job runner: it cuts the monolingual frame into shards, reuses the shards
+a crashed or earlier run left (each valid file is decoded once), generates the
+others (their candidates are used from memory, not read back) and selects shard
+by shard, returning the corpus rows and the counts. The generator is a scripted
 fake and the QE scorer a fake, so no test needs a server, a model or a GPU."""
 
 from __future__ import annotations
@@ -9,23 +10,34 @@ import dataclasses
 import math
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import polars as pl
 import pytest
 
 from rinchen.config.filters import QeConfig
-from rinchen.config.synth import JobConfig, SelectionConfig, SynthConfig, VllmConfig
+from rinchen.config.synth import (
+    GeneratorConfig,
+    JobConfig,
+    SelectionConfig,
+    SynthConfig,
+    VllmConfig,
+)
 from rinchen.corpus.schema import CORPUS_SCHEMA, make_row_id
 from rinchen.errors import ConfigError, DataError, UpstreamError
-from rinchen.synth.run import RunResult, ShardProgress, run_job
+from rinchen.filter.qe import QEScorer
+from rinchen.synth.plan import Plan
+from rinchen.synth.run import RunPlan, RunResult, ShardProgress, plan_run, run_job
 from rinchen.synth.select import Kind, SourceRows, build_rows, select_candidates
 from rinchen.synth.shards import (
     ShardStore,
     job_fingerprint,
     shard_directory,
 )
+from rinchen.synth.translator import Translator
 from tests.support.planted_synth import (
+    FIRST_RUN_STATS,
+    PLANTED_COUNTS,
     FakeScorer,
     ScriptedTranslator,
     planted_monolingual,
@@ -49,23 +61,38 @@ def _job(kind: Kind = "bt", shard_size: int = SHARD_SIZE) -> JobConfig:
     )
 
 
-def _run(out_dir: Path, kind: Kind = "bt", **overrides: Any) -> RunResult:
+def _run(
+    out_dir: Path,
+    kind: Kind = "bt",
+    *,
+    frame: pl.DataFrame | None = None,
+    cfg: SynthConfig | None = None,
+    job: JobConfig | None = None,
+    generator_name: str = GENERATOR,
+    generator_cfg: GeneratorConfig | None = None,
+    translator: Translator | None = None,
+    scorer: QEScorer | None | Literal["planted"] = "planted",
+    seed: int = SEED,
+    force: bool = False,
+    progress: Callable[[ShardProgress], None] | None = None,
+) -> RunResult:
     """`run_job` over the planted 40-row frame with the planted translator and
-    scorer, 5 shards of 8 rows; `overrides` replace any of the inputs."""
-    frame = overrides.pop("frame", planted_monolingual())
-    cfg = overrides.pop("cfg", SynthConfig())
-    name = overrides.pop("generator_name", GENERATOR)
+    scorer, 5 shards of 8 rows; the keyword arguments replace any of the inputs
+    (`scorer=None` runs without a scorer)."""
+    frame = planted_monolingual() if frame is None else frame
+    cfg = SynthConfig() if cfg is None else cfg
     return run_job(
-        overrides.pop("job", _job(kind)),
-        name,
-        overrides.pop("generator_cfg", cfg.generators.get(name)),
-        overrides.pop("translator", ScriptedTranslator(planted_script(frame))),
+        _job(kind) if job is None else job,
+        generator_name,
+        cfg.generators[generator_name] if generator_cfg is None else generator_cfg,
+        ScriptedTranslator(planted_script(frame)) if translator is None else translator,
         frame,
         out_dir=out_dir,
         cfg=cfg,
-        scorer=overrides.pop("scorer", planted_scorer(frame, kind)),
-        seed=overrides.pop("seed", SEED),
-        **overrides,
+        scorer=planted_scorer(frame, kind) if isinstance(scorer, str) else scorer,
+        seed=seed,
+        force=force,
+        progress=progress,
     )
 
 
@@ -126,24 +153,6 @@ def _expected_winner(row_index: int) -> str | None:
 
 
 SELECTED_ROWS = [index for index in range(40) if _expected_winner(index) is not None]
-
-PLANTED_COUNTS = {
-    "sources": 40,
-    "candidates": 60,
-    "dropped_empty": 5,
-    "dropped_purity": 10,
-    "dropped_qe": 10,
-    "dropped_copy": 0,
-    "no_candidates": 5,
-    "no_survivor": 20,
-    "selected": 15,
-}
-FIRST_RUN_STATS = {
-    "planned": 5,
-    "reused": 0,
-    "generated": 5,
-    "regenerated_invalid": 0,
-}
 
 
 # --- the rows and the counts -------------------------------------------------
@@ -898,7 +907,7 @@ class _AlteredOnCall(ScriptedTranslator):
         self,
         script: dict[str, list[str]],
         call: int,
-        alter: Callable[[list[list[str]]], list[list[str]]],
+        alter: Callable[[list[list[str]]], Any],
     ) -> None:
         super().__init__(script)
         self._call = call
@@ -934,6 +943,31 @@ def test_a_wrong_number_of_candidate_lists_is_a_data_error_and_writes_nothing(
     assert len(translator.calls) == 2
 
 
+@pytest.mark.parametrize(
+    ("alter", "type_name"),
+    [
+        (lambda reply: None, "NoneType"),
+        (lambda reply: (candidates for candidates in reply), "generator"),
+        (lambda reply: tuple(reply), "tuple"),
+        (lambda reply: "x" * len(reply), "str"),
+    ],
+    ids=["None", "generator", "tuple", "str"],
+)
+def test_a_reply_that_is_not_a_list_is_a_data_error_naming_the_shard_and_the_type(
+    tmp_path: Path, alter: Callable[[list[list[str]]], Any], type_name: str
+) -> None:
+    translator = _AlteredOnCall(planted_script(planted_monolingual()), 1, alter)
+
+    with pytest.raises(
+        DataError,
+        match=rf"^shard 1 of 5: the translator returned a {type_name}, not a list$",
+    ):
+        _run(tmp_path, translator=translator)
+
+    assert _files(_shard_dir(tmp_path)) == SHARD_FILES[:1]
+    assert len(translator.calls) == 2
+
+
 @pytest.mark.parametrize("bad", [None, "a string", ("x",), [None], [1]])
 def test_a_reply_that_is_not_a_list_of_candidate_strings_is_a_data_error(
     tmp_path: Path, bad: Any
@@ -959,6 +993,77 @@ def test_a_candidate_list_that_is_empty_is_stored_as_a_refusal(tmp_path: Path) -
 
     store = ShardStore(result.shard_directory)
     assert store.read(0, frame["id"].to_list()) == [[], []]
+
+
+# --- what the translator may raise ---------------------------------------------
+
+
+@pytest.mark.parametrize("error_type", [DataError, ConfigError])
+def test_a_data_or_config_error_of_the_translator_keeps_its_type_and_gains_the_shard(
+    tmp_path: Path, error_type: type[Exception]
+) -> None:
+    original = error_type("the model file is gone")
+    translator = ScriptedTranslator(
+        planted_script(planted_monolingual()), fail_on_call={2: original}
+    )
+
+    with pytest.raises(
+        error_type, match=r"^shard 2 of 5: the model file is gone$"
+    ) as info:
+        _run(tmp_path, translator=translator)
+
+    assert type(info.value) is error_type
+    assert info.value.__cause__ is original
+    assert _files(_shard_dir(tmp_path)) == SHARD_FILES[:2]
+
+
+@pytest.mark.parametrize(
+    ("error", "message"),
+    [
+        (OSError("disk gone"), "disk gone"),
+        (ConnectionResetError("reset by peer"), "reset by peer"),
+        (TimeoutError("timed out"), "timed out"),
+    ],
+    ids=["OSError", "ConnectionResetError", "TimeoutError"],
+)
+def test_an_os_error_of_the_translator_becomes_an_upstream_error_naming_the_shard(
+    tmp_path: Path, error: OSError, message: str
+) -> None:
+    translator = ScriptedTranslator(
+        planted_script(planted_monolingual()), fail_on_call={2: error}
+    )
+
+    with pytest.raises(
+        UpstreamError, match=rf"^shard 2 of 5 failed: {message}$"
+    ) as info:
+        _run(tmp_path, translator=translator)
+
+    assert info.value.__cause__ is error
+    assert _files(_shard_dir(tmp_path)) == SHARD_FILES[:2]
+
+
+@pytest.mark.parametrize(
+    "interrupt", [KeyboardInterrupt(), SystemExit(3)], ids=["Ctrl-C", "exit"]
+)
+def test_an_interrupt_in_the_translator_propagates_unchanged_with_the_finished_shards(
+    tmp_path: Path, interrupt: BaseException
+) -> None:
+    translator = ScriptedTranslator(
+        planted_script(planted_monolingual()), fail_on_call={2: interrupt}
+    )
+
+    with pytest.raises(type(interrupt)) as info:
+        _run(tmp_path, translator=translator)
+
+    assert info.value is interrupt
+    # Two shard files and nothing else: no temporary file of the third.
+    assert _files(_shard_dir(tmp_path)) == SHARD_FILES[:2]
+    resuming = ScriptedTranslator(planted_script(planted_monolingual()))
+    rerun = _run(tmp_path, translator=resuming)
+    assert resuming.calls == [
+        (texts, "khk_Cyrl", "eng_Latn") for texts in _shard_texts(2, 3, 4)
+    ]
+    assert dict(rerun.shard_stats)["reused"] == 2
 
 
 # --- the inputs the runner refuses ----------------------------------------------
@@ -1044,6 +1149,150 @@ def test_a_frame_without_rows_is_a_data_error(tmp_path: Path) -> None:
         _run(tmp_path, frame=planted_monolingual(1).clear())
 
 
+@pytest.mark.parametrize("missing", ["id", "text"])
+def test_a_frame_without_an_id_or_text_column_is_a_data_error_naming_it(
+    tmp_path: Path, missing: str
+) -> None:
+    translator = ScriptedTranslator({})
+    out_dir = tmp_path / "synth"
+
+    with pytest.raises(DataError, match=rf"required columns: \['{missing}'\]"):
+        _run(
+            out_dir,
+            frame=planted_monolingual(3).drop(missing),
+            translator=translator,
+            scorer=None,
+        )
+
+    assert translator.calls == []
+    assert not out_dir.exists()
+
+
+# --- planning -------------------------------------------------------------------
+
+
+def _plan_run(
+    out_dir: Path,
+    *,
+    job: JobConfig | None = None,
+    generator_name: str = GENERATOR,
+    generator_cfg: GeneratorConfig | None = None,
+    frame: pl.DataFrame | None = None,
+    seed: int = SEED,
+) -> RunPlan:
+    cfg = SynthConfig()
+    return plan_run(
+        _job() if job is None else job,
+        generator_name,
+        cfg.generators[generator_name] if generator_cfg is None else generator_cfg,
+        planted_monolingual() if frame is None else frame,
+        out_dir=out_dir,
+        cfg=cfg,
+        seed=seed,
+    )
+
+
+def test_plan_run_gives_the_plan_the_shards_the_fingerprint_and_the_directory(
+    tmp_path: Path,
+) -> None:
+    out_dir = tmp_path / "synth"
+
+    run_plan = _plan_run(out_dir)
+
+    fingerprint = job_fingerprint(
+        planted_monolingual(),
+        _job(),
+        SynthConfig().generators[GENERATOR],
+        SHARD_SIZE,
+        SEED,
+    )
+    assert run_plan.plan == Plan(
+        kind="bt",
+        generator_src_lang="khk_Cyrl",
+        generator_tgt_lang="eng_Latn",
+        real_lang="khk_Cyrl",
+        synthetic_lang="eng_Latn",
+    )
+    assert [shard.index for shard in run_plan.shards] == [0, 1, 2, 3, 4]
+    assert run_plan.shards[0].ids == tuple(f"s{index:03d}" for index in range(8))
+    assert [shard.texts for shard in run_plan.shards] == [
+        texts for (texts,) in (_shard_texts(index) for index in range(5))
+    ]
+    assert run_plan.fingerprint == fingerprint
+    assert run_plan.shard_directory == out_dir / f"shards-{fingerprint[:12]}"
+    assert not out_dir.exists()
+
+
+@pytest.mark.parametrize("kind", ["bt", "ft"])
+def test_run_job_works_in_the_shard_directory_that_plan_run_names(
+    tmp_path: Path, kind: Kind
+) -> None:
+    planned = plan_run(
+        _job(kind),
+        GENERATOR,
+        SynthConfig().generators[GENERATOR],
+        planted_monolingual(),
+        out_dir=tmp_path,
+        cfg=SynthConfig(),
+        seed=SEED,
+    )
+
+    result = _run(tmp_path, kind)
+
+    assert planned.plan.kind == kind
+    assert (result.fingerprint, result.shard_directory) == (
+        planned.fingerprint,
+        planned.shard_directory,
+    )
+    assert _files(planned.shard_directory) == SHARD_FILES
+
+
+def test_plan_run_follows_the_seed_and_the_shard_size(tmp_path: Path) -> None:
+    base = _plan_run(tmp_path)
+
+    other_seed = _plan_run(tmp_path, seed=SEED + 1)
+    other_size = _plan_run(tmp_path, job=_job("bt", shard_size=10))
+
+    assert other_seed.fingerprint != base.fingerprint
+    assert other_seed.shard_directory != base.shard_directory
+    assert len(base.shards) == 5
+    assert len(other_size.shards) == 4
+    assert other_size.fingerprint != base.fingerprint
+
+
+def test_a_run_plan_is_frozen(tmp_path: Path) -> None:
+    run_plan = _plan_run(tmp_path)
+
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        run_plan.fingerprint = "x"  # type: ignore[misc]
+
+
+def test_plan_run_refuses_the_inputs_run_job_refuses_and_creates_nothing(
+    tmp_path: Path,
+) -> None:
+    out_dir = tmp_path / "synth"
+    other_job = JobConfig(
+        kind="bt",
+        mono_lang="khk_Cyrl",
+        other_lang="eng_Latn",
+        generator="llamacpp_default",
+        shard_size=SHARD_SIZE,
+    )
+
+    with pytest.raises(ConfigError, match=r"'llamacpp_default'.*'vllm_default'"):
+        _plan_run(out_dir, job=other_job)
+    with pytest.raises(ConfigError, match=r"'vllm_default'.*differs"):
+        _plan_run(out_dir, generator_cfg=VllmConfig(n=3))
+    with pytest.raises(DataError, match=r"'eng_Latn'"):
+        _plan_run(out_dir, frame=planted_monolingual(3, lang="eng_Latn"))
+    with pytest.raises(DataError, match=r"no monolingual rows"):
+        _plan_run(out_dir, frame=planted_monolingual(1).clear())
+    with pytest.raises(DataError, match=r"required columns: \['text'\]"):
+        _plan_run(out_dir, frame=planted_monolingual(3).drop("text"))
+
+    assert not out_dir.exists()
+
+
 # --- failures after generation ---------------------------------------------------
 
 
@@ -1068,6 +1317,77 @@ def test_a_scorer_that_fails_leaves_the_shards_written_so_far_and_the_rerun_resu
         "regenerated_invalid": 0,
     }
     assert dict(rerun.counts) == PLANTED_COUNTS
+
+
+class _ScorerFailingOnCall:
+    """The planted scorer, which raises on its call number `call` (0-based)."""
+
+    requires_cuda = False
+
+    def __init__(self, inner: FakeScorer, call: int) -> None:
+        self._inner = inner
+        self._call = call
+
+    def score(self, sources: Sequence[str], translations: Sequence[str]) -> list[float]:
+        if len(self._inner.calls) == self._call:
+            raise RuntimeError("scorer out of memory")
+        return self._inner.score(sources, translations)
+
+
+def test_a_scorer_that_fails_on_a_later_shard_keeps_the_shards_before_it_for_the_rerun(
+    tmp_path: Path,
+) -> None:
+    scorer = _ScorerFailingOnCall(planted_scorer(planted_monolingual(), "bt"), call=2)
+    events: list[ShardProgress] = []
+
+    with pytest.raises(RuntimeError, match="scorer out of memory"):
+        _run(tmp_path, scorer=scorer, progress=events.append)
+
+    # Shard 2 was written before its selection failed; 3 and 4 were never asked for.
+    assert _files(_shard_dir(tmp_path)) == SHARD_FILES[:3]
+    assert events == [ShardProgress(index, 5, False) for index in range(3)]
+    translator = ScriptedTranslator(planted_script(planted_monolingual()))
+
+    rerun = _run(tmp_path, translator=translator)
+
+    assert translator.calls == [
+        (texts, "khk_Cyrl", "eng_Latn") for texts in _shard_texts(3, 4)
+    ]
+    assert dict(rerun.shard_stats) == {
+        "planned": 5,
+        "reused": 3,
+        "generated": 2,
+        "regenerated_invalid": 0,
+    }
+    assert dict(rerun.counts) == PLANTED_COUNTS
+
+
+def _row_of(real_text: str) -> int:
+    """The position of a planted real text (`Монгол улс 013`) in the frame."""
+    return int(real_text.rsplit(" ", 1)[1])
+
+
+@pytest.mark.parametrize("shard_size", [3, 8, 13, 40])
+@pytest.mark.parametrize("kind", ["bt", "ft"])
+def test_no_scorer_call_spans_two_shards_and_the_calls_follow_the_shard_order(
+    tmp_path: Path, kind: Kind, shard_size: int
+) -> None:
+    scorer = planted_scorer(planted_monolingual(), kind)
+
+    _run(tmp_path, kind, job=_job(kind, shard_size), scorer=scorer)
+
+    # The pair is (candidate, real text) for bt and (real text, candidate) for ft.
+    shards_per_call = [
+        [
+            _row_of(real) // shard_size
+            for real in (translations if kind == "bt" else sources)
+        ]
+        for sources, translations in scorer.calls
+    ]
+    assert all(len(set(shards)) == 1 for shards in shards_per_call), shards_per_call
+    first_shard_of_each_call = [shards[0] for shards in shards_per_call]
+    assert first_shard_of_each_call == sorted(first_shard_of_each_call)
+    assert sum(len(shards) for shards in shards_per_call) == 45
 
 
 def test_a_scorer_that_returns_nan_for_every_pair_drops_every_candidate(

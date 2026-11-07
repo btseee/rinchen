@@ -12,10 +12,7 @@ temporary directories.
 
 from __future__ import annotations
 
-import json
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 import httpx
 import polars as pl
@@ -34,8 +31,8 @@ from rinchen.synth.shards import job_fingerprint
 from rinchen.synth.vllm_client import OpenAICompatTranslator
 from tests.support.fake_llm_server import FakeLlmServer, table_responder
 from tests.support.planted_synth import (
+    PLANTED_COUNTS,
     ScriptedTranslator,
-    planted_monolingual,
     planted_scorer,
     planted_script,
 )
@@ -43,24 +40,16 @@ from tests.support.synth_cli import (
     BT_JOB,
     FT_JOB,
     GENERATOR,
+    SHARD_SIZE,
     Seams,
+    Workspace,
     install_seams,
+    make_workspace,
     write_job_config,
 )
 
 runner = CliRunner()
 
-PLANTED_COUNTS = {
-    "sources": 40,
-    "candidates": 60,
-    "dropped_empty": 5,
-    "dropped_purity": 10,
-    "dropped_qe": 10,
-    "dropped_copy": 0,
-    "no_candidates": 5,
-    "no_survivor": 20,
-    "selected": 15,
-}
 # The rows the selection keeps: those whose position modulo 8 is 0, 6 or 7, with
 # the winning candidate of each (the planted outcomes are in
 # `tests.support.planted_synth`).
@@ -74,58 +63,14 @@ WINNERS = [
     for i in KEPT_POSITIONS
 ]
 MONGOLIAN = [f"Монгол улс {i:03d}" for i in KEPT_POSITIONS]
-SHARD_SIZE = 8
-
-
-@dataclass(frozen=True, slots=True)
-class Run:
-    monolingual: Path
-    config: Path
-    out_dir: Path
-    frame: pl.DataFrame
-
-    def args(
-        self,
-        job: str,
-        *extra: str,
-        out_dir: Path | None = None,
-        config: Path | None = None,
-    ) -> list[str]:
-        return [
-            "synth",
-            "run",
-            job,
-            "--input",
-            str(self.monolingual),
-            "--config",
-            str(config or self.config),
-            "--out-dir",
-            str(out_dir or self.out_dir),
-            *extra,
-        ]
-
-    def corpus(self, out_dir: Path | None = None) -> pl.DataFrame:
-        return pl.read_parquet((out_dir or self.out_dir) / "corpus.parquet")
-
-    def counts(self) -> dict[str, Any]:
-        return json.loads((self.out_dir / "counts.json").read_text(encoding="utf-8"))
 
 
 @pytest.fixture
-def run(tmp_path: Path) -> Run:
-    frame = planted_monolingual()
-    monolingual = tmp_path / "in" / "khk_mono.parquet"
-    monolingual.parent.mkdir()
-    frame.write_parquet(monolingual)
-    return Run(
-        monolingual=monolingual,
-        config=write_job_config(tmp_path / "synth.yaml", shard_size=SHARD_SIZE),
-        out_dir=tmp_path / "out",
-        frame=frame,
-    )
+def run(tmp_path: Path) -> Workspace:
+    return make_workspace(tmp_path)
 
 
-def _planted(monkeypatch: pytest.MonkeyPatch, run: Run, kind: str) -> Seams:
+def _planted(monkeypatch: pytest.MonkeyPatch, run: Workspace, kind: str) -> Seams:
     return install_seams(
         monkeypatch,
         translator=ScriptedTranslator(planted_script(run.frame)),
@@ -147,13 +92,13 @@ def _without_created(frame: pl.DataFrame) -> pl.DataFrame:
     ("job", "kind", "origin"), [(BT_JOB, "bt", "bt"), (FT_JOB, "ft", "synth_llm")]
 )
 def test_the_tiny_run_keeps_and_drops_exactly_the_planted_rows(
-    run: Run, monkeypatch: pytest.MonkeyPatch, job: str, kind: str, origin: str
+    run: Workspace, monkeypatch: pytest.MonkeyPatch, job: str, kind: str, origin: str
 ) -> None:
     _planted(monkeypatch, run, kind)
 
     result = _invoke_ok(run.args(job))
 
-    assert run.counts()["counts"] == PLANTED_COUNTS
+    assert run.counts_document()["counts"] == PLANTED_COUNTS
     assert result.stdout.splitlines()[-1] == (
         "rows 15 (selected 15 of 40 sources, qe ok)"
     )
@@ -165,7 +110,7 @@ def test_the_tiny_run_keeps_and_drops_exactly_the_planted_rows(
         (str(run.out_dir / "corpus.parquet"), 15),
         (str(run.out_dir / "counts.json"), None),
     ]
-    corpus = run.corpus()
+    corpus = run.corpus_frame()
     assert corpus.schema == CORPUS_SCHEMA
     validate_corpus_schema(corpus.schema, source="the tiny synthetic run")
     assert corpus["origin"].cast(pl.String).unique().to_list() == [origin]
@@ -175,13 +120,13 @@ def test_the_tiny_run_keeps_and_drops_exactly_the_planted_rows(
 
 
 def test_a_back_translation_run_pairs_the_synthetic_english_source_with_the_real_target(
-    run: Run, monkeypatch: pytest.MonkeyPatch
+    run: Workspace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _planted(monkeypatch, run, "bt")
 
     _invoke_ok(run.args(BT_JOB))
 
-    corpus = run.corpus()
+    corpus = run.corpus_frame()
     assert corpus["src"].to_list() == WINNERS
     assert corpus["tgt"].to_list() == MONGOLIAN
     assert corpus["src_lang"].unique().to_list() == ["eng_Latn"]
@@ -189,13 +134,13 @@ def test_a_back_translation_run_pairs_the_synthetic_english_source_with_the_real
 
 
 def test_a_forward_translation_run_pairs_the_real_source_with_the_synthetic_english_target(
-    run: Run, monkeypatch: pytest.MonkeyPatch
+    run: Workspace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _planted(monkeypatch, run, "ft")
 
     _invoke_ok(run.args(FT_JOB))
 
-    corpus = run.corpus()
+    corpus = run.corpus_frame()
     assert corpus["src"].to_list() == MONGOLIAN
     assert corpus["tgt"].to_list() == WINNERS
     assert corpus["src_lang"].unique().to_list() == ["khk_Cyrl"]
@@ -204,7 +149,7 @@ def test_a_forward_translation_run_pairs_the_real_source_with_the_synthetic_engl
 
 @pytest.mark.parametrize(("job", "kind"), [(BT_JOB, "bt"), (FT_JOB, "ft")])
 def test_a_run_that_dies_after_shard_1_resumes_to_the_uninterrupted_corpus(
-    run: Run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, job: str, kind: str
+    run: Workspace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, job: str, kind: str
 ) -> None:
     crashing = ScriptedTranslator(
         planted_script(run.frame), fail_on_call={2: UpstreamError("server down")}
@@ -244,8 +189,8 @@ def test_a_run_that_dies_after_shard_1_resumes_to_the_uninterrupted_corpus(
         "shard 4/5 generated",
         "shard 5/5 generated",
     ]
-    assert run.counts()["counts"] == PLANTED_COUNTS
-    assert run.counts()["shard_stats"] == {
+    assert run.counts_document()["counts"] == PLANTED_COUNTS
+    assert run.counts_document()["shard_stats"] == {
         "planned": 5,
         "reused": 2,
         "generated": 3,
@@ -258,20 +203,20 @@ def test_a_run_that_dies_after_shard_1_resumes_to_the_uninterrupted_corpus(
     fingerprint = job_fingerprint(
         run.frame, cfg.jobs[job], cfg.generators[GENERATOR], SHARD_SIZE, 7
     )
-    assert run.counts()["fingerprint"] == fingerprint
+    assert run.counts_document()["fingerprint"] == fingerprint
     assert shard_directory.name == f"shards-{fingerprint[:12]}"
 
     uninterrupted = tmp_path / "uninterrupted"
     _planted(monkeypatch, run, kind)
     _invoke_ok(run.args(job, "--seed", "7", out_dir=uninterrupted))
     assert_frame_equal(
-        _without_created(run.corpus()),
-        _without_created(run.corpus(uninterrupted)),
+        _without_created(run.corpus_frame()),
+        _without_created(run.corpus_frame(uninterrupted)),
     )
 
 
 def _use_the_vllm_client_over(
-    monkeypatch: pytest.MonkeyPatch, run: Run, server: FakeLlmServer
+    monkeypatch: pytest.MonkeyPatch, run: Workspace, server: FakeLlmServer
 ) -> None:
     """The real vLLM client, talking to `server`, behind the translator seam;
     the planted scorer behind the other."""
@@ -289,7 +234,7 @@ def _use_the_vllm_client_over(
 
 
 def test_the_real_vllm_client_over_a_fake_server_gives_the_same_rows(
-    run: Run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    run: Workspace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _planted(monkeypatch, run, "bt")
     _invoke_ok(run.args(BT_JOB, out_dir=tmp_path / "scripted"))
@@ -299,15 +244,15 @@ def test_the_real_vllm_client_over_a_fake_server_gives_the_same_rows(
     _invoke_ok(run.args(BT_JOB))
 
     assert len(server.requests) == 40
-    assert run.counts()["counts"]["selected"] == 15
+    assert run.counts_document()["counts"]["selected"] == 15
     assert_frame_equal(
-        _without_created(run.corpus()),
-        _without_created(run.corpus(tmp_path / "scripted")),
+        _without_created(run.corpus_frame()),
+        _without_created(run.corpus_frame(tmp_path / "scripted")),
     )
 
 
 def test_a_server_that_keeps_failing_ends_the_run_with_exit_4_and_no_output(
-    run: Run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    run: Workspace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     config = write_job_config(
         tmp_path / "no_retries.yaml", shard_size=SHARD_SIZE, generator={"retries": 0}
@@ -323,5 +268,6 @@ def test_a_server_that_keeps_failing_ends_the_run_with_exit_4_and_no_output(
     errors = [line for line in result.stderr.splitlines() if line.startswith("error:")]
     assert len(errors) == 1
     assert errors[0].startswith("error: shard 0 of 5 failed: ")
-    # The first shard failed, so nothing was written at all.
-    assert not run.out_dir.exists()
+    # The first shard failed, so nothing was written at all: the output
+    # directory, made before the work, is empty.
+    assert list(run.out_dir.rglob("*")) == []
