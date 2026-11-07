@@ -82,3 +82,16 @@ def test_select_returns_the_first_candidate_of_highest_expected_utility(
         expected = _expected_utilities(segment, None if refs is None else refs[i])
         assert expected[winner] == max(expected)
         assert all(value < expected[winner] for value in expected[:winner])
+
+
+@given(st.lists(_SEGMENT, max_size=4))
+def test_select_finds_the_same_best_expected_utility_when_candidates_are_reversed(
+    cands: list[list[str]],
+) -> None:
+    reversed_cands = [segment[::-1] for segment in cands]
+    winners = select(reversed_cands, ChrfUtility())
+    for segment, flipped, winner in zip(cands, reversed_cands, winners, strict=True):
+        if len(segment) == 1:
+            continue
+        best = max(_expected_utilities(segment, None))
+        assert _expected_utilities(flipped, None)[winner] == best

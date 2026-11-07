@@ -187,8 +187,9 @@ threshold of the configured scorer (above `qe.max_metricx_qe` for `metricx_qe`, 
 reason `qe`; the scorer is called with `qe.batch_size` pairs per call and a wrong number of scores
 raises `UpstreamError`, as in the D4 stage; when no scorer is given the QE step is skipped and the
 status says so); then MBR
-among the survivors (`mbr.select`, pseudo-references = the survivors, a single survivor wins
-unscored). A source with no survivor produces no row and counts under `no_survivor`. The result
+among the survivors (`mbr.select(survivors, utility)` with `pseudo_refs=None`, so each survivor is
+scored against the OTHER survivors: passing the survivors as explicit pseudo-references would
+score every candidate against itself; a single survivor wins unscored). A source with no survivor produces no row and counts under `no_survivor`. The result
 carries the selected index per source, the QE score and the purity of the winner, and counts per
 reason (candidates dropped per reason, sources without survivor, sources selected).
 `build_rows(...) -> pl.DataFrame` makes `CORPUS_SCHEMA` rows: `bt`: `src` synthetic, `tgt` real,

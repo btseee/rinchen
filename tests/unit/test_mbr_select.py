@@ -1,10 +1,12 @@
 """Minimum Bayes risk selection: a planted candidate set whose winner is
 computed by hand with chrF, the tie-break, the self-skip rule, explicit
-pseudo-references, and the errors for malformed input."""
+pseudo-references, the errors for malformed input and the errors for utilities
+that are NaN, infinite or too large to average."""
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import math
+from collections.abc import Callable, Iterator
 from statistics import fmean
 
 import pytest
@@ -34,6 +36,11 @@ def _length_of_hypothesis(hyp: str, ref: str) -> float:
 
 def _self_match_scores_length(hyp: str, ref: str) -> float:
     return float(len(hyp)) if hyp == ref else 0.0
+
+
+def _nan_at(*nan_pairs: tuple[str, str]) -> StubUtility:
+    """A utility that scores 1.0 except for the given (hyp, ref) pairs, which are NaN."""
+    return StubUtility(lambda hyp, ref: math.nan if (hyp, ref) in nan_pairs else 1.0)
 
 
 def _expected_chrf(candidate: str, references: list[str]) -> float:
@@ -199,3 +206,178 @@ def test_select_checks_every_segment_before_scoring_any() -> None:
     with pytest.raises(ValueError):
         select([["a", "b"]], utility, [["r"], ["s"]])
     assert utility.pairs == []
+
+
+# --- ties that only exact arithmetic sees -------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("scores_p", "scores_q"),
+    [([0.1, 0.2, 0.3], [0.3, 0.2, 0.1]), ([0.3, 0.2, 0.1], [0.1, 0.2, 0.3])],
+)
+def test_select_ties_on_the_same_scores_added_in_another_order(
+    scores_p: list[float], scores_q: list[float]
+) -> None:
+    # Added left to right, 0.1 + 0.2 + 0.3 is 0.6000000000000001 and
+    # 0.3 + 0.2 + 0.1 is 0.6: the two candidates still tie, so index 0 wins.
+    references = ["r1", "r2", "r3"]
+    table = {
+        **{("p", ref): score for ref, score in zip(references, scores_p, strict=True)},
+        **{("q", ref): score for ref, score in zip(references, scores_q, strict=True)},
+    }
+    utility = StubUtility(lambda hyp, ref: table[(hyp, ref)])
+    assert select([["p", "q"]], utility, [references]) == [0]
+
+
+# --- utilities that are NaN, infinite or too large -----------------------------
+
+INF = math.inf
+
+
+@pytest.mark.parametrize(
+    ("nan_pair", "candidate"),
+    [(("a", "b"), 0), (("b", "c"), 1), (("c", "a"), 2)],
+)
+def test_select_rejects_a_nan_utility_among_the_candidates(
+    nan_pair: tuple[str, str], candidate: int
+) -> None:
+    cands = [["x", "y"], ["a", "b", "c"]]
+    with pytest.raises(ValueError) as caught:
+        select(cands, _nan_at(nan_pair))
+    assert "segment 1" in str(caught.value)
+    assert f"candidate {candidate}" in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    ("nan_pair", "candidate"),
+    [(("a", "s"), 0), (("b", "r"), 1), (("c", "r"), 2)],
+)
+def test_select_rejects_a_nan_utility_against_pseudo_references(
+    nan_pair: tuple[str, str], candidate: int
+) -> None:
+    cands = [["x", "y"], ["a", "b", "c"]]
+    refs = [["r"], ["r", "s"]]
+    with pytest.raises(ValueError) as caught:
+        select(cands, _nan_at(nan_pair), refs)
+    assert "segment 1" in str(caught.value)
+    assert f"candidate {candidate}" in str(caught.value)
+
+
+def test_select_names_the_segment_and_the_candidate_of_a_nan_utility() -> None:
+    cands = [["a", "b"]] * 3 + [["k", "l", "m"]]
+    with pytest.raises(ValueError) as caught:
+        select(cands, _nan_at(("m", "k")))
+    assert "segment 3" in str(caught.value)
+    assert "candidate 2" in str(caught.value)
+    assert "'m'" in str(caught.value)
+
+
+def test_select_shows_at_most_the_first_60_characters_of_the_candidate() -> None:
+    long_text = "x" * 100
+    with pytest.raises(ValueError) as caught:
+        select([["a", long_text]], _nan_at((long_text, "a")))
+    assert "x" * 60 in str(caught.value)
+    assert "x" * 61 not in str(caught.value)
+    with pytest.raises(ValueError) as caught:
+        select([["the cat", "b"]], _nan_at(("the cat", "b")))
+    assert "the cat" in str(caught.value)
+
+
+def test_select_rejects_infinities_of_both_signs_with_the_original_as_cause() -> None:
+    def mixed(hyp: str, ref: str) -> float:
+        return INF if ref == "r1" else -INF
+
+    with pytest.raises(ValueError) as caught:
+        select([["a", "b"], ["c", "d"]], StubUtility(mixed), [["r1", "r2"]] * 2)
+    assert "segment 0" in str(caught.value)
+    assert "candidate 0" in str(caught.value)
+    assert isinstance(caught.value.__cause__, ValueError)
+
+
+def test_select_rejects_infinities_of_both_signs_among_the_candidates() -> None:
+    def mixed(hyp: str, ref: str) -> float:
+        return INF if ref == "b" else -INF
+
+    with pytest.raises(ValueError) as caught:
+        select([["a", "b", "c"]], StubUtility(mixed))
+    assert "segment 0" in str(caught.value)
+    assert "candidate 0" in str(caught.value)
+    assert isinstance(caught.value.__cause__, ValueError)
+
+
+@pytest.mark.parametrize("pseudo", [False, True])
+def test_select_rejects_a_sum_beyond_the_float_range_with_the_cause(
+    pseudo: bool,
+) -> None:
+    utility = StubUtility(lambda hyp, ref: 1.7e308)
+    with pytest.raises(ValueError) as caught:
+        if pseudo:
+            select([["a", "b"]], utility, [["r1", "r2"]])
+        else:
+            select([["a", "b", "c"]], utility)
+    assert "segment 0" in str(caught.value)
+    assert "candidate 0" in str(caught.value)
+    assert isinstance(caught.value.__cause__, OverflowError)
+
+
+def test_select_still_averages_large_finite_utilities() -> None:
+    scores = {"a": [1e300, 2e300, 3e300], "b": [3e300, 3e300, 3e300]}
+    results: Iterator[float] = iter(scores["a"] + scores["b"])
+    utility = StubUtility(lambda hyp, ref: next(results))
+    assert select([["a", "b"]], utility, [["r1", "r2", "r3"]]) == [1]
+
+
+def test_select_ranks_an_infinite_expected_utility_beyond_the_finite_ones() -> None:
+    utility = StubUtility(lambda hyp, ref: INF if hyp == "b" else 5.0)
+    assert select([["a", "b", "c"]], utility) == [1]
+    assert select([["a", "b", "c"]], utility, [["r1", "r2"]]) == [1]
+
+
+# --- the wrong kinds of input ---------------------------------------------------
+
+
+def test_select_rejects_a_flat_list_of_strings_naming_the_segment() -> None:
+    utility = StubUtility()
+    with pytest.raises(TypeError, match="segment 0 of cands") as caught:
+        select(["the cat sat", "the cat sat down"], utility)  # type: ignore[list-item]
+    assert "string" in str(caught.value)
+    assert utility.pairs == []
+
+
+def test_select_rejects_a_string_as_a_later_segment() -> None:
+    with pytest.raises(TypeError, match="segment 1 of cands"):
+        select([["a", "b"], "cd"], StubUtility())  # type: ignore[list-item]
+
+
+@pytest.mark.parametrize("refs", [["abc"], [["r"], "abc"]])
+def test_select_rejects_a_string_as_a_pseudo_reference_segment(
+    refs: list[object],
+) -> None:
+    cands = [["only"], ["a", "b"]][: len(refs)]
+    utility = StubUtility()
+    index = len(refs) - 1
+    with pytest.raises(TypeError, match=f"segment {index} of pseudo_refs"):
+        select(cands, utility, refs)  # type: ignore[arg-type]
+    assert utility.pairs == []
+
+
+def test_select_rejects_a_string_for_the_whole_of_cands_or_pseudo_refs() -> None:
+    with pytest.raises(TypeError, match="cands"):
+        select("ab", StubUtility())  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="pseudo_refs"):
+        select([["a", "b"]], StubUtility(), "r")  # type: ignore[arg-type]
+
+
+def test_select_rejects_a_generator_for_cands_instead_of_returning_nothing() -> None:
+    with pytest.raises(TypeError, match="cands"):
+        select((segment for segment in [["a", "b"]]), StubUtility())  # type: ignore[arg-type]
+
+
+def test_select_rejects_a_generator_for_pseudo_refs() -> None:
+    with pytest.raises(TypeError, match="pseudo_refs"):
+        select([["a", "b"]], StubUtility(), (ref for ref in [["r"]]))  # type: ignore[arg-type]
+
+
+def test_select_rejects_a_generator_as_a_segment() -> None:
+    with pytest.raises(TypeError, match="segment 0 of cands"):
+        select([(c for c in "ab")], StubUtility())  # type: ignore[list-item]
