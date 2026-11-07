@@ -48,9 +48,10 @@ with the real GlotLID, LaBSE and MetricX-QE models.
    analysis and for choosing thresholds.
 
 Models, in the order the pipeline loads them: GlotLID (CPU, in `lid`), LaBSE
-(GPU when available, in `labse`), MetricX-QE (GPU only, in `qe`). LaBSE is
-released as soon as `labse` has run, so MetricX-QE does not share the GPU with
-it.
+(GPU when available, in `labse`), MetricX-QE (GPU only, in `qe`). When
+`labse` is listed before `qe` (the default order), LaBSE is released as soon as
+`labse` has run, so MetricX-QE does not share the GPU with it; with `qe` listed
+first the two are resident together.
 
 ## Models
 

@@ -515,7 +515,7 @@ def test_a_corpus_in_the_out_dir_that_is_not_an_output_is_allowed(
     assert corpus.is_file()
 
 
-@pytest.mark.parametrize("extra", [[], ["--force"]])
+@pytest.mark.parametrize("extra", [[], ["--force"], ["--dry-run"]])
 def test_an_out_dir_holding_the_manifest_of_another_stage_is_a_data_error(
     workspace: Workspace, monkeypatch: pytest.MonkeyPatch, extra: list[str]
 ) -> None:

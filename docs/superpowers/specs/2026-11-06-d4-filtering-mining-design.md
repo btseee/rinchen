@@ -159,9 +159,10 @@ says the previous run is reusable: both output tables exist, the manifest there 
 manifest that lists them, and the inputs (the corpus and each model file the config names)
 and the config are unchanged; `--force` never skips. The manifest is the commit marker:
 `begin_commit` removes it before any output is written, and it is written atomically last.
-Two guards run before anything is read or written: `--corpus` may not be one of the two
-output tables (ConfigError, 2: the run would overwrite its own input), and an out dir that
-holds the manifest of another stage is refused (DataError, 3) and its manifest kept.
+Two guards run before any output is written or model loaded: `--corpus` may not be one of
+the two output tables (ConfigError, 2: the run would overwrite its own input; checked first,
+before anything is read), and an out dir that holds the manifest of another stage is
+refused (DataError, 3) and its manifest kept (also under `--dry-run`).
 `--dry-run` validates the config, the model files it names and the input schema and prints
 the stage names, with the reason a `qe` stage is skipped only when that can be known
 without loading a model; it writes nothing. Exit codes as the D3 CLI

@@ -150,12 +150,13 @@ def run(
         cfg = load_filter_config(config)
         _require_model_files(cfg)
         frame = scan_corpus(corpus)
+        # A dry run that passes must not be followed by a refusal for this.
+        refuse_foreign_manifest(target, _STAGE_NAME)
         if dry_run:
             for line in _plan_lines(cfg):
                 typer.echo(line)
             return
 
-        refuse_foreign_manifest(target, _STAGE_NAME)
         input_paths = [corpus, *(path for _, path in _model_files(cfg))]
         config_sha256 = sha256_of(config)
         if outputs_current(

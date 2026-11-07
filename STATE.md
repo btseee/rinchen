@@ -212,7 +212,7 @@ filtering and mining"). STOP gate and gates, run for real on Linux, CPython
 were run individually; the figures are those after the final review-fix
 commit): `ruff format --check .` -- 176 files already formatted;
 `ruff check .` -- all checks passed; `mypy src` -- no issues found in 85 source
-files; `pytest -m "not network" -q` -- **1701 passed, 10 deselected** (1656
+files; `pytest -m "not network" -q` -- **1702 passed, 10 deselected** (1656
 before the final review fixes, 938 on the branch point; the end-to-end test in `tests/unit/test_cli_filter.py` runs
 the CLI on the 50-row planted corpus and gets 28 kept rows with the planted
 reason counts exact, `qe` skipped). Numeric gates, on

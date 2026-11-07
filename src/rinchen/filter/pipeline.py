@@ -79,7 +79,8 @@ def run_pipeline(
     `qe_scorer` serves `qe`, which is skipped without one.
 
     The frame is collected after every stage, so an error surfaces at the stage
-    that caused it. The pipeline gives LaBSE back before `qe` loads its model:
+    that caused it. When `labse` is listed before `qe` (the default order) the
+    pipeline gives LaBSE back before `qe` loads its model:
     `embedder` is released, when it has a `release`, as soon as the `labse`
     stage has run, also when that stage failed. The embedder object stays
     usable; only the model it loaded is dropped. A QE scorer is not released
