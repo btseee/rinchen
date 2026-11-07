@@ -107,9 +107,10 @@ Layering: `mbr` depends on `metrics.bleu_chrf` and numpy only. `translator` is t
   and the generator translates it into `other_lang` to make the source; for `ft`, the monolingual
   text is the source and the generator translates it into `other_lang` to make the target.
 - `selection`: `min_script_share` (0.9, the share of the synthetic side's letters that must belong
-  to the registry scripts of its language), `qe_min_score` (-1.0, in the scale of the configured
-  scorer; the D4 QE stage's convention: higher is better, a NaN score fails), `qe_batch_size` (64),
-  `mbr_utility` (`chrf`).
+  to the registry scripts of its language); `qe`: exactly the D4 `rinchen.config.filters.QeConfig`
+  (`scorer` `metricx_qe` | `cometkiwi`, `max_metricx_qe` 8.0 where LOWER is better, `min_cometkiwi`
+  0.55 where higher is better, `batch_size` 32), reused unchanged so both stages mean the same
+  thing by "QE"; `mbr_utility` (`chrf`).
 - `load_synth_config(path=SYNTH_CONFIG_PATH)` raises `ConfigError` on any violation;
   `configs/data/synth.yaml` loads to exactly the `SynthConfig()` defaults.
 
@@ -180,15 +181,19 @@ Inner Mongolia. Template text is the builder's, not a published template of any 
 
 `select_candidates(rows: SourceRows, candidates, *, cfg, scorer, kind, ...) -> Selection` applies,
 in this order and per candidate: empty string (dropped, reason `empty`); script purity below
-`min_script_share` for the synthetic side's language (reason `purity`); QE below `qe_min_score` or
-NaN (reason `qe`; when no scorer is given the QE step is skipped and the status says so); then MBR
+`min_script_share` for the synthetic side's language (reason `purity`); QE worse than the D4
+threshold of the configured scorer (above `qe.max_metricx_qe` for `metricx_qe`, below
+`qe.min_cometkiwi` for `cometkiwi`; a score exactly at the threshold passes; a NaN score fails;
+reason `qe`; the scorer is called with `qe.batch_size` pairs per call and a wrong number of scores
+raises `UpstreamError`, as in the D4 stage; when no scorer is given the QE step is skipped and the
+status says so); then MBR
 among the survivors (`mbr.select`, pseudo-references = the survivors, a single survivor wins
 unscored). A source with no survivor produces no row and counts under `no_survivor`. The result
 carries the selected index per source, the QE score and the purity of the winner, and counts per
 reason (candidates dropped per reason, sources without survivor, sources selected).
 `build_rows(...) -> pl.DataFrame` makes `CORPUS_SCHEMA` rows: `bt`: `src` synthetic, `tgt` real,
 `src_lang` the job's `other_lang`, `tgt_lang` its `mono_lang`, `scores.script_src` the purity,
-`scores.metricx_qe` the QE score when a scorer ran; `ft`: `src` real, `tgt` synthetic, the languages
+`scores.metricx_qe` or `scores.cometkiwi` (by the configured scorer) the QE score when a scorer ran; `ft`: `src` real, `tgt` synthetic, the languages
 the other way round, `scores.script_tgt`; `origin` from `tags.origin_for`; `corpus` =
 `"<kind>:<generator name>"`; `split` `train`; `id` from `corpus.schema` row-id helper over (src,
 tgt, languages); `created` now. Pairs whose two sides are identical are dropped (reason `copy`).
@@ -268,8 +273,9 @@ Tests first. Fakes only: no network, no model, no GPU.
 5. **Selection order purity, QE, MBR.** Cheap filters first; QE (GPU) only on purity survivors; MBR
    only among those that passed both. Cost: a candidate that QE would have rated best but that fails
    a threshold never competes in MBR.
-6. **QE floor in the scorer's scale, default -1.0, an unvalidated prior.** Same convention as the D4
-   QE stage. Cost: the number is arbitrary until real scores exist.
+6. **QE thresholds are the D4 ones, reused through `QeConfig`** (`max_metricx_qe` 8.0, lower is
+   better; `min_cometkiwi` 0.55), unvalidated priors. Cost: the numbers are arbitrary until real
+   scores exist, and a change to the D4 defaults changes D6 too (the YAML pins them).
 7. **Shard directory keyed by the job fingerprint** (input rows, job, generator config, shard size,
    seed). Cost: changing any config value regenerates everything; old shard directories stay until
    removed.
