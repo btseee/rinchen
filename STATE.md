@@ -282,9 +282,11 @@ config; the runbook and the spec were corrected. The 24-row smoke run was
 repeated with the release in place (exit 0, `kept 16 of 24 rows`), and `uv run
 pytest -m network -q` passed again (10 passed, 12.4 s).
 
-**D5 (script converter) is done on branch `d5-script-converter`; its STOP gate (tiny
-converter exported and served) is met locally.** The branch was cut from `main` at
-`4eac98f` on 2026-11-07; it is not merged, not pushed, and no CI run covers it. It is a
+**D5 (script converter) is done and merged into `main` locally; its STOP gate (tiny
+converter exported and served) is met locally.** It was built on branch
+`d5-script-converter`, cut from `main` at `4eac98f` on 2026-11-07, fast-forwarded into
+`main` the same day (merge tip `862e176`) and deleted; `main` is not pushed and no CI run
+covers it. It is a
 scaffold, not a quality converter: the rule baseline spells 237 of 1,022 held-out dictionary
 words exactly, the tiny model memorises a 500-word fixture (and gets 17 of 52 held-out
 fixture words right), the full profile was never trained, and there is no real parallel
@@ -298,8 +300,7 @@ the `rinchen convert-script` commands `build-data`, `train`, `export`, `apply` a
 `scripts/build_script_conv_fixtures.py`, the Wiktionary reference and the fixtures built from
 it (`tests/fixtures/script_conv/`), `tests/integration/` with its helpers in `tests/support/`,
 `manifests/ucd_standardized_variants.json`, and `docs/runbooks/05_script_converter.md`.
-24 commits ahead of `main` as of `f79de26`, the final review fixes (later documentation-only
-commits are not counted; `ed7ead9` design and plan,
+25 commits ahead of `main` at the merge (`862e176`); `ed7ead9` design and plan,
 `2186b83` through `7517915` the code and its review fixes, `14e04ba` the runbook and
 records, then the parked minors, the final review fixes and their docs; the last commit is the
 one that records this). A whole-branch review found no Critical issue and four Important ones,
@@ -363,16 +364,13 @@ worked example, the measurement scripts and the reproductions of both upstream d
 described in the runbook and in `docs/VERIFY.md`, 2026-11-07, commits `ed7ead9` through
 the final review fixes.]
 
-Branch status (updated 2026-11-07, after the D5 build): `main` holds D3, the D3
-research follow-up and D4, and is at `4eac98f` (the commit that records the D4
-merge; `2346cea` was the D3 end and `b38eaae` the D4 merge tip, and no
-`d3-research-followup` or `d4-filtering-mining` ref remains). `main` is 56 commits
-ahead of `origin/main` (`9e7b0ec`); it is unpushed, and no CI run covers D3, D4 or
-D5. The full local gate was rerun on the merged tree: 1702 passed, 10 deselected.
-`d5-script-converter` is a separate branch cut from `main` at `4eac98f`, 24 commits
-ahead as of `f79de26`, the final review fixes (later documentation-only commits are not
-counted); it is not
-merged into `main` and not pushed.
+Branch status (updated 2026-11-07, after the D5 merge): `main` holds D3, the D3
+research follow-up, D4 and D5, and is at `862e176` (the D5 merge tip; `2346cea` was the
+D3 end, `b38eaae` the D4 merge tip and `4eac98f` the commit that recorded the D4 merge;
+no `d3-research-followup`, `d4-filtering-mining` or `d5-script-converter` ref remains).
+At the merge `main` was 81 commits ahead of `origin/main` (`9e7b0ec`); it is unpushed,
+and no CI run covers D3, D4 or D5. The full local gate was rerun on the merged tree: 2833 passed,
+1 skipped, 10 deselected, in 171 s.
 
 Next step: D6 (Synthetic data). Nothing in D5 blocks it. Its inputs from D5: the converter
 is a scaffold, so no output of `ScriptConverter` should be treated as real `mn_Mong` data;

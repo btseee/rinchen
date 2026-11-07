@@ -88,11 +88,11 @@ mining) is done: its STOP gate was met locally (2026-11-07) and branch
 `d4-filtering-mining` was fast-forwarded into `main` (unpushed); every threshold
 is an unvalidated prior because no real data exists, and the D3 gates assigned to
 D4 (abbreviation induction, o-like substitute counts, the traditional-script
-control-character audit) stay open. `main` is unpushed and no CI run covers D3
-or D4. D5 (Cyrillic/traditional converter) is done locally on branch
-`d5-script-converter`, cut from `main` at `4eac98f`: its STOP gate (the tiny
-converter exported and served through `ScriptConverter`) is met on the tiny
-fixture, and the branch is not merged, not pushed and covered by no CI run. It is
+control-character audit) stay open. `main` is unpushed and no CI run covers D3,
+D4 or D5. D5 (Cyrillic/traditional converter) is done locally: branch
+`d5-script-converter` (cut from `main` at `4eac98f`) was fast-forwarded into `main`
+(unpushed); its STOP gate (the tiny converter exported and served through
+`ScriptConverter`) is met on the tiny fixture. It is
 a scaffold, not a quality converter: the rule baseline spells 237 of 1,022
 held-out dictionary words exactly, the tiny model memorises a 500-word fixture,
 the full profile was never trained, and the gates that need real script text or a

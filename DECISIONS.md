@@ -897,7 +897,7 @@ full wording is `docs/superpowers/specs/2026-11-07-d5-script-converter-design.md
 1 to 13, amended to match the finished code, and the amendments A to U; the numbers and
 letters below are the same); procedures, measured numbers and the known limitations are in
 `docs/runbooks/05_script_converter.md`. The work lives on branch `d5-script-converter`, cut
-from `main` at `4eac98f`; it is not merged and not pushed.
+from `main` at `4eac98f`; it was fast-forwarded into `main` on 2026-11-07 (tip `862e176`) and is not pushed.
 
 [DESIGN: 1. The engine half of the STOP gate becomes `ScriptConverter`.] The master plan
 says "served via engine with `script="Mong"`"; there is no engine until D11 and D12. Cost
