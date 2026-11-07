@@ -42,8 +42,9 @@ not given. What was checked: the unit and property tests (planted inputs with ex
 each new test checked by mutation by hand); the integration test
 `tests/integration/test_synth_tiny_run.py` (the STOP gate: the CLI in process with a
 scripted generator); one run of the command by hand for this runbook (the worked example);
-and the real `rinchen` binary for `--help`, a dry run and a failing run against a closed
-port.
+and the real `rinchen` binary for `--help`, a dry run, a failing run against a closed
+port and, after the final review, runs against a loopback stand-in for a server (the interrupt
+and out directories whose names hold `[`, `*` or `?`).
 
 ## Architecture
 
@@ -254,6 +255,26 @@ and exits 4. The directory then holds only `shards-<fp>/shard-00000.parquet` and
 with a working generator reuses shards 1 and 2, requests only shards 3 to 5 (three calls
 of 8 texts) and ends with the same rows as an uninterrupted run.
 
+### Interrupt
+
+Ctrl-C while an HTTP client is generating a shard cancels the requests not yet sent and
+raises `KeyboardInterrupt`; the command exits 130 with the finished shards on disk, nothing
+written for the interrupted shard and no manifest of that run. The requests already in
+flight are not abandoned: the client's thread pool is shut down with `wait=True`, so up to
+`concurrency` requests (32 by default for `vllm`, 8 for `llamacpp`) are finished first, and
+a request that fails goes on with its own retries, so the worst case for each is
+`retries + 1` attempts of up to `timeout_s` plus the backoff sleeps (each at most 30 s). A
+second Ctrl-C during that wait is not delivered until it ends.
+
+The main thread waits for the requests in slices of 0.2 s. Once `polars` is imported (it
+always is under `rinchen`), a SIGINT does not wake an untimed `concurrent.futures.wait()`,
+and the interrupt would have been raised only after every queued request had been sent;
+`docs/VERIFY.md`, `D-POLARS-SIGINT`. Measured through the real binary on 2026-11-08 against
+a loopback server that sleeps 1 s per request (`concurrency` 4, 40 texts in one shard,
+SIGINT 4.5 s after the start): exit 130, 0.27 s after the signal, 16 of the 40 requests
+received (before the fix: 6.33 s after the signal, 40 of 40). The CTranslate2 backend was
+not examined: it runs in process and is not a request queue.
+
 ### Options
 
 | Option | Default | Meaning |
@@ -299,8 +320,8 @@ Failures print `error: <message>` on standard error; messages are one line.
 | 1 | An `OSError` creating the output directory or writing an output ("cannot write the synth outputs under DIR: ..."), or any other `RinchenError` |
 | 2 | `ConfigError`: unknown job, a missing, unreadable or invalid config, an `--out-dir` that is the input's directory, a `base_url` that is not an http(s) URL with a host, a language outside the CT2 family's table |
 | 3 | `DataError`: a missing or unreadable input, not Parquet, a missing or non-string column, no rows of the job's language, a null or empty id, a null, empty or whitespace-only text, a duplicated id, a translator reply of the wrong shape, a text that cannot be encoded as UTF-8, a CT2 model or SentencePiece file that cannot be loaded, an output directory that holds another stage's manifest |
-| 4 | `UpstreamError`: a shard's generation failed (server unreachable after the retries, a status that is not retried, a malformed reply, a CT2 failure), named as `shard i of n`; a QE scorer that returns the wrong number of scores |
-| 130 | An interrupt (Ctrl-C): the queued requests are cancelled, the finished shards stay |
+| 4 | `UpstreamError`: a shard's generation failed (server unreachable after the retries, a status that is not retried, a malformed reply, a CT2 failure), named as `shard i of n`; a QE scorer that returns the wrong number of scores, a score that is not a number or an `OSError` ("the QE scorer failed: ...") |
+| 130 | An interrupt (Ctrl-C): the queued requests are cancelled and the finished shards stay; the requests already in flight still complete first (up to `concurrency` of them, each up to `timeout_s` plus its retries and backoff), see "Interrupt" |
 
 ### The real binary
 
@@ -309,7 +330,11 @@ dry run through the real binary on the same planted file gives the plan lines ab
 another fingerprint, because that config named `http://127.0.0.1:9/v1` with `retries: 0`).
 A real run against that closed port ends with `error: shard 0 of 5 failed:
 http://127.0.0.1:9/v1/chat/completions failed with ConnectError, attempts: 1`, exit 4,
-2.2 s of wall time, and an empty output directory (it is made before the work).
+2.2 s of wall time, and an empty output directory (it is made before the work). After the
+final review the binary was also run against a loopback stand-in for a chat server (not a
+model; 40 planted texts, one shard, `--no-qe`): `--out-dir` `out[1]`, `out*`, `out?` and
+`out[a-z]` each exit 0 and write `corpus.parquet`, `counts.json` and `manifest.json`, and
+the interrupt probe above.
 
 ## Shard directory, fingerprint and resume
 
@@ -323,7 +348,8 @@ http://127.0.0.1:9/v1/chat/completions failed with ConnectError, attempts: 1`, e
 ```
 
 A shard file holds one row per source id of the shard, in order, with the candidates the
-translator returned (an empty list for a refusal). Files are written through a uniquely
+translator returned (an empty list for a refusal) and, in its Parquet key-value metadata,
+the content digest `rinchen.content_sha256` (below). Files are written through a uniquely
 named `.part` file and a rename, one shard at a time, in index order, each before the
 next shard is started; there is no fsync.
 
@@ -363,16 +389,30 @@ outputs, if any, stay untouched until a later run reaches its commit.
 
 **A damaged shard.** A file is valid when it is Parquet with exactly the columns `id` and
 `candidates` of the right types, as many rows as the shard has ids, the same ids in the
-same order, and no null list or null candidate. Anything else (truncated, foreign,
-another shard's file) is invalid: the rerun regenerates it and counts it under
-`regenerated_invalid`. Two limits of that check, measured with polars 2.1.0 (see
-"Measured numbers"): a bit flip that leaves the structure intact decodes to different
-candidates and is not detected (Parquet page checksums are not checked, and no content
-checksum was added), so silent rot inside a stored candidate passes; and a few damaged
-files make polars panic (`PanicException`, a `BaseException`, which the code catches and
-treats as an invalid file) or, rarer still, abort the process with a Rust allocation
-failure that cannot be caught. A partial write or a truncation, the crash cases, are
-caught.
+same order, no null list or null candidate, and a content digest in its metadata that
+matches its rows. Anything else (truncated, foreign, another shard's file, changed text, or
+written before shards carried a digest) is invalid: the rerun regenerates it and counts it
+under `regenerated_invalid`. The structural checks run first, because they are cheap and say
+more about what is wrong; the digest, which hashes every text, runs last.
+
+The digest is the SHA-256 hex digest of the UTF-8 bytes of the JSON text
+`{"ids":[...],"candidates":[[...],...]}`: the keys in that order, no whitespace,
+`ensure_ascii=False` (non-ASCII text stays as it is; JSON escapes only quotes, backslashes
+and control characters), the ids in shard order and one list of candidates per id in
+generation order. `ShardStore.write` stores it under the key `rinchen.content_sha256`;
+`ShardStore.read` recomputes it from the decoded rows. It detects any change to an id, a
+candidate, an order or a count, which the file reader does not notice: polars does not
+verify Parquet page checksums, so a flipped bit often decodes to other text without an
+error (before the digest, 63.7% of random single-bit flips of a 98 KB shard decoded to
+different candidates, and the structural checks caught 0.3%). It is not a signature:
+whoever can rewrite a shard can rewrite its digest, and the artefact of record is
+`corpus.parquet`, whose SHA-256 is in the manifest. It is not part of the job fingerprint.
+A shard written before the digest existed has none and is regenerated, and counted as
+`regenerated_invalid`, by the first rerun. A flip that leaves the decoded rows unchanged is
+not reported; it did no harm. One limit remains: a few damaged files make polars panic
+(`PanicException`, a `BaseException`, which the code catches and treats as an invalid file)
+or, rarer still, abort the process with a Rust allocation failure that cannot be caught. A
+partial write or a truncation, the crash cases, are caught.
 
 **Two runs into one directory** are not guarded: a second run rewrites the first's
 outputs and manifest, and either manifest may then describe files the other wrote. Run
@@ -423,7 +463,11 @@ Things to know:
   the same float32), as D4's stage would have it.
 - **QE orientation follows the final pair.** `bt`: `(source=candidate, translation=real
   text)`; `ft`: `(source=real text, translation=candidate)`. A scorer is called with
-  `qe.batch_size` pairs per call, and a wrong number of scores is an `UpstreamError`.
+  `qe.batch_size` pairs per call; a wrong number of scores, a score that is not a number
+  (text, even text that reads like a number, `None`, a list, bytes) or a reply that is not
+  a list of scores is an `UpstreamError` naming the pair and the type, never a text; NaN
+  and the infinities are numbers, and the threshold decides; an `OSError` of the scorer
+  (a missing weights file, say) is an `UpstreamError` "the QE scorer failed: ...".
 - **A refusal shows as `no_candidates`.** A null, absent or empty `message.content`, an
   empty `choices` list and a CT2 result without hypotheses all give an empty candidate
   list for that text.
@@ -570,7 +614,8 @@ No figures are given, because none was measured. Before trusting a run, answer:
 The machine: Intel Core Ultra 7 265K (20 cores as `nproc` reports), 46 GiB of RAM,
 Linux 7.0.0-42, CPython 3.14.10, polars 2.1.0, httpx 0.28.1, sacrebleu 2.6.0,
 ctranslate2 4.8.4. The GPU (RTX 5070 Ti) was not used by any of these runs. All dates
-2026-11-07 by the machine's clock.
+2026-11-07 by the machine's clock, except the interrupt probe, the shard digest and the
+bit-flip sweeps with it, which are 2026-11-08.
 
 ### The tiny run
 
@@ -629,14 +674,38 @@ The corpus rows and candidates of the run itself were not part of this probe.
 
 ### Damaged shard files
 
-Single-bit flips of a 3,324-byte shard-shaped Parquet file (8 rows of 2 candidates), 150,000
-trials with polars 2.1.0 (a parent process restarts the child after an abort): 38,581
-raised a polars error (an invalid file, regenerated), 45,528 still decoded to the same
-frame, 65,607 decoded to a different frame without error, 276 raised `PanicException`
-(caught) and 8 aborted the process with "memory allocation of 2305843009213693952 bytes
-failed". On a realistic 156,403-byte shard (512 rows of 4 candidates, 3,000 flips) 1,101
-raised an error, 22 decoded unchanged and 1,877 decoded to different data; no panic and no
-abort occurred. A flip inside a stored candidate is not detected.
+Before the content digest (2026-11-07): single-bit flips of a 3,324-byte shard-shaped
+Parquet file (8 rows of 2 candidates), 150,000 trials with polars 2.1.0 (a parent process
+restarts the child after an abort): 38,581 raised a polars error (an invalid file,
+regenerated), 45,528 still decoded to the same frame, 65,607 decoded to a different frame
+without error, 276 raised `PanicException` (caught) and 8 aborted the process with "memory
+allocation of 2305843009213693952 bytes failed". On a realistic 156,403-byte shard (512 rows
+of 4 candidates, 3,000 flips) 1,101 raised an error, 22 decoded unchanged and 1,877 decoded
+to different data; no panic and no abort occurred. Through `ShardStore.read` (the structural
+checks alone) the final review measured 63.7% different without error and 0.3% caught on a
+98,112-byte shard, and 27.5% different and 0.9% caught on a 3,248-byte one.
+
+With the digest (2026-11-08), every flip judged through `ShardStore.load`, one bit at a
+time, a parent process restarting the child after an abort:
+
+| Shard file | Flips | Digest mismatch | Unreadable | Structural | Rows unchanged | Different rows, no error | Aborted |
+|---|---|---|---|---|---|---|---|
+| 1,236 bytes (8 rows x 4, the unit test's shard), all bits | 9,888 | 941 | 4,136 | 249 | 4,561 | 0 | 1 |
+| 3,339 bytes (8 rows, random words), all bits | 26,712 | 7,461 | 11,046 | 232 | 7,972 | 0 | 1 |
+| 98,203 bytes (512 rows x 4), 3,000 random bits | 3,000 | 1,843 | 1,117 | 8 | 32 | 0 | 0 |
+
+The same harness with the digest comparison switched off decoded 1,840 of the 3,000 flips
+of the large shard to different candidates (61.3%). The aborts are single positions (bit 0
+of byte 63 of the first file, bit 0 of byte 66 of the second); the unit test sweeps every
+7th byte of the first shard with a bit that cycles through all eight, which never pairs byte 63
+with bit 0, and says so.
+
+Cost of the digest (medians of 200 repeats, 40 for the largest; canonical JSON text of 6.0,
+350.6 and 2,806.6 KiB for 8, 512 and 4,096 rows of 4 candidates of 10 to 30 words): 0.015,
+0.71 and 7.0 ms, about 2.0 to 2.5 microseconds per KiB of text; reading the metadata block
+7 microseconds; a whole `ShardStore.read` of the 512-row shard (95.9 KiB on disk) 2.2 ms, of
+which the digest is 0.7 ms and the decoding 0.7 ms; `write` of it 5.4 ms. A shard takes
+seconds to minutes to generate.
 
 ## Memory model of `run_job`
 
@@ -664,16 +733,29 @@ gigabytes (the extrapolation above): cut the input into files and run them one a
 | Runner | a translator `UpstreamError` or `OSError` | `UpstreamError` "shard i of n failed: ...", chained | 4 |
 | Runner | a reply that is not a list, has the wrong length or a non-list or non-string entry | `DataError` naming the shard (nothing is written for it) | 3 |
 | Runner | `KeyboardInterrupt`, `SystemExit` | unchanged, with the finished shards on disk | 130 for Ctrl-C |
-| Selection | a QE scorer that returns the wrong number of scores / raises another kind of exception | `UpstreamError` / propagates as it is (a traceback) | 4 / 1 |
+| Selection | a QE scorer that returns the wrong number of scores, a score that is not a number, or raises an `OSError` / raises another kind of exception | `UpstreamError` / propagates as it is (a traceback) | 4 / 1 |
 | CLI | an `OSError` creating the output directory or writing outputs | "cannot write the synth outputs under DIR: ..." | 1 |
 | CLI | the output directory holds another stage's manifest | `DataError` | 3 |
 
-Known wording flaw: an `OSError` raised by the QE scorer (not by the translator) is also
-reported as "cannot write the synth outputs". Known hazard: `write_corpus` reads the
-file back with a path that polars expands as a pattern, so an output directory whose
-path contains `[`, `*` or `?` fails after the generation was paid for; keep such
-characters out of `--out-dir` (the shard store and the monolingual reader are safe).
-Both were open when this was written.
+### Known limitations
+
+The final review's findings about the interrupt, the out directory with `[` and the shard
+digest are fixed (above). What it found and D6 deliberately leaves, one line each:
+
+- `select._score_in_chunks` repeats the chunk loop and the count check of D4's
+  `filter/qe.py:_score` (with "pairs" where D4 says "rows"); the two must change together
+  if the scorer contract changes.
+- `plan.py` imports `Kind` from `select`; `Plan` has five fields for three values; `bt.py`
+  and `ft.py` exist for a kind-mismatch check that cannot fire through `run_job` or the CLI;
+  `ShardStore.invalid` has no production caller; the CLI imports `Releasable` from
+  `rinchen.mine.embed`.
+- A `base_url` with a space inside the host (`http://h h/v1`) is accepted; httpx normalises it.
+- The `rinchen` console entry has no CPython 3.14 assertion except `doctor`, as in D4 and
+  D5, and a `manifest.json` that cannot be parsed is overwritten by the D4 manifest store's
+  design.
+- An `OSError` raised by `scorer.release()` is worded as a failure to write the outputs
+  (read from the code, not run).
+- Two runs into one output directory are not guarded (above).
 
 ## Extending
 
@@ -728,12 +810,14 @@ The D3 gates assigned to D4 stay open as recorded in `docs/runbooks/04_filtering
 - **Windows and macOS were not run.**
 - **Concurrent runs into one output directory are not guarded** (see above); only
   sequential runs are tested.
-- **Silent bit rot in a shard is not detected** and a damaged file can abort the process
-  (measured above).
+- **A damaged shard file can still abort the process** (a Rust allocation failure that no
+  handler catches; measured above), and the content digest is not a signature.
 - **Memory beyond 200,000 rows** was extrapolated, and the memory of a whole `run_job`
   beyond the tiny run was not measured.
-- **The real binary** was run only for `--help`, a dry run and a failing run against a
-  closed port; a successful run used the fake seams in process.
+- **The real binary** was run for `--help`, a dry run, a failing run against a closed port
+  and, against a loopback stand-in for a chat server that is not a model, an interrupt and
+  four out directories with glob characters; every other successful run used the fake seams
+  in process.
 
 ## Where the code lives
 
@@ -743,4 +827,4 @@ The D3 gates assigned to D4 stay open as recorded in `docs/runbooks/04_filtering
 `configs/data/synth.yaml`, `src/rinchen/cli/synth.py`, unit and property tests named
 `test_mbr_*`, `test_synth_*`, `test_config_synth.py`, `test_cli_synth.py`,
 `tests/integration/test_synth_tiny_run.py`, and the test helpers in `tests/support/`
-(`planted_synth.py`, `synth_cli.py`, `fake_llm_server.py`).
+(`planted_synth.py`, `synth_cli.py`, `fake_llm_server.py`, `shard_files.py`).

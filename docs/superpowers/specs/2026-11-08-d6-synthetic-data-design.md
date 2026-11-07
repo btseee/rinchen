@@ -228,6 +228,12 @@ Both HTTP clients subclass `ChatCompletionsTranslator` in the private module
   the first. These drops are not counted anywhere.
 - A failure of any request fails the whole call, and requests not yet started are cancelled, as they
   are on an interrupt (`KeyboardInterrupt`); the first failure in submission order is the one raised.
+  The requests already in flight finish first (the pool is shut down with `wait=True`), each with
+  its own retries. The main thread waits in slices of `_INTERRUPT_POLL_S` (0.2 s), not in one
+  untimed `wait()`: once polars is imported a SIGINT does not wake an untimed wait (the handler
+  polars installs restarts it), so the interrupt would be raised only after every queued request had
+  been sent (`D-POLARS-SIGINT`; found by the final review, which measured exit 130 6.3 s after the
+  signal with all 40 requests received; a polled wait gives 0.27 s and 16 of 40).
 - `LlamaCppTranslator(cfg: LlamaCppConfig, ...)`: the same contract, but it issues `n` separate
   requests per text with `n` 1 (the server's `n` support varies by build), each with
   `seed + k` (modulo 2**31), and merges the candidates in that order.
@@ -281,18 +287,33 @@ Both HTTP clients subclass `ChatCompletionsTranslator` in the private module
   and an atomic rename, with no fsync; it raises `ValueError` for a caller's mistake (ids and
   candidates of different lengths, a string where a list belongs, a non-string candidate, a negative
   index) and `DataError` for a candidate UTF-8 cannot encode, before the disk is touched, naming the
-  shard and the id. `read(index, expected_ids)` returns the candidate lists or raises `DataError`
+  shard and the id. `write` also stores the content digest of what it wrote in the Parquet
+  key-value metadata, under `rinchen.content_sha256`: the SHA-256 hex digest of the UTF-8 bytes of
+  the JSON text `{"ids":[...],"candidates":[[...],...]}` (keys in that order, no whitespace,
+  `ensure_ascii=False`, the ids in shard order and one candidate list per id in order; a golden
+  test pins it). `read(index, expected_ids)` returns the candidate lists or raises `DataError`
   naming the file for a missing file, a file that is not Parquet, other columns or types, a row
-  count or an id (in order) that is not the expected one, a null list or a null candidate.
+  count or an id (in order) that is not the expected one, a null list or a null candidate, and then,
+  last (it hashes every text, and the structural checks say more about what is wrong), for a
+  missing content digest (a shard written before the digest existed, or by something else), an
+  unreadable metadata block (`pl.read_parquet_metadata`, which reads the file named and has no
+  `glob`) or a digest that differs from the one recomputed from the decoded rows. The digest is not
+  part of `job_fingerprint`.
   `load(index, expected_ids)` is the one place a file is judged: `Loaded(candidates)`, `Missing()`
   (no file; a stale `.part` beside it does not count) or `Invalid(reason)` (the `DataError`
   message, which names the file and never a text), decoding the file at most once.
   `completed(shards)` and `invalid(shards)` are built on `load`. Every Parquet read passes
   `glob=False`: `pl.read_parquet` expands `[`, `*` and `?` in a path (see `D-POLARS-GLOB`). A damaged
   file can make polars panic with `PanicException`, a `BaseException`, which is caught and treated
-  as an invalid file (`D-POLARS-PANIC`). Residual risk, accepted: page checksums are not checked, so
-  a bit flip that leaves the structure intact decodes to different candidates without error, and a
-  rare damaged file aborts the process; partial writes and truncation are caught.
+  as an invalid file (`D-POLARS-PANIC`). Page checksums are not checked by polars, so a bit flip
+  that leaves the structure intact decodes to different candidates without error (63.7% of random
+  flips of a 98 KB shard; the structural checks caught 0.3%); the content digest closes that: of
+  every single-bit flip of two small shards (9,888 and 26,712 flips) and 3,000 random flips of a 98
+  KB one, none decoded to different rows without an error. It is not a signature (whoever can
+  rewrite a shard can rewrite its digest; `corpus.parquet` and the manifest's hash are the record).
+  Residual risk, accepted: a rare damaged file aborts the process (a Rust allocation failure no
+  handler catches); partial writes and truncation are caught. A shard without a digest is invalid
+  and regenerated.
 
 ### `select`
 
@@ -316,8 +337,12 @@ rule that fails (rulings O, P, Q):
    NaN fails, a magnitude beyond float32 is the infinity of its sign, without a warning). The
    scorer is called with `qe.batch_size` pairs per call, as `(source, translation)` in the
    orientation of the FINAL pair (ruling M): for `bt` `(candidate, real text)`, for `ft` `(real
-   text, candidate)`. A wrong number of scores is an `UpstreamError`; an exception of the scorer
-   propagates unchanged.
+   text, candidate)`. A wrong number of scores is an `UpstreamError`, and so is a reply that is not
+   a sized iterable (`None`, a number, an iterator) and a score that is not a `numbers.Real`
+   (text, even when it reads like a number, `None`, a list, bytes), naming the pair index and the type,
+   never a text; NaN and the infinities are numbers and the threshold decides; an `OSError` of the
+   scorer is an `UpstreamError` "the QE scorer failed: ..." (chained); any other exception of the
+   scorer propagates unchanged.
 
 Then MBR among the survivors of a source: `mbr.select(survivors, utility)` with `pseudo_refs=None`,
 so each survivor is scored against the OTHER survivors (passing the survivors as explicit
@@ -408,8 +433,10 @@ scorer is released afterwards when it is `Releasable`, also after a failure. Eac
 before it is read so the manifest vouches for the bytes the run started from;
 `begin_commit` goes right before the first OUTPUT write, not before the generation,
 because shards are resumable work files and not manifest outputs, so a failed generation must not
-erase an earlier manifest (ruling V). An `OSError` anywhere in the run or the commit exits 1 with
-one line "cannot write the synth outputs under DIR: ...".
+erase an earlier manifest (ruling V). An `OSError` creating the out dir or in the commit exits 1 with
+one line "cannot write the synth outputs under DIR: ..."; one raised by a translator or the scorer
+is an `UpstreamError` (exit 4) before it gets there. `write_corpus` reads its output back with
+`glob=False`, so an out dir whose name holds `[`, `*` or `?` works.
 
 The dry run prints `job`, `kind`, `generator` (name and kind), `input rows`, `shards` (count and
 size), `fingerprint`, `shard directory`, `valid shards present` (the shard files that pass
@@ -446,19 +473,27 @@ Tests first. Fakes only: no network, no model, no GPU.
 - Clients (`httpx.MockTransport` fake server in `tests/support/fake_llm_server.py`): request body
   fields exact; `n` and seed handling; order preserved under concurrency; retry on 429/503 then
   success; `Retry-After`; retry exhaustion raises `UpstreamError` with the attempt count; a 400 is not
-  retried; malformed bodies, refusals and `choices: []`; the interrupt cancels queued requests;
+  retried; malformed bodies, refusals and `choices: []`; the interrupt cancels queued requests (one
+  test patches `wait` to raise, one sends a real SIGINT with polars imported and fails by assertion
+  with an untimed wait);
   backoff sleeps recorded through the injected `sleep`; the llama.cpp client issues `n` requests
   with `seed + k`.
 - CT2: family token conventions asserted with literals through stubs; language table errors; the
   `ctranslate2` module is never loaded by a test.
 - Shards: deterministic plan (property: concatenating shards reproduces the input; same input and
   size, same shards); fingerprint changes with each ingredient and a golden digest; store atomicity
-  (a failed write leaves no final file); a corrupt shard is regenerated; a `[1]` directory name; shard
+  (a failed write leaves no final file); a corrupt shard is regenerated; a `[1]` directory name; the
+  content digest (a golden value for awkward text, every part of the content tells shards apart, changed
+  text with the digest kept, no digest, an unreadable metadata block, the structural errors first, a
+  deterministic bit-flip sweep through `load` where no flip yields different rows without an error, a
+  `run_job` resume that regenerates a shard whose text changed on disk); shard
   resume after a crash: a fake generator that fails on shard 2 leaves shards 0-1 on disk, a second
   run with a working generator requests only shards 2..N and the final corpus equals an
   uninterrupted run's.
 - Select: exact reason counts on a planted candidate set (empty, non-Cyrillic output rejected by
-  purity, low-QE, NaN QE, survivors) with a fake scorer; boundary cases in float32; MBR picks the
+  purity, low-QE, NaN QE, survivors) with a fake scorer; scorer contract violations (text, None,
+  lists, bytes, a reply that is not a list, the pair index across chunks, an `OSError`); boundary
+  cases in float32; MBR picks the
   planted best among survivors; the QE-skipped status without a scorer; copies dropped as `copy`.
 - Run and CLI: the tiny synth run (the STOP gate): a planted monolingual file of 40 rows, the fake
   server and the scripted fakes, the fake scorer: exact counts of rows kept and dropped per reason
@@ -566,11 +601,14 @@ lazy, cached `supported_directions()`, and the Mongolian-script rule is one publ
 interrupt, validate `base_url`, wrap raw httpx errors, tolerate `"error": null`, honour
 `Retry-After` and drop candidates without a letter or digit; the encodability check is shared
 (`_texts.require_encodable`) and runs in `CT2Translator` too; every Parquet read uses `glob=False`
-(`corpus/readers.py` too) and a polars `PanicException` is handled; `plan.py`, `plan_run` and
+(`corpus/readers.py` and the read-back of `corpus/writers.py` too) and a polars `PanicException` is
+handled; `plan.py`, `plan_run` and
 `RunPlan` exist; the translator reply and error taxonomy of `run_job`; `Invalid.reason`; the CLI
 hashes each input before reading it, creates the out dir before the work, records `eole` and
 `torch` in `tool_versions`, prefixes metric keys with `count.` and `shards.` and releases the
-scorer.
+scorer. The final review's fix wave added the polled wait of the HTTP clients, `glob=False` on the
+`write_corpus` read-back, the per-shard content digest, the scorer return-type and `OSError`
+errors, and `tests/support/shard_files.py`.
 
 ## Open gates and limitations (not done by D6)
 
@@ -583,7 +621,9 @@ scorer.
 - The QE floor, the purity share and every default are priors; the real MetricX-QE scorer was not
   run in D6.
 - Concurrent runs into one out dir are not guarded (a second run rewrites the first's outputs and
-  manifest); the fingerprint does not cover the prompt wording or the weights behind a path; silent
-  bit rot inside a stored candidate is not detected; `write_corpus` reads its output back through a
-  path polars expands as a pattern, so an out dir containing `[`, `*` or `?` fails after the
-  generation was paid for (open when this was written).
+  manifest); the fingerprint does not cover the prompt wording or the weights behind a path; a
+  damaged shard file can still abort the process, and the content digest is not a signature; an
+  `OSError` of `scorer.release()` is worded as an output write failure; the minors the final review
+  left (a QE chunk loop that duplicates D4's, `plan.py` importing `Kind` from `select` and the
+  small indirections around it, a `base_url` with a space inside the host, no CPython 3.14 assertion
+  at the console entry except `doctor`) are listed in the runbook.

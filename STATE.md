@@ -367,8 +367,9 @@ the final review fixes.]
 **D6 (synthetic data) is done on branch `d6-synthetic-data`; its STOP gate (a tiny synth
 run through the CLI with a fake generator) is met locally.** The branch was cut from `main`
 at `0d534a3` on 2026-11-07, is not merged and not pushed (the overnight run made no merge
-and no push), and no CI run covers it. It is 21 commits ahead of `main` as of `510258d`
-(the last code commit; the commit that records this is the next one). It is a tested
+and no push), and no CI run covers it. It is 23 commits ahead of `main` as of `38297c4`
+(the last code commit; the commit that records the final review's fixes in the documents is the
+next one). It is a tested
 pipeline, not a pipeline that ever ran: no vLLM or llama.cpp server, no NLLB or MADLAD
 CTranslate2 model and no GPU was used by any test or measurement, every client path was
 tested against fakes, no real monolingual corpus exists, the prompts are the builder's
@@ -384,14 +385,17 @@ the command `rinchen synth run` (`rinchen.cli.synth`), the test helpers `planted
 its 12 rulings and the 22 amendments A to V, made without a review round because the user
 said "Proceed. I'm going to sleep now. Don't stop until you finish everything. Commit
 everything.", are condensed in DECISIONS.md ("2026-11-08: D6 synthetic data"). Every task was
-reviewed and fixed once, a batch of parked review minors followed (`510258d`), and a final
-whole-branch review and its fix wave were still to run when this was written. Gates, run for
-real on Linux, CPython 3.14.10, 2026-11-07 (`just` is not installed here, so the four gate
-commands were run as one chain), the last gate of the code, on `510258d`: `ruff format
---check .` clean, `ruff check .` clean, `mypy src` clean, `pytest -m "not network" -q` --
-**4294 passed, 1 skipped, 10 deselected** in 192 s (3 min 15 s for the four commands) (2833
-passed at the D5 merge); rerun with these records added, the same counts in 225 s (3 min 47 s
-for the four commands).
+reviewed and fixed once, a batch of parked review minors followed (`510258d`), and an independent
+whole-branch review then ran (no Critical finding, three Important ones: Ctrl-C did not cancel
+the queued requests in the real binary, `write_corpus` failed for an `--out-dir` containing `[`,
+and a bit flip in a shard could write wrong text into the corpus on a resume); its fix wave is
+`38297c4` and corrects earlier statements, in DECISIONS.md ("2026-11-08: D6 final review -
+corrections and fixes"). Gates, run for real on Linux, CPython 3.14.10 (`just` is not installed
+here, so the four gate commands were run as one chain), the last gate of the code, on `38297c4`
+(2026-11-08): `ruff format --check .` clean, `ruff check .` clean, `mypy src` clean, `pytest -m
+"not network" -q` -- **4330 passed, 1 skipped, 10 deselected** in 193 s (3 min 16 s for the four
+commands; the same counts again with these records added) (4294 on `510258d`, 2833 at the D5
+merge).
 Evidence, all through the CLI in process with planted fakes: the 40 planted rows give exactly
 sources 40, candidates 60, empty 5, purity 10, QE 10, copy 0, no candidates 5, no survivor 20
 and selected 15 for both `bt` and `ft` (without QE: QE 0, no survivor 10, selected 25), in 5
@@ -408,13 +412,23 @@ the build, one mutant at a time, as recorded per task: MBR 42, config 110, promp
 121, CT2 52 (and 18 more in the fix round), shards 80, selection 58 (about 45 more in the fix
 round), runner 60 (40 more after the refactor), CLI about 52, end batch 35; every survivor was
 shown to be an equivalent mutant.
-Findings worth knowing: three upstream facts, recorded in `docs/VERIFY.md`. `D-POLARS-GLOB`:
+Findings worth knowing: four upstream facts, recorded in `docs/VERIFY.md`. `D-POLARS-GLOB`:
 `pl.read_parquet` and `pl.scan_parquet` expand `[`, `*` and `?` in a path as a pattern, so a
 shard directory named `run[1]` made every shard unreadable and a resume silently regenerated
-everything (`glob=False` everywhere). `D-POLARS-PANIC`: a damaged Parquet file can raise
-`PanicException`, a `BaseException` (caught); in 150,000 single-bit flips of a small shard-shaped
-file 276 panicked, 8 aborted the process with a Rust allocation failure (not catchable) and
-65,607 decoded without error to different data, so silent bit rot in a shard is not detected.
+everything (`glob=False` everywhere, the read-back of `write_corpus` included since the final
+fix wave). `D-POLARS-PANIC`: a damaged Parquet file can raise `PanicException`, a
+`BaseException` (caught); in 150,000 single-bit flips of a small shard-shaped file 276 panicked,
+8 aborted the process with a Rust allocation failure (not catchable) and 65,607 decoded without
+error to different data; through `ShardStore.read` the structural checks alone caught 0.3% of
+the flips of a 98 KB shard (63.7% decoded to different candidates), which the build had put at
+about 1% and accepted, so every shard now carries a SHA-256 of its content in the Parquet
+metadata that `read` checks last (no flip of three test shards, 9,888, 26,712 and 3,000
+sampled, decoded to different rows without an error; the digest is not a signature and a
+damaged file can still abort the process). `D-POLARS-SIGINT`: once polars is imported a SIGINT
+does not wake an untimed `concurrent.futures.wait()`, so Ctrl-C did not cancel the queued
+requests (through the real binary: exit 130 6.33 s after the signal with 40 of 40 requests
+sent); the clients now wait in 0.2 s slices (0.27 s and 16 of 40), and the requests already in
+flight still finish.
 `D-CT2-NUMHYP`: libctranslate2 4.8.4 raises "The number of hypotheses cannot be greater than
 beam_size * patience" at the first batch, so `Ct2Config` rejects `n > beam_size` at load. Also:
 the first draft of the spec had the QE floor in the wrong direction (MetricX-QE is lower-is-
@@ -429,17 +443,24 @@ Open gates (none can be done without a real generator, data or a reader): runnin
 generator (the servers, the NLLB and MADLAD models, their token conventions, prompt quality,
 throughput, GPU memory); a Mongolian reader's judgement of any output; calibrating the QE floor,
 the script share and every default; a language identifier on the synthetic side; COMET and MetricX
-as MBR utilities; training-time `<bt>` and `<ft>` insertion (D7 and D8). Known and open when this
-was written: `write_corpus` reads its output back through a path polars expands as a pattern (an
-out dir containing `[`, `*` or `?` fails after generation was paid for), concurrent runs into one
-out dir are not guarded, a scorer's `OSError` is worded as "cannot write the synth outputs". NOT
-verified: any real server or model, the MADLAD and NLLB token conventions, the real MetricX-QE
+as MBR utilities; training-time `<bt>` and `<ft>` insertion (D7 and D8). Known and open:
+concurrent runs into one out dir are not guarded; a damaged shard file can still abort the
+process; the minors the final review left (a QE chunk loop that duplicates D4's, `plan.py`
+importing `Kind` from `select` and the small indirections around it, a `base_url` with a space
+inside the host, no CPython 3.14 assertion at the console entry except `doctor`, an `OSError` of
+`scorer.release()` worded as an output write failure), listed in the runbook. NOT verified: any
+real server or model, the MADLAD and NLLB token conventions, the real MetricX-QE
 scorer inside D6, Windows and macOS, memory beyond 200,000 rows and of a whole `run_job` beyond the
 tiny run. [EVIDENCE: the gate chain, the integration test, the worked example, the measurement
-scripts and the reproductions of the three upstream facts described in the runbook and in
-`docs/VERIFY.md`, 2026-11-07, commits `8d2cd7f` through `510258d`.]
+scripts and the reproductions of the four upstream facts described in the runbook and in
+`docs/VERIFY.md`, 2026-11-07 and 2026-11-08, commits `8d2cd7f` through `38297c4`; the final fix
+wave added 36 tests, checked 22 mutants by hand (the two that survive are equivalent: a poll
+interval of 5 s, because any timed wait is interrupted at once, and a wait without
+`FIRST_EXCEPTION`, which only delays noticing a failure by at most 0.2 s), and re-ran the real
+binary against a loopback stand-in for a server (the interrupt, and `out[1]`, `out*`, `out?` and
+`out[a-z]`).]
 
-Branch status (updated 2026-11-07, after the D6 build): `main` holds D3, the D3
+Branch status (updated 2026-11-08, after the D6 final review's fixes): `main` holds D3, the D3
 research follow-up, D4 and D5, and is at `0d534a3` (the commit that records the D5 merge;
 `862e176` is the D5 merge tip, `2346cea` was the D3 end, `b38eaae` the D4 merge tip and
 `4eac98f` the commit that recorded the D4 merge; no `d3-research-followup`,
@@ -447,7 +468,7 @@ research follow-up, D4 and D5, and is at `0d534a3` (the commit that records the 
 `d6-synthetic-data`, cut from `main` at `0d534a3`; it is not merged into `main` and not
 pushed. At the D5 merge `main` was 81 commits ahead of `origin/main` (`9e7b0ec`); it is
 unpushed, and no CI run covers D3, D4, D5 or D6. The full local gate was last run on the D6
-branch: 4294 passed, 1 skipped, 10 deselected (D6 included), on `510258d`; on the merged D5
+branch: 4330 passed, 1 skipped, 10 deselected (D6 included), on `38297c4`; on the merged D5
 tree `main` gave 2833 passed.
 
 Next step: D7 (Multilingual ablations). Nothing in D6 blocks it. Its inputs from D6: `rinchen

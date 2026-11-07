@@ -1371,3 +1371,114 @@ share, a language identifier on the synthetic side (purity cannot tell Mongolian
 Cyrillic text), COMET and MetricX as MBR utilities, and the training-time `<bt>` and `<ft>`
 insertion (D7 and D8). The D3 gates assigned to D4 and the D5 gates that need real text stay open as
 recorded there.
+
+## 2026-11-08: D6 final review - corrections and fixes
+
+An independent review of the whole branch `d6-synthetic-data` (base `0d534a3`, head `f8a9d67`, 22
+commits, read-only, run after the build and the documentation commit) found no Critical issue and
+three Important ones; the gate reproduced exactly (4294 passed, 1 skipped, 10 deselected). This entry
+records what it found, what was changed and how, CORRECTS in words the earlier statements it shows
+to be false, and lists what is left alone. The code and tests are in the commit "D6: final review
+fixes" and the documents in "D6: final review fixes, docs"; both are on the branch, which is still
+not merged and not pushed. Nothing here is a ruling the user approved: like the rest of D6 these
+were decided by the builder, and each says what it costs if wrong.
+
+[CORRECTION: Ctrl-C did not cancel the queued requests in the real program.] The runbook's exit-code
+table, the design and the build record of the fix for the Task 4 review ("interrupt now cancels
+queued requests") said that an interrupt cancels the requests not yet sent. That was true of the
+unit test, which patched `wait` to raise `KeyboardInterrupt` and so never exercised signal
+delivery, and false of `rinchen`: once `polars` is imported (always, under `rinchen.cli.main`) a
+SIGINT does not wake the main thread's untimed `concurrent.futures.wait()`, and the interrupt is
+raised only when the call returns on its own, after every queued request has been sent. Through the
+real binary, a loopback server sleeping 1 s per request, `concurrency` 4 and 40 texts in one shard,
+a SIGINT 4.5 s after the start gave exit 130 6.33 s later with 40 of 40 requests received. [DESIGN:
+Polled wait.] `_fan_out` now waits in slices of 0.2 s (`_INTERRUPT_POLL_S`), keeping every other
+behaviour (the first failure cancels the rest and is the one raised, any `BaseException` cancels the
+queue, results in input order, `shutdown(wait=True)` so requests in flight finish). The same probe
+now gives exit 130 0.27 s after the signal with 16 of 40 received. Also stated plainly now: the
+requests in flight are finished, not abandoned, up to `concurrency` of them, each with its own
+retries, and a second Ctrl-C during that wait is not delivered until it ends. Cost if wrong: a
+5 Hz wake-up of the main thread while a shard is being generated. `docs/VERIFY.md` gets
+`D-POLARS-SIGINT`: polars installs a SIGINT handler with `SA_RESTART`, so an untimed lock acquire is
+restarted and a timed one is not (a `wait(timeout=5)` is interrupted at once); every `rinchen`
+command whose main thread blocks without a timeout is affected the same way, which is out of D6's
+scope and was not examined for D4 and D5.
+
+[CORRECTION: silent bit rot in a shard was neither "about 1%" nor an acceptable residual risk.]
+The build record of the shard store said that about 1% of random byte flips of a Parquet shard
+decode to different data and accepted it (no content checksum). The 2026-11-08 entry above kept
+that stance ("silent bit rot inside a stored candidate passes validation", "no content checksum
+was added") and measured 65,607 of 150,000 flips of a small shard decoding to a different frame
+without error. The review repeated the measurement through `ShardStore.read` with the expected ids,
+which is what `run_job` does: 63.7% of 1,500 flips of a 98,112-byte shard (512 rows of 4
+candidates) decoded to different candidates with no error and only 0.3% were caught by the store's
+own checks; on a 3,248-byte shard 27.5% and 0.9%. The shards are the resumable work files, so a flip
+on disk between a crash and a resume wrote wrong text into the corpus with no trace. [DESIGN: Shard
+content digest.] `ShardStore.write` stores the SHA-256 of the canonical JSON of the shard's ids and
+candidates (the exact recipe is in the `_content_digest` docstring and the runbook) in the Parquet
+key-value metadata under `rinchen.content_sha256`; `ShardStore.read` recomputes it from the decoded
+rows, after the cheap structural checks, and a missing digest, an unreadable metadata block or a
+mismatch is a `DataError` naming the file, so the shard is `Invalid` and is regenerated and counted
+under `regenerated_invalid`. Shards written before this change have no digest and are regenerated
+once. The digest is not part of `job_fingerprint` (its golden digest and the planted counts did not
+change). It is not a signature: whoever can rewrite a shard can rewrite its digest, and the artefact
+of record stays the manifest-hashed `corpus.parquet`. Cost if wrong: about 2 to 2.5 microseconds per
+KiB of candidate text (0.7 ms for a 512-row shard of 4 candidates, against seconds to minutes to
+generate it) and a regeneration of every shard that predates the change. What it does not touch: a
+damaged file can still abort the process (a Rust allocation failure no handler catches).
+
+[CORRECTION: `write_corpus` was not "open"; it was a bug that is now fixed.] The `D-POLARS-GLOB`
+evidence above, the runbook, the design and STATE.md called the read-back of `write_corpus`
+(`pl.scan_parquet(part_path)` without `glob=False`) a known hazard to avoid by keeping `[`, `*` and
+`?` out of `--out-dir`. The review ran it: `--out-dir out[1]` generated every shard and then ended in
+an uncaught `ComputeError` (exit 1, a traceback, no corpus, counts or manifest, and the earlier
+manifest already removed by `begin_commit`); `out*` and `out?` happened to work. One argument,
+`glob=False`, and tests (the writer with `[` in the directory and in the name, the CLI with
+`out[1]`, `out*?` and `out[a-z]`). The real binary now writes all three outputs for `out[1]`,
+`out*`, `out?` and `out[a-z]`. `write_corpus` is shared with D4; its other callers gain the same
+protection.
+
+[DESIGN: A scorer's wrong reply and its `OSError` are `UpstreamError`.] A QE scorer returning
+text, `None` or a list as a score gave a bare `ValueError` or `TypeError` traceback from `float()`,
+and a scorer that raised `OSError` (a missing weights file) was reported as "cannot write the synth
+outputs". Now a score that is not a `numbers.Real` (text is rejected even when it reads like a
+number), or a reply that is not a sized iterable, is an `UpstreamError` that names the pair and the
+type and never a text, like the wrong count it joins (exit 4); NaN and the infinities stay numbers
+and the threshold decides; an `OSError` of the scorer is an `UpstreamError` "the QE scorer failed:
+...", chained; any other exception of the scorer still propagates unchanged. Cost if wrong: a scorer
+that returns numeric strings on purpose is refused.
+
+[EVIDENCE: Bit-flip sweeps with the digest, through `ShardStore.load`, 2026-11-08, one bit at a
+time with a parent process restarting the child after an abort.] A 1,236-byte shard, all 9,888
+flips: 941 digest mismatches, 4,136 unreadable, 249 structural, 4,561 leaving the rows unchanged, 0
+different rows without an error, 1 abort. A 3,339-byte shard, all 26,712 flips: 7,461, 11,046, 232,
+7,972, 0 and 1 abort. A 98,203-byte shard, 3,000 random flips: 1,843 digest mismatches, 1,117
+unreadable, 8 structural, 32 unchanged, 0 different, no abort; with the digest comparison switched
+off the same harness decoded 1,840 of them to different candidates. The two aborts are single
+positions (SIGABRT, return code -6); the committed unit test sweeps every 7th byte of the first
+shard, with a bit that cycles through all eight, which never pairs the aborting byte with the
+aborting bit. Mutations checked by hand, one at a time: the bare wait (the new SIGINT test fails by
+assertion, 3.01 s), no failure check in the wait, no `cancel_futures`, `glob=False` removed from the
+read-back, the digest comparison skipped (six tests fail), the digest without the ids, with
+`ensure_ascii=True`, with default separators, with sorted candidates, with the keys swapped, a
+missing digest accepted, the metadata errors unhandled, the digest checked before the structure, a
+numeric-text score accepted, the type check dropped, the pair index without the chunk offset, a
+reply without `len` accepted, the `OSError` not converted, not chained, and a message that carries
+the score; every one was caught except two equivalent mutants: `_INTERRUPT_POLL_S = 5.0`, which
+passes because any timed wait is interrupted at once on this platform, and a wait without
+`FIRST_EXCEPTION`, which only delays noticing a failure by at most 0.2 s (22 mutants).
+
+[CORRECTION: STATE.md and the runbook said the final review and its fix wave had still to run.]
+They have run; this entry and the two commits are the outcome, and the gate counts in STATE.md are
+those of the fixed tree.
+
+[DESIGN: Findings the fix wave leaves alone, one line each; the runbook lists them too.] M-1: the
+`select._score_in_chunks` loop and count check duplicate D4's `filter/qe.py:_score`, so they must
+change together. M-3: `plan.py` imports `Kind` from `select`, `Plan` has five fields for three
+values, `bt.py` and `ft.py` exist for a kind-mismatch check that cannot fire, `ShardStore.invalid`
+has no production caller and `cli/synth.py` imports `Releasable` from `rinchen.mine.embed`. M-4: a
+`base_url` with a space inside the host is accepted (httpx normalises it). M-5: the `rinchen` console
+entry has no CPython 3.14 assertion except `doctor` (as in D4 and D5), and an unparseable
+`manifest.json` is overwritten by the D4 manifest store's design. Not examined: whether the polars
+SIGINT behaviour shows in D4 and D5 commands, and a call into a C++ extension such as CTranslate2's
+`translate_batch`.
