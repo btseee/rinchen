@@ -272,3 +272,37 @@ def test_a_missing_lexicon_file_is_a_data_error(
 
     with pytest.raises(DataError, match=r"lexicon\.tsv"):
         _load_lexicon()
+
+
+class _BytesResource:
+    """A package resource with fixed bytes, decoded the way `read_text` decodes."""
+
+    def __init__(self, data: bytes) -> None:
+        self._data = data
+
+    def joinpath(self, *names: str) -> _BytesResource:
+        return self
+
+    def read_text(self, encoding: str) -> str:
+        return self._data.decode(encoding)
+
+
+def test_a_lexicon_file_read_through_the_resource_seam_is_parsed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data = (HEADER + "аа\t" + SCRIPT_A + "\n").encode("utf-8")
+    monkeypatch.setattr(rules.resources, "files", lambda package: _BytesResource(data))
+
+    assert _load_lexicon() == {"аа": SCRIPT_A}
+
+
+def test_a_lexicon_file_that_is_not_utf8_is_a_data_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data = HEADER.encode("utf-8") + b"\xff\xfe\tX\n"
+    monkeypatch.setattr(rules.resources, "files", lambda package: _BytesResource(data))
+
+    with pytest.raises(DataError, match=r"lexicon\.tsv.*UTF-8") as caught:
+        _load_lexicon()
+
+    assert isinstance(caught.value.__cause__, UnicodeDecodeError)

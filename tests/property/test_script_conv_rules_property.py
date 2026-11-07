@@ -7,6 +7,8 @@ code points stay reviewable.
 
 from __future__ import annotations
 
+import string
+
 from hypothesis import event, given
 from hypothesis import strategies as st
 
@@ -41,6 +43,27 @@ _CHARACTER = st.one_of(
 _TEXT = st.text(alphabet=_CHARACTER, max_size=40)
 
 
+_ASCII_ALPHANUMERIC = frozenset(string.ascii_letters + string.digits)
+# Written out here, not read from the alphabet module, so the oracle stands alone.
+_SCRIPT_MARK = {".": chr(0x1803), ",": chr(0x1802)}
+_NO_CYRILLIC = st.text(alphabet=st.sampled_from("abZ09., "), max_size=14)
+
+
+def _expected_marks(text: str) -> str:
+    """A "." or "," stays between two ASCII letters or digits and maps elsewhere."""
+    converted = []
+    for index, char in enumerate(text):
+        between = (
+            0 < index < len(text) - 1
+            and text[index - 1] in _ASCII_ALPHANUMERIC
+            and text[index + 1] in _ASCII_ALPHANUMERIC
+        )
+        converted.append(
+            _SCRIPT_MARK[char] if char in _SCRIPT_MARK and not between else char
+        )
+    return "".join(converted)
+
+
 def _changes_only_dots_and_commas(before: str, after: str) -> bool:
     return len(before) == len(after) and all(
         old == new or CYRILLIC_TO_SCRIPT_PUNCTUATION.get(old) == new
@@ -69,6 +92,13 @@ def test_a_non_cyrillic_segment_changes_only_in_its_dots_and_commas(text: str) -
             assert transliterate(piece.text) == piece.text
         elif piece.kind == "other":
             assert _changes_only_dots_and_commas(piece.text, transliterate(piece.text))
+
+
+@given(_NO_CYRILLIC)
+def test_a_dot_or_comma_between_ascii_letters_or_digits_is_the_only_one_that_stays(
+    text: str,
+) -> None:
+    assert transliterate(text) == _expected_marks(text)
 
 
 @given(_TEXT)

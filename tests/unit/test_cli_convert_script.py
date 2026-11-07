@@ -14,6 +14,7 @@ import errno
 import hashlib
 import importlib.metadata
 import json
+import os
 import shlex
 import sys
 from collections.abc import Callable, Sequence
@@ -593,6 +594,23 @@ def test_a_failed_write_leaves_no_manifest_for_a_later_run_to_trust(
     assert "disk full" in result.stderr
     assert not store.manifest_path(data_workspace.out_dir).exists()
     _no_part_files(data_workspace.out_dir)
+
+
+def test_a_failed_write_of_build_data_names_the_path_the_error_reports(
+    data_workspace: DataWorkspace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def disk_full(*args: Any, **kwargs: Any) -> NoReturn:
+        raise OSError(errno.ENOSPC, "No space left on device", "/disk/corpus/a.src")
+
+    monkeypatch.setattr(convert_script, "build_corpus", disk_full)
+
+    result = _run(*data_workspace.args())
+
+    assert result.exit_code == 1, result.output
+    assert result.stderr == (
+        f"error: cannot write the corpus files under {data_workspace.out_dir}: "
+        "No space left on device: /disk/corpus/a.src\n"
+    )
 
 
 def test_a_run_that_keeps_no_pair_is_a_data_error_that_leaves_no_manifest(
@@ -1287,6 +1305,24 @@ def test_train_resolves_the_data_and_run_directories_before_it_renders_the_confi
     assert dry_run.stdout.splitlines()[1] == str(train_workspace.config)
 
 
+def test_train_records_a_relative_spm_config_by_its_absolute_path(
+    train_workspace: TrainWorkspace,
+    seams: TrainSeams,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    relative = os.path.relpath(train_workspace.spm_config, tmp_path)
+    assert not Path(relative).is_absolute()
+
+    _run_ok(*train_workspace.args(), "--spm-config", relative)
+
+    inputs = [item.path for item in _manifest(train_workspace.run_dir).inputs]
+    assert str(train_workspace.spm_config.resolve()) in inputs
+    assert relative not in inputs
+    assert all(Path(path).is_absolute() for path in inputs)
+
+
 @pytest.mark.parametrize("extra", [[], ["--dry-run"]])
 def test_train_fails_before_any_work_when_the_eole_script_is_missing(
     train_workspace: TrainWorkspace,
@@ -1568,6 +1604,63 @@ def test_export_refuses_an_out_dir_that_exists_and_touches_nothing(
     assert _tree(export_workspace.run_dir) == before
 
 
+def test_export_refuses_an_out_dir_that_appears_after_the_plan_and_touches_nothing(
+    export_workspace: ExportWorkspace,
+    export_seam: ExportSeam,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    out_dir = export_workspace.default_out_dir
+    hash_inputs = convert_script._hash_inputs
+
+    def hash_then_let_another_process_create_the_directory(
+        paths: list[Path],
+    ) -> Any:
+        hashed = hash_inputs(paths)
+        out_dir.mkdir()
+        (out_dir / "earlier.bin").write_bytes(b"earlier")
+        return hashed
+
+    monkeypatch.setattr(
+        convert_script,
+        "_hash_inputs",
+        hash_then_let_another_process_create_the_directory,
+    )
+
+    result = _run(*export_workspace.args())
+
+    assert result.exit_code == 2, result.output
+    assert result.stderr == (
+        f"error: {out_dir} exists: remove it, or pass another --out-dir\n"
+    )
+    assert export_seam.calls == []
+    assert _tree(out_dir) == [(str(out_dir / "earlier.bin"), b"earlier")]
+
+
+def test_export_refuses_a_dangling_link_that_appears_after_the_plan(
+    export_workspace: ExportWorkspace,
+    export_seam: ExportSeam,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    out_dir = export_workspace.default_out_dir
+    nowhere = tmp_path / "nowhere"
+    hash_inputs = convert_script._hash_inputs
+
+    def hash_then_plant_a_link(paths: list[Path]) -> Any:
+        hashed = hash_inputs(paths)
+        out_dir.symlink_to(nowhere, target_is_directory=True)
+        return hashed
+
+    monkeypatch.setattr(convert_script, "_hash_inputs", hash_then_plant_a_link)
+
+    result = _run(*export_workspace.args())
+
+    assert result.exit_code == 2, result.output
+    assert export_seam.calls == []
+    assert out_dir.is_symlink()
+    assert not nowhere.exists()
+
+
 def test_a_failed_export_removes_the_directory_it_created_and_keeps_the_log(
     export_workspace: ExportWorkspace, export_seam: ExportSeam
 ) -> None:
@@ -1600,6 +1693,47 @@ def test_a_failed_export_does_not_touch_a_directory_that_was_there_before(
     assert result.exit_code == 2, result.output
     assert export_seam.calls == []
     assert _tree(earlier) == before
+
+
+def test_a_failed_write_of_export_names_the_path_the_error_reports(
+    export_workspace: ExportWorkspace,
+    export_seam: ExportSeam,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def disk_full(source: Path, destination: Path) -> NoReturn:
+        raise OSError(errno.ENOSPC, "No space left on device", "/disk/ct2/model.bin")
+
+    monkeypatch.setattr(convert_script, "_copy_into_place", disk_full)
+
+    result = _run(*export_workspace.args())
+
+    assert result.exit_code == 1, result.output
+    assert result.stderr == (
+        f"error: cannot write the export outputs under "
+        f"{export_workspace.default_out_dir}: "
+        "No space left on device: /disk/ct2/model.bin\n"
+    )
+    assert not export_workspace.default_out_dir.exists()
+
+
+def test_an_unreadable_config_is_a_data_error_not_a_failed_write(
+    export_workspace: ExportWorkspace,
+    export_seam: ExportSeam,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unreadable(path: Path) -> NoReturn:
+        raise OSError(errno.EACCES, "Permission denied", str(path))
+
+    monkeypatch.setattr(convert_script, "sha256_of", unreadable)
+
+    result = _run(*export_workspace.args())
+
+    assert result.exit_code == 3, result.output
+    assert result.stderr.startswith("error: cannot read the config ")
+    assert str(export_workspace.config) in result.stderr
+    assert "cannot write" not in result.stderr
+    assert export_seam.calls == []
+    assert not export_workspace.default_out_dir.exists()
 
 
 def test_a_failed_copy_of_the_char_model_leaves_no_manifest_and_no_part_file(
@@ -2003,6 +2137,13 @@ def test_eval_reports_a_converter_that_changes_the_number_of_lines(
     assert result.exit_code == 4, result.output
     assert "4" in result.stderr
     assert result.stdout == ""
+
+
+def test_eval_help_lists_the_five_lines_it_prints() -> None:
+    result = _run_ok("eval", "--help")
+
+    for line in ("cer", "word_accuracy", "n", "rule_fallbacks", "invalid_outputs"):
+        assert f"`{line}`" in result.stdout, line
 
 
 def test_eval_rejects_an_unknown_target_before_it_loads_the_model(

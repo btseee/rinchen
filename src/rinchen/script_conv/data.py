@@ -21,7 +21,7 @@ from typing import Literal, TextIO
 
 from rinchen.errors import ConfigError, DataError
 from rinchen.script_conv.rules import transliterate_word
-from rinchen.script_conv.validate import validate_traditional
+from rinchen.script_conv.validate import is_script_word, validate_traditional
 from rinchen.text.normalize import normalize
 from rinchen.utils.part_file import unique_part_path
 
@@ -29,6 +29,7 @@ PairOrigin = Literal["reference", "rule", "parallel"]
 
 EMPTY = "empty"
 MULTIWORD = "multiword"
+NOT_SCRIPT_WORD = "not_script_word"
 DUPLICATE = "duplicate"
 
 _CYRILLIC = "khk_Cyrl"
@@ -64,7 +65,7 @@ class CorpusFiles:
 
     `files` and `rows` are keyed by file name (`cyrl2mong.train.src`, ...); `rows`
     counts lines. `dropped` is keyed by drop code and lists only the codes that
-    fired: `empty`, `multiword`, `duplicate` and each code of
+    fired: `empty`, `multiword`, `not_script_word`, `duplicate` and each code of
     `rinchen.script_conv.validate.VIOLATION_CODES`.
     """
 
@@ -176,11 +177,13 @@ def _reject_line_breaks(index: int, pair: WordPair) -> None:
 def _screen_pair(pair: WordPair) -> WordPair | _Drop:
     """The normalized pair, or the first check it fails.
 
-    The checks run in order: empty, multiword, a script-side violation, then (in the
-    caller) duplicate. The validator reads the raw script side because `normalize`
-    strips joiners, which would hide them. A Cyrillic side is normalized first because
-    normalization turns other whitespace into spaces. A script side that passes the
-    validator is never empty once normalized: it holds a character `normalize` keeps.
+    The checks run in order: empty, multiword, a script-side violation, a script side
+    that is not one script word, then (in the caller) duplicate. The validator reads
+    the raw script side because `normalize` strips joiners, which would hide them. The
+    script-word check reads the normalized side, the text the corpus will hold. A
+    Cyrillic side is normalized first because normalization turns other whitespace
+    into spaces. A script side that passes the validator is never empty once
+    normalized: it holds a character `normalize` keeps.
     """
     cyrillic = normalize(pair.cyrillic, _CYRILLIC)
     if not cyrillic or _is_blank(pair.script):
@@ -190,7 +193,10 @@ def _screen_pair(pair: WordPair) -> WordPair | _Drop:
     violations = validate_traditional(pair.script)
     if violations:
         return _Drop(violations[0].code)
-    return WordPair(cyrillic, normalize(pair.script, _SCRIPT), pair.origin)
+    script = normalize(pair.script, _SCRIPT)
+    if not is_script_word(script):
+        return _Drop(NOT_SCRIPT_WORD)
+    return WordPair(cyrillic, script, pair.origin)
 
 
 def _screen_pairs(pairs: Sequence[WordPair]) -> tuple[list[WordPair], Counter[str]]:
@@ -276,7 +282,10 @@ def build_corpus(
     2. a side that still holds U+0020 after its outer spaces are stripped, because a
        corpus line is one word (NNBSP does not count) [`multiword`];
     3. a violation on the raw script side, counted under the first one's code;
-    4. a repeat of an earlier pair once both sides are normalized, the first is kept
+    4. a normalized script side that is not one script word (`is_script_word`): it
+       holds no letter, or an ASCII letter, a digit, punctuation or a space, which
+       running text may hold but a converted word cannot [`not_script_word`];
+    5. a repeat of an earlier pair once both sides are normalized, the first is kept
        [`duplicate`].
     Cyrillic sides go through `normalize(..., "khk_Cyrl")` and script sides through
     `normalize(..., "mn_Mong")`, which leaves NNBSP, MVS and FVS alone.
@@ -308,8 +317,8 @@ def build_corpus(
     train, valid = _split(kept, valid_fraction, seed)
     if not train:
         raise DataError(
-            f"train split is empty: {len(kept)} pairs, valid_fraction"
-            f" {valid_fraction}, seed {seed}"
+            f"train split is empty (pairs kept: {len(kept)}, valid_fraction"
+            f" {valid_fraction}, seed {seed})"
         )
     out_dir.mkdir(parents=True, exist_ok=True)
     lines_by_name = _corpus_lines(train, valid)

@@ -17,7 +17,11 @@ import ctranslate2
 
 from rinchen.errors import ConfigError, DataError, UpstreamError
 from rinchen.script_conv.alphabet import LETTERS, SCRIPT_TO_CYRILLIC_PUNCTUATION
-from rinchen.script_conv.char_model import CONVERTER_TAGS, load_char_processor
+from rinchen.script_conv.char_model import (
+    TO_CYRILLIC_TAG,
+    TO_SCRIPT_TAG,
+    load_char_processor,
+)
 from rinchen.script_conv.rules import transliterate, transliterate_word
 from rinchen.script_conv.segments import Segment, segment
 from rinchen.script_conv.validate import is_script_word
@@ -26,7 +30,6 @@ from rinchen.text.normalize import normalize
 Target = Literal["Mong", "Cyrl"]
 _Spelling = Literal["model", "rules", "kept"]
 
-_TO_SCRIPT_TAG, _TO_CYRILLIC_TAG = CONVERTER_TAGS
 _CYRILLIC = "khk_Cyrl"
 _SCRIPT = "mn_Mong"
 # Longer words are far outside what the model was trained on.
@@ -111,10 +114,10 @@ def _normalize_script_word(word: str) -> str:
 
 
 _TO_SCRIPT = _Direction(
-    "Mong", _TO_SCRIPT_TAG, _is_cyrillic_word, _normalize_cyrillic_word
+    "Mong", TO_SCRIPT_TAG, _is_cyrillic_word, _normalize_cyrillic_word
 )
 _TO_CYRILLIC = _Direction(
-    "Cyrl", _TO_CYRILLIC_TAG, _is_script_segment_with_letter, _normalize_script_word
+    "Cyrl", TO_CYRILLIC_TAG, _is_script_segment_with_letter, _normalize_script_word
 )
 
 
@@ -306,7 +309,8 @@ class ScriptConverter:
 
     def _remember(self, target: Target, outputs: dict[str, str]) -> None:
         if len(outputs) > _MAX_CACHED_WORDS:
-            # A call larger than the whole cache would only evict it for nothing.
+            # This one call has more fresh (not yet cached) words than the cache can
+            # hold: keeping them would only push every other entry out.
             return
         if len(self._cache) + len(outputs) > _MAX_CACHED_WORDS:
             # Drops the whole cache, warm entries included: simpler than evicting

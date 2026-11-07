@@ -3,6 +3,12 @@
 The converter never emits ZWJ or ZWNJ, puts NNBSP only between letters, and
 uses a variation selector only for a pair the Unicode Character Database lists.
 `validate_traditional` reports every place where text breaks one of those rules.
+
+`validate_traditional` judges running text, so it lets ASCII letters, digits,
+punctuation and spaces through. `is_script_word` has the stricter contract of one
+converted word: letters, their selectors, the vowel separator, the stroke and the
+suffix gap only, with at least one letter. Screening a converter's output or a
+training pair's script side takes `is_script_word`.
 """
 
 from __future__ import annotations
@@ -59,30 +65,36 @@ class Violation:
     detail: str
 
 
-def _load_variant_table() -> Mapping[str, frozenset[str]]:
-    text = (
-        resources.files("rinchen.script_conv")
-        .joinpath(_VARIANT_TABLE_FILE)
-        .read_text("utf-8")
-    )
+def _parse_variant_table(text: str) -> Mapping[str, frozenset[str]]:
+    """Read the table file's text; a malformed or empty table is a `DataError`."""
     selectors_by_base: defaultdict[str, set[str]] = defaultdict(set)
     for number, line in enumerate(text.splitlines(), start=1):
         if not line or line.startswith("#"):
             continue
-        fields = line.split("\t")
+        where = f"{_VARIANT_TABLE_FILE}:{number}"
         try:
-            base, selector = (chr(int(field, 16)) for field in fields)
+            base, selector = (chr(int(field, 16)) for field in line.split("\t"))
         except ValueError as error:
             raise DataError(
-                f"{_VARIANT_TABLE_FILE}:{number}: expected 'base_hex<TAB>selector_hex'"
+                f"{where}: expected 'base_hex<TAB>selector_hex', both below U+110000"
             ) from error
         if base not in LETTERS or selector not in FVS:
-            raise DataError(
-                f"{_VARIANT_TABLE_FILE}:{number}: not a Mongolian letter and selector pair"
-            )
+            raise DataError(f"{where}: not a Mongolian letter and selector pair")
+        if selector in selectors_by_base[base]:
+            raise DataError(f"{where}: duplicate row")
         selectors_by_base[base].add(selector)
+    if not selectors_by_base:
+        raise DataError(f"{_VARIANT_TABLE_FILE}: the table has no rows")
     return MappingProxyType(
         {base: frozenset(selectors) for base, selectors in selectors_by_base.items()}
+    )
+
+
+def _load_variant_table() -> Mapping[str, frozenset[str]]:
+    return _parse_variant_table(
+        resources.files("rinchen.script_conv")
+        .joinpath(_VARIANT_TABLE_FILE)
+        .read_text("utf-8")
     )
 
 

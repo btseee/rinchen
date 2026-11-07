@@ -20,7 +20,7 @@ import yaml
 
 from rinchen.errors import ConfigError, DataError, UpstreamError
 from rinchen.script_conv._subprocess import run_logged
-from rinchen.script_conv.char_model import load_char_processor
+from rinchen.script_conv.char_model import CONVERTER_TAGS, load_char_processor
 from rinchen.script_conv.config import dump_config, validate_converter_config
 
 _PREDICT_BATCH_SIZE = 64
@@ -169,8 +169,11 @@ def predict(
     command; one that runs past it is killed with everything it started.
 
     Raises:
-        ConfigError: a path or the prediction config holds `$`, which Eole would
-            expand as a variable; or `tag` is not a piece of the model.
+        ConfigError: `tag` is not one of `CONVERTER_TAGS` or is not a piece of the
+            model; or `ckpt_dir` or `out_file` holds `$`, which Eole would expand as
+            a variable in the prediction config (they, and the token files beside
+            `out_file`, are the paths the config names; `src_file` and `spm_model`
+            are only read here, so `$` is fine in them).
         DataError: the character model at `spm_model` cannot be loaded, or `src_file`
             cannot be read or has no lines.
         ValueError: `threads` is less than 1.
@@ -179,6 +182,10 @@ def predict(
             missing, or it exits zero without writing its output or with another
             number of lines than the source has.
     """
+    if tag not in CONVERTER_TAGS:
+        raise ConfigError(
+            f"the tag {tag!r} is not a converter tag: expected one of {CONVERTER_TAGS}"
+        )
     side = predict_side_paths(out_file)
     cfg = {
         "model_path": ckpt_dir.as_posix(),
@@ -191,13 +198,8 @@ def predict(
         "world_size": 1,
         "transforms": [],
     }
-    for name, value in (
-        ("checkpoint directory", ckpt_dir),
-        ("source file", src_file),
-        ("SentencePiece model", spm_model),
-        ("output file", out_file),
-        ("prediction config", yaml.safe_dump(cfg)),
-    ):
+    # `out_file` is enough for the token files in `cfg`: they only add a suffix to it.
+    for name, value in (("checkpoint directory", ckpt_dir), ("output file", out_file)):
         _reject_dollar(name, value)
     processor = load_char_processor(spm_model)
     if processor.piece_to_id(tag) == processor.unk_id():

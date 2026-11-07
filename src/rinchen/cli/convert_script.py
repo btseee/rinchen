@@ -423,8 +423,8 @@ def _plan_training(
     the same checks for a dry run and a real one, so that a real run does not fail
     on something its dry run passed, nor after the character model is trained.
 
-    The directories are made absolute, so that `converter.yaml` means the same from
-    any working directory.
+    The directories and the character model config are made absolute, so that
+    `converter.yaml` and the manifest mean the same from any working directory.
 
     Raises ConfigError for an unknown profile, an unconfirmed full run, a character
     model config or an Eole config that does not hold (a `$` in a path included),
@@ -438,6 +438,7 @@ def _plan_training(
         )
     char_config = load_char_model_config(spm_config)
     data_dir, run_dir = data_dir.resolve(), run_dir.resolve()
+    spm_config = spm_config.resolve()
     corpus_files = _require_corpus_files(data_dir)
     prefix = char_config.output_prefix
     char_model, char_vocab = Path(f"{prefix}.model"), Path(f"{prefix}.vocab")
@@ -643,9 +644,13 @@ def _plan_export(
     for path in (run.checkpoint, run.paths.char_model):
         if not path.is_file():
             raise DataError(f"file not found: {path}")
-    if run.target.exists() or run.target.is_symlink():
-        raise ConfigError(f"{run.target} exists: remove it, or pass another --out-dir")
+    _require_no_model_directory(run.target)
     return run
+
+
+def _require_no_model_directory(target: Path) -> None:
+    if target.exists() or target.is_symlink():
+        raise ConfigError(f"{target} exists: remove it, or pass another --out-dir")
 
 
 def _commit_export(run: _ExportRun) -> Path:
@@ -655,8 +660,12 @@ def _commit_export(run: _ExportRun) -> Path:
     # Hashed before the work, so that the manifest vouches for what was converted.
     # The converter refuses an existing directory, so none can hold a manifest to
     # erase: no commit start is needed.
-    config_sha256 = sha256_of(run.config_path)
+    config_sha256 = _config_sha256(run.config_path)
     input_files = _hash_inputs(run.input_paths)
+    # Hashing a large checkpoint takes a while, and the plan's check is older than
+    # that. Outside the `try`, because its cleanup removes `run.target`: a directory
+    # that someone else created in the meantime is not this run's to remove.
+    _require_no_model_directory(run.target)
     try:
         export_ct2(run.paths.checkpoint_dir, run.target, timeout=run.timeout)
         _copy_into_place(run.paths.char_model, run.target / _CHAR_MODEL_FILE)
@@ -770,8 +779,11 @@ def evaluate(
         ),
     ] = "Mong",
 ) -> None:
-    """Convert one side of each reference pair and print the character error
-    rate, the share of exactly right words and the number of words."""
+    """Convert one side of each reference pair and print five lines: the character
+    error rate (`cer`), the share of exactly right words (`word_accuracy`), the
+    number of words (`n`), and two counts of words whose model output was unusable:
+    those the rules spelled instead (`rule_fallbacks`) and those that stayed as they
+    were (`invalid_outputs`)."""
     with rinchen_errors_as_exit_codes():
         script = _target(target)
         word_pairs = read_pairs_tsv(pairs, origin="reference")
@@ -821,6 +833,13 @@ def _hash_inputs(paths: list[Path]) -> list[ManifestFile]:
         return build_inputs(paths)
     except OSError as exc:
         raise DataError(f"cannot read the input files: {exc}") from exc
+
+
+def _config_sha256(path: Path) -> str:
+    try:
+        return sha256_of(path)
+    except OSError as exc:
+        raise DataError(f"cannot read the config {path}: {exc}") from exc
 
 
 def _describe_os_error(exc: OSError) -> str:

@@ -28,9 +28,11 @@ from pydantic import (
 from rinchen.config.loader import anchor_at_repo_root, reject_blank_path
 from rinchen.errors import ConfigError, DataError, UpstreamError
 
-# The single source for the symbols the model must keep whole: each one tells the
-# converter which script to write.
-CONVERTER_TAGS = ("<2mn_Mong>", "<2mn_Cyrl>")
+# The symbols the model must keep whole: each one tells the converter which script to
+# write, so a source line starts with the tag of its TARGET script.
+TO_SCRIPT_TAG = "<2mn_Mong>"
+TO_CYRILLIC_TAG = "<2mn_Cyrl>"
+CONVERTER_TAGS = (TO_SCRIPT_TAG, TO_CYRILLIC_TAG)
 
 # U+2581 LOWER ONE EIGHTH BLOCK: SentencePiece's default dummy prefix, which it puts
 # in front of a text that does not start with a space.
@@ -89,6 +91,10 @@ def train_char_model(texts: Iterable[str], prefix: Path, *, vocab_size: int) -> 
     `<prefix>.model`; the trainer writes `<prefix>.vocab` beside it. The texts pass
     through `<prefix>.input.txt`, which is removed afterwards. The directory of
     `prefix` is created even when training then fails. Blank texts are skipped.
+
+    An existing file at `<prefix>.input.txt` is overwritten and then deleted; when
+    that path is a symbolic link, the file the link points to is overwritten and the
+    link is deleted. Give `prefix` a name that no other file shares.
 
     `vocab_size` is only a cap: the model has one piece per distinct character plus
     the special pieces and tags, so the tiny reference list trains to 73 pieces at a

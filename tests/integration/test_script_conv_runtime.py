@@ -3,8 +3,10 @@ now through CTranslate2 and the runtime wrapper.
 
 Every test uses the session fixtures of `conftest.py`, so the model is trained and
 exported once. Each test builds its own converter, so its cache and its counts are its
-own. The measured numbers go to the test report as properties (`word_exact_match`,
-`rule_fallbacks`, `invalid_outputs`, ...), not to the output.
+own. The measured numbers go to the test report as properties
+(`word_exact_match_<n>_per_call`, `rule_fallbacks_<n>_per_call`,
+`invalid_outputs_<n>_per_call`, `agreement_with_eole_<direction>`, `reverse_cer` and
+`reverse_invalid_outputs`), not to the output.
 """
 
 from __future__ import annotations

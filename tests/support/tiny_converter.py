@@ -10,10 +10,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from rinchen.script_conv.char_model import CONVERTER_TAGS
+from rinchen.script_conv.char_model import TO_CYRILLIC_TAG, TO_SCRIPT_TAG
 from rinchen.script_conv.data import CorpusFiles
 
-TO_SCRIPT_TAG, TO_CYRILLIC_TAG = CONVERTER_TAGS
 DIRECTION_TAGS = {"cyrl2mong": TO_SCRIPT_TAG, "mong2cyrl": TO_CYRILLIC_TAG}
 # Bounds each Eole or CTranslate2 command of the integration tests, so a hung
 # subprocess fails the session instead of blocking it.

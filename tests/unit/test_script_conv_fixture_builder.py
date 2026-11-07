@@ -143,6 +143,44 @@ def test_a_reference_too_small_for_one_hundred_golden_rows_is_a_data_error(
         build(reference, tmp_path / "out" / "lexicon.tsv", tmp_path / "out")
 
 
+def test_a_reference_too_small_for_golden_rows_leaves_every_output_untouched(
+    tmp_path: Path,
+) -> None:
+    reference, _, _ = _plant(
+        tmp_path, development=30, held_out_correct=10, held_out_wrong=10
+    )
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    earlier = {
+        out_dir / "lexicon.tsv": "earlier lexicon\n",
+        out_dir / GOLDEN_FILE: "earlier golden\n",
+        out_dir / "tiny_words.tsv": "earlier tiny words\n",
+    }
+    for path, text in earlier.items():
+        path.write_text(text, encoding="utf-8", newline="\n")
+
+    with pytest.raises(DataError, match=r"100 golden rows"):
+        build(reference, out_dir / "lexicon.tsv", out_dir)
+
+    assert {
+        path: path.read_text(encoding="utf-8") for path in out_dir.iterdir()
+    } == earlier
+
+
+def test_a_reference_too_small_for_golden_rows_creates_no_output_directory(
+    tmp_path: Path,
+) -> None:
+    reference, _, _ = _plant(
+        tmp_path, development=30, held_out_correct=10, held_out_wrong=10
+    )
+
+    with pytest.raises(DataError, match=r"100 golden rows"):
+        build(reference, tmp_path / "lex" / "lexicon.tsv", tmp_path / "fixtures")
+
+    assert not (tmp_path / "lex").exists()
+    assert not (tmp_path / "fixtures").exists()
+
+
 _REGENERATE_WITHOUT_THE_LEXICON = textwrap.dedent(
     """
     import sys

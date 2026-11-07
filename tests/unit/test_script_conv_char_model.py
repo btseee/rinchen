@@ -25,6 +25,8 @@ from rinchen.errors import ConfigError, DataError, UpstreamError
 from rinchen.script_conv.alphabet import FVS, MVS, NNBSP
 from rinchen.script_conv.char_model import (
     CONVERTER_TAGS,
+    TO_CYRILLIC_TAG,
+    TO_SCRIPT_TAG,
     CharModelConfig,
     check_char_model,
     load_char_model_config,
@@ -145,6 +147,12 @@ def trained_model(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 def test_converter_tags_are_the_two_target_script_tags() -> None:
     assert CONVERTER_TAGS == (TAG_TO_SCRIPT, TAG_TO_CYRILLIC)
+
+
+def test_each_tag_has_its_own_name_and_the_tuple_lists_them_script_first() -> None:
+    assert TO_SCRIPT_TAG == TAG_TO_SCRIPT
+    assert TO_CYRILLIC_TAG == TAG_TO_CYRILLIC
+    assert CONVERTER_TAGS == (TO_SCRIPT_TAG, TO_CYRILLIC_TAG)
 
 
 def test_trainer_receives_exactly_the_policy_options(

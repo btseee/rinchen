@@ -14,9 +14,9 @@ Reads tests/fixtures/script_conv/wiktionary_reference.tsv and writes three files
   Cyrillic word, the training fixture of the tiny converter model.
 
 The builder imports the fallback but not `rinchen.script_conv.rules`, so it can
-regenerate a lexicon that is missing or corrupt. It raises DataError when the
-reference cannot supply 100 golden rows. Rows whose script form fails
-`validate_traditional` are dropped before anything else.
+regenerate a lexicon that is missing or corrupt. It raises DataError, before it
+writes or creates anything, when the reference cannot supply 100 golden rows. Rows
+whose script form fails `validate_traditional` are dropped before anything else.
 
 The output is a pure function of the reference, so rerunning it rewrites the same
 bytes; tests/unit/test_script_conv_fixtures.py compares the committed files with
@@ -111,14 +111,12 @@ def build(reference_path: Path, lexicon_path: Path, fixtures_dir: Path) -> None:
     pairs = read_reference(reference_path)
     development = [pair for pair in pairs if development_split(pair[0])]
     held_out = [pair for pair in pairs if not development_split(pair[0])]
+    # The one step that can reject the reference runs before any file is written.
+    golden = _golden_rows(development, held_out)
     lexicon_path.parent.mkdir(parents=True, exist_ok=True)
     fixtures_dir.mkdir(parents=True, exist_ok=True)
     _write_tsv(lexicon_path, LEXICON_HEADER, development)
-    _write_tsv(
-        fixtures_dir / "rules_golden.tsv",
-        GOLDEN_HEADER,
-        _golden_rows(development, held_out),
-    )
+    _write_tsv(fixtures_dir / "rules_golden.tsv", GOLDEN_HEADER, golden)
     _write_tsv(fixtures_dir / "tiny_words.tsv", LEXICON_HEADER, pairs[:TINY_ROWS])
 
 

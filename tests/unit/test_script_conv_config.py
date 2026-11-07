@@ -37,7 +37,7 @@ from rinchen.script_conv.config import (
     render_converter_config,
     validate_converter_config,
 )
-from rinchen.script_conv.data import build_corpus, read_pairs_tsv
+from rinchen.script_conv.data import CORPUS_FILE_NAMES, build_corpus, read_pairs_tsv
 from tests.support.script_reference import FIXTURE_DIR
 
 # Importing Eole warns about its missing C++ extension and flash_attn and about
@@ -308,6 +308,22 @@ def test_validation_uses_one_corpus_named_valid_for_the_cyrillic_to_script_direc
     }
 
 
+@pytest.mark.parametrize("profile", PROFILES)
+def test_every_rendered_corpus_path_names_a_file_build_corpus_writes(
+    profile: Profile,
+) -> None:
+    data = _render(profile)["data"]
+    paths = [
+        Path(corpus[side])
+        for corpus in data.values()
+        for side in ("path_src", "path_tgt")
+    ]
+
+    assert len(paths) == 2 * len(CORPORA)
+    assert {path.name for path in paths} <= set(CORPUS_FILE_NAMES)
+    assert {path.parent for path in paths} == {DATA_DIR}
+
+
 def test_the_prefixes_are_the_character_model_tags() -> None:
     assert CONVERTER_TAGS == (TO_SCRIPT_TAG, TO_CYRILLIC_TAG)
 
@@ -555,6 +571,109 @@ def test_a_direction_with_the_wrong_tag_is_rejected(
 def test_a_missing_source_prefix_is_rejected() -> None:
     cfg = _delete(_render("tiny"), "data.mong2cyrl.src_prefix")
     with pytest.raises(ConfigError, match=r"data\.mong2cyrl\.src_prefix"):
+        validate_converter_config(cfg)
+
+
+# --- validation: transforms, layer sizes, position switch, string sections -------------
+
+_NO_TRANSFORMS = "missing"
+
+
+@pytest.mark.parametrize("corpus", CORPORA)
+@pytest.mark.parametrize(
+    "transforms",
+    [
+        _NO_TRANSFORMS,
+        None,
+        [],
+        ["filtertoolong"],
+        ["sentencepiece"],
+        ["prefix"],
+        ["prefix", "sentencepiece"],
+        ["filtertoolong", "prefix", "sentencepiece"],
+        "sentencepiece prefix",
+    ],
+    ids=str,
+)
+def test_a_corpus_that_does_not_split_into_pieces_before_it_prefixes_is_rejected(
+    corpus: str, transforms: object
+) -> None:
+    cfg = _render("tiny")
+    if transforms == _NO_TRANSFORMS:
+        del cfg["data"][corpus]["transforms"]
+    else:
+        cfg["data"][corpus]["transforms"] = transforms
+    with pytest.raises(ConfigError, match=re.escape(f"data.{corpus}.transforms")):
+        validate_converter_config(cfg)
+
+
+@pytest.mark.parametrize("corpus", CORPORA)
+@pytest.mark.parametrize(
+    "transforms",
+    [
+        ["sentencepiece", "prefix"],
+        ["sentencepiece", "prefix", "filtertoolong"],
+        ["filtertoolong", "sentencepiece", "prefix"],
+        ["sentencepiece", "filtertoolong", "prefix"],
+    ],
+    ids=str,
+)
+def test_a_corpus_may_add_other_transforms_around_sentencepiece_and_prefix(
+    corpus: str, transforms: list[str]
+) -> None:
+    cfg = _set(_render("tiny"), f"data.{corpus}.transforms", transforms)
+    validate_converter_config(cfg)
+
+
+def test_an_extra_training_corpus_needs_the_two_transforms_too() -> None:
+    cfg = _render("tiny")
+    cfg["data"]["more"] = copy.deepcopy(cfg["data"]["cyrl2mong"])
+    cfg["data"]["more"]["transforms"] = ["prefix"]
+    with pytest.raises(ConfigError, match=r"data\.more\.transforms"):
+        validate_converter_config(cfg)
+
+
+@pytest.mark.parametrize("where", ["model.encoder", "model.decoder"])
+@pytest.mark.parametrize("hidden_size", [63, 128, "64", None])
+def test_a_layer_level_hidden_size_that_differs_from_the_vector_size_is_rejected(
+    where: str, hidden_size: object
+) -> None:
+    cfg = _set(_render("tiny"), f"{where}.hidden_size", hidden_size)
+    with pytest.raises(ConfigError, match=re.escape(f"{where}.hidden_size")):
+        validate_converter_config(cfg)
+
+
+@pytest.mark.parametrize("where", ["model.encoder", "model.decoder"])
+def test_a_layer_level_hidden_size_equal_to_the_vector_size_is_accepted(
+    where: str,
+) -> None:
+    validate_converter_config(_set(_render("tiny"), f"{where}.hidden_size", 64))
+
+
+@pytest.mark.parametrize("value", [False, None, 0, "false"])
+def test_switching_the_absolute_position_encoding_off_is_rejected(
+    value: object,
+) -> None:
+    cfg = _set(_render("tiny"), "model.embeddings.position_encoding", value)
+    with pytest.raises(ConfigError, match=r"model\.embeddings\.position_encoding:"):
+        validate_converter_config(cfg)
+
+
+def test_the_absolute_position_encoding_switch_may_be_on_or_left_out() -> None:
+    assert "position_encoding" not in _render("tiny")["model"]["embeddings"]
+    validate_converter_config(_render("tiny"))
+    validate_converter_config(
+        _set(_render("tiny"), "model.embeddings.position_encoding", True)
+    )
+
+
+@pytest.mark.parametrize("where", ["model.encoder", "model.decoder"])
+@pytest.mark.parametrize("text", ["{'layers': 2, 'sliding_window': 4}", "None", ""])
+def test_a_string_valued_encoder_or_decoder_is_rejected(where: str, text: str) -> None:
+    # Eole evaluates such a string as Python code, and the string would hide any
+    # forbidden key from the checks above.
+    cfg = _set(_render("tiny"), where, text)
+    with pytest.raises(ConfigError, match=rf"{re.escape(where)}:.*string"):
         validate_converter_config(cfg)
 
 
@@ -862,6 +981,20 @@ def test_eole_accepts_the_data_and_vocabulary_checks_that_eole_train_runs(
     eole_run.config._validate_data_config()
 
 
+def test_eole_accepts_the_full_profile_rendering_without_any_file() -> None:
+    # Constructing the config checks every key and value against Eole's own schema;
+    # it reads no file, so the placeholder paths do not have to exist.
+    from eole.config.run import TrainConfig
+
+    config = TrainConfig(**_render("full"))
+
+    assert config.training.gpu_ranks == [0]
+    assert str(config.training.compute_dtype) == "torch.bfloat16"
+    assert config.training.batch_size == 8192
+    assert config.model.hidden_size == 512
+    assert config.model.embeddings.position_encoding_type == SINUSOIDAL
+
+
 @pytest.mark.subprocess
 def test_every_training_line_carries_the_tag_of_its_direction_in_the_vocabulary_eole_builds(
     eole_run: EoleRun,
@@ -943,12 +1076,40 @@ def test_a_dollar_sign_in_a_list_item_is_rejected_with_its_index() -> None:
         validate_converter_config(cfg)
 
 
-def test_a_dollar_sign_in_a_key_or_a_non_string_value_is_not_a_variable_reference() -> (
-    None
-):
+@pytest.mark.parametrize(
+    ("where", "key", "key_path"),
+    [
+        ("training", "cost$", "training.cost$"),
+        ("model", "$HOME", "model.$HOME"),
+        ("data.valid", "x${y}", "data.valid.x${y}"),
+    ],
+)
+def test_a_dollar_sign_in_a_key_is_rejected_with_its_key_path(
+    where: str, key: str, key_path: str
+) -> None:
+    # Eole expands the whole YAML text, so a key is rewritten like a value.
+    cfg = _render("tiny")
+    _node(cfg, where)[key] = 1
+
+    with pytest.raises(ConfigError, match=re.escape(key_path)) as raised:
+        validate_converter_config(cfg)
+
+    assert "$" in str(raised.value)
+
+
+def test_a_dollar_sign_in_a_key_below_a_list_is_rejected_with_its_index() -> None:
+    cfg = _render("tiny")
+    cfg["model"]["layer_overrides"] = [{"heads": 4}, {"note$": 1}]
+
+    with pytest.raises(ConfigError, match=re.escape("model.layer_overrides[1].note$")):
+        validate_converter_config(cfg)
+
+
+def test_a_non_string_value_is_not_a_variable_reference() -> None:
     cfg = _render("tiny")
     cfg["training"]["note"] = 5
-    cfg["training"]["cost$"] = 1
+    cfg["training"]["rate"] = 1.5
+    cfg["training"]["flag"] = True
 
     validate_converter_config(cfg)
 

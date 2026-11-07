@@ -30,7 +30,7 @@ from rinchen.script_conv.data import (
     rule_pairs,
 )
 from rinchen.script_conv.rules import LEXICON, transliterate_word
-from rinchen.script_conv.validate import validate_traditional
+from rinchen.script_conv.validate import is_script_word, validate_traditional
 from tests.support.script_reference import FIXTURE_DIR
 
 TINY_WORDS = FIXTURE_DIR / "tiny_words.tsv"
@@ -46,6 +46,9 @@ CYRILLIC_O = chr(0x043E)
 CYRILLIC_SHORT_I = chr(0x0439)
 LATIN_A = chr(0x0061)
 LATIN_O = chr(0x006F)
+SCRIPT_COMMA = chr(0x1802)
+SCRIPT_FULL_STOP = chr(0x1803)
+NIRUGU = chr(0x180A)
 # Mongolian "ongol" (the word MONGOL) and the genitive suffix after an NNBSP.
 MONGOL = "".join(
     chr(code_point) for code_point in (0x182E, 0x1823, 0x1829, 0x182D, 0x1823, 0x182F)
@@ -115,10 +118,11 @@ def _in_valid(
 
 
 def _planted_pairs() -> tuple[list[WordPair], list[WordPair]]:
-    """The 42 planted pairs and the 34 of them that must survive, in input order.
+    """The 43 planted pairs and the 34 of them that must survive, in input order.
 
-    Eight are bad: three exact duplicates, one ZWJ in the script, one empty side, one
-    Cyrillic letter in the script, and two with a space inside a side.
+    Nine are bad: three exact duplicates, one ZWJ in the script, one empty side, one
+    Cyrillic letter in the script, one ASCII letter in the script (the validator
+    passes it, a script word cannot hold it) and two with a space inside a side.
     """
     # Stepping by 7 (coprime to 34) keeps the words distinct but out of sorted order.
     kept = [_pair(index * 7 % 34) for index in range(34)]
@@ -128,6 +132,7 @@ def _planted_pairs() -> tuple[list[WordPair], list[WordPair]]:
     zwj = WordPair(_cyrillic_word(40), A + ZWJ + NA, "reference")
     empty = WordPair("   ", _script_word(41), "reference")
     foreign = WordPair(_cyrillic_word(42), A + CYRILLIC_A + NA, "reference")
+    ascii_letter = WordPair(_cyrillic_word(46), A + LATIN_A + NA, "reference")
     spaced_cyrillic = WordPair(
         _cyrillic_word(43) + " " + _cyrillic_word(44), _script_word(43), "reference"
     )
@@ -138,11 +143,11 @@ def _planted_pairs() -> tuple[list[WordPair], list[WordPair]]:
         kept[:20]
         + [kept[0], zwj]
         + kept[20:30]
-        + [kept[1], empty, foreign]
+        + [kept[1], empty, foreign, ascii_letter]
         + kept[30:]
         + [spaced_cyrillic, kept[2], spaced_script]
     )
-    assert len(planted) == 42
+    assert len(planted) == 43
     return planted, kept
 
 
@@ -412,6 +417,7 @@ def test_build_corpus_counts_rows_and_drops_exactly_on_the_planted_list(
         "joiner": 1,
         "empty": 1,
         "foreign_character": 1,
+        "not_script_word": 1,
         "multiword": 2,
     }
     assert dict(result.rows) == {
@@ -756,6 +762,77 @@ def test_every_violation_code_is_counted_under_its_own_name(
     assert _dropped(tmp_path, [WordPair("аб", script, "reference")]) == {code: 1}
 
 
+@pytest.mark.parametrize(
+    "script",
+    [
+        pytest.param(A + LATIN_A, id="letter-then-ascii-letter"),
+        pytest.param(LATIN_A + A, id="ascii-letter-then-letter"),
+        pytest.param(A + "1" + NA, id="digit-inside"),
+        pytest.param("7", id="digit-only"),
+        pytest.param(LATIN_A, id="ascii-letter-only"),
+        pytest.param(A + "." + NA, id="ascii-full-stop"),
+        pytest.param(A + SCRIPT_FULL_STOP + NA, id="script-full-stop"),
+        pytest.param(SCRIPT_COMMA, id="script-comma-only"),
+        pytest.param(NIRUGU, id="nirugu-only"),
+    ],
+)
+def test_a_script_side_that_is_not_one_script_word_is_dropped_as_not_a_script_word(
+    tmp_path: Path, script: str
+) -> None:
+    # The validator lets all of these through: running text may hold them.
+    assert validate_traditional(script) == ()
+    assert not is_script_word(script)
+    assert _dropped(tmp_path, [WordPair("аб", script, "reference")]) == {
+        "not_script_word": 1
+    }
+
+
+@pytest.mark.parametrize(
+    ("script", "code"),
+    [
+        (A + ZWJ + LATIN_A, "joiner"),
+        (A + CYRILLIC_A + LATIN_A, "foreign_character"),
+        (FVS_SECOND + LATIN_A, "orphan_selector"),
+        (A + NNBSP + LATIN_A, "misplaced_nnbsp"),
+        (A + FVS_FIFTH + LATIN_A, "invalid_variant"),
+    ],
+)
+def test_a_violation_outranks_not_a_script_word(
+    tmp_path: Path, script: str, code: str
+) -> None:
+    assert not is_script_word(script)
+    assert _dropped(tmp_path, [WordPair("аб", script, "reference")]) == {code: 1}
+
+
+def test_multiword_and_empty_outrank_not_a_script_word(tmp_path: Path) -> None:
+    assert _dropped(tmp_path, [WordPair("аб", A + " " + LATIN_A, "reference")]) == {
+        "multiword": 1
+    }
+    assert _dropped(tmp_path, [WordPair("", A + LATIN_A, "reference")]) == {"empty": 1}
+
+
+def test_not_a_script_word_outranks_duplicate(tmp_path: Path) -> None:
+    pair = WordPair("аб", A + LATIN_A, "reference")
+    assert _dropped(tmp_path, [pair, pair]) == {"not_script_word": 2}
+
+
+def test_a_script_word_with_padding_spaces_is_still_a_script_word(
+    tmp_path: Path,
+) -> None:
+    pair = WordPair("аб", " " + A + NA + " ", "reference")
+    assert _dropped(tmp_path, [pair]) == {}
+
+
+def test_every_lexicon_spelling_and_tiny_fixture_script_word_passes_the_screen() -> (
+    None
+):
+    assert LEXICON
+    tiny_scripts = [pair.script for pair in read_pairs_tsv(TINY_WORDS)]
+    assert tiny_scripts
+    assert [script for script in LEXICON.values() if not is_script_word(script)] == []
+    assert [script for script in tiny_scripts if not is_script_word(script)] == []
+
+
 def test_duplicates_are_found_after_normalization_and_the_first_is_kept(
     tmp_path: Path,
 ) -> None:
@@ -849,7 +926,7 @@ def test_an_empty_train_split_is_a_data_error_raised_before_any_file(
     out_dir = tmp_path / "corpus"
     with pytest.raises(
         DataError,
-        match="train split is empty: 1 pairs, valid_fraction 0.25, seed 7",
+        match=r"train split is empty \(pairs kept: 1, valid_fraction 0.25, seed 7\)",
     ):
         build_corpus(
             [WordPair(valid_word, A, "reference")],

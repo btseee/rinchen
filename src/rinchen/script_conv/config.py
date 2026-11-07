@@ -24,18 +24,16 @@ from typing import Any, Final, Literal, NamedTuple, NoReturn
 import yaml
 
 from rinchen.errors import ConfigError
-from rinchen.script_conv.char_model import CONVERTER_TAGS
+from rinchen.script_conv.char_model import TO_CYRILLIC_TAG, TO_SCRIPT_TAG
 from rinchen.utils.part_file import unique_part_path
 
 Profile = Literal["tiny", "full"]
 
-# The tag names the TARGET script: a corpus that converts Cyrillic to the traditional
-# script starts every source line with the script tag. A test pins the tuple's order.
-_TO_SCRIPT_TAG, _TO_CYRILLIC_TAG = CONVERTER_TAGS
-
 _CYRL2MONG: Final = "cyrl2mong"
 _MONG2CYRL: Final = "mong2cyrl"
-_DIRECTION_TAGS: Final = {_CYRL2MONG: _TO_SCRIPT_TAG, _MONG2CYRL: _TO_CYRILLIC_TAG}
+# The tag names the TARGET script: a corpus that converts Cyrillic to the traditional
+# script starts every source line with the script tag.
+_DIRECTION_TAGS: Final = {_CYRL2MONG: TO_SCRIPT_TAG, _MONG2CYRL: TO_CYRILLIC_TAG}
 
 # Eole 0.6.4 takes ONE validation corpus: it reads `data["valid"]` for validation and
 # treats every other name as a training corpus (`eole/inputters/text_corpus.py`,
@@ -48,6 +46,10 @@ _VALID: Final = "valid"
 _VALID_DIRECTION: Final = _CYRL2MONG
 
 _POSITION_ENCODING: Final = "SinusoidalInterleaved"
+
+# Eole transforms every corpus needs, in this order (see `_data_section`).
+_SENTENCEPIECE: Final = "sentencepiece"
+_PREFIX: Final = "prefix"
 _SEED: Final = 1234
 
 # Eole's `prefix` transform fails with a TypeError when a corpus has no
@@ -244,7 +246,7 @@ def _data_section(data_dir: Path) -> dict[str, Any]:
         direction: {
             "path_src": _corpus_path(data_dir, direction, "train", "src"),
             "path_tgt": _corpus_path(data_dir, direction, "train", "tgt"),
-            "transforms": ["sentencepiece", "prefix", "filtertoolong"],
+            "transforms": [_SENTENCEPIECE, _PREFIX, "filtertoolong"],
             "src_prefix": tag,
             "tgt_prefix": _NO_TARGET_PREFIX,
             "weight": 1,
@@ -254,7 +256,7 @@ def _data_section(data_dir: Path) -> dict[str, Any]:
     data[_VALID] = {
         "path_src": _corpus_path(data_dir, _VALID_DIRECTION, "valid", "src"),
         "path_tgt": _corpus_path(data_dir, _VALID_DIRECTION, "valid", "tgt"),
-        "transforms": ["sentencepiece", "prefix"],
+        "transforms": [_SENTENCEPIECE, _PREFIX],
         "src_prefix": _DIRECTION_TAGS[_VALID_DIRECTION],
         "tgt_prefix": _NO_TARGET_PREFIX,
     }
@@ -342,14 +344,23 @@ def validate_converter_config(
     """Check `cfg` against the converter's invariants; return None when it holds.
 
     Always checked: only the known top-level keys, all present; no key of
-    `FORBIDDEN_KEYS` at any depth; no `$` in any string value (Eole expands it as an
-    environment variable); `position_encoding_type` is
-    `SinusoidalInterleaved` wherever it appears and is set on the embeddings;
-    `word_vec_size` equals `hidden_size`; the corpora `cyrl2mong`, `mong2cyrl` and
-    `valid` exist, each has `tgt_prefix` `""`, and each direction has its target
-    script tag as `src_prefix` (`valid` holds the Cyrillic-to-script direction);
-    `share_vocab` is true. With `profile="tiny"` the config must also be CPU-only:
-    `gpu_ranks` is `[]` and `compute_dtype` is `fp32`.
+    `FORBIDDEN_KEYS` at any depth; no `$` in any key or string value (Eole expands
+    it as an environment variable in the whole YAML text); `model.encoder` and
+    `model.decoder`, when present, are not strings (Eole evaluates a string as Python
+    code, and it would hide a forbidden key); `position_encoding_type` is
+    `SinusoidalInterleaved` wherever it appears and is set on the embeddings, and an
+    `embeddings.position_encoding` that is present is `true`; `word_vec_size` equals
+    `hidden_size`, and so does a `hidden_size` set on the encoder or the decoder;
+    the corpora `cyrl2mong`, `mong2cyrl` and `valid` exist, each has `tgt_prefix`
+    `""`, and each direction has its target script tag as `src_prefix` (`valid` holds
+    the Cyrillic-to-script direction); every corpus, `valid` and any extra training
+    corpus included, lists `transforms` with `sentencepiece` before `prefix`;
+    `share_vocab` is true.
+
+    The CPU-only checks (`gpu_ranks` is `[]`, `compute_dtype` is `fp32`) run only for
+    `profile="tiny"`. Without `profile`, the default, they are SKIPPED, so a caller
+    that holds a tiny rendering has to say so: the CLI and `run_training` pass the
+    profile of the rendering they validate.
 
     Raises:
         ConfigError: any of these fails; the message names the key path.
@@ -361,6 +372,7 @@ def validate_converter_config(
     _check_top_level_keys(cfg)
     _check_no_forbidden_keys(cfg)
     _check_no_variable_references(cfg)
+    _check_layers_are_not_strings(cfg)
     _check_position_encoding(cfg)
     _check_embedding_size(cfg)
     _check_corpora(cfg)
@@ -430,16 +442,51 @@ def _strings(node: object, path: str) -> Iterator[tuple[str, str]]:
 
 def _check_no_variable_references(cfg: Mapping[str, Any]) -> None:
     # Eole runs `os.path.expandvars` over the text of the YAML file, so a `$NAME`
-    # anywhere in a value would be replaced by an environment variable's value.
+    # anywhere, in a key as much as in a value, would be replaced by an environment
+    # variable's value.
+    for path, key, _ in _entries(cfg, ""):
+        if isinstance(key, str) and "$" in key:
+            _fail(path, "the key holds '$', which Eole would expand as a variable")
     for path, value in _strings(cfg, ""):
         if "$" in value:
             _fail(path, f"holds '$', which Eole would expand as a variable: {value!r}")
+
+
+def _layers(cfg: Mapping[str, Any]) -> Iterator[tuple[str, object]]:
+    """The `model.encoder` and `model.decoder` values that are present."""
+    model = _lookup(cfg, "model")
+    if not isinstance(model, Mapping):
+        _fail("model", f"expected a mapping, got {type(model).__name__}")
+    for name in ("encoder", "decoder"):
+        if name in model:
+            yield name, model[name]
+
+
+def _check_layers_are_not_strings(cfg: Mapping[str, Any]) -> None:
+    # Eole's `str_to_dict` validator runs `eval` on a string given for `encoder` or
+    # `decoder`. Such a string is not a mapping, so the key checks would not see into
+    # it.
+    for name, layer in _layers(cfg):
+        if isinstance(layer, str):
+            _fail(
+                f"model.{name}",
+                f"must be a mapping, not a string: Eole evaluates a string as code ({layer!r})",
+            )
 
 
 def _check_position_encoding(cfg: Mapping[str, Any]) -> None:
     embeddings_path = "model.embeddings.position_encoding_type"
     if _lookup(cfg, embeddings_path) != _POSITION_ENCODING:
         _fail(embeddings_path, f"must be {_POSITION_ENCODING}")
+    embeddings = _lookup(cfg, "model.embeddings")
+    if (
+        "position_encoding" in embeddings
+        and embeddings["position_encoding"] is not True
+    ):
+        _fail(
+            "model.embeddings.position_encoding",
+            "must be true when set: false would switch the absolute position encoding off",
+        )
     for path, key, value in _entries(cfg, ""):
         if key == "position_encoding_type" and value != _POSITION_ENCODING:
             _fail(path, f"must be {_POSITION_ENCODING}")
@@ -453,6 +500,17 @@ def _check_embedding_size(cfg: Mapping[str, Any]) -> None:
             "model.embeddings.word_vec_size",
             f"must equal model.hidden_size ({hidden_size!r}), got {word_vec_size!r}",
         )
+    for name, layer in _layers(cfg):
+        if (
+            isinstance(layer, Mapping)
+            and "hidden_size" in layer
+            and layer["hidden_size"] != word_vec_size
+        ):
+            _fail(
+                f"model.{name}.hidden_size",
+                f"must equal model.embeddings.word_vec_size ({word_vec_size!r}),"
+                f" got {layer['hidden_size']!r}",
+            )
 
 
 def _check_corpora(cfg: Mapping[str, Any]) -> None:
@@ -470,10 +528,26 @@ def _check_corpora(cfg: Mapping[str, Any]) -> None:
                 f"data.{name}.tgt_prefix",
                 'must be "": the prefix transform fails without it',
             )
+        _check_transforms(name, corpus)
     expected_tags = {**_DIRECTION_TAGS, _VALID: _DIRECTION_TAGS[_VALID_DIRECTION]}
     for name, tag in expected_tags.items():
         if data[name].get("src_prefix") != tag:
             _fail(f"data.{name}.src_prefix", f"must be {tag!r}")
+
+
+def _check_transforms(name: str, corpus: Mapping[str, Any]) -> None:
+    transforms = corpus.get("transforms")
+    if (
+        not isinstance(transforms, list)
+        or _SENTENCEPIECE not in transforms
+        or _PREFIX not in transforms
+        or transforms.index(_SENTENCEPIECE) > transforms.index(_PREFIX)
+    ):
+        _fail(
+            f"data.{name}.transforms",
+            f"must list {_SENTENCEPIECE!r} before {_PREFIX!r}, so the tag stays one"
+            f" piece; got {transforms!r}",
+        )
 
 
 def _check_cpu_only(cfg: Mapping[str, Any]) -> None:

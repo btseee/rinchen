@@ -14,12 +14,14 @@ from pathlib import Path
 
 import pytest
 
+from rinchen.errors import DataError
 from rinchen.script_conv.alphabet import FVS, LETTERS, MVS, NIRUGU, NNBSP
 from rinchen.script_conv.rules import LEXICON
 from rinchen.script_conv.validate import (
     VARIANT_TABLE,
     VIOLATION_CODES,
     Violation,
+    _parse_variant_table,
     is_script_word,
     validate_traditional,
 )
@@ -56,6 +58,12 @@ def _table_text() -> str:
         .joinpath("standardized_variants.tsv")
         .read_text("utf-8")
     )
+
+
+def _table_rows() -> list[str]:
+    return [
+        line for line in _table_text().splitlines() if line and not line.startswith("#")
+    ]
 
 
 def _header() -> dict[str, str]:
@@ -216,6 +224,29 @@ def test_nnbsp_after_a_stem_final_variant_is_valid() -> None:
     assert validate_traditional(A + FVS_SECOND + NNBSP + A) == ()
 
 
+def test_nnbsp_after_a_selector_that_follows_no_letter_is_misplaced() -> None:
+    # The stem-final-selector allowance needs a letter under the selector.
+    assert _located(" " + FVS_SECOND + NNBSP + A) == [
+        (1, "orphan_selector"),
+        (2, "misplaced_nnbsp"),
+    ]
+    assert _located(FVS_SECOND + NNBSP + A) == [
+        (0, "orphan_selector"),
+        (1, "misplaced_nnbsp"),
+    ]
+
+
+def test_nnbsp_after_a_nirugu_or_a_vowel_separator_is_misplaced() -> None:
+    # `segments.segment` keeps both inside one Mongolian segment, because they are
+    # run characters. The validator is stricter on purpose: the converter never
+    # puts an NNBSP after them, so output that does is a defect worth flagging.
+    assert _located(A + NIRUGU + NNBSP + A) == [(2, "misplaced_nnbsp")]
+    assert _located(A + MVS + NNBSP + A) == [
+        (1, "orphan_selector"),
+        (2, "misplaced_nnbsp"),
+    ]
+
+
 # --- invalid_variant --------------------------------------------------------
 
 
@@ -296,9 +327,7 @@ def test_table_is_read_only() -> None:
 
 
 def test_table_rows_are_tab_separated_hex_pairs() -> None:
-    rows = [
-        line for line in _table_text().splitlines() if line and not line.startswith("#")
-    ]
+    rows = _table_rows()
     assert rows
     assert all(re.fullmatch(r"[0-9A-F]{4}\t[0-9A-F]{4}", row) for row in rows)
     assert len(rows) == len(set(rows))
@@ -312,6 +341,48 @@ def test_table_header_records_source_version_and_sha256() -> None:
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", header["retrieved"])
 
 
+def test_parse_variant_table_skips_comments_and_blank_lines() -> None:
+    table = _parse_variant_table("# a comment\n\n1820\t180B\n1820\t180C\n1821\t180F\n")
+    assert table == {A: {FVS_SECOND, FVS_THIRD}, chr(0x1821): {FVS_FIFTH}}
+    with pytest.raises(TypeError):
+        table[A] = frozenset()  # type: ignore[index]
+
+
+BAD_TABLE_ROWS = {
+    "bad hex digits": "1820\tZZZZ",
+    "an empty hex field": "\t180B",
+    "a negative number": "-1820\t180B",
+    "one column": "1820",
+    "three columns": "1820\t180B\t180C",
+    "columns split by a space": "1820 180B",
+    "a base above the Unicode range": "110000\t180B",
+    "a base far above the Unicode range": "FFFFFFFFFFFFFFFFFFFF\t180B",
+    "a selector above the Unicode range": "1820\t110000",
+    "a base below the letters": "181F\t180B",
+    "a base above the letters": "1843\t180B",
+    "a selector that is the vowel separator": "1820\t180E",
+    "a selector that is the nirugu": "1820\t180A",
+    "a selector that is not Mongolian": "1820\t0041",
+}
+
+
+@pytest.mark.parametrize("row", BAD_TABLE_ROWS.values(), ids=list(BAD_TABLE_ROWS))
+def test_parse_variant_table_names_the_file_and_line_of_a_bad_row(row: str) -> None:
+    with pytest.raises(DataError, match=r"^standardized_variants\.tsv:3: "):
+        _parse_variant_table(f"# header\n1820\t180B\n{row}\n1821\t180B\n")
+
+
+def test_parse_variant_table_rejects_a_duplicate_row() -> None:
+    with pytest.raises(DataError, match=r"^standardized_variants\.tsv:2: .*duplicate"):
+        _parse_variant_table("1820\t180B\n1820\t180B\n")
+
+
+@pytest.mark.parametrize("text", ["", "\n\n", "# only a comment\n"])
+def test_parse_variant_table_rejects_a_table_without_rows(text: str) -> None:
+    with pytest.raises(DataError, match=r"^standardized_variants\.tsv: .*no rows"):
+        _parse_variant_table(text)
+
+
 def test_manifest_carries_the_same_hashes_as_the_table() -> None:
     manifest = json.loads(MANIFEST_PATH.read_text("utf-8"))
     header = _header()
@@ -321,6 +392,10 @@ def test_manifest_carries_the_same_hashes_as_the_table() -> None:
     assert manifest["retrieved"] == header["retrieved"]
     table_bytes = _table_text().encode("utf-8")
     assert manifest["derived_sha256"] == hashlib.sha256(table_bytes).hexdigest()
+    assert manifest["derived_rows"] == len(_table_rows())
+    derived_file = REPO_ROOT / manifest["derived_file"]
+    assert derived_file.is_file()
+    assert derived_file.read_bytes() == table_bytes
 
 
 # --- is_script_word ---------------------------------------------------------

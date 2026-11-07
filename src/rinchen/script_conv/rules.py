@@ -100,6 +100,8 @@ def _load_lexicon() -> Mapping[str, str]:
         )
     except FileNotFoundError as error:
         raise DataError(f"{_LEXICON_FILE}: the package data file is missing") from error
+    except UnicodeDecodeError as error:
+        raise DataError(f"{_LEXICON_FILE}: the file is not valid UTF-8") from error
     return MappingProxyType(_parse_lexicon(text))
 
 

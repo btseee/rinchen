@@ -11,6 +11,7 @@ process handling (timeouts, killing a process group) is tested with real childre
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -24,7 +25,7 @@ import yaml
 
 from rinchen.errors import ConfigError, DataError, UpstreamError
 from rinchen.script_conv import train as train_module
-from rinchen.script_conv.char_model import train_char_model
+from rinchen.script_conv.char_model import CONVERTER_TAGS, train_char_model
 from rinchen.script_conv.config import dump_config, render_converter_config
 from rinchen.script_conv.train import (
     eole_commands,
@@ -39,6 +40,8 @@ TO_SCRIPT_TAG = "<2mn_Mong>"
 TO_CYRILLIC_TAG = "<2mn_Cyrl>"
 DUMMY_PREFIX = chr(0x2581)  # SentencePiece's dummy prefix, a piece of its own
 NNBSP = chr(0x202F)
+LINE_SEPARATOR = chr(0x2028)
+NEXT_LINE = chr(0x0085)
 EOLE_NAMES = ("eole", "eole.exe")
 CHECKPOINT_FILE = "model.00.safetensors"  # what Eole links to its newest checkpoint
 
@@ -877,26 +880,192 @@ def test_predict_creates_the_directory_of_the_output_file(
     assert out_file.parent.is_dir()
 
 
-@pytest.mark.parametrize("field", ["ckpt_dir", "src_file", "spm_model", "out_file"])
-def test_predict_rejects_a_dollar_sign_in_a_path_before_writing_anything(
-    fake_eole: FakeEole, tmp_path: Path, spm_model: Path, field: str
+@pytest.mark.parametrize(
+    "path_of",
+    [
+        pytest.param(lambda root: {"ckpt_dir": root / "$ckpt"}, id="checkpoint-name"),
+        pytest.param(
+            lambda root: {"ckpt_dir": root / "run$x" / "ckpt"}, id="checkpoint-parent"
+        ),
+        pytest.param(
+            lambda root: {"out_file": root / "out" / "$pred.tgt"}, id="output-name"
+        ),
+        pytest.param(
+            lambda root: {"out_file": root / "out$" / "pred.tgt"}, id="output-parent"
+        ),
+    ],
+)
+def test_predict_rejects_a_dollar_sign_in_a_path_that_reaches_the_config_before_writing(
+    fake_eole: FakeEole, tmp_path: Path, spm_model: Path, path_of: Any
 ) -> None:
+    # `model_path` is the checkpoint directory; `src` and `output` are the token
+    # files beside `out_file`. Eole expands `$` in the text of the config it reads.
     with pytest.raises(ConfigError, match=r"holds '\$'"):
-        _predict(tmp_path, spm_model, **{field: tmp_path / "out" / "$x"})
+        _predict(tmp_path, spm_model, **path_of(tmp_path))
 
     assert fake_eole.calls == []
-    assert not (tmp_path / "out").exists()
+    assert [path.name for path in tmp_path.iterdir()] == ["words.src"]
 
 
-def test_predict_rejects_a_tag_the_model_does_not_know_before_writing_anything(
+def test_predict_names_the_path_that_holds_a_dollar_sign(
     fake_eole: FakeEole, tmp_path: Path, spm_model: Path
 ) -> None:
-    # An unknown tag would reach Eole as <unk> and silently convert in no direction.
-    with pytest.raises(ConfigError, match="not a piece of the model"):
-        _predict(tmp_path, spm_model, tag="<2xx_Latn>")
+    with pytest.raises(ConfigError, match="checkpoint directory"):
+        _predict(tmp_path, spm_model, ckpt_dir=tmp_path / "$a")
+    with pytest.raises(ConfigError, match="output file"):
+        _predict(tmp_path, spm_model, out_file=tmp_path / "$b" / "pred.tgt")
+
+
+def test_predict_accepts_a_dollar_sign_in_the_source_or_model_path(
+    fake_eole: FakeEole, tmp_path: Path, spm_model: Path
+) -> None:
+    # Neither path is written into the config Eole reads: the source lines reach it
+    # as the token file beside the output, and the model only tokenises in Python.
+    odd_dir = tmp_path / "odd$dir"
+    odd_dir.mkdir()
+    src_file = odd_dir / "words$.src"
+    src_file.write_text("abc\n", encoding="utf-8")
+    odd_model = odd_dir / "chars$.model"
+    shutil.copyfile(spm_model, odd_model)
+
+    out_file = _predict(tmp_path, spm_model, src_file=src_file, spm_model=odd_model)
+
+    config_text = predict_side_paths(out_file).config.read_text(encoding="utf-8")
+    assert "$" not in config_text
+    assert _lines(out_file) == ["abc"]
+
+
+@pytest.fixture(scope="module")
+def tagless_model(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A character model that knows a, b and c but not the converter tags."""
+    directory = tmp_path_factory.mktemp("tagless_model")
+    corpus = directory / "corpus.txt"
+    corpus.write_text("abc\ncab\n", encoding="utf-8")
+    prefix = directory / "chars"
+    sentencepiece.SentencePieceTrainer.train(
+        input=str(corpus),
+        model_prefix=str(prefix),
+        vocab_size=20,
+        model_type="char",
+        hard_vocab_limit=False,
+        minloglevel=2,
+    )
+    return Path(f"{prefix}.model")
+
+
+@pytest.mark.parametrize(
+    "tag", ["<2xx_Latn>", "a", DUMMY_PREFIX, "<unk>", "", f"{TO_SCRIPT_TAG} "]
+)
+def test_predict_rejects_a_tag_that_is_not_a_converter_tag_before_writing_anything(
+    fake_eole: FakeEole, tmp_path: Path, spm_model: Path, tag: str
+) -> None:
+    # An unknown tag would reach Eole as <unk> and silently convert in no direction;
+    # a piece of the model that is no tag (a letter, say) would ask for no script.
+    with pytest.raises(ConfigError, match="not a converter tag"):
+        _predict(tmp_path, spm_model, tag=tag)
 
     assert fake_eole.calls == []
     assert not (tmp_path / "out").exists()
+
+
+def test_the_converter_tags_are_the_tags_predict_accepts(
+    fake_eole: FakeEole, tmp_path: Path, spm_model: Path
+) -> None:
+    for tag in CONVERTER_TAGS:
+        _predict(tmp_path, spm_model, tag=tag)
+
+    assert [lines[0].split(" ")[0] for _, lines in fake_eole.predict_inputs] == list(
+        CONVERTER_TAGS
+    )
+
+
+def test_predict_rejects_a_model_that_lacks_a_converter_tag_before_writing_anything(
+    fake_eole: FakeEole, tmp_path: Path, tagless_model: Path
+) -> None:
+    with pytest.raises(ConfigError, match="not a piece of the model"):
+        _predict(tmp_path, tagless_model, tag=TO_SCRIPT_TAG)
+
+    assert fake_eole.calls == []
+    assert not (tmp_path / "out").exists()
+
+
+@pytest.mark.parametrize("threads", [0, -1])
+def test_predict_rejects_fewer_than_one_thread_before_it_writes_anything(
+    fake_eole: FakeEole, tmp_path: Path, spm_model: Path, threads: int
+) -> None:
+    with pytest.raises(ValueError, match="threads must be at least 1"):
+        _predict(tmp_path, spm_model, threads=threads)
+
+    assert fake_eole.calls == []
+    assert not (tmp_path / "out").exists()
+
+
+@pytest.mark.parametrize(
+    ("text", "lines"),
+    [
+        ("", []),
+        ("\n", [""]),
+        ("a", ["a"]),
+        ("a\n", ["a"]),
+        ("a\nb", ["a", "b"]),
+        ("a\n\nb\n", ["a", "", "b"]),
+        ("a\rb\n", ["a\rb"]),
+        ("a\r\nb\r\n", ["a\r", "b\r"]),
+        (f"a{LINE_SEPARATOR}b\n", [f"a{LINE_SEPARATOR}b"]),
+        (f"a{NEXT_LINE}b\n", [f"a{NEXT_LINE}b"]),
+        ("a\x0bb\x0cc\x1cd\n", ["a\x0bb\x0cc\x1cd"]),
+    ],
+    ids=repr,
+)
+def test_split_lines_breaks_at_lf_only(text: str, lines: list[str]) -> None:
+    assert train_module._split_lines(text) == lines
+
+
+def _token_source_text(out_file: Path) -> str:
+    """The token file `predict` wrote for Eole, with every character as written."""
+    return predict_side_paths(out_file).token_source.read_bytes().decode("utf-8")
+
+
+def test_predict_keeps_every_other_line_separator_inside_its_line(
+    fake_eole: FakeEole, tmp_path: Path, spm_model: Path
+) -> None:
+    fake_eole.hypotheses = ["a", "b", "c"]
+    lines = ["a\rb", f"b{LINE_SEPARATOR}c", f"c{NEXT_LINE}a"]
+
+    out_file = _predict(tmp_path, spm_model, lines=lines)
+
+    assert _token_source_text(out_file).removesuffix("\n").split("\n") == [
+        f"{TO_SCRIPT_TAG} {DUMMY_PREFIX} a \r b",
+        f"{TO_SCRIPT_TAG} {DUMMY_PREFIX} b {LINE_SEPARATOR} c",
+        f"{TO_SCRIPT_TAG} {DUMMY_PREFIX} c {NEXT_LINE} a",
+    ]
+    assert out_file.read_bytes().count(b"\n") == 3
+
+
+def test_predict_reads_the_source_file_without_translating_a_carriage_return(
+    fake_eole: FakeEole, tmp_path: Path, spm_model: Path
+) -> None:
+    fake_eole.hypotheses = ["a", "b"]
+    src_file = tmp_path / "crlf.src"
+    src_file.write_bytes(b"abc\r\ncab\r\n")
+
+    out_file = _predict(tmp_path, spm_model, src_file=src_file)
+
+    # The carriage return is a character of its line, not part of the line break.
+    assert _token_source_text(out_file) == (
+        f"{TO_SCRIPT_TAG} {DUMMY_PREFIX} a b c \r\n"
+        f"{TO_SCRIPT_TAG} {DUMMY_PREFIX} c a b \r\n"
+    )
+
+
+def test_predict_reads_the_token_output_without_translating_a_carriage_return(
+    fake_eole: FakeEole, tmp_path: Path, spm_model: Path
+) -> None:
+    fake_eole.hypotheses = ["a b\rc", "c"]
+
+    out_file = _predict(tmp_path, spm_model, lines=["abc", "cab"])
+
+    assert out_file.read_bytes().count(b"\n") == 2
 
 
 @pytest.mark.parametrize("problem", ["missing", "directory"])
