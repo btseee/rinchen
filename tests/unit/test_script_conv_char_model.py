@@ -10,7 +10,9 @@ lands under pytest's temporary directories.
 from __future__ import annotations
 
 import csv
+import hashlib
 import re
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -43,6 +45,9 @@ VOCAB_SIZE = 200
 TOO_SMALL_VOCAB_SIZE = 4
 # Above that but far below the fixture's characters: the trainer accepts it.
 TRUNCATING_VOCAB_SIZE = 40
+# Pieces every model holds besides the characters and the tags: unknown, the two
+# sentence markers and the dummy prefix.
+SPECIAL_PIECES = 4
 DUMMY_PREFIX = chr(0x2581)
 FVS_FIRST = chr(0x180B)
 
@@ -96,9 +101,19 @@ def _processor(model: Path) -> sentencepiece.SentencePieceProcessor:
     return sentencepiece.SentencePieceProcessor(model_file=str(model))
 
 
-def _train_variant(texts: list[str], prefix: Path, *, symbols: list[str]) -> Path:
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _train_variant(
+    texts: list[str],
+    prefix: Path,
+    *,
+    symbols: list[str],
+    symbol_option: str = "user_defined_symbols",
+) -> Path:
     """Train through the real trainer with the converter's options, except for the
-    reserved symbols, which the caller sets."""
+    reserved symbols, which the caller sets, and the option that carries them."""
     corpus = prefix.parent / f"{prefix.name}.txt"
     corpus.write_text("".join(f"{text}\n" for text in texts), encoding="utf-8")
     options: dict[str, object] = {
@@ -114,7 +129,7 @@ def _train_variant(texts: list[str], prefix: Path, *, symbols: list[str]) -> Pat
         "minloglevel": 2,
     }
     if symbols:
-        options["user_defined_symbols"] = symbols
+        options[symbol_option] = symbols
     sentencepiece.SentencePieceTrainer.train(**options)
     return Path(f"{prefix}.model")
 
@@ -147,10 +162,9 @@ def test_trainer_receives_exactly_the_policy_options(
 
     train_char_model(["ab"], prefix, vocab_size=VOCAB_SIZE)
 
-    input_path = Path(str(captured.pop("input")))
-    assert input_path.parent == tmp_path
-    assert input_path.name.startswith(prefix.name)
-    assert input_path.suffix == ".part"
+    # A fixed name beside the prefix, so the model file does not depend on a random
+    # input path.
+    assert captured.pop("input") == str(tmp_path / "converter_char.input.txt")
     # Spelled out rather than imported, so changing a policy option fails here. An
     # option not listed (a seed, shuffling) is left at the trainer's default.
     assert captured == {
@@ -250,16 +264,29 @@ def test_missing_prefix_directory_is_created(tmp_path: Path) -> None:
     assert model.is_file()
 
 
-def test_training_twice_on_the_same_texts_gives_the_same_pieces(
-    tmp_path: Path, trained_model: Path
+def test_training_three_times_into_one_prefix_gives_identical_files(
+    tmp_path: Path,
 ) -> None:
-    again = train_char_model(TRAINING_TEXTS, tmp_path / "again", vocab_size=VOCAB_SIZE)
+    prefix = tmp_path / "converter_char"
+    model_hashes = []
+    vocab_hashes = []
 
-    # The vocab file, not the model file: the model embeds the paths it was trained
-    # from, which differ from run to run.
-    assert again.with_suffix(".vocab").read_bytes() == (
-        trained_model.with_suffix(".vocab").read_bytes()
-    )
+    for _ in range(3):
+        model = train_char_model(TRAINING_TEXTS, prefix, vocab_size=VOCAB_SIZE)
+        model_hashes.append(_sha256(model))
+        vocab_hashes.append(_sha256(Path(f"{prefix}.vocab")))
+
+    assert len(set(model_hashes)) == 1
+    assert len(set(vocab_hashes)) == 1
+
+
+def test_vocab_size_is_only_a_cap_on_the_pieces(tmp_path: Path) -> None:
+    model = train_char_model(TRAINING_TEXTS, tmp_path / "capped", vocab_size=512)
+
+    characters = {char for text in TRAINING_TEXTS for char in text}
+    pieces = _processor(model).get_piece_size()
+    assert pieces == len(characters) + len(CONVERTER_TAGS) + SPECIAL_PIECES
+    assert pieces < 512
 
 
 def test_a_vocab_too_small_for_the_special_pieces_raises_upstream_error_with_cause(
@@ -272,7 +299,36 @@ def test_a_vocab_too_small_for_the_special_pieces_raises_upstream_error_with_cau
 
     assert isinstance(excinfo.value.__cause__, RuntimeError)
     assert str(excinfo.value.__cause__) in str(excinfo.value)
-    assert list(tmp_path.glob("*.part")) == []
+    assert not Path(f"{prefix}.input.txt").exists()
+
+
+def test_the_prefix_directory_is_created_even_when_training_fails(
+    tmp_path: Path,
+) -> None:
+    prefix = tmp_path / "nested" / "converter_char"
+
+    with pytest.raises(UpstreamError):
+        train_char_model(TRAINING_TEXTS, prefix, vocab_size=TOO_SMALL_VOCAB_SIZE)
+
+    assert prefix.parent.is_dir()
+    assert list(prefix.parent.iterdir()) == []
+
+
+def test_a_text_iterator_that_raises_midway_leaves_no_input_file(
+    tmp_path: Path,
+) -> None:
+    def failing_texts() -> Iterator[str]:
+        yield "ab"
+        raise RuntimeError("source failed")
+
+    with pytest.raises(RuntimeError, match="source failed") as excinfo:
+        train_char_model(
+            failing_texts(), tmp_path / "converter_char", vocab_size=VOCAB_SIZE
+        )
+
+    # The source's own error, not SentencePiece's.
+    assert not isinstance(excinfo.value, UpstreamError)
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_a_vocab_below_the_character_count_trains_a_model_the_check_rejects(
@@ -383,6 +439,35 @@ def test_check_names_a_tag_the_model_does_not_hold_as_one_piece(
         check_char_model(model, TRAINING_TEXTS)
 
     assert str(model) in str(excinfo.value)
+
+
+@pytest.mark.parametrize(
+    "extra_texts",
+    [
+        pytest.param([], id="tag-characters-unknown"),
+        pytest.param([TAG_TO_SCRIPT, TAG_TO_CYRILLIC], id="tag-characters-known"),
+    ],
+)
+def test_check_names_a_tag_that_is_a_piece_but_never_matched_in_text(
+    tmp_path: Path, extra_texts: list[str]
+) -> None:
+    # A control symbol is a piece of the model, but text never matches it.
+    model = _train_variant(
+        [*TRAINING_TEXTS, *extra_texts],
+        tmp_path / "control",
+        symbols=list(CONVERTER_TAGS),
+        symbol_option="control_symbols",
+    )
+    processor = _processor(model)
+    assert processor.piece_to_id(TAG_TO_SCRIPT) != processor.unk_id()
+
+    with pytest.raises(DataError, match="not matched as a symbol") as excinfo:
+        check_char_model(model, TRAINING_TEXTS)
+
+    message = str(excinfo.value)
+    assert TAG_TO_SCRIPT in message
+    assert "encodes to ids" in message
+    assert "split into" not in message
 
 
 def test_check_names_the_second_tag_when_only_the_first_is_defined(

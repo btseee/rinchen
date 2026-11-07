@@ -26,7 +26,6 @@ from pydantic import (
 
 from rinchen.config.loader import anchor_at_repo_root, reject_blank_path
 from rinchen.errors import ConfigError, DataError, UpstreamError
-from rinchen.utils.part_file import unique_part_path
 
 # The single source for the symbols the model must keep whole: each one tells the
 # converter which script to write.
@@ -86,13 +85,20 @@ def load_char_model_config(path: Path) -> CharModelConfig:
 
 def train_char_model(texts: Iterable[str], prefix: Path, *, vocab_size: int) -> Path:
     """Train the character model on `texts`, one word per line, and return its path,
-    `<prefix>.model`; the trainer writes `<prefix>.vocab` beside it. Blank texts are
-    skipped. `vocab_size` is an upper bound: a bound above the number of distinct
-    characters plus the special pieces and tags is not an error. A bound below it is
-    not an error either: the trainer drops the rarest characters, so run
-    `check_char_model` on the training texts afterwards. Training is deterministic
-    (the `.vocab` file is identical between runs), but the model file embeds the
-    random name of the input file, so its bytes and hash differ between runs.
+    `<prefix>.model`; the trainer writes `<prefix>.vocab` beside it. The texts pass
+    through `<prefix>.input.txt`, which is removed afterwards. The directory of
+    `prefix` is created even when training then fails. Blank texts are skipped.
+
+    `vocab_size` is only a cap: the model has one piece per distinct character plus
+    the special pieces and tags, so the tiny reference list trains to 73 pieces at a
+    `vocab_size` of 512. A cap below that count is not an error either: the trainer
+    drops the rarest characters. Run `check_char_model` afterwards on the training
+    texts, as a collection that can be read again (a generator is spent by this call).
+
+    Training is deterministic: the same texts into the same `prefix` give
+    byte-identical `.model` and `.vocab` files. The model file embeds the absolute
+    prefix, so its hash holds per location only; the `.vocab` file (pieces and
+    scores) is the location-independent identity of the model. Record both hashes.
 
     Raises:
         DataError: `texts` holds no non-blank text.
@@ -101,7 +107,9 @@ def train_char_model(texts: Iterable[str], prefix: Path, *, vocab_size: int) -> 
             `RuntimeError` is chained as the cause.
     """
     prefix.parent.mkdir(parents=True, exist_ok=True)
-    input_path = unique_part_path(prefix)
+    # Nothing is renamed into place, and a fixed name keeps the model file free of a
+    # random path (the trainer records its input path in the model).
+    input_path = Path(f"{prefix}.input.txt")
     try:
         if _write_non_blank_lines(texts, input_path) == 0:
             raise DataError(f"cannot train {prefix}: no non-blank text")
@@ -150,6 +158,9 @@ def check_char_model(model: Path, texts: Iterable[str]) -> None:
     a gap or selector inside a word is exercised as the converter meets it. Stops at
     the first failure.
 
+    `texts` must be a collection that can be read again, not the generator that fed
+    `train_char_model`: a spent generator, like an empty `texts`, checks only the tags.
+
     Raises:
         DataError: the model cannot be loaded (the message names the file, and the
             cause is chained except for a directory), a tag is not a single piece, or
@@ -182,15 +193,18 @@ def _tag_defect(
 ) -> str | None:
     """Why `tag` is not a single piece, or None when it is: it encodes to its own id,
     alone or after the dummy prefix. Ids, not piece strings, because a run of unknown
-    characters comes back as one piece spelled like the original text."""
+    characters comes back as one piece spelled like the original text, and a piece
+    that exists but is not a user-defined symbol (a control symbol) is never matched
+    in text."""
     tag_id = processor.piece_to_id(tag)
     if tag_id == processor.unk_id():
         return "is not a piece of the model"
     ids = processor.encode(tag)
     if ids == [tag_id] or ids == [processor.piece_to_id(_DUMMY_PREFIX), tag_id]:
         return None
-    pieces = processor.encode(tag, out_type=str)
-    return f"is split into {pieces!a}"
+    return (
+        f"is not matched as a symbol: it encodes to ids {ids}, not to its id {tag_id}"
+    )
 
 
 def _check_text(
