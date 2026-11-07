@@ -10,7 +10,6 @@ import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from enum import Enum
 from pathlib import Path
 
 import polars as pl
@@ -25,12 +24,6 @@ _SHARD_SCHEMA = pl.Schema({"id": pl.String(), "candidates": pl.List(pl.String())
 _LANGUAGES_SHOWN = 5
 
 
-class _ShardState(Enum):
-    MISSING = "missing"
-    VALID = "valid"
-    INVALID = "invalid"
-
-
 @dataclass(frozen=True, slots=True)
 class Shard:
     """A contiguous slice of the id-sorted input: the ids and texts of one unit
@@ -39,6 +32,26 @@ class Shard:
     index: int
     ids: tuple[str, ...]
     texts: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class Loaded:
+    """A shard whose file is valid: the candidate lists of its ids, in order."""
+
+    candidates: list[list[str]]
+
+
+@dataclass(frozen=True, slots=True)
+class Missing:
+    """A shard without a file."""
+
+
+@dataclass(frozen=True, slots=True)
+class Invalid:
+    """A shard whose file exists but fails `ShardStore.read`."""
+
+
+ShardLoad = Loaded | Missing | Invalid
 
 
 def _read_parquet(path: Path, what: str) -> pl.DataFrame:
@@ -296,30 +309,37 @@ class ShardStore:
             raise DataError(f"{path}: null candidates: {null_candidates}")
         return lists
 
-    def _state(self, shard: Shard) -> _ShardState:
-        """The single place a shard's file is judged: one decode at most."""
-        if not self.path_for(shard.index).is_file():
-            return _ShardState.MISSING
+    def load(self, index: int, expected_ids: Sequence[str]) -> ShardLoad:
+        """Shard `index` as one of `Loaded`, `Missing` (no file) and `Invalid`
+        (a file that fails `read` against `expected_ids`), decoding the file at
+        most once. A stale `.part` file beside a missing shard does not count.
+        This is the single place a shard's file is judged: `completed` and
+        `invalid` are built on it."""
+        if not self.path_for(index).is_file():
+            return Missing()
         try:
-            self.read(shard.index, shard.ids)
+            return Loaded(self.read(index, expected_ids))
         except DataError:
-            return _ShardState.INVALID
-        return _ShardState.VALID
+            return Invalid()
 
-    def _indexes_in_state(
-        self, shards: Sequence[Shard], state: _ShardState
+    def _indexes_loading_as(
+        self, shards: Sequence[Shard], outcome: type[Loaded | Invalid]
     ) -> frozenset[int]:
-        return frozenset(shard.index for shard in shards if self._state(shard) is state)
+        return frozenset(
+            shard.index
+            for shard in shards
+            if isinstance(self.load(shard.index, shard.ids), outcome)
+        )
 
     def completed(self, shards: Sequence[Shard]) -> frozenset[int]:
         """The indexes of the shards whose file passes `read` against the
         shard's own ids. A missing, corrupt, short or foreign file is not
         completed; an invalid one stays on disk until the next `write` replaces
         it."""
-        return self._indexes_in_state(shards, _ShardState.VALID)
+        return self._indexes_loading_as(shards, Loaded)
 
     def invalid(self, shards: Sequence[Shard]) -> frozenset[int]:
         """The indexes of the shards whose file exists but fails `read`: the
         files a rerun will replace. A shard without a file is not invalid (a
         stale `.part` file beside it does not count as one)."""
-        return self._indexes_in_state(shards, _ShardState.INVALID)
+        return self._indexes_loading_as(shards, Invalid)

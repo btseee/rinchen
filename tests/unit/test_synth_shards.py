@@ -18,6 +18,9 @@ import pytest
 from rinchen.config.synth import Ct2Config, JobConfig, LlamaCppConfig, VllmConfig
 from rinchen.errors import DataError
 from rinchen.synth.shards import (
+    Invalid,
+    Loaded,
+    Missing,
     Shard,
     ShardStore,
     job_fingerprint,
@@ -1354,6 +1357,142 @@ def test_a_later_write_moves_an_invalid_shard_to_completed(store: ShardStore) ->
 
     assert store.invalid(plan) == frozenset()
     assert store.completed(plan) == frozenset({0, 1})
+
+
+# --- ShardStore: load ---------------------------------------------------------
+
+
+def test_load_of_a_valid_file_gives_its_candidates(store: ShardStore) -> None:
+    store.write(0, IDS, CANDIDATES)
+
+    loaded = store.load(0, IDS)
+
+    assert loaded == Loaded(CANDIDATES)
+    assert isinstance(loaded, Loaded)
+    assert loaded.candidates == store.read(0, IDS)
+
+
+def test_load_of_a_shard_without_a_file_is_missing(store: ShardStore) -> None:
+    assert store.load(3, IDS) == Missing()
+
+
+def test_load_of_a_shard_in_a_directory_that_does_not_exist_is_missing(
+    tmp_path: Path,
+) -> None:
+    assert ShardStore(tmp_path / "never-made").load(0, IDS) == Missing()
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        lambda path: path.write_bytes(b"this is not parquet"),
+        lambda path: path.write_bytes(b""),
+        lambda path: path.write_bytes(path.read_bytes()[:30]),
+    ],
+    ids=["garbage", "empty", "truncated"],
+)
+def test_load_of_a_damaged_file_is_invalid(
+    store: ShardStore, damage: Callable[[Path], None]
+) -> None:
+    store.write(0, IDS, CANDIDATES)
+    damage(store.path_for(0))
+
+    assert store.load(0, IDS) == Invalid()
+
+
+def test_load_of_a_valid_file_for_other_ids_or_another_size_is_invalid(
+    store: ShardStore,
+) -> None:
+    store.write(0, IDS, CANDIDATES)
+
+    assert store.load(0, ["a", "c", "b"]) == Invalid()
+    assert store.load(0, ["a", "b"]) == Invalid()
+
+
+def test_load_turns_a_reader_panic_into_invalid(
+    store: ShardStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store.write(0, IDS, CANDIDATES)
+    monkeypatch.setattr(pl, "read_parquet", _panicking_reader)
+
+    assert store.load(0, IDS) == Invalid()
+
+
+def test_load_tells_the_valid_the_damaged_and_the_missing_shards_apart(
+    store: ShardStore,
+) -> None:
+    plan = _mixed_store(store)
+
+    outcomes = [type(store.load(shard.index, shard.ids)) for shard in plan]
+
+    assert outcomes == [Loaded, Invalid, Missing, Invalid, Invalid, Loaded]
+
+
+def test_completed_and_invalid_are_the_loaded_and_the_invalid_shards(
+    store: ShardStore,
+) -> None:
+    plan = _mixed_store(store)
+    loads = {shard.index: store.load(shard.index, shard.ids) for shard in plan}
+
+    assert store.completed(plan) == {
+        index for index, load in loads.items() if isinstance(load, Loaded)
+    }
+    assert store.invalid(plan) == {
+        index for index, load in loads.items() if isinstance(load, Invalid)
+    }
+
+
+def test_load_decodes_an_existing_file_once_and_never_opens_a_missing_one(
+    store: ShardStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    plan = _mixed_store(store)
+    opened = _count_reads(monkeypatch)
+
+    for shard in plan:
+        store.load(shard.index, shard.ids)
+
+    assert sorted(opened) == [
+        "shard-00000.parquet",
+        "shard-00001.parquet",
+        "shard-00003.parquet",
+        "shard-00004.parquet",
+        "shard-00005.parquet",
+    ]
+
+
+def test_load_ignores_a_stale_part_file_beside_a_missing_shard(
+    store: ShardStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    plan = _plan(1)
+    store.path_for(0).parent.mkdir(parents=True)
+    stale = store.path_for(0).with_name("shard-00000.parquet.0123abcd.part")
+    stale.write_bytes(b"half a file")
+    opened = _count_reads(monkeypatch)
+
+    assert store.load(0, plan[0].ids) == Missing()
+    assert opened == []
+
+
+def test_a_later_write_turns_an_invalid_load_into_a_loaded_one(
+    store: ShardStore,
+) -> None:
+    plan = _plan(1)
+    store.write(0, plan[0].ids, [["ok"]] * 2)
+    store.path_for(0).write_bytes(b"garbage")
+    assert store.load(0, plan[0].ids) == Invalid()
+
+    store.write(0, plan[0].ids, [["fresh"]] * 2)
+
+    assert store.load(0, plan[0].ids) == Loaded([["fresh"]] * 2)
+
+
+def test_the_load_outcomes_are_frozen_values() -> None:
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        Loaded([]).candidates = [["x"]]  # type: ignore[misc]
+    assert Missing() == Missing()
+    assert Invalid() == Invalid()
+    assert Missing() != Invalid()
+    assert Loaded([["a"]]) != Loaded([["b"]])
 
 
 # --- paths that look like glob patterns ---------------------------------------

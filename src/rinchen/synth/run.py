@@ -1,29 +1,42 @@
-"""The job runner: plan a synthetic-data job, generate the shards of candidates
-that are not on disk yet, select the best candidate of every source and return
-the corpus rows with the counts. The CLI owns every file the run leaves besides
-the shards: this module never writes the corpus or a manifest."""
+"""The job runner: plan a synthetic-data job, then shard by shard get the
+candidates (from disk, or generated and written there) and select the best
+candidate of every source, returning the corpus rows with the counts. The CLI
+owns every file the run leaves besides the shards: this module never writes the
+corpus or a manifest."""
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from types import MappingProxyType
+from typing import Literal
 
 import polars as pl
 
-from rinchen.config.synth import GeneratorConfig, JobConfig, SynthConfig
+from rinchen.config.synth import (
+    GeneratorConfig,
+    JobConfig,
+    SelectionConfig,
+    SynthConfig,
+)
 from rinchen.errors import ConfigError, DataError, UpstreamError
 from rinchen.filter.qe import QEScorer
 from rinchen.synth import bt, ft
 from rinchen.synth.plan import Plan
 from rinchen.synth.select import (
+    COUNT_KEYS,
     QeStatus,
     SourceRows,
     build_rows,
     select_candidates,
 )
 from rinchen.synth.shards import (
+    Invalid,
+    Loaded,
+    Missing,
     Shard,
     ShardStore,
     job_fingerprint,
@@ -77,94 +90,93 @@ def run_job(
     progress: Callable[[ShardProgress], None] | None = None,
 ) -> RunResult:
     """Run `job` over the monolingual `frame`, as `read_monolingual` returns it
-    for `job.mono_lang`, with the generator `generator_name` (a key of
-    `cfg.generators`, whose config is `generator_cfg`).
+    for `job.mono_lang`, with the generator `generator_name` (the one `job`
+    names, a key of `cfg.generators`, whose config is `generator_cfg`).
 
     The frame is cut into shards of `job.shard_size` rows, kept in
-    `<out_dir>/shards-<fingerprint[:12]>/`. Each shard without a valid file
-    there is sent to `translator` and written before the next one is started,
-    so a run that dies keeps the finished shards and a rerun resumes after them.
-    With `force` every shard is generated again. Then every shard is read back
-    from disk and the candidates are selected, so a reused and a fresh shard
-    reach the selection the same way, and `scorer` (or None to skip the QE
-    floor) rates them. `seed` only names the shard directory: the translators
-    derive their per-request seeds themselves. `progress` is called once per
-    shard in order, after the shard is on disk or found there.
+    `<out_dir>/shards-<fingerprint[:12]>/`, and the shards are handled one at a
+    time in index order. A shard with a valid file there is reused (the file is
+    decoded once). Otherwise it is sent to `translator` and written before the
+    next shard is started, so a run that dies keeps the finished shards and a
+    rerun resumes after them. Either way the shard's candidates are then
+    selected on their own, with `scorer` (or None to skip the QE floor), and
+    the shard's candidates are dropped. Selection is per source, so the rows
+    and the summed counts are those of one selection over the whole frame; only
+    the grouping of the scorer calls differs. `progress` is called once per
+    shard in order, after the shard is on disk or found there and before it is
+    selected. `seed` only names the shard directory: the translators derive
+    their per-request seeds themselves.
 
-    The shard statistics count the shards `planned`, `reused` from disk,
+    With `force` the store is ignored: every shard is generated again and
+    overwritten, whatever is on disk, and `regenerated_invalid` stays 0. The
+    shard statistics count the shards `planned`, `reused` from disk,
     `generated` and, of those, the `regenerated_invalid` ones whose file was
-    present but damaged or for other ids (always 0 with `force`).
+    present but damaged or for other ids. All rows carry one `created` stamp.
 
-    Raises ConfigError when `generator_name` is not in `cfg` or `generator_cfg`
-    is not its config, and whatever the job's planner raises for a frame that
-    does not fit the job (DataError). A `translator` that raises UpstreamError
-    for a shard gives an UpstreamError naming the shard, chained to it; a reply
-    with other than one list of strings per text is a DataError naming the
-    shard, and nothing is written for it. Any other exception propagates as it
-    is, with the finished shards on disk.
+    Raises ConfigError when `job.generator` is not `generator_name`, when
+    `generator_name` is not in `cfg` or when `generator_cfg` is not its config,
+    and whatever the job's planner raises for a frame that does not fit the job
+    (DataError). A `translator` that raises UpstreamError for a shard gives an
+    UpstreamError naming the shard, chained to it; a reply with other than one
+    list of strings per text is a DataError naming the shard, and nothing is
+    written for it. Any other exception propagates as it is, with the shards
+    written so far on disk.
 
-    The caller's frame is the largest object in memory: planning copies every
-    text into Python tuples (about 400 MB per million rows of 190 characters),
-    so drop your reference to it after the call. Candidates the translators
-    dropped (empty, duplicate, no letter or digit, not encodable) are counted
-    nowhere; a source whose generator refused shows up as `no_candidates`."""
-    _require_configured_generator(cfg, generator_name, generator_cfg)
+    Memory: the caller's frame is the largest object (planning copies every
+    text into Python tuples, about 400 MB per million rows of 190 characters,
+    so drop your reference to it after the call), plus the planned shards, the
+    corpus rows accumulated so far and the candidates of ONE shard. Candidates
+    the translators dropped (empty, duplicate, no letter or digit, not
+    encodable) are counted nowhere; a source whose generator refused shows up
+    as `no_candidates`."""
+    _require_configured_generator(job, cfg, generator_name, generator_cfg)
     plan = _PLANNERS[job.kind](job, frame)
     shards = plan_shards(frame, job.shard_size)
     fingerprint = job_fingerprint(frame, job, generator_cfg, job.shard_size, seed)
     directory = shard_directory(out_dir, fingerprint)
     store = ShardStore(directory)
-
-    done = frozenset() if force else store.completed(shards)
-    invalid = frozenset() if force else store.invalid(shards)
-    _generate_missing_shards(store, shards, plan, translator, done, progress)
-
-    sources = SourceRows(
-        ids=tuple(id_ for shard in shards for id_ in shard.ids),
-        texts=tuple(text for shard in shards for text in shard.texts),
-    )
-    candidates = [
-        texts for shard in shards for texts in store.read(shard.index, shard.ids)
-    ]
-    selection = select_candidates(
-        sources,
-        candidates,
-        kind=plan.kind,
-        synthetic_lang=plan.synthetic_lang,
+    selector = _ShardSelector(
+        plan=plan,
         cfg=cfg.selection,
         scorer=scorer,
-    )
-    corpus = build_rows(
-        sources,
-        candidates,
-        selection,
-        kind=plan.kind,
         generator_kind=generator_cfg.kind,
         generator_name=generator_name,
-        mono_lang=plan.real_lang,
-        other_lang=plan.synthetic_lang,
-        qe_scorer=cfg.selection.qe.scorer if scorer is not None else None,
+        created=datetime.now(UTC),
     )
+
+    selected: list[_Selected] = []
+    sourced: list[_Sourced] = []
+    for shard in shards:
+        candidates, how = _candidates_of(
+            store, shard, len(shards), plan, translator, force
+        )
+        sourced.append(how)
+        if progress is not None:
+            progress(ShardProgress(shard.index, len(shards), how == "reused"))
+        selected.append(selector.select(shard, candidates))
     return RunResult(
-        corpus=corpus,
-        counts=selection.counts,
-        qe_status=selection.qe_status,
-        shard_stats=MappingProxyType(
-            {
-                "planned": len(shards),
-                "reused": len(done),
-                "generated": len(shards) - len(done),
-                "regenerated_invalid": len(invalid),
-            }
+        corpus=pl.concat([part.rows for part in selected]),
+        counts=MappingProxyType(
+            {key: sum(part.counts[key] for part in selected) for key in COUNT_KEYS}
         ),
+        qe_status=selected[0].qe_status,
+        shard_stats=_shard_stats(sourced),
         fingerprint=fingerprint,
         shard_directory=directory,
     )
 
 
 def _require_configured_generator(
-    cfg: SynthConfig, generator_name: str, generator_cfg: GeneratorConfig
+    job: JobConfig,
+    cfg: SynthConfig,
+    generator_name: str,
+    generator_cfg: GeneratorConfig,
 ) -> None:
+    if job.generator != generator_name:
+        raise ConfigError(
+            f"the job names generator {job.generator!r} but {generator_name!r} "
+            "was given"
+        )
     configured = cfg.generators.get(generator_name)
     if configured is None:
         raise ConfigError(
@@ -178,25 +190,36 @@ def _require_configured_generator(
         )
 
 
-def _generate_missing_shards(
+# How a shard's candidates were obtained: read from a valid file, generated
+# because there was no file, or generated to replace a file that failed
+# validation.
+_Sourced = Literal["reused", "generated", "regenerated"]
+
+
+def _candidates_of(
     store: ShardStore,
-    shards: tuple[Shard, ...],
+    shard: Shard,
+    total: int,
     plan: Plan,
     translator: Translator,
-    done: frozenset[int],
-    progress: Callable[[ShardProgress], None] | None,
-) -> None:
-    for shard in shards:
-        reused = shard.index in done
-        if not reused:
-            _generate_shard(store, shard, len(shards), plan, translator)
-        if progress is not None:
-            progress(ShardProgress(shard.index, len(shards), reused))
+    force: bool,
+) -> tuple[list[list[str]], _Sourced]:
+    how: _Sourced = "generated"
+    if not force:
+        match store.load(shard.index, shard.ids):
+            case Loaded(candidates=candidates):
+                return candidates, "reused"
+            case Invalid():
+                how = "regenerated"
+            case Missing():
+                pass
+    return _generate_shard(store, shard, total, plan, translator), how
 
 
 def _generate_shard(
     store: ShardStore, shard: Shard, total: int, plan: Plan, translator: Translator
-) -> None:
+) -> list[list[str]]:
+    """The translator's candidate lists for the shard, validated and written."""
     try:
         reply = translator.translate(
             shard.texts, plan.generator_src_lang, plan.generator_tgt_lang
@@ -207,6 +230,7 @@ def _generate_shard(
         ) from error
     _require_one_candidate_list_per_text(shard, reply)
     store.write(shard.index, shard.ids, reply)
+    return reply
 
 
 def _require_one_candidate_list_per_text(shard: Shard, reply: list[list[str]]) -> None:
@@ -223,3 +247,60 @@ def _require_one_candidate_list_per_text(shard: Shard, reply: list[list[str]]) -
                 f"shard {shard.index}: the translator's reply for text "
                 f"{position} is not a list of strings"
             )
+
+
+@dataclass(frozen=True, slots=True)
+class _Selected:
+    """The selection of one shard: its corpus rows and its counts."""
+
+    rows: pl.DataFrame
+    counts: Mapping[str, int]
+    qe_status: QeStatus
+
+
+@dataclass(frozen=True, slots=True)
+class _ShardSelector:
+    """What every shard of a run is selected with."""
+
+    plan: Plan
+    cfg: SelectionConfig
+    scorer: QEScorer | None
+    generator_kind: str
+    generator_name: str
+    created: datetime
+
+    def select(self, shard: Shard, candidates: list[list[str]]) -> _Selected:
+        sources = SourceRows(ids=shard.ids, texts=shard.texts)
+        selection = select_candidates(
+            sources,
+            candidates,
+            kind=self.plan.kind,
+            synthetic_lang=self.plan.synthetic_lang,
+            cfg=self.cfg,
+            scorer=self.scorer,
+        )
+        rows = build_rows(
+            sources,
+            candidates,
+            selection,
+            kind=self.plan.kind,
+            generator_kind=self.generator_kind,
+            generator_name=self.generator_name,
+            mono_lang=self.plan.real_lang,
+            other_lang=self.plan.synthetic_lang,
+            qe_scorer=self.cfg.qe.scorer if self.scorer is not None else None,
+            created=self.created,
+        )
+        return _Selected(rows, selection.counts, selection.qe_status)
+
+
+def _shard_stats(sourced: list[_Sourced]) -> Mapping[str, int]:
+    tally = Counter(sourced)
+    return MappingProxyType(
+        {
+            "planned": len(sourced),
+            "reused": tally["reused"],
+            "generated": tally["generated"] + tally["regenerated"],
+            "regenerated_invalid": tally["regenerated"],
+        }
+    )

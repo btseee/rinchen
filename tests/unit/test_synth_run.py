@@ -19,7 +19,7 @@ from rinchen.config.synth import JobConfig, SelectionConfig, SynthConfig, VllmCo
 from rinchen.corpus.schema import CORPUS_SCHEMA, make_row_id
 from rinchen.errors import ConfigError, DataError, UpstreamError
 from rinchen.synth.run import RunResult, ShardProgress, run_job
-from rinchen.synth.select import Kind
+from rinchen.synth.select import Kind, SourceRows, build_rows, select_candidates
 from rinchen.synth.shards import (
     ShardStore,
     job_fingerprint,
@@ -96,6 +96,13 @@ def _files(directory: Path) -> list[str]:
 def _shard_texts(*indexes: int) -> list[tuple[str, ...]]:
     texts = planted_monolingual()["text"].to_list()
     return [tuple(texts[index * 8 : index * 8 + 8]) for index in indexes]
+
+
+class _RaisingScorer:
+    requires_cuda = False
+
+    def score(self, sources: Any, translations: Any) -> list[float]:
+        raise RuntimeError("scorer out of memory")
 
 
 def _without_created(frame: pl.DataFrame) -> pl.DataFrame:
@@ -333,13 +340,20 @@ def test_a_real_text_in_the_synthetic_script_that_the_generator_copies_is_counte
     assert result.corpus["src"].to_list() == ["Hello there"]
 
 
+@pytest.mark.parametrize("shard_size", [8, 1])
 def test_refusals_are_counted_and_a_run_of_nothing_but_refusals_gives_no_rows(
-    tmp_path: Path,
+    tmp_path: Path, shard_size: int
 ) -> None:
     frame = planted_monolingual(3)
     translator = ScriptedTranslator({text: [] for text in frame["text"]})
 
-    result = _run(tmp_path, "bt", frame=frame, translator=translator)
+    result = _run(
+        tmp_path,
+        "bt",
+        frame=frame,
+        translator=translator,
+        job=_job("bt", shard_size),
+    )
 
     assert dict(result.counts) == {
         "sources": 3,
@@ -354,6 +368,79 @@ def test_refusals_are_counted_and_a_run_of_nothing_but_refusals_gives_no_rows(
     }
     assert result.corpus.schema == CORPUS_SCHEMA
     assert result.corpus.height == 0
+
+
+def _pairs_asked(scorer: FakeScorer) -> list[tuple[str, str]]:
+    return [
+        pair
+        for sources, translations in scorer.calls
+        for pair in zip(sources, translations, strict=True)
+    ]
+
+
+def _one_selection_over_the_whole_frame(
+    kind: Kind, *, with_scorer: bool
+) -> tuple[pl.DataFrame, dict[str, int], str, list[tuple[str, str]]]:
+    """What a single `select_candidates` and `build_rows` over all 40 planted
+    rows give: the corpus, the counts, the QE status and the pairs the scorer
+    was asked about."""
+    frame = planted_monolingual()
+    script = planted_script(frame)
+    sources = SourceRows(ids=tuple(frame["id"]), texts=tuple(frame["text"]))
+    candidates = [script[text] for text in sources.texts]
+    selection_cfg = SynthConfig().selection
+    scorer = planted_scorer(frame, kind) if with_scorer else None
+    selection = select_candidates(
+        sources,
+        candidates,
+        kind=kind,
+        synthetic_lang="eng_Latn",
+        cfg=selection_cfg,
+        scorer=scorer,
+    )
+    corpus = build_rows(
+        sources,
+        candidates,
+        selection,
+        kind=kind,
+        generator_kind="vllm",
+        generator_name=GENERATOR,
+        mono_lang="khk_Cyrl",
+        other_lang="eng_Latn",
+        qe_scorer=selection_cfg.qe.scorer if scorer is not None else None,
+    )
+    pairs = [] if scorer is None else _pairs_asked(scorer)
+    return corpus, dict(selection.counts), selection.qe_status, pairs
+
+
+@pytest.mark.parametrize("shard_size", [1, 3, 7, 8, 40, 100])
+@pytest.mark.parametrize("with_scorer", [True, False])
+@pytest.mark.parametrize("kind", ["bt", "ft"])
+def test_selecting_shard_by_shard_equals_one_selection_over_the_whole_frame(
+    tmp_path: Path, kind: Kind, with_scorer: bool, shard_size: int
+) -> None:
+    corpus, counts, qe_status, pairs = _one_selection_over_the_whole_frame(
+        kind, with_scorer=with_scorer
+    )
+    scorer = planted_scorer(planted_monolingual(), kind) if with_scorer else None
+
+    result = _run(tmp_path, kind, job=_job(kind, shard_size), scorer=scorer)
+
+    assert _without_created(result.corpus).equals(_without_created(corpus))
+    assert dict(result.counts) == counts
+    assert result.qe_status == qe_status
+    if scorer is not None:
+        asked = _pairs_asked(scorer)
+        assert len(asked) == len(pairs) == 45
+        assert len(set(asked)) == len(asked)  # no pair is scored twice
+        assert sorted(asked) == sorted(pairs)
+
+
+def test_every_row_of_a_multi_shard_run_has_the_same_timestamp(tmp_path: Path) -> None:
+    corpus = _run(tmp_path, job=_job("bt", 1)).corpus
+
+    assert corpus.height == 15
+    assert corpus["created"].n_unique() == 1
 
 
 def test_the_frame_order_does_not_change_the_corpus_or_the_fingerprint(
@@ -684,6 +771,15 @@ def test_progress_marks_the_reused_shards_after_a_crash(tmp_path: Path) -> None:
     ]
 
 
+def test_progress_is_reported_before_the_shard_is_selected(tmp_path: Path) -> None:
+    events: list[ShardProgress] = []
+
+    with pytest.raises(RuntimeError, match="scorer out of memory"):
+        _run(tmp_path, scorer=_RaisingScorer(), progress=events.append)
+
+    assert events == [ShardProgress(0, 5, False)]
+
+
 def test_a_generated_shard_is_on_disk_when_its_progress_is_reported(
     tmp_path: Path,
 ) -> None:
@@ -698,20 +794,82 @@ def test_a_generated_shard_is_on_disk_when_its_progress_is_reported(
     assert on_disk == [True] * 5
 
 
-def test_selection_reads_the_shards_back_from_disk(tmp_path: Path) -> None:
-    frame = planted_monolingual(8)
-    directory = _shard_dir(tmp_path, frame=frame)
+def _count_reads(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Patch the Parquet reader to record the name of every file it opens."""
+    opened: list[str] = []
+    real_read = pl.read_parquet
 
-    def replace_candidates_on_disk(event: ShardProgress) -> None:
-        ShardStore(directory).write(
-            event.index,
-            frame["id"].to_list(),
-            [[f"On disk {index}"] for index in range(8)],
-        )
+    def counting_read(source: Any, *args: Any, **kwargs: Any) -> pl.DataFrame:
+        opened.append(Path(source).name)
+        return real_read(source, *args, **kwargs)
 
-    result = _run(tmp_path, frame=frame, progress=replace_candidates_on_disk)
+    monkeypatch.setattr(pl, "read_parquet", counting_read)
+    return opened
 
-    assert result.corpus["src"].to_list() == [f"On disk {index}" for index in range(8)]
+
+def test_a_first_run_decodes_no_shard_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    opened = _count_reads(monkeypatch)
+
+    result = _run(tmp_path)
+
+    assert opened == []
+    assert result.corpus.height == 15
+
+
+def test_a_rerun_decodes_each_existing_shard_exactly_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _run(tmp_path)
+    opened = _count_reads(monkeypatch)
+
+    _run(tmp_path)
+
+    assert sorted(opened) == SHARD_FILES
+
+
+def test_a_resumed_run_decodes_the_finished_shards_once_and_never_opens_a_missing_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    crashing = ScriptedTranslator(
+        planted_script(planted_monolingual()), fail_on_call={2: UpstreamError("down")}
+    )
+    with pytest.raises(UpstreamError):
+        _run(tmp_path, translator=crashing)
+    opened = _count_reads(monkeypatch)
+
+    _run(tmp_path)
+
+    assert sorted(opened) == SHARD_FILES[:2]
+
+
+def test_a_corrupt_shard_is_decoded_once_and_regenerated_without_a_read_back(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first = _run(tmp_path)
+    _garbage(first.shard_directory / SHARD_FILES[3])
+    opened = _count_reads(monkeypatch)
+    translator = ScriptedTranslator(planted_script(planted_monolingual()))
+
+    second = _run(tmp_path, translator=translator)
+
+    assert sorted(opened) == SHARD_FILES
+    assert translator.calls == [
+        (texts, "khk_Cyrl", "eng_Latn") for texts in _shard_texts(3)
+    ]
+    assert dict(second.shard_stats)["regenerated_invalid"] == 1
+
+
+def test_force_does_not_open_the_shard_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _run(tmp_path)
+    opened = _count_reads(monkeypatch)
+
+    _run(tmp_path, force=True)
+
+    assert opened == []
 
 
 def test_progress_is_optional(tmp_path: Path) -> None:
@@ -810,13 +968,42 @@ def test_a_generator_name_outside_the_config_is_a_config_error(tmp_path: Path) -
     translator = ScriptedTranslator({})
     out_dir = tmp_path / "synth"
 
+    job = JobConfig(
+        kind="bt",
+        mono_lang="khk_Cyrl",
+        other_lang="eng_Latn",
+        generator="nope",
+        shard_size=SHARD_SIZE,
+    )
+
     with pytest.raises(ConfigError, match=r"'nope' is not in the config"):
         _run(
             out_dir,
+            job=job,
             generator_name="nope",
             generator_cfg=VllmConfig(),
             translator=translator,
         )
+
+    assert translator.calls == []
+    assert not out_dir.exists()
+
+
+def test_a_job_that_names_another_generator_than_the_one_given_is_a_config_error(
+    tmp_path: Path,
+) -> None:
+    translator = ScriptedTranslator({})
+    out_dir = tmp_path / "synth"
+    job = JobConfig(
+        kind="bt",
+        mono_lang="khk_Cyrl",
+        other_lang="eng_Latn",
+        generator="llamacpp_default",
+        shard_size=SHARD_SIZE,
+    )
+
+    with pytest.raises(ConfigError, match=r"'llamacpp_default'.*'vllm_default'"):
+        _run(out_dir, job=job, translator=translator)
 
     assert translator.calls == []
     assert not out_dir.exists()
@@ -860,24 +1047,26 @@ def test_a_frame_without_rows_is_a_data_error(tmp_path: Path) -> None:
 # --- failures after generation ---------------------------------------------------
 
 
-class _RaisingScorer:
-    requires_cuda = False
-
-    def score(self, sources: Any, translations: Any) -> list[float]:
-        raise RuntimeError("scorer out of memory")
-
-
-def test_a_scorer_that_fails_leaves_every_shard_so_the_rerun_generates_nothing(
+def test_a_scorer_that_fails_leaves_the_shards_written_so_far_and_the_rerun_resumes(
     tmp_path: Path,
 ) -> None:
     with pytest.raises(RuntimeError, match="scorer out of memory"):
         _run(tmp_path, scorer=_RaisingScorer())
-    translator = ScriptedTranslator({})
+    # Shard 0 was written before its selection failed; the others were never asked for.
+    assert _files(_shard_dir(tmp_path)) == SHARD_FILES[:1]
+    translator = ScriptedTranslator(planted_script(planted_monolingual()))
 
     rerun = _run(tmp_path, translator=translator)
 
-    assert translator.calls == []
-    assert dict(rerun.shard_stats)["reused"] == 5
+    assert translator.calls == [
+        (texts, "khk_Cyrl", "eng_Latn") for texts in _shard_texts(1, 2, 3, 4)
+    ]
+    assert dict(rerun.shard_stats) == {
+        "planned": 5,
+        "reused": 1,
+        "generated": 4,
+        "regenerated_invalid": 0,
+    }
     assert dict(rerun.counts) == PLANTED_COUNTS
 
 
