@@ -1,0 +1,97 @@
+# Default synthetic-data config (D6). Every number below is an unvalidated
+# prior: no real generator exists in this repository, so none of them has
+# been tuned or checked on output. The generator `model` names and the CT2
+# paths are placeholders the operator replaces. This file must load to
+# exactly the SynthConfig() defaults in src/rinchen/config/synth.py; change
+# both together.
+#
+# Relative paths are anchored at the repository root by the CLI.
+#
+# Generators are used for inference only: nothing here trains or adapts a
+# model. Listing generators or jobs replaces the default table, it is not
+# merged into it, so a job must name a generator you list.
+
+generators:
+  # An OpenAI-compatible vLLM server.
+  vllm_default:
+    kind: vllm
+    base_url: http://127.0.0.1:8000/v1
+    # Placeholder: the model name the server actually serves.
+    model: Hy-MT2-7B
+    concurrency: 32
+    timeout_s: 120
+    retries: 4
+    backoff_s: 1.0
+    # Candidates per source text, and how they are sampled.
+    n: 4
+    temperature: 0.7
+    top_p: 0.95
+    max_tokens: 256
+
+  # An OpenAI-compatible llama.cpp server.
+  llamacpp_default:
+    kind: llamacpp
+    base_url: http://127.0.0.1:8080/v1
+    # Placeholder: the model name the server actually serves.
+    model: Hy-MT2-7B
+    concurrency: 8
+    timeout_s: 120
+    retries: 4
+    backoff_s: 1.0
+    n: 4
+    temperature: 0.7
+    top_p: 0.95
+    max_tokens: 256
+
+  # A CTranslate2 translation model run in-process. It takes n as the number
+  # of hypotheses and beam_size for the search; temperature, top_p and
+  # max_tokens do not apply to it.
+  ct2_nllb_default:
+    kind: ct2
+    # Placeholders: nothing creates these paths.
+    model_dir: models/ct2/nllb-200-3.3B
+    spm_model: models/ct2/nllb-200-3.3B/sentencepiece.bpe.model
+    family: nllb # nllb | madlad
+    device: cpu # cpu | cuda | auto
+    beam_size: 4
+    batch_size: 16
+    n: 4
+    temperature: 0.7
+    top_p: 0.95
+    max_tokens: 256
+
+# One job turns one monolingual corpus into synthetic pairs. One of the two
+# languages must be khk_Cyrl, and both must be codes in configs/languages.yaml.
+#   bt: the monolingual text is the target; the generator translates it into
+#       other_lang to make the source.
+#   ft: the monolingual text is the source; the generator translates it into
+#       other_lang to make the target.
+jobs:
+  bt_eng_khk:
+    kind: bt
+    mono_lang: khk_Cyrl
+    other_lang: eng_Latn
+    generator: vllm_default
+    shard_size: 512
+  ft_khk_eng:
+    kind: ft
+    mono_lang: khk_Cyrl
+    other_lang: eng_Latn
+    generator: vllm_default
+    shard_size: 512
+
+selection:
+  # Share of the synthetic side's letters that must belong to the registry
+  # scripts of its language. Unvalidated prior.
+  min_script_share: 0.9
+  # Quality estimation: the same section and thresholds as qe in
+  # configs/data/filters.yaml. The scorer picks which threshold applies;
+  # lower is better for max_metricx_qe, higher for min_cometkiwi.
+  # Unvalidated priors.
+  qe:
+    scorer: metricx_qe
+    max_metricx_qe: 8.0
+    min_cometkiwi: 0.55
+    batch_size: 32
+  # Candidate chosen among those that pass: minimum Bayes risk with chrF.
+  mbr_utility: chrf
