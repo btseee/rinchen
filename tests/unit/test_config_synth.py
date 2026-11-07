@@ -14,6 +14,7 @@ from rinchen.config.filters import QeConfig, load_filter_config
 from rinchen.config.languages import LanguageEntry
 from rinchen.config.loader import REPO_ROOT
 from rinchen.config.synth import (
+    MONGOLIAN,
     SYNTH_CONFIG_PATH,
     Ct2Config,
     JobConfig,
@@ -22,6 +23,7 @@ from rinchen.config.synth import (
     SynthConfig,
     VllmConfig,
     load_synth_config,
+    supported_partner_languages,
 )
 from rinchen.errors import ConfigError
 from rinchen.lang.scripts import Script
@@ -560,6 +562,38 @@ def test_a_job_language_is_refused_by_its_registry_script_not_by_its_code(
             JobConfig(kind="bt", mono_lang=code, other_lang="khk_Cyrl", generator="g")
         with pytest.raises(ValidationError, match=f"'{code}' is not a supported"):
             JobConfig(kind="bt", mono_lang="khk_Cyrl", other_lang=code, generator="g")
+
+
+def test_mongolian_is_khk_cyrl():
+    assert MONGOLIAN == "khk_Cyrl"
+
+
+def test_the_supported_partners_are_the_eight_registry_languages_besides_mongolian():
+    assert supported_partner_languages() == {
+        "eng_Latn",
+        "rus_Cyrl",
+        "zho_Hans",
+        "kor_Hang",
+        "jpn_Jpan",
+        "deu_Latn",
+        "kaz_Cyrl",
+        "tur_Latn",
+    }
+
+
+def test_a_supported_partner_is_chosen_by_its_registry_script_not_by_its_code(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    registry = _registry(
+        ("khk_Cyrl", [Script.CYRILLIC]),
+        ("eng_Latn", [Script.LATIN]),
+        ("zzz_Mong", [Script.MONGOLIAN]),
+        ("mixed_Mong", [Script.CYRILLIC, Script.MONGOLIAN]),
+        ("mn_Mong", [Script.LATIN]),
+    )
+    monkeypatch.setattr(synth_module, "load_languages", lambda: registry)
+
+    assert supported_partner_languages() == {"eng_Latn", "mn_Mong"}
 
 
 @pytest.mark.parametrize(

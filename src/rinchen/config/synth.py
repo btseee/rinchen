@@ -32,7 +32,7 @@ from rinchen.lang.scripts import Script
 
 SYNTH_CONFIG_PATH = REPO_ROOT / "configs" / "data" / "synth.yaml"
 
-_MONGOLIAN = "khk_Cyrl"
+MONGOLIAN = "khk_Cyrl"
 
 # Strict so a quoted number or a YAML boolean is a typo to report, not a
 # value to coerce.
@@ -163,6 +163,12 @@ def _supported_job_languages() -> frozenset[str]:
     )
 
 
+def supported_partner_languages() -> frozenset[str]:
+    """The languages a job pairs with Mongolian: every registry language a
+    generator can write, Mongolian itself left out."""
+    return _supported_job_languages() - {MONGOLIAN}
+
+
 class JobConfig(BaseModel):
     """One synthetic-data run over a monolingual corpus. For `bt` the
     monolingual text is the target of the pairs and the generator translates
@@ -198,9 +204,9 @@ class JobConfig(BaseModel):
             raise ValueError(
                 f"mono_lang and other_lang must differ, both are {self.mono_lang!r}"
             )
-        if _MONGOLIAN not in (self.mono_lang, self.other_lang):
+        if MONGOLIAN not in (self.mono_lang, self.other_lang):
             raise ValueError(
-                f"one of mono_lang and other_lang must be {_MONGOLIAN}, "
+                f"one of mono_lang and other_lang must be {MONGOLIAN}, "
                 f"got {self.mono_lang!r} and {self.other_lang!r}"
             )
         return self
@@ -210,13 +216,13 @@ def _default_jobs() -> dict[str, JobConfig]:
     return {
         "bt_eng_khk": JobConfig(
             kind="bt",
-            mono_lang=_MONGOLIAN,
+            mono_lang=MONGOLIAN,
             other_lang="eng_Latn",
             generator="vllm_default",
         ),
         "ft_khk_eng": JobConfig(
             kind="ft",
-            mono_lang=_MONGOLIAN,
+            mono_lang=MONGOLIAN,
             other_lang="eng_Latn",
             generator="vllm_default",
         ),

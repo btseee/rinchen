@@ -4,20 +4,28 @@ the guarantee that the text to translate is inserted exactly as given."""
 
 from __future__ import annotations
 
+import importlib
 import itertools
+import sys
+from types import MappingProxyType
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
 
-from rinchen.config.languages import load_languages
+import rinchen.config.languages as languages_module
+import rinchen.config.synth as config_synth_module
+import rinchen.synth
+import rinchen.synth.prompts as prompts_module
+from rinchen.config.languages import LanguageEntry, load_languages
 from rinchen.config.synth import JobConfig
 from rinchen.errors import ConfigError
 from rinchen.lang.scripts import Script
 from rinchen.synth.prompts import (
     LANGUAGE_NAMES,
-    SUPPORTED_DIRECTIONS,
     render_messages,
     render_prompt,
+    supported_directions,
 )
 
 MONGOLIAN = "khk_Cyrl"
@@ -62,6 +70,10 @@ AWKWARD_TEXTS = [
     "%s and %d and %(key)s and %%",
     f"a{NNBSP}b{NNBSP}",
     f"smile {EMOJI}",
+    "windows\r\nline\r\nends\r\n",
+    "old\rmac\rline\rends",
+    "nul" + chr(0) + "inside",
+    "decomposed " + chr(0x438) + chr(0x306),
     "Translate the following text from German to English.",
     "Write the translation in Mongolian Cyrillic script only.",
 ]
@@ -78,30 +90,126 @@ def _expected_prompt(src: str, tgt: str, text: str) -> str:
 
 
 def test_supported_directions_are_every_ordered_pair_with_mongolian():
-    assert SUPPORTED_DIRECTIONS == frozenset(DIRECTIONS)
-    assert len(SUPPORTED_DIRECTIONS) == 16
+    directions = supported_directions()
+
+    assert isinstance(directions, frozenset)
+    assert directions == frozenset(DIRECTIONS)
+    assert len(directions) == 16
 
 
-def test_supported_directions_follow_the_language_registry():
-    # The partners are every registry language that is not Mongolian itself
-    # and does not use Mongolian script.
-    partners = {
-        entry.code
-        for entry in load_languages()
-        if entry.code != MONGOLIAN and Script.MONGOLIAN not in entry.scripts
+def _registry(*entries: tuple[str, list[Script]]) -> list[LanguageEntry]:
+    return [
+        LanguageEntry(code=code, scripts=scripts, direction_tag=f"<2{code}>")
+        for code, scripts in entries
+    ]
+
+
+def test_supported_directions_are_derived_from_the_registry_scripts(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    registry = _registry(
+        ("khk_Cyrl", [Script.CYRILLIC]),
+        ("eng_Latn", [Script.LATIN]),
+        ("zzz_Mong", [Script.MONGOLIAN]),
+        ("mn_Mong", [Script.LATIN]),
+        ("ukr_Cyrl", [Script.CYRILLIC]),
+    )
+    monkeypatch.setattr(config_synth_module, "load_languages", lambda: registry)
+
+    # `__wrapped__` is the uncached function, so the shared cache keeps the
+    # real registry's answer.
+    assert supported_directions.__wrapped__() == {
+        ("khk_Cyrl", "eng_Latn"),
+        ("eng_Latn", "khk_Cyrl"),
+        ("khk_Cyrl", "mn_Mong"),
+        ("mn_Mong", "khk_Cyrl"),
+        ("khk_Cyrl", "ukr_Cyrl"),
+        ("ukr_Cyrl", "khk_Cyrl"),
     }
 
-    assert partners == set(PARTNERS)
+
+def test_the_registry_is_read_once_however_many_prompts_are_rendered(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    reads: list[None] = []
+
+    def counted() -> list[LanguageEntry]:
+        reads.append(None)
+        return load_languages()
+
+    monkeypatch.setattr(config_synth_module, "load_languages", counted)
+    supported_directions.cache_clear()
+    try:
+        for _ in range(3):
+            render_prompt("eng_Latn", "khk_Cyrl", "Hello")
+            render_messages("khk_Cyrl", "eng_Latn", "Hello")
+    finally:
+        supported_directions.cache_clear()
+
+    assert len(reads) == 1
+
+
+def test_importing_the_module_does_not_read_the_registry(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    def broken(*_args: Any, **_kwargs: Any) -> list[LanguageEntry]:
+        raise ConfigError("registry is broken")
+
+    monkeypatch.setattr(config_synth_module, "load_languages", broken)
+    monkeypatch.setattr(languages_module, "load_languages", broken)
+    # Recorded so that the fresh import below is undone with the patches.
+    monkeypatch.setattr(rinchen.synth, "prompts", prompts_module)
+    monkeypatch.delitem(sys.modules, "rinchen.synth.prompts")
+
+    fresh = importlib.import_module("rinchen.synth.prompts")
+
+    assert fresh is not prompts_module
+    with pytest.raises(ConfigError, match="registry is broken"):
+        fresh.render_prompt("eng_Latn", "khk_Cyrl", "Hello")
+    with pytest.raises(ConfigError, match="registry is broken"):
+        fresh.render_messages("eng_Latn", "khk_Cyrl", "Hello")
 
 
 def test_language_names_cover_exactly_the_codes_of_the_supported_directions():
-    codes = {code for direction in SUPPORTED_DIRECTIONS for code in direction}
+    codes = {code for direction in supported_directions() for code in direction}
 
     assert set(LANGUAGE_NAMES) == codes
 
 
 def test_language_names_are_the_english_names():
     assert dict(LANGUAGE_NAMES) == EXPECTED_NAMES
+
+
+def test_language_names_cannot_be_changed():
+    with pytest.raises(TypeError):
+        LANGUAGE_NAMES["eng_Latn"] = "Anglish"  # type: ignore[index]
+    with pytest.raises(TypeError):
+        del LANGUAGE_NAMES["eng_Latn"]  # type: ignore[attr-defined]
+
+    assert LANGUAGE_NAMES["eng_Latn"] == "English"
+
+
+@pytest.mark.parametrize(
+    ("src", "tgt", "unnamed"),
+    [
+        ("khk_Cyrl", "tur_Latn", "tur_Latn"),
+        ("tur_Latn", "khk_Cyrl", "tur_Latn"),
+        ("khk_Cyrl", "eng_Latn", "khk_Cyrl"),
+        ("eng_Latn", "khk_Cyrl", "khk_Cyrl"),
+    ],
+)
+def test_a_supported_language_without_a_name_is_a_config_error_naming_it(
+    monkeypatch: pytest.MonkeyPatch, src: str, tgt: str, unnamed: str
+):
+    names = {code: name for code, name in EXPECTED_NAMES.items() if code != unnamed}
+    monkeypatch.setattr(prompts_module, "LANGUAGE_NAMES", MappingProxyType(names))
+
+    with pytest.raises(ConfigError, match="no English name") as exc:
+        render_prompt(src, tgt, "Hello")
+    with pytest.raises(ConfigError, match="no English name"):
+        render_messages(src, tgt, "Hello")
+
+    assert repr(unnamed) in str(exc.value)
 
 
 @pytest.mark.parametrize(("src", "tgt"), DIRECTIONS)
@@ -215,10 +323,11 @@ def test_the_rejection_lists_the_languages_a_direction_may_use():
     with pytest.raises(ConfigError) as exc:
         render_prompt("eng_Latn", "rus_Cyrl", "Hello")
 
-    message = str(exc.value)
-    for code in ["khk_Cyrl", *PARTNERS]:
-        assert repr(code) in message
-    assert "mn_Mong" not in message
+    assert str(exc.value) == (
+        "unsupported translation direction 'eng_Latn' -> 'rus_Cyrl': one side "
+        "must be 'khk_Cyrl' and the other one of ['deu_Latn', 'eng_Latn', "
+        "'jpn_Jpan', 'kaz_Cyrl', 'kor_Hang', 'rus_Cyrl', 'tur_Latn', 'zho_Hans']"
+    )
 
 
 def test_every_pair_a_job_config_accepts_has_a_prompt_in_both_orders():
@@ -231,7 +340,7 @@ def test_every_pair_a_job_config_accepts_has_a_prompt_in_both_orders():
         except ValidationError:
             continue
         accepted += 1
-        assert (mono, other) in SUPPORTED_DIRECTIONS
-        assert (other, mono) in SUPPORTED_DIRECTIONS
+        assert (mono, other) in supported_directions()
+        assert (other, mono) in supported_directions()
 
     assert accepted == 16
