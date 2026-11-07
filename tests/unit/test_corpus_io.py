@@ -170,3 +170,21 @@ def test_empty_frame_round_trips(tmp_path: Path) -> None:
 
     assert result.height == 0
     assert result.schema == CORPUS_SCHEMA
+
+
+def test_a_writer_never_touches_the_temporary_file_of_another_writer(
+    tmp_path: Path,
+) -> None:
+    # What a concurrent run into the same directory has in flight, under the
+    # name an earlier version of the writer used for itself.
+    other_writers_file = tmp_path / "corpus.parquet.part"
+    other_writers_file.write_bytes(b"in flight")
+    path = tmp_path / "corpus.parquet"
+
+    write_corpus(_frame(), path)
+
+    assert other_writers_file.read_bytes() == b"in flight"
+    assert scan_corpus(path).collect().equals(_frame())
+    assert sorted(entry.name for entry in tmp_path.glob("*.part")) == [
+        "corpus.parquet.part"
+    ]

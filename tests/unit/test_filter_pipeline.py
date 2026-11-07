@@ -4,17 +4,24 @@ embedder standing in for the real models."""
 
 from __future__ import annotations
 
+import gc
+import weakref
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
+import numpy as np
 import polars as pl
 import pytest
+from numpy.typing import NDArray
 
 from rinchen.config.filters import FilterConfig, LengthConfig, LidConfig, StageName
 from rinchen.corpus.schema import CORPUS_SCHEMA, SCORES_DTYPE, corpus_frame
-from rinchen.errors import ConfigError, DataError
+from rinchen.errors import ConfigError, DataError, UpstreamError
 from rinchen.filter.pipeline import PipelineResult, kept_rows, run_pipeline
 from rinchen.filter.reasons import FilterReason
+from rinchen.mine import embed as embed_module
+from rinchen.mine.embed import SentenceTransformerEmbedder
 from tests.support.embedders import ConceptEmbedder
 from tests.support.planted_corpus import (
     PLANTED_REASON_COUNTS,
@@ -297,3 +304,168 @@ def test_a_missing_lid_model_is_a_config_error(
 
     with pytest.raises(ConfigError, match="absent.bin"):
         run_pipeline(planted.frame.lazy(), _only(config, "lid"))
+
+
+# --- giving the embedder's memory back after the labse stage ------------------------
+
+
+class EventLog(list[str]):
+    """The order in which the stages' collaborators were used."""
+
+    def first(self, event: str) -> int:
+        return self.index(event)
+
+    def last(self, event: str) -> int:
+        return len(self) - 1 - self[::-1].index(event)
+
+
+class ReleasableEmbedder(ConceptEmbedder):
+    def __init__(self, concepts: dict[str, int], events: EventLog) -> None:
+        super().__init__(concepts)
+        self._events = events
+
+    def embed(self, texts: Sequence[str]) -> NDArray[np.float32]:
+        self._events.append("embed")
+        return super().embed(texts)
+
+    def release(self) -> None:
+        self._events.append("release")
+
+
+class FailingReleasableEmbedder(ReleasableEmbedder):
+    def embed(self, texts: Sequence[str]) -> NDArray[np.float32]:
+        self._events.append("embed")
+        raise UpstreamError("embedding model unavailable")
+
+
+class EventScorer(ConstantScorer):
+    def __init__(self, events: EventLog) -> None:
+        super().__init__()
+        self._events = events
+
+    def score(self, sources: Sequence[str], translations: Sequence[str]) -> list[float]:
+        self._events.append("score")
+        return super().score(sources, translations)
+
+
+def test_the_embedder_is_released_once_after_labse_and_before_qe(
+    planted: PlantedCorpus, tiny_config: FilterConfig
+) -> None:
+    events = EventLog()
+    embedder = ReleasableEmbedder(planted.concepts, events)
+    config = _only(tiny_config, "numbers", "labse", "qe")
+
+    result = run_pipeline(
+        planted.frame.lazy(), config, embedder=embedder, qe_scorer=EventScorer(events)
+    )
+
+    assert result.stage_status == {"numbers": "ok", "labse": "ok", "qe": "ok"}
+    assert events.count("release") == 1
+    assert events.last("embed") < events.first("release") < events.first("score")
+
+
+def test_the_embedder_is_released_when_labse_is_the_last_stage(
+    planted: PlantedCorpus, tiny_config: FilterConfig
+) -> None:
+    events = EventLog()
+    embedder = ReleasableEmbedder(planted.concepts, events)
+
+    run_pipeline(planted.frame.lazy(), _only(tiny_config, "labse"), embedder=embedder)
+
+    assert events.count("release") == 1
+    assert events.last("embed") < events.first("release")
+
+
+def test_the_embedder_is_not_released_when_labse_is_not_a_stage(
+    planted: PlantedCorpus, tiny_config: FilterConfig
+) -> None:
+    events = EventLog()
+    embedder = ReleasableEmbedder(planted.concepts, events)
+
+    run_pipeline(
+        planted.frame.lazy(),
+        _only(tiny_config, "numbers", "qe"),
+        embedder=embedder,
+        qe_scorer=EventScorer(events),
+    )
+
+    assert set(events) == {"score"}
+
+
+def test_the_embedder_is_released_when_the_labse_stage_fails(
+    planted: PlantedCorpus, tiny_config: FilterConfig
+) -> None:
+    events = EventLog()
+    embedder = FailingReleasableEmbedder(planted.concepts, events)
+
+    with pytest.raises(UpstreamError, match="embedding model unavailable"):
+        run_pipeline(
+            planted.frame.lazy(), _only(tiny_config, "labse"), embedder=embedder
+        )
+
+    assert events.count("release") == 1
+
+
+def test_an_embedder_that_cannot_be_released_is_used_as_before(
+    planted: PlantedCorpus, tiny_config: FilterConfig, embedder: ConceptEmbedder
+) -> None:
+    result = run_pipeline(
+        planted.frame.lazy(), _only(tiny_config, "labse"), embedder=embedder
+    )
+
+    assert result.stage_status == {"labse": "ok"}
+    assert result.reason_counts["labse"] > 0
+
+
+class ConceptModel:
+    """Stands in for a SentenceTransformer, which a test can weakly reference."""
+
+    def __init__(self, concepts: dict[str, int]) -> None:
+        self._embedder = ConceptEmbedder(concepts)
+
+    def encode(self, inputs: Sequence[str], **options: Any) -> NDArray[np.float32]:
+        return self._embedder.embed(inputs)
+
+
+class ModelProbeScorer(ConstantScorer):
+    """Records, whenever it scores, whether the first model that was loaded is
+    still alive."""
+
+    def __init__(
+        self, loaded_models: list[weakref.ReferenceType[ConceptModel]]
+    ) -> None:
+        super().__init__()
+        self._loaded_models = loaded_models
+        self.model_alive_while_scoring: list[bool] = []
+
+    def score(self, sources: Sequence[str], translations: Sequence[str]) -> list[float]:
+        gc.collect()
+        self.model_alive_while_scoring.append(self._loaded_models[0]() is not None)
+        return super().score(sources, translations)
+
+
+def test_no_reference_to_the_loaded_labse_model_survives_into_the_qe_stage(
+    planted: PlantedCorpus, tiny_config: FilterConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    loaded_models: list[weakref.ReferenceType[ConceptModel]] = []
+
+    def load(model_name: str, device: str) -> ConceptModel:
+        model = ConceptModel(planted.concepts)
+        loaded_models.append(weakref.ref(model))
+        return model
+
+    monkeypatch.setattr(embed_module, "_load_model", load)
+    embedder = SentenceTransformerEmbedder("some/model", device="cpu")
+    scorer = ModelProbeScorer(loaded_models)
+
+    result = run_pipeline(
+        planted.frame.lazy(),
+        _only(tiny_config, "labse", "qe"),
+        embedder=embedder,
+        qe_scorer=scorer,
+    )
+
+    assert result.stage_status == {"labse": "ok", "qe": "ok"}
+    assert len(loaded_models) == 1
+    assert scorer.model_alive_while_scoring
+    assert not any(scorer.model_alive_while_scoring)

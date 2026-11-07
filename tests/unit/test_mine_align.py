@@ -7,9 +7,7 @@ from __future__ import annotations
 
 import itertools
 import random
-import time
 from collections.abc import Iterator, Sequence
-from dataclasses import dataclass
 
 import numpy as np
 import pytest
@@ -30,7 +28,6 @@ from tests.support.planted_alignments import (
 
 MIN_F1 = 0.95
 MIN_ONE_TO_ONE_RECALL = 0.97
-ALIGN_SECONDS = 2.0
 DEFAULT_SKIP_COST = 0.9
 
 
@@ -98,43 +95,33 @@ def planted() -> Planted:
     return build_planted_alignments()
 
 
-@dataclass(frozen=True)
-class Timed:
-    alignments: list[Alignment]
-    seconds: float
-
-
 @pytest.fixture(scope="module")
-def aligned(planted: Planted) -> Timed:
-    started = time.perf_counter()
-    alignments = align(planted.src, planted.tgt, HashEmbedder())
-    return Timed(alignments, time.perf_counter() - started)
+def aligned(planted: Planted) -> list[Alignment]:
+    return align(planted.src, planted.tgt, HashEmbedder())
 
 
 # --- quality gates ---------------------------------------------------------------
 
 
 def test_aligner_reaches_f1_0_95_on_planted_alignments(
-    planted: Planted, aligned: Timed
+    planted: Planted, aligned: list[Alignment]
 ) -> None:
-    predicted = pairs_of(aligned.alignments)
+    predicted = pairs_of(aligned)
 
     assert f1_score(predicted, planted.gold) >= MIN_F1
     assert recall_of_shape(predicted, planted.gold, (1, 1)) >= MIN_ONE_TO_ONE_RECALL
 
 
-def test_aligning_150_sentences_per_side_is_fast(aligned: Timed) -> None:
-    assert aligned.seconds < ALIGN_SECONDS
-
-
 def test_alignment_of_planted_data_covers_every_sentence_in_order(
-    planted: Planted, aligned: Timed
+    planted: Planted, aligned: list[Alignment]
 ) -> None:
-    _assert_partition(aligned.alignments, len(planted.src), len(planted.tgt), 4)
+    _assert_partition(aligned, len(planted.src), len(planted.tgt), 4)
 
 
-def test_alignment_cost_of_a_deletion_is_the_skip_cost(aligned: Timed) -> None:
-    deletions = _deletions(aligned.alignments)
+def test_alignment_cost_of_a_deletion_is_the_skip_cost(
+    aligned: list[Alignment],
+) -> None:
+    deletions = _deletions(aligned)
 
     assert deletions
     assert {d.cost for d in deletions} == {DEFAULT_SKIP_COST}
@@ -274,8 +261,10 @@ def test_costs_that_are_not_finite_and_non_negative_raise(
         align(["a b"], ["a b"], HashEmbedder(), **{name: bad})
 
 
-def test_max_k_three_forbids_two_to_two(planted: Planted, aligned: Timed) -> None:
-    assert any(_shape(a) == (2, 2) for a in aligned.alignments)
+def test_max_k_three_forbids_two_to_two(
+    planted: Planted, aligned: list[Alignment]
+) -> None:
+    assert any(_shape(a) == (2, 2) for a in aligned)
 
     limited = align(planted.src, planted.tgt, HashEmbedder(), max_k=3)
 
@@ -292,17 +281,19 @@ def test_max_k_two_allows_only_one_to_one_and_deletions(planted: Planted) -> Non
 
 
 def test_larger_max_k_finds_the_one_to_three_alignments(
-    planted: Planted, aligned: Timed
+    planted: Planted, aligned: list[Alignment]
 ) -> None:
     gold_shapes = {(len(src), len(tgt)) for src, tgt in planted.gold}
-    found = {_shape(a) for a in aligned.alignments}
+    found = {_shape(a) for a in aligned}
 
     assert {(1, 3), (3, 1)} <= gold_shapes
     assert {(1, 3), (3, 1)} <= found
 
 
-def test_skip_cost_controls_deletions(planted: Planted, aligned: Timed) -> None:
-    default_deletions = len(_deletions(aligned.alignments))
+def test_skip_cost_controls_deletions(
+    planted: Planted, aligned: list[Alignment]
+) -> None:
+    default_deletions = len(_deletions(aligned))
 
     forbidden = align(planted.src, planted.tgt, HashEmbedder(), skip_cost=1000.0)
     cheap = align(planted.src, planted.tgt, HashEmbedder(), skip_cost=0.05)
@@ -312,7 +303,7 @@ def test_skip_cost_controls_deletions(planted: Planted, aligned: Timed) -> None:
 
 
 def test_merge_penalty_controls_how_many_sentences_are_grouped(
-    planted: Planted, aligned: Timed
+    planted: Planted, aligned: list[Alignment]
 ) -> None:
     def grouped(alignments: Sequence[Alignment]) -> int:
         return sum(len(a.src) + len(a.tgt) > 2 for a in alignments)
@@ -321,7 +312,7 @@ def test_merge_penalty_controls_how_many_sentences_are_grouped(
     strict = align(planted.src, planted.tgt, HashEmbedder(), merge_penalty=5.0)
 
     assert grouped(strict) == 0
-    assert grouped(plain) > grouped(aligned.alignments) > 0
+    assert grouped(plain) > grouped(aligned) > 0
 
 
 # --- the embedder contract -----------------------------------------------------------

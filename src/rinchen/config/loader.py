@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from pydantic import ValidationInfo
 
 from rinchen.config.schema import RinchenConfig
 from rinchen.config.settings import RinchenEnvSettings
@@ -16,6 +17,21 @@ from rinchen.errors import ConfigError
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 BASE_CONFIG_PATH = REPO_ROOT / "configs" / "base.yaml"
 PROFILES_DIR = REPO_ROOT / "configs" / "profiles"
+
+
+def reject_blank_path(value: object, info: ValidationInfo) -> object:
+    """A pydantic before-validator for a path field: an empty or blank string
+    is an error. Path("") already collapses to ".", which anchoring would turn
+    into the repo root itself."""
+    if isinstance(value, str) and not value.strip():
+        raise ValueError(f"{info.field_name} must not be empty or blank")
+    return value
+
+
+def anchor_at_repo_root(value: Path) -> Path:
+    """A pydantic after-validator for a path field: a relative path means the
+    same thing from any working directory."""
+    return value if value.is_absolute() else REPO_ROOT / value
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:

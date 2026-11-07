@@ -19,7 +19,7 @@ from rinchen.corpus.schema import validate_corpus_schema
 from rinchen.filter import labse, length, lid, minhash, numbers, qe, script_ratio
 from rinchen.filter.qe import QEScorer
 from rinchen.filter.reasons import FilterReason
-from rinchen.mine.embed import Embedder
+from rinchen.mine.embed import Embedder, Releasable
 
 _OK = "ok"
 _PARTIAL_PREFIX = "partial: "
@@ -52,10 +52,12 @@ class _Models:
 @dataclass(frozen=True, slots=True)
 class _Plan:
     """What one stage does in this run: its status and, unless it is skipped,
-    the function that applies it."""
+    the function that applies it, and the resource the stage alone uses, if the
+    pipeline gives it back once the stage has run."""
 
     status: str
     apply: Callable[[pl.LazyFrame], pl.LazyFrame] | None
+    release_after: Releasable | None = None
 
 
 _Planner = Callable[[FilterConfig, _Models], _Plan]
@@ -76,10 +78,13 @@ def run_pipeline(
     stage, which builds the LaBSE embedder from `cfg` when it is None;
     `qe_scorer` serves `qe`, which is skipped without one.
 
-    The frame is collected after every stage, so the LID model, LaBSE and the
-    QE model are never in memory together and an error surfaces at the stage
-    that caused it. The whole corpus is in memory, the input plus the current
-    stage's result: budget two to three times its size."""
+    The frame is collected after every stage, so an error surfaces at the stage
+    that caused it. The pipeline gives LaBSE back before `qe` loads its model:
+    `embedder` is released, when it has a `release`, as soon as the `labse`
+    stage has run, also when that stage failed. The embedder object stays
+    usable; only the model it loaded is dropped. A QE scorer is not released
+    here, its owner does that. The whole corpus is in memory, the input plus
+    the current stage's result: budget two to three times its size."""
     validate_corpus_schema(df.collect_schema(), source="filter pipeline input")
     models = _Models(embedder=embedder, qe_scorer=qe_scorer)
     frame = df.collect()
@@ -88,7 +93,11 @@ def run_pipeline(
         plan = _PLANNERS[name](cfg, models)
         stage_status[name] = plan.status
         if plan.apply is not None:
-            frame = plan.apply(frame.lazy()).collect()
+            try:
+                frame = plan.apply(frame.lazy()).collect()
+            finally:
+                if plan.release_after is not None:
+                    plan.release_after.release()
     return PipelineResult(
         frame=frame,
         reason_counts=_count_reasons(frame),
@@ -122,6 +131,15 @@ def _plan_length(cfg: FilterConfig, models: _Models) -> _Plan:
     return _Plan(status, partial(length.apply, cfg=cfg.length))
 
 
+def _plan_labse(cfg: FilterConfig, models: _Models) -> _Plan:
+    embedder = models.embedder
+    return _Plan(
+        _OK,
+        partial(labse.apply, cfg=cfg.labse, embedder=embedder),
+        release_after=embedder if isinstance(embedder, Releasable) else None,
+    )
+
+
 def _plan_qe(cfg: FilterConfig, models: _Models) -> _Plan:
     scorer = models.qe_scorer
     if scorer is None:
@@ -140,8 +158,6 @@ _PLANNERS: dict[StageName, _Planner] = {
     "length": _plan_length,
     "lid": lambda cfg, models: _runs(partial(lid.apply, cfg=cfg.lid)),
     "minhash": lambda cfg, models: _runs(partial(minhash.apply, cfg=cfg.minhash)),
-    "labse": lambda cfg, models: _runs(
-        partial(labse.apply, cfg=cfg.labse, embedder=models.embedder)
-    ),
+    "labse": _plan_labse,
     "qe": _plan_qe,
 }

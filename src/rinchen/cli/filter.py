@@ -34,11 +34,13 @@ from rinchen.filter.qe_eole import EoleMetricXQEScorer
 from rinchen.manifest import store
 from rinchen.manifest.model import Manifest, ManifestFile
 from rinchen.manifest.stage import (
+    begin_commit,
     build_inputs,
     code_version,
     output_file,
+    outputs_current,
+    refuse_foreign_manifest,
     sha256_of,
-    should_skip,
     tool_versions,
 )
 from rinchen.mine.embed import Embedder, SentenceTransformerEmbedder
@@ -47,7 +49,9 @@ from rinchen.utils.logging import get as get_logger
 app = typer.Typer(no_args_is_help=True)
 
 # Polars appends this note, naming the failing expression, to an exception
-# raised inside a stage.
+# raised inside a stage. Stripping it is best-effort: it couples to the text of
+# polars' message, so a polars release that words the note differently leaves
+# the note in the printed error (the error and its exit code are unaffected).
 _POLARS_EXPRESSION_NOTE = "\n\nThis error occurred in the following expression"
 
 _STAGE_NAME = "filter"
@@ -57,7 +61,10 @@ _KEPT_FILE = "kept.parquet"
 _TOOL_PACKAGES = (
     "polars",
     "datasketch",
+    # `import fasttext` is served by the vendored `fasttext-wheel` shim, which
+    # wraps the native binding of `fasttext-new`: a LID run depends on both.
     "fasttext-new",
+    "fasttext-wheel",
     "sentence-transformers",
     "sentencepiece",
     "torch",
@@ -136,6 +143,10 @@ def run(
     corpus (every row, with its filter reason) and the kept corpus. The corpus
     is held in memory: budget two to three times its size."""
     with rinchen_errors_as_exit_codes(message_of=_error_message):
+        target = out_dir if out_dir is not None else DEFAULT_OUT_ROOT / corpus.stem
+        # First of all: nothing is read or hashed for a run that would replace
+        # its own input.
+        _require_corpus_apart_from_outputs(corpus, target)
         cfg = load_filter_config(config)
         _require_model_files(cfg)
         frame = scan_corpus(corpus)
@@ -144,10 +155,17 @@ def run(
                 typer.echo(line)
             return
 
-        target = out_dir if out_dir is not None else DEFAULT_OUT_ROOT / corpus.stem
+        refuse_foreign_manifest(target, _STAGE_NAME)
         input_paths = [corpus, *(path for _, path in _model_files(cfg))]
         config_sha256 = sha256_of(config)
-        if _outputs_are_current(target, input_paths, config_sha256, force=force):
+        if outputs_current(
+            target,
+            _STAGE_NAME,
+            input_paths,
+            config_sha256,
+            list(_output_paths(target)),
+            force=force,
+        ):
             typer.echo("skipped: inputs and config are unchanged since the last run")
             typer.echo(f"manifest: {store.manifest_path(target)}")
             return
@@ -199,21 +217,27 @@ def _require_model_files(cfg: FilterConfig) -> None:
             raise ConfigError(f"{key} is not a file: {path}")
 
 
-def _outputs_are_current(
-    out_dir: Path, input_paths: list[Path], config_sha256: str, *, force: bool
-) -> bool:
-    # `should_skip` compares the manifest only; a deleted output must not pass.
-    outputs_exist = (out_dir / _SCORED_FILE).is_file() and (
-        out_dir / _KEPT_FILE
-    ).is_file()
-    return outputs_exist and should_skip(
-        out_dir, input_paths, config_sha256, force=force
-    )
+def _output_paths(out_dir: Path) -> tuple[Path, Path]:
+    return out_dir / _SCORED_FILE, out_dir / _KEPT_FILE
+
+
+def _require_corpus_apart_from_outputs(corpus: Path, out_dir: Path) -> None:
+    """A run replaces its two output tables, so a corpus that is one of them
+    would be overwritten while the manifest recorded its old hash. Compares
+    resolved paths, so a symlink or a `..` does not hide the clash."""
+    resolved = corpus.resolve()
+    for output in _output_paths(out_dir):
+        if output.resolve() == resolved:
+            raise ConfigError(
+                f"--corpus {corpus} is the {output.name} that this run writes "
+                f"in {out_dir}; pass a different --out-dir"
+            )
 
 
 def _run_with_models(frame: pl.LazyFrame, cfg: FilterConfig) -> PipelineResult:
     """Run the pipeline with the models its configured stages need, and give
-    the QE model's GPU memory back afterwards, also after a failure."""
+    the QE model's GPU memory back afterwards, also after a failure. The
+    pipeline gives LaBSE back itself, right after its stage."""
     embedder = build_embedder(cfg.labse) if "labse" in cfg.stages else None
     qe_scorer = build_qe_scorer(cfg.qe) if "qe" in cfg.stages else None
     try:
@@ -234,12 +258,8 @@ def _write_run(
     """Write the scored and the kept corpus, then the manifest, which comes
     last so that it never describes outputs that are not there. Returns the
     manifest path."""
-    # The manifest is the commit marker: drop the old one before touching an
-    # output, so a failure part-way leaves no manifest that vouches for a mix
-    # of old and new outputs.
-    store.manifest_path(out_dir).unlink(missing_ok=True)
-    scored_path = out_dir / _SCORED_FILE
-    kept_path = out_dir / _KEPT_FILE
+    begin_commit(out_dir, _STAGE_NAME)
+    scored_path, kept_path = _output_paths(out_dir)
     outputs = [
         output_file(scored_path, write_corpus(result.frame, scored_path)),
         output_file(kept_path, write_corpus(kept, kept_path)),

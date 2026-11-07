@@ -1,4 +1,5 @@
-"""Stage runner: skip a stage iff inputs+config sha match an existing manifest."""
+"""Stage runner: skip a stage iff inputs+config sha match an existing manifest,
+and the commit protocol of a stage command: the manifest is written last."""
 
 from __future__ import annotations
 
@@ -9,8 +10,9 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from rinchen.config.loader import REPO_ROOT
+from rinchen.errors import DataError
 from rinchen.manifest import store
-from rinchen.manifest.model import ManifestFile
+from rinchen.manifest.model import Manifest, ManifestFile
 from rinchen.utils.logging import get as get_logger
 
 
@@ -91,13 +93,67 @@ def should_skip(
     if force:
         return False
     existing = store.read(stage_dir)
-    if existing is None:
+    return existing is not None and _records_run(existing, input_paths, config_sha256)
+
+
+def outputs_current(
+    stage_dir: Path,
+    stage: str,
+    input_paths: list[Path],
+    config_sha256: str,
+    outputs: list[Path],
+    *,
+    force: bool = False,
+) -> bool:
+    """True iff the previous run of `stage` in `stage_dir` can be reused: not
+    forced, every file of `outputs` exists, and the manifest there is the one
+    of `stage`, lists every one of `outputs`, and records the same input hashes
+    and config hash as now. Raises DataError for a manifest that is unreadable,
+    but only when every output exists: a rebuild needs no manifest."""
+    if force or not all(path.is_file() for path in outputs):
         return False
-    if existing.config_sha256 != config_sha256:
+    existing = store.read(stage_dir)
+    if existing is None or existing.stage != stage:
         return False
-    existing_hashes = {item.path: item.sha256 for item in existing.inputs}
-    for input_path in input_paths:
-        key = str(input_path)
-        if existing_hashes.get(key) != sha256_of(input_path):
-            return False
-    return True
+    listed = {item.path for item in existing.outputs}
+    return all(str(path) in listed for path in outputs) and _records_run(
+        existing, input_paths, config_sha256
+    )
+
+
+def refuse_foreign_manifest(stage_dir: Path, stage: str) -> None:
+    """Raises DataError when `stage_dir` holds the manifest of another stage,
+    which `stage` must never replace. No manifest, one of `stage` and one that
+    cannot be read pass: an unreadable manifest names no stage to protect, and
+    a forced rerun is how the user repairs it."""
+    try:
+        existing = store.read(stage_dir)
+    except DataError:
+        return
+    if existing is not None and existing.stage != stage:
+        raise DataError(
+            f"{stage_dir} holds the manifest of stage {existing.stage!r}, not of "
+            f"{stage!r}; refusing to erase it. Use another output directory."
+        )
+
+
+def begin_commit(stage_dir: Path, stage: str) -> None:
+    """Start writing the outputs of `stage` into `stage_dir`. The manifest is
+    the commit marker: it is removed before any output is touched, so a
+    failure part-way leaves no manifest that vouches for a mix of old and new
+    outputs. Raises DataError, and removes nothing, for the manifest of another
+    stage (see `refuse_foreign_manifest`)."""
+    refuse_foreign_manifest(stage_dir, stage)
+    store.manifest_path(stage_dir).unlink(missing_ok=True)
+
+
+def _records_run(
+    manifest: Manifest, input_paths: list[Path], config_sha256: str
+) -> bool:
+    if manifest.config_sha256 != config_sha256:
+        return False
+    recorded_hashes = {item.path: item.sha256 for item in manifest.inputs}
+    return all(
+        recorded_hashes.get(str(input_path)) == sha256_of(input_path)
+        for input_path in input_paths
+    )

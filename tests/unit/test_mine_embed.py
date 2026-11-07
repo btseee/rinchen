@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import weakref
 from collections.abc import Sequence
 from typing import Any
 
@@ -13,7 +14,7 @@ from numpy.typing import NDArray
 
 from rinchen.errors import UpstreamError
 from rinchen.mine import embed as embed_module
-from rinchen.mine.embed import Embedder, SentenceTransformerEmbedder
+from rinchen.mine.embed import Embedder, Releasable, SentenceTransformerEmbedder
 from tests.support.embedders import ConceptEmbedder, HashEmbedder
 
 
@@ -62,6 +63,12 @@ def test_every_embedder_satisfies_the_protocol(embedder: object) -> None:
 
 def test_an_object_without_embed_does_not_satisfy_the_protocol() -> None:
     assert not isinstance(object(), Embedder)
+
+
+def test_only_an_embedder_with_release_is_releasable() -> None:
+    assert isinstance(SentenceTransformerEmbedder(), Releasable)
+    assert not isinstance(HashEmbedder(), Releasable)
+    assert not isinstance(ConceptEmbedder({}), Releasable)
 
 
 # --- loading ------------------------------------------------------------------------
@@ -193,6 +200,58 @@ def test_an_explicit_device_is_used_whatever_cuda_says(
     SentenceTransformerEmbedder(device=device).embed(["a"])
 
     assert loader.loads == [("sentence-transformers/LaBSE", device)]
+
+
+# --- giving the memory back ---------------------------------------------------------
+
+
+def test_release_before_the_model_is_loaded_does_nothing(loader: _LoaderSpy) -> None:
+    embedder = SentenceTransformerEmbedder("some/model", device="cpu")
+
+    embedder.release()
+    embedder.release()
+
+    assert loader.loads == []
+
+
+def test_release_drops_the_model_and_a_later_embed_loads_it_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import torch
+
+    emptied: list[None] = []
+    monkeypatch.setattr(torch.cuda, "empty_cache", lambda: emptied.append(None))
+    models: list[weakref.ReferenceType[_FakeModel]] = []
+
+    def load(model_name: str, device: str) -> _FakeModel:
+        model = _FakeModel()
+        models.append(weakref.ref(model))
+        return model
+
+    monkeypatch.setattr(embed_module, "_load_model", load)
+    embedder = SentenceTransformerEmbedder("some/model", device="cpu")
+    embedder.embed(["a"])
+    assert [ref() is not None for ref in models] == [True]
+
+    embedder.release()
+    embedder.release()
+
+    assert [ref() is None for ref in models] == [True]
+    assert emptied
+    embedder.embed(["a"])
+    assert len(models) == 2
+
+
+def test_release_does_not_import_torch_when_nothing_else_has(
+    loader: _LoaderSpy, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    embedder = SentenceTransformerEmbedder("some/model", device="cpu")
+    embedder.embed(["a"])
+    monkeypatch.delitem(sys.modules, "torch", raising=False)
+
+    embedder.release()
+
+    assert "torch" not in sys.modules
 
 
 # --- import cost --------------------------------------------------------------------

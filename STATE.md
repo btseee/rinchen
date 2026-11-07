@@ -202,16 +202,18 @@ Built: the corpus Parquet contract (`rinchen.corpus`: `CORPUS_SCHEMA`,
 `rinchen spm` in `cli/errors.py`), `Manifest.status`, test helpers in
 `tests/support/`, and `docs/runbooks/04_filtering_mining.md`. 22 commits before
 this one (`fb8c6d7` design and plan; `e882113` through `102509a` the code, its
-review fixes and the test hardening), then the records commit. The design is
+review fixes and the test hardening), then the records commit and a final
+review-fix commit (below). The design is
 `docs/superpowers/specs/2026-11-06-d4-filtering-mining-design.md` (updated to
 the finished code); the 17 rulings, made without a review round because the
 user asked for no check-ins, are condensed in DECISIONS.md ("2026-11-07: D4
 filtering and mining"). STOP gate and gates, run for real on Linux, CPython
 3.14.10, 2026-11-07 (`just` is not installed here, so the four gate commands
-were run individually): `ruff format --check .` -- 174 files already formatted;
-`ruff check .` -- all checks passed; `mypy src` -- no issues found in 84 source
-files; `pytest -m "not network" -q` -- **1656 passed, 10 deselected** (938 on
-the branch point; the end-to-end test in `tests/unit/test_cli_filter.py` runs
+were run individually; the figures are those after the final review-fix
+commit): `ruff format --check .` -- 176 files already formatted;
+`ruff check .` -- all checks passed; `mypy src` -- no issues found in 85 source
+files; `pytest -m "not network" -q` -- **1701 passed, 10 deselected** (1656
+before the final review fixes, 938 on the branch point; the end-to-end test in `tests/unit/test_cli_filter.py` runs
 the CLI on the 50-row planted corpus and gets 28 kept rows with the planted
 reason counts exact, `qe` skipped). Numeric gates, on
 synthetic planted data: MinHash recall 0.98 and precision 1.0 (gate 0.95);
@@ -244,9 +246,12 @@ reader. A 12-line `rinchen mine align` run gave 12 correct 1-1 rows in 6.3 s.
 Findings worth knowing: GlotLID v3 labels Chinese `cmn_Hani` or `wuu_Hani`,
 never `zho_Hans`, and has no `mn_Mong` (the default accept table and the
 wrapper's pre-detector handle both; Simplified versus Traditional is not
-checked); LaBSE stays on the GPU while the QE model runs (6,665 MiB allocated in
-all; the `run_pipeline` docstring says otherwise and should be corrected); the
-installed `huggingface_hub` ships `hf`, not `huggingface-cli`, and the download
+checked); LaBSE used to stay on the GPU while the QE model ran (6,665 MiB
+allocated in all, against a `run_pipeline` docstring that said otherwise): the
+pipeline now releases the embedder after the `labse` stage and the QE stage runs
+with 4,866 MiB allocated (6,387 MiB used on the device, 1,068 idle; measured in
+the real `filter run` command over the 24-row smoke corpus, not tried on an 8
+GiB card); the installed `huggingface_hub` ships `hf`, not `huggingface-cli`, and the download
 writes `models/lid/model_v3.bin` while the default config reads
 `models/lid/glotlid_v3.bin`. NOT verified: every threshold on real data (none
 exists), the aligner on real embeddings (calibrated on synthetic additive data
@@ -259,6 +264,21 @@ before D5. `match_documents` is a library function with no command yet, and
 there is no CometKiwi adapter. [EVIDENCE: the four gate commands, `uv run
 pytest -m network -q`, the scratch measurement scripts and the smoke runs
 described in the runbook, 2026-11-07, commits `fb8c6d7` through `102509a`.]
+
+Final review fixes (whole-branch review of `2346cea..8cbd39f`, one commit after
+`8cbd39f`): both commands refuse a run that would overwrite its own input
+(`filter run --corpus` equal to `scored.parquet` or `kept.parquet` of the out
+dir, `mine align --out` or its manifest equal to `--src` or `--tgt`; exit 2),
+and an out dir that holds another stage's manifest (exit 3); the pipeline
+releases the LaBSE embedder after the `labse` stage and its docstring is true
+(`Releasable`, `SentenceTransformerEmbedder.release`); the skip and commit
+protocol of the two commands lives in `manifest/stage.py`; Parquet and manifest
+writes go through a uniquely named temporary file; `fasttext-wheel` is recorded
+in the manifest's `tool_versions`; the wall-clock assertion of the aligner test
+is gone; the filter config shares its path validators with the SentencePiece
+config; the runbook and the spec were corrected. The 24-row smoke run was
+repeated with the release in place (exit 0, `kept 16 of 24 rows`), and `uv run
+pytest -m network -q` passed again (10 passed, 12.4 s).
 
 Branch status (corrected 2026-11-07): `main` is at `2346cea`; it holds D3 and
 the D3 research follow-up (the follow-up branch was fast-forwarded into it, and

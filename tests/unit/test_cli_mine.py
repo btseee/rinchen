@@ -12,10 +12,11 @@ from __future__ import annotations
 import hashlib
 import inspect
 import os
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import NoReturn
 
 import numpy as np
 import polars as pl
@@ -685,6 +686,81 @@ def test_a_run_for_another_output_in_the_same_directory_is_not_skipped(
 
     assert not result.stdout.startswith("skipped:")
     assert [item.path for item in _manifest(workspace).outputs] == [str(workspace.out)]
+
+
+def _fail_if_called(name: str) -> Callable[..., NoReturn]:
+    def fail(*args: object, **kwargs: object) -> NoReturn:
+        raise AssertionError(f"{name} must not be called")
+
+    return fail
+
+
+@pytest.mark.parametrize("input_option", ["src", "tgt"])
+@pytest.mark.parametrize("through_symlink", [False, True], ids=["path", "symlink"])
+def test_an_out_that_is_an_input_file_is_a_config_error_that_destroys_nothing(
+    workspace: Workspace,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    input_option: str,
+    through_symlink: bool,
+) -> None:
+    victim: Path = getattr(workspace, input_option)
+    out = victim
+    if through_symlink:
+        out = tmp_path / "alias.parquet"
+        out.symlink_to(victim)
+    before = victim.read_bytes()
+    for name in ("build_inputs", "build_embedder", "_read_sentences"):
+        monkeypatch.setattr(mine_cli, name, _fail_if_called(name))
+
+    result = runner.invoke(app, workspace.args(out=str(out)))
+
+    assert result.exit_code == 2, result.output
+    assert result.stderr.startswith(f"error: --out {out} ")
+    assert f"--{input_option}" in result.stderr
+    assert "pass a different --out" in result.stderr
+    assert victim.read_bytes() == before
+
+
+def test_an_input_file_named_like_the_manifest_beside_out_is_a_config_error(
+    workspace: Workspace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace.out.parent.mkdir()
+    clash = _write_lines(workspace.out.parent / "manifest.json", SRC_SENTENCES)
+    before = clash.read_bytes()
+    monkeypatch.setattr(mine_cli, "build_embedder", _fail_if_called("build_embedder"))
+
+    result = runner.invoke(app, workspace.args(src=str(clash)))
+
+    assert result.exit_code == 2, result.output
+    assert "manifest" in result.stderr
+    assert "--src" in result.stderr
+    assert clash.read_bytes() == before
+
+
+@pytest.mark.parametrize("extra", [[], ["--force"]])
+def test_an_out_dir_holding_the_manifest_of_another_stage_is_a_data_error(
+    workspace: Workspace, monkeypatch: pytest.MonkeyPatch, extra: list[str]
+) -> None:
+    foreign = Manifest(
+        stage="filter",
+        created="2026-11-07T00:00:00Z",
+        code_version="deadbeef",
+        config_sha256="cfg-abc",
+        seed=0,
+    )
+    store.write(workspace.out.parent, foreign)
+    before = workspace.manifest.read_bytes()
+    monkeypatch.setattr(mine_cli, "build_embedder", _fail_if_called("build_embedder"))
+
+    result = runner.invoke(app, workspace.args(*extra))
+
+    assert result.exit_code == 3, result.output
+    assert "filter" in result.stderr
+    assert "'mine_align'" in result.stderr
+    assert str(workspace.out.parent) in result.stderr
+    assert workspace.manifest.read_bytes() == before
+    assert not workspace.out.exists()
 
 
 def test_a_run_that_fails_part_way_leaves_no_manifest_for_a_later_run_to_trust(

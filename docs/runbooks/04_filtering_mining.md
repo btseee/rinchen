@@ -48,7 +48,9 @@ with the real GlotLID, LaBSE and MetricX-QE models.
    analysis and for choosing thresholds.
 
 Models, in the order the pipeline loads them: GlotLID (CPU, in `lid`), LaBSE
-(GPU when available, in `labse`), MetricX-QE (GPU only, in `qe`).
+(GPU when available, in `labse`), MetricX-QE (GPU only, in `qe`). LaBSE is
+released as soon as `labse` has run, so MetricX-QE does not share the GPU with
+it.
 
 ## Models
 
@@ -87,7 +89,8 @@ the adapter. Running offline after the models are cached was not tested.
 
 ```bash
 # Look first: validates the config, the model files and the corpus schema,
-# prints the stages, writes nothing.
+# prints the stage names (and why `qe` is skipped, when that is known without
+# loading a model), writes nothing.
 uv run rinchen filter run --corpus data/clean/mycorpus.parquet --dry-run
 
 # Run. Default config: configs/data/filters.yaml.
@@ -124,9 +127,11 @@ holds the corpus and each model file the config reads (the LID model and, when
 set, the SentencePiece model) with path, SHA-256 and size; `outputs` holds
 both tables with their row counts; `metrics` holds `rows_in`, `rows_kept` and
 `reason.<name>` for each of the ten reasons (0 when unused; kept rows are not
-counted); `tool_versions` holds polars, datasketch, fasttext-new,
-sentence-transformers, sentencepiece, torch and eole; and `status` maps every
-configured stage to `ok`, `partial: <what was skipped>` or `skipped: <reason>`.
+counted); `tool_versions` holds polars, datasketch, fasttext-new (the native
+binding), fasttext-wheel (the vendored shim that provides `import fasttext` on
+top of it), sentence-transformers, sentencepiece, torch and eole; and `status`
+maps every configured stage to `ok`, `partial: <what was skipped>` or
+`skipped: <reason>`.
 The statuses a run can show today:
 
 | Status | Meaning |
@@ -144,16 +149,28 @@ only when it can know that without importing torch (the cometkiwi case); for
 **Skip semantics.** A run is skipped, printing `skipped: inputs and config are
 unchanged since the last run` and the manifest path, with exit 0, when all of
 these hold: no `--force`; `scored.parquet` and `kept.parquet` both exist; a
-manifest exists whose `config_sha256` equals the config file's hash; and every
-input in `inputs` (the corpus and each model file the config names) has the
-recorded hash. Notes: the model files named by the config must exist even for a
-skipped run (exit 2 otherwise); the skip check hashes them, which costs about a
-second with the 1.7 GB GlotLID file; the code version, the LaBSE and MetricX
+manifest exists whose `stage` is `filter`, whose `outputs` list both files and
+whose `config_sha256` equals the config file's hash; and every input in
+`inputs` (the corpus and each model file the config names) has the recorded
+hash. Notes: the model files named by the config must exist even for a skipped
+run (exit 2 otherwise); the skip check hashes them, which costs about 0.5 s
+with the 1.7 GB GlotLID file (0.44 to 0.48 s, measured with the file in the
+page cache; a cold read is slower and was not measured); the code version, the LaBSE and MetricX
 weights and the package versions are not part of the check, so use `--force`
 after changing code or after the cached models change; the manifest is written
 last and removed before any output is touched, so a failed run leaves no
 manifest and the next run starts over. `--seed` is recorded and nothing else:
 the pipeline is deterministic and MinHash has its own `minhash.seed`.
+
+**Output directory.** The run replaces `scored.parquet` and `kept.parquet` in
+the out dir, so `--corpus` must not be either of them, also through a symlink:
+the command exits 2 before it reads anything, saying to pass a different
+`--out-dir`. An out dir whose `manifest.json` belongs to another command (a
+`mine_align` run, say) exits 3 and leaves that manifest alone, with or without
+`--force`: a directory holds the outputs of one command. Each output and the
+manifest are written to a uniquely named temporary file beside the target
+(`<name>.<random>.part`) and renamed into place; a killed run can leave such a
+file behind, and it is safe to delete.
 
 **Exit codes.** Failures print `error: <message>` on stderr.
 
@@ -161,9 +178,17 @@ the pipeline is deterministic and MinHash has its own `minhash.seed`.
 |---|---|
 | 0 | OK, including a skipped run and `--dry-run` |
 | 1 | any other `RinchenError`, or an `OSError` while writing outputs |
-| 2 | `ConfigError`: config missing or invalid (the message names the field), a model file the config names is not a file or not a model; also a command-line usage error such as a missing `--corpus` |
-| 3 | `DataError`: corpus missing, unreadable or not a corpus table (the message lists the schema problems); a language code in the rows that is not in `configs/languages.yaml`; an unreadable manifest |
+| 2 | `ConfigError`: config missing or invalid (the message names the field), a model file the config names is not a file or not a model, `--corpus` is one of the files the run writes; also a command-line usage error such as a missing `--corpus` |
+| 3 | `DataError`: corpus missing, unreadable or not a corpus table (the message lists the schema problems); a language code in the rows that is not in `configs/languages.yaml`; an unreadable manifest; an out dir that holds another command's manifest |
 | 4 | `UpstreamError`: a model could not be loaded or run (LaBSE, MetricX-QE), with the reason appended |
+
+A corrupt model file exits 2 where its loader raises: 12 corrupt GlotLID files
+(garbage bytes, empty, truncated at 4 KiB, a tenth and a half, 4 bytes, six with
+header bytes changed) all did. The fastText and SentencePiece loaders are
+native code, though, and a file that crashes one of them ends the interpreter
+instead of exiting 2: SentencePiece does so for a directory, which the command
+rules out beforehand, and a corrupt fastText file of a kind not tried may do
+the same.
 
 Errors that are not `RinchenError`s are not mapped and end as a Python
 traceback: the main case is a Parquet file whose metadata is fine but whose
@@ -201,11 +226,16 @@ they are read; `metrics` hold `aligned`, `unaligned_src`, `unaligned_tgt`,
 `src_sentences`, `tgt_sentences`, `blank_lines_dropped`, `param.max_k`,
 `param.skip_cost` and `param.merge_penalty`; there is no `status`. A rerun is
 skipped, like `filter run`, when the output exists, the manifest in its
-directory lists it, and inputs and parameters are unchanged.
+directory is a `mine_align` manifest that lists it, and inputs and parameters
+are unchanged. `--out` must not be `--src` or `--tgt`, and the `manifest.json`
+beside it must not be one of them either (the run would destroy its own
+input); a directory whose manifest belongs to another command (a `filter run`)
+is refused and its manifest kept, with or without `--force`.
 
 Exit codes as above: 2 for a bad parameter (`--max-k` below 2, a negative or
-non-finite cost), an unknown language code or a bad corpus name, 3 for a
-missing, unreadable or non-UTF-8 sentence file, 4 for an embedding model that
+non-finite cost), an unknown language code, a bad corpus name or an `--out`
+that is an input, 3 for a missing, unreadable or non-UTF-8 sentence file or a
+directory that holds another command's manifest, 4 for an embedding model that
 cannot be loaded (also for an `align` failure on bad embedder output).
 
 The aligner is vecalign-style: every span of 1 to `max_k - 1` consecutive
@@ -346,20 +376,32 @@ run, which also reads, writes and hashes the data:
 The GPU time of the full pipeline is therefore dominated by `qe`. Because every
 stage scores every row, a row rejected early still costs GPU time in `labse`
 and `qe`; running only the first four stages first (a config with
-`stages: [script_ratio, numbers, length, lid]`) and feeding `kept.parquet` to a
-second run with the GPU stages is a way to spend less, at the price of no
-scores on the rejected rows (not tried).
+`stages: [script_ratio, numbers, length, lid]`) and feeding its `kept.parquet`
+to a second run with the GPU stages is a way to spend less, at the price of no
+scores on the rejected rows (not tried). Give the second run its own out dir,
+for example `--corpus data/clean/mycorpus/kept.parquet --out-dir
+data/clean/mycorpus_gpu`. Never pass the first pass's directory: the run would
+overwrite its own input, and the command refuses it (exit 2). Without
+`--out-dir` the default is named after the corpus file stem, so every second
+pass lands in `data/clean/kept/`.
 
 **GPU memory in a full run.** MetricX-QE needs about 5 GB alone (above). The
-LaBSE model is not released after the `labse` stage: its embedder stays alive
-for the whole run, so during `qe` both are on the GPU. Measured on the smoke
-corpus, torch reported 6,665 MiB allocated after the first QE call (MetricX
-alone is 4,866 MiB once loaded, so LaBSE holds the remaining 1,800 MiB or so),
-and `nvidia-smi` showed the device at 8,217 MiB against 1,079 MiB idle, 7,138
-MiB above it. Budget about 7 GiB of GPU memory for the default pipeline; a
-16 GiB card has room, an 8 GiB card may not. (The
-docstring of `run_pipeline` says the models are never in memory together; for
-LaBSE and the QE model that is not so.)
+pipeline releases the LaBSE embedder as soon as the `labse` stage has run
+(`SentenceTransformerEmbedder.release` drops the model, calls `gc.collect()` and
+`torch.cuda.empty_cache()`), so during `qe` the GPU holds MetricX-QE only. The
+QE model is released when the command ends, also after a failure. Measured on
+2026-11-07 in the real `filter run` command over the 24-row smoke corpus below,
+with the real GlotLID, LaBSE and MetricX-QE, after the first QE call: torch
+reported 4,866 MiB allocated (5,034 MiB reserved) and `nvidia-smi` showed the
+device at 6,387 MiB against 1,068 MiB idle, 5,319 MiB above it; the peak
+allocated over the whole run was 4,941 MiB, and 32 MiB were still allocated
+after the command's QE release (`nvidia-smi` then showed 1,385 MiB). The same
+run with LaBSE's release switched off (a scratch script, which is what the code
+did before this fix) held 6,665 MiB allocated (6,862 MiB reserved) after the
+first QE call, `nvidia-smi` showed 8,219 MiB against 1,073 MiB idle (7,146 MiB
+above it) and the peak allocated was 6,739 MiB. Budget about 5.5 GiB of GPU
+memory for the default pipeline. Not tried on an 8 GiB card. An embedder given
+to `run_pipeline` that has no `release` is left alone.
 
 **Not measured:** LaBSE on CPU; any GPU other than this one; MetricX-QE in
 bf16 or fp16 (the adapter defaults to fp32); real sentence-length
@@ -478,13 +520,17 @@ inputs were the corpus and the 1,687,094,687-byte GlotLID file;
 `code_version` `102509a`.
 
 Timings: 9.5 s wall for the command, which includes the Python start-up, the
-SHA-256 of the 1.7 GB model file (0.4 s, once on a first run), and every model
-load from the local cache. Per stage, run one at a time: `script_ratio` 0.04 s, `numbers`
+SHA-256 of the 1.7 GB model file (about 0.5 s, once on a first run), and every
+model load from the local cache. Per stage, run one at a time: `script_ratio` 0.04 s, `numbers`
 under 0.01 s, `length` 0.01 s, `lid` 1.2 s (the model load), `minhash` 0.01 s,
 `labse` 4.5 s (the model load and 48 sentences), `qe` 1.3 s (load and 24
 pairs). A repeated run printed `skipped: inputs and config are unchanged since
 the last run` after 1.1 s; a config with `script_ratio.min_ratio: 1.5` exited 2
 with the pydantic message naming the field; a missing corpus exited 3.
+
+After the LaBSE release was added, the same command was run again over the same
+rows from a scratch script (exit 0, `kept 16 of 24 rows`, 7.0 s wall, with the
+models in the page cache and the memory figures of "Estimates").
 
 **What stood out.** No legitimate pair was rejected by the default priors, but
 two natural rows were near a floor: row 6 had `lid_src` 0.623 (Buryat took

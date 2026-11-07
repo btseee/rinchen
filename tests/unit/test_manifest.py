@@ -394,3 +394,186 @@ def test_output_file_without_a_row_count_leaves_rows_unset(tmp_path):
     entry = stage.output_file(written, None)
 
     assert (entry.bytes, entry.rows) == (0, None)
+
+
+def test_a_manifest_write_never_touches_the_temporary_file_of_another_writer(tmp_path):
+    # What a concurrent run into the same directory has in flight, under the
+    # name an earlier version of the store used for itself.
+    other_writers_file = tmp_path / "manifest.json.part"
+    other_writers_file.write_text("in flight", encoding="utf-8")
+
+    store.write(tmp_path, _demo_manifest())
+
+    assert other_writers_file.read_text(encoding="utf-8") == "in flight"
+    assert store.read(tmp_path) is not None
+    assert sorted(path.name for path in tmp_path.glob("*.part")) == [
+        "manifest.json.part"
+    ]
+
+
+# --- outputs_current and begin_commit: the protocol every stage command shares -
+
+
+def _committed_run(
+    tmp_path: Path, *, stage_name: str = "demo", config_sha256: str = "cfg-abc"
+) -> tuple[Path, list[Path], list[Path]]:
+    """A stage directory holding one input, two outputs and the manifest that
+    vouches for them."""
+    stage_dir = tmp_path / "stage"
+    stage_dir.mkdir()
+    input_file = tmp_path / "input.txt"
+    input_file.write_text("hello", encoding="utf-8")
+    outputs = [stage_dir / "a.parquet", stage_dir / "b.parquet"]
+    for output in outputs:
+        output.write_text(output.name, encoding="utf-8")
+    store.write(
+        stage_dir,
+        Manifest(
+            stage=stage_name,
+            created="2026-11-07T00:00:00Z",
+            code_version="deadbeef",
+            config_sha256=config_sha256,
+            seed=0,
+            inputs=stage.build_inputs([input_file]),
+            outputs=[stage.output_file(output, None) for output in outputs],
+        ),
+    )
+    return stage_dir, [input_file], outputs
+
+
+def test_a_run_whose_manifest_and_outputs_are_all_there_is_current(tmp_path):
+    stage_dir, inputs, outputs = _committed_run(tmp_path)
+
+    assert stage.outputs_current(stage_dir, "demo", inputs, "cfg-abc", outputs)
+
+
+def test_force_makes_a_current_run_not_current(tmp_path):
+    stage_dir, inputs, outputs = _committed_run(tmp_path)
+
+    assert not stage.outputs_current(
+        stage_dir, "demo", inputs, "cfg-abc", outputs, force=True
+    )
+
+
+def test_a_directory_without_a_manifest_is_not_current(tmp_path):
+    stage_dir, inputs, outputs = _committed_run(tmp_path)
+    store.manifest_path(stage_dir).unlink()
+
+    assert not stage.outputs_current(stage_dir, "demo", inputs, "cfg-abc", outputs)
+
+
+def test_a_manifest_of_another_stage_is_not_current(tmp_path):
+    stage_dir, inputs, outputs = _committed_run(tmp_path, stage_name="mine_align")
+
+    assert not stage.outputs_current(stage_dir, "demo", inputs, "cfg-abc", outputs)
+
+
+def test_a_changed_config_or_input_is_not_current(tmp_path):
+    stage_dir, inputs, outputs = _committed_run(tmp_path)
+
+    assert not stage.outputs_current(stage_dir, "demo", inputs, "cfg-other", outputs)
+    inputs[0].write_text("changed", encoding="utf-8")
+    assert not stage.outputs_current(stage_dir, "demo", inputs, "cfg-abc", outputs)
+
+
+def test_an_input_the_manifest_does_not_list_is_not_current(tmp_path):
+    stage_dir, inputs, outputs = _committed_run(tmp_path)
+    extra = tmp_path / "extra.txt"
+    extra.write_text("more", encoding="utf-8")
+
+    assert not stage.outputs_current(
+        stage_dir, "demo", [*inputs, extra], "cfg-abc", outputs
+    )
+
+
+def test_a_missing_output_file_is_not_current(tmp_path):
+    stage_dir, inputs, outputs = _committed_run(tmp_path)
+    outputs[1].unlink()
+
+    assert not stage.outputs_current(stage_dir, "demo", inputs, "cfg-abc", outputs)
+
+
+def test_an_output_the_manifest_does_not_list_is_not_current(tmp_path):
+    stage_dir, inputs, outputs = _committed_run(tmp_path)
+    unlisted = stage_dir / "c.parquet"
+    unlisted.write_text("c", encoding="utf-8")
+
+    assert not stage.outputs_current(
+        stage_dir, "demo", inputs, "cfg-abc", [*outputs, unlisted]
+    )
+
+
+def test_a_missing_output_is_decided_before_the_manifest_is_read(tmp_path):
+    stage_dir, inputs, outputs = _committed_run(tmp_path)
+    store.manifest_path(stage_dir).write_text("not json", encoding="utf-8")
+    outputs[0].unlink()
+
+    assert not stage.outputs_current(stage_dir, "demo", inputs, "cfg-abc", outputs)
+
+
+def test_a_corrupt_manifest_next_to_all_the_outputs_is_a_data_error(tmp_path):
+    stage_dir, inputs, outputs = _committed_run(tmp_path)
+    store.manifest_path(stage_dir).write_text("not json", encoding="utf-8")
+
+    with pytest.raises(DataError, match="unreadable manifest"):
+        stage.outputs_current(stage_dir, "demo", inputs, "cfg-abc", outputs)
+
+
+def test_begin_commit_removes_the_manifest_of_the_same_stage(tmp_path):
+    stage_dir, _, outputs = _committed_run(tmp_path)
+
+    stage.begin_commit(stage_dir, "demo")
+
+    assert not store.manifest_path(stage_dir).exists()
+    assert all(output.exists() for output in outputs)
+
+
+def test_begin_commit_in_a_directory_without_a_manifest_does_nothing(tmp_path):
+    stage.begin_commit(tmp_path, "demo")
+    stage.begin_commit(tmp_path / "absent", "demo")
+
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_begin_commit_refuses_to_erase_the_manifest_of_another_stage(tmp_path):
+    stage_dir, _, _ = _committed_run(tmp_path, stage_name="mine_align")
+    before = store.manifest_path(stage_dir).read_bytes()
+
+    with pytest.raises(DataError) as raised:
+        stage.begin_commit(stage_dir, "filter")
+
+    message = str(raised.value)
+    assert "mine_align" in message
+    assert "filter" in message
+    assert str(stage_dir) in message
+    assert store.manifest_path(stage_dir).read_bytes() == before
+
+
+def test_begin_commit_removes_a_manifest_that_cannot_be_read(tmp_path):
+    # An unreadable manifest vouches for nothing and names no stage to protect;
+    # a forced rerun is how the user repairs it.
+    store.manifest_path(tmp_path).write_text("not json", encoding="utf-8")
+
+    stage.begin_commit(tmp_path, "demo")
+
+    assert not store.manifest_path(tmp_path).exists()
+
+
+def test_refusing_a_foreign_manifest_removes_nothing_and_accepts_the_rest(tmp_path):
+    stage_dir, _, _ = _committed_run(tmp_path)
+
+    stage.refuse_foreign_manifest(stage_dir, "demo")
+    stage.refuse_foreign_manifest(tmp_path / "absent", "demo")
+    store.manifest_path(stage_dir).write_text("not json", encoding="utf-8")
+    stage.refuse_foreign_manifest(stage_dir, "demo")
+
+    assert store.manifest_path(stage_dir).is_file()
+
+
+def test_refusing_a_foreign_manifest_raises_for_another_stage(tmp_path):
+    stage_dir, _, _ = _committed_run(tmp_path, stage_name="mine_align")
+
+    with pytest.raises(DataError, match="mine_align"):
+        stage.refuse_foreign_manifest(stage_dir, "filter")
+
+    assert store.manifest_path(stage_dir).is_file()

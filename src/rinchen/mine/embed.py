@@ -6,6 +6,8 @@ module stays cheap."""
 
 from __future__ import annotations
 
+import gc
+import sys
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
@@ -25,11 +27,21 @@ class Embedder(Protocol):
         ...
 
 
+@runtime_checkable
+class Releasable(Protocol):
+    def release(self) -> None:
+        """Give back the memory the object holds, a model on a GPU for one.
+        Safe before first use and when called twice; a later use may load
+        again."""
+        ...
+
+
 class SentenceTransformerEmbedder:
     """Embeds with a sentence-transformers model, LaBSE by default.
 
-    The model loads on the first `embed` and is reused afterwards. `device`
-    is `"auto"` (CUDA when torch sees one, else CPU), `"cpu"` or `"cuda"`."""
+    The model loads on the first `embed` and is reused afterwards, until
+    `release`. `device` is `"auto"` (CUDA when torch sees one, else CPU),
+    `"cpu"` or `"cuda"`."""
 
     def __init__(
         self,
@@ -56,6 +68,16 @@ class SentenceTransformerEmbedder:
             show_progress_bar=False,
         )
         return np.asarray(vectors, dtype=np.float32)
+
+    def release(self) -> None:
+        """Drop the loaded model and give its GPU memory back. Safe before the
+        first `embed` and more than once; a later `embed` loads the model
+        again."""
+        self._model = None
+        gc.collect()
+        torch = sys.modules.get("torch")
+        if torch is not None:
+            torch.cuda.empty_cache()
 
     def _loaded_model(self) -> SentenceTransformer:
         if self._model is None:

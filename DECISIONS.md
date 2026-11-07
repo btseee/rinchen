@@ -816,11 +816,16 @@ text is accepted as Chinese and Simplified versus Traditional is not checked in 
 (`Hani` does not separate them and neither does `script_ratio`).
 
 [DESIGN: 14. The pipeline collects after every stage.] Errors surface at the stage that
-caused them. Cost if wrong: no cross-stage lazy fusion, which does not matter. **A
-claim in the code is false and should be corrected:** the docstring of `run_pipeline`
-says the LID model, LaBSE and the QE model are never in memory together, but the CLI
-keeps the LaBSE embedder alive for the whole run, so about 1,800 MiB of LaBSE stay on
-the GPU during `qe` (6,665 MiB allocated in all, found in the 2026-11-07 smoke run).
+caused them. Cost if wrong: no cross-stage lazy fusion, which does not matter.
+**Corrected in the final review wave:** the docstring of `run_pipeline` said the LID
+model, LaBSE and the QE model are never in memory together, but the CLI kept the LaBSE
+embedder alive for the whole run, so about 1,800 MiB of LaBSE stayed on the GPU during
+`qe` (6,665 MiB allocated in all, found in the 2026-11-07 smoke run). The pipeline now
+releases an embedder that implements `Releasable` right after the `labse` stage, and the
+docstring says so. [EVIDENCE: measured after the fix, in the real `filter run` command
+over the 24-row smoke corpus, 2026-11-07: 4,866 MiB allocated and 6,387 MiB used on the
+device (1,068 idle) after the first QE call, against 6,665 and 8,219 MiB (1,073 idle)
+with the release switched off in a scratch script; not tried on an 8 GiB card.]
 [DESIGN: 15. The aligner has a `merge_penalty` (edge weight `cost * (a + b) +
 merge_penalty * (a + b - 2)`, default 0.3).] With the plain weighting a weak pair rides
 on a strong neighbour and F1 on the planted data was 0.906; 0.3 gives 0.989 (mean
@@ -831,6 +836,19 @@ wrong: a lone pair is accepted when its cosine distance is below about 0.87, whi
 lenient for LaBSE. [DESIGN: 17. One shared CLI error mapping, `cli/errors.py`, used by
 `cli/spm.py`, `cli/filter.py` and `cli/mine.py`; `mine align` gained `--merge-penalty`.]
 Cost if wrong: D3's `cli/spm.py` was edited (behaviour and tests unchanged).
+
+[DESIGN: Final review wave, after the whole-branch review of 2346cea..8cbd39f.] Both
+commands now refuse a run that would overwrite its own input (`--corpus` equal to one of
+the two output tables; `--out`, or the manifest beside it, equal to `--src` or `--tgt`;
+ConfigError, exit 2) and an out dir that holds the manifest of another stage (DataError,
+exit 3). They share one skip and commit protocol in `manifest/stage.py`
+(`outputs_current`, `refuse_foreign_manifest`, `begin_commit`), the manifest and Parquet
+writers write through a uniquely named temporary file, and `fasttext-wheel` (the vendored
+shim that provides `import fasttext`) joins `tool_versions` next to `fasttext-new`. Cost
+if wrong: a second pass given the first pass's directory as `--out-dir` gets an error
+instead of a silent overwrite, and one directory cannot hold both a `filter run` and a
+`mine align` output; an unreadable manifest is still removed by the next run, because it
+names no stage to protect.
 
 [EVIDENCE: Measured on the development machine (Intel Core Ultra 7 265K, RTX 5070 Ti,
 CPython 3.14.10), 2026-11-06 and 2026-11-07. Synthetic planted data: MinHash recall

@@ -10,16 +10,18 @@ downloaded. Everything lands under pytest's temporary directories.
 from __future__ import annotations
 
 import shutil
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
+import numpy as np
 import polars as pl
 import pytest
 import yaml
 from click.testing import Result
+from numpy.typing import NDArray
 from typer.testing import CliRunner
 
 from rinchen.cli import filter as filter_cli
@@ -54,6 +56,7 @@ TOOL_PACKAGES = [
     "polars",
     "datasketch",
     "fasttext-new",
+    "fasttext-wheel",
     "sentence-transformers",
     "sentencepiece",
     "torch",
@@ -449,6 +452,95 @@ def test_a_run_that_fails_part_way_leaves_no_manifest_for_a_later_run_to_trust(
     ]
 
 
+def _fail_if_called(name: str) -> Callable[..., NoReturn]:
+    def fail(*args: object, **kwargs: object) -> NoReturn:
+        raise AssertionError(f"{name} must not be called")
+
+    return fail
+
+
+def _forbid_reading_inputs(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in ("load_filter_config", "scan_corpus", "build_inputs", "sha256_of"):
+        monkeypatch.setattr(filter_cli, name, _fail_if_called(name))
+
+
+@pytest.mark.parametrize("output", ["scored", "kept"])
+@pytest.mark.parametrize("through_symlink", [False, True], ids=["path", "symlink"])
+def test_a_corpus_that_is_an_output_of_the_run_is_a_config_error_that_destroys_nothing(
+    workspace: Workspace,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    output: str,
+    through_symlink: bool,
+) -> None:
+    _run_ok(workspace.args())
+    first_pass = getattr(workspace, output)
+    corpus = first_pass
+    if through_symlink:
+        corpus = tmp_path / "alias.parquet"
+        corpus.symlink_to(first_pass)
+    files_before = {
+        path: path.read_bytes()
+        for path in (workspace.scored, workspace.kept, workspace.manifest)
+    }
+    _forbid_reading_inputs(monkeypatch)
+
+    result = runner.invoke(
+        app,
+        ["filter", "run", "--corpus", str(corpus), "--config", str(workspace.config)]
+        + ["--out-dir", str(workspace.out_dir)],
+    )
+
+    assert result.exit_code == 2, result.output
+    assert result.stderr.startswith("error: --corpus ")
+    assert f"is the {first_pass.name} that this run writes" in result.stderr
+    assert "pass a different --out-dir" in result.stderr
+    assert {path: path.read_bytes() for path in files_before} == files_before
+
+
+def test_a_corpus_in_the_out_dir_that_is_not_an_output_is_allowed(
+    workspace: Workspace, tmp_path: Path
+) -> None:
+    corpus = workspace.out_dir / "input.parquet"
+    workspace.out_dir.mkdir()
+    shutil.copy(workspace.corpus, corpus)
+
+    result = runner.invoke(
+        app,
+        ["filter", "run", "--corpus", str(corpus), "--config", str(workspace.config)]
+        + ["--out-dir", str(workspace.out_dir)],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert corpus.is_file()
+
+
+@pytest.mark.parametrize("extra", [[], ["--force"]])
+def test_an_out_dir_holding_the_manifest_of_another_stage_is_a_data_error(
+    workspace: Workspace, monkeypatch: pytest.MonkeyPatch, extra: list[str]
+) -> None:
+    foreign = Manifest(
+        stage="mine_align",
+        created="2026-11-07T00:00:00Z",
+        code_version="deadbeef",
+        config_sha256="cfg-abc",
+        seed=0,
+    )
+    store.write(workspace.out_dir, foreign)
+    before = workspace.manifest.read_bytes()
+    monkeypatch.setattr(filter_cli, "build_embedder", _fail_if_called("build_embedder"))
+
+    result = runner.invoke(app, workspace.args(*extra))
+
+    assert result.exit_code == 3, result.output
+    assert "mine_align" in result.stderr
+    assert "'filter'" in result.stderr
+    assert str(workspace.out_dir) in result.stderr
+    assert workspace.manifest.read_bytes() == before
+    assert not workspace.scored.exists()
+    assert not workspace.kept.exists()
+
+
 def test_a_corrupt_manifest_is_a_data_error_until_the_run_is_forced(
     workspace: Workspace,
 ) -> None:
@@ -556,6 +648,40 @@ def test_a_qe_scorer_is_used_and_released_after_the_run(
     assert _manifest(workspace).status["qe"] == "ok"
     scored = scan_corpus(workspace.scored).collect()
     assert scored["scores"].struct.field("metricx_qe").null_count() == 0
+    assert scorer.releases == 1
+
+
+def test_the_labse_embedder_is_released_before_the_qe_scorer_is_used(
+    workspace: Workspace, planted: PlantedCorpus, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    events: list[str] = []
+
+    class RecordingEmbedder(ConceptEmbedder):
+        def embed(self, texts: Sequence[str]) -> NDArray[np.float32]:
+            events.append("embed")
+            return super().embed(texts)
+
+        def release(self) -> None:
+            events.append("release")
+
+    class RecordingScorer(SpyQeScorer):
+        def score(
+            self, sources: Sequence[str], translations: Sequence[str]
+        ) -> list[float]:
+            events.append("score")
+            return super().score(sources, translations)
+
+    scorer = RecordingScorer()
+    monkeypatch.setattr(
+        filter_cli, "build_embedder", lambda cfg: RecordingEmbedder(planted.concepts)
+    )
+    monkeypatch.setattr(filter_cli, "build_qe_scorer", lambda cfg: scorer)
+
+    _run_ok(workspace.args())
+
+    last_embed = len(events) - 1 - events[::-1].index("embed")
+    assert events.count("release") == 1
+    assert last_embed < events.index("release") < events.index("score")
     assert scorer.releases == 1
 
 

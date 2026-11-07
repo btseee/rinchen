@@ -58,10 +58,11 @@ src/rinchen/filter/reasons.py                    FilterReason vocabulary + flag(
 src/rinchen/filter/{script_ratio,numbers,length,lid,minhash,labse,qe}.py
 src/rinchen/filter/qe_eole.py                    MetricX-QE scorer through Eole (the QEScorer adapter)
 src/rinchen/filter/pipeline.py                   stage registry, run_pipeline, reason counts, status
-src/rinchen/mine/{embed,align,docalign}.py       Embedder protocol + LaBSE, B6 aligner, doc matcher
+src/rinchen/mine/{embed,align,docalign}.py       Embedder + Releasable protocols, LaBSE, B6 aligner, doc matcher
 src/rinchen/mine/pairs.py                        alignments -> mined corpus rows and their counts
 src/rinchen/cli/{filter,mine}.py                 the two commands
 src/rinchen/cli/errors.py                        RinchenError -> exit code mapping shared by spm, filter, mine
+src/rinchen/utils/part_file.py                   unique temporary name for write-then-rename
 configs/data/filters.yaml                        default pipeline config (documented priors)
 tests/support/                                   planted-failure corpus, planted alignments, fake embedders,
                                                  pseudo-text, tiny LID model
@@ -69,12 +70,13 @@ docs/runbooks/04_filtering_mining.md
 ```
 
 Changes to existing modules: `manifest/model.py` (`Manifest.status`), `manifest/stage.py`
-(`code_version`, `tool_versions`, `build_inputs`, `output_file`), `manifest/store.py` (atomic
-write, strict read), `lang/scripts.py` (`script_of` ignores Common/Inherited letters),
+(`code_version`, `tool_versions`, `build_inputs`, `output_file`, and the commit protocol both
+commands share: `outputs_current`, `refuse_foreign_manifest`, `begin_commit`),
+`manifest/store.py` (atomic write through a unique temporary file, strict read), `lang/scripts.py` (`script_of` ignores Common/Inherited letters),
 `cli/spm.py` (uses `cli/errors.py`, behaviour unchanged), `pyproject.toml` (mypy overrides
 for the untyped `datasketch`, `eole`, `fasttext`). No dependency was added.
 
-Dependency direction: `cli -> filter/mine -> corpus, config, lang, text, spm`; `filter.labse`
+Dependency direction: `cli -> filter/mine -> corpus, config, lang`; `filter.labse`
 uses `mine.embed` and `filter.qe` a scorer protocol; `filter.qe_eole` implements that
 protocol and only the CLI builds it; `mine` never imports `filter`; nothing imports `cli`
 except other CLI modules (`cli/errors.py`). Models are details behind two protocols (`Embedder`, `QEScorer`) injected by
@@ -138,7 +140,9 @@ rows are not counted), and `stage_status: dict[str, str]`. A status is `ok`,
 skipped (no spm_model)`) or `skipped: <reason>` (`qe`: `no QE scorer configured` or `no CUDA
 device`). A stage that reports `skipped` is not applied. The frame given to a stage is
 always valid against `CORPUS_SCHEMA`. The frame is collected after every stage (ruling 14),
-so an error surfaces at the stage that caused it.
+so an error surfaces at the stage that caused it. The embedder it was given is released, when
+it implements `Releasable`, as soon as the `labse` stage has run (also when that stage fails),
+so LaBSE is not on the GPU during `qe`; the QE scorer is the caller's to release.
 
 The manifest gets (a) `metrics`: `rows_in`, `rows_kept`, and `reason.<name>` for each reason,
 (b) a new optional field `status: dict[str, str]` on the `Manifest` model carrying
@@ -150,11 +154,17 @@ string stays `rinchen.manifest/1`.
 `rinchen filter run --corpus PATH [--config PATH] [--out-dir DIR] [--force] [--dry-run]
 [--seed N]`: reads a corpus Parquet, runs the pipeline, writes `scored.parquet` (all rows,
 with `filter_reason`), `kept.parquet` (rows with no reason) and `manifest.json` into the out
-dir (default `data/clean/<corpus file stem>/`). Skips when `manifest.should_skip` says the
-inputs (the corpus and each model file the config names) and the config are unchanged and
-both output tables exist, unless `--force`. The manifest is the commit marker: it is
-removed before any output is written and written atomically last. `--dry-run` validates the config, the model files it names and the
-input schema and prints the stage plan; it writes nothing. Exit codes as the D3 CLI
+dir (default `data/clean/<corpus file stem>/`). Skips when `manifest.stage.outputs_current`
+says the previous run is reusable: both output tables exist, the manifest there is a `filter`
+manifest that lists them, and the inputs (the corpus and each model file the config names)
+and the config are unchanged; `--force` never skips. The manifest is the commit marker:
+`begin_commit` removes it before any output is written, and it is written atomically last.
+Two guards run before anything is read or written: `--corpus` may not be one of the two
+output tables (ConfigError, 2: the run would overwrite its own input), and an out dir that
+holds the manifest of another stage is refused (DataError, 3) and its manifest kept.
+`--dry-run` validates the config, the model files it names and the input schema and prints
+the stage names, with the reason a `qe` stage is skipped only when that can be known
+without loading a model; it writes nothing. Exit codes as the D3 CLI
 (ConfigError 2, DataError 3, UpstreamError 4, other RinchenError 1; message `error: <msg>`
 on stderr). On success it prints the manifest path.
 
@@ -167,13 +177,19 @@ space; a deletion emits no row) and a manifest whose metrics count `aligned`,
 `unaligned_src`, `unaligned_tgt`, `src_sentences`, `tgt_sentences`, `blank_lines_dropped`
 and record the parameters as `param.max_k`, `param.skip_cost`, `param.merge_penalty`. The
 parameters stand in for a config file in `config_sha256`, and the inputs are hashed before
-they are read.
+they are read. It shares the commit protocol of `filter run` (`outputs_current` with the
+stage `mine_align`, `begin_commit`) and its two guards: `--out`, or the manifest beside it,
+may not be `--src` or `--tgt` (ConfigError, 2), and a directory that holds the manifest of
+another stage is refused (DataError, 3).
 
 ### Mining
 
 `mine/embed.py`: `Embedder` protocol (`embed(texts: Sequence[str]) -> numpy float32 array`,
 shape `(n, d)`, rows L2-normalised) and `SentenceTransformerEmbedder` (LaBSE by default,
-batched, `device="auto"` = CUDA when available).
+batched, `device="auto"` = CUDA when available). A `Releasable` protocol (`release() -> None`)
+names what gives its memory back; `SentenceTransformerEmbedder.release` drops the loaded
+model, runs `gc.collect()` and empties the CUDA cache when torch is loaded, and is safe before
+the first `embed` and when called twice.
 
 `mine/align.py` (B6): `align(src, tgt, embed, max_k=4, *, skip_cost=0.9, margin_k=4,
 merge_penalty=0.3) -> list[Alignment]`; `Alignment(src: tuple[int, ...], tgt: tuple[int, ...], cost: float)`; an
@@ -290,10 +306,13 @@ Rulings 11 to 17 were made during the build (ledger tags R-b to R-h) and, like r
     stages and made lazy again for the next, so an error surfaces at the stage that caused it
     and no query plans the LID model, LaBSE and the QE model together. Cost if wrong: no
     cross-stage lazy fusion, which does not matter because every stage runs Python batch
-    functions. Correction from the 2026-11-07 smoke run: this does not keep LaBSE and the QE
-    model apart on the GPU. The CLI keeps the embedder alive for the whole run, so about
-    1,800 MiB of LaBSE stay allocated during `qe` (6,665 MiB in all); the runbook has the
-    numbers, and releasing the embedder after its stage would be a small follow-up.
+    functions. Correction from the 2026-11-07 smoke run, fixed in the final review wave:
+    collecting after every stage did not by itself keep LaBSE and the QE model apart on the
+    GPU, because the CLI kept the embedder alive for the whole run (6,665 MiB allocated during
+    `qe`, about 1,800 MiB of it LaBSE). The pipeline now releases an embedder that implements
+    `Releasable` right after the `labse` stage; measured after the fix, `qe` runs with 4,866
+    MiB allocated (the runbook has the numbers). Cost if wrong: an embedder given to
+    `run_pipeline` without a `release` keeps its model.
 15. **The aligner has a `merge_penalty` (R-f).** Edge weight `cost * (a + b) +
     merge_penalty * (a + b - 2)`, keyword-only, default 0.3; 0.0 is plain vecalign. Why: with
     the pinned weighting `cost * (a + b)` a weak pair rides on a strong neighbour (the cosine

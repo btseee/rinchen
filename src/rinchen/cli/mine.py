@@ -28,10 +28,12 @@ from rinchen.errors import ConfigError, DataError, UpstreamError
 from rinchen.manifest import store
 from rinchen.manifest.model import Manifest, ManifestFile
 from rinchen.manifest.stage import (
+    begin_commit,
     build_inputs,
     code_version,
     output_file,
-    should_skip,
+    outputs_current,
+    refuse_foreign_manifest,
     tool_versions,
 )
 from rinchen.mine.align import Alignment, align
@@ -159,12 +161,22 @@ def align_files(
         run = _validated_run(
             src_lang, tgt_lang, corpus, max_k, skip_cost, merge_penalty
         )
+        target = out if out is not None else DEFAULT_OUT_ROOT / corpus / _OUT_FILE
+        # Before any input file is opened: a run must not replace its own input.
+        _require_out_apart_from_inputs(target, src, tgt)
         for path in (src, tgt):
             _require_sentence_file(path)
 
-        target = out if out is not None else DEFAULT_OUT_ROOT / corpus / _OUT_FILE
+        refuse_foreign_manifest(target.parent, _STAGE_NAME)
         config_sha256 = _config_sha256(run)
-        if _outputs_are_current(target, [src, tgt], config_sha256, force=force):
+        if outputs_current(
+            target.parent,
+            _STAGE_NAME,
+            [src, tgt],
+            config_sha256,
+            [target],
+            force=force,
+        ):
             typer.echo(
                 "skipped: inputs and parameters are unchanged since the last run"
             )
@@ -279,18 +291,22 @@ def _read_sentences(path: Path) -> _Sentences:
     return _Sentences(lines, blank)
 
 
-def _outputs_are_current(
-    out: Path, input_paths: list[Path], config_sha256: str, *, force: bool
-) -> bool:
-    # `should_skip` compares the manifest only; a deleted output must not pass,
-    # nor an output that the manifest in this directory does not describe.
-    if force or not out.is_file():
-        return False
-    recorded = store.read(out.parent)
-    describes_out = recorded is not None and any(
-        item.path == str(out) for item in recorded.outputs
+def _require_out_apart_from_inputs(out: Path, src: Path, tgt: Path) -> None:
+    """A run writes `out` and the manifest beside it, so either one that is an
+    input file would destroy that input. Compares resolved paths, so a symlink
+    or a `..` does not hide the clash."""
+    written = (
+        ("--out", out),
+        ("the manifest beside --out", store.manifest_path(out.parent)),
     )
-    return describes_out and should_skip(out.parent, input_paths, config_sha256)
+    inputs = (("--src", src), ("--tgt", tgt))
+    for label, written_path in written:
+        for option, input_path in inputs:
+            if written_path.resolve() == input_path.resolve():
+                raise ConfigError(
+                    f"{label} {written_path} would overwrite the {option} file; "
+                    "pass a different --out"
+                )
 
 
 def _align_sentences(run: _AlignRun, src: list[str], tgt: list[str]) -> list[Alignment]:
@@ -341,9 +357,7 @@ def _write_run(
 ) -> Path:
     """Write the corpus, then the manifest, which comes last so that it never
     describes an output that is not there. Returns the manifest path."""
-    # The manifest is the commit marker: drop the old one before touching the
-    # output, so a failure part-way leaves no manifest that vouches for it.
-    store.manifest_path(out.parent).unlink(missing_ok=True)
+    begin_commit(out.parent, _STAGE_NAME)
     output = output_file(out, write_corpus(frame, out))
     manifest = Manifest(
         stage=_STAGE_NAME,

@@ -8,6 +8,7 @@ from pydantic import ValidationError
 
 from rinchen.errors import DataError
 from rinchen.manifest.model import Manifest
+from rinchen.utils.part_file import unique_part_path
 
 
 def manifest_path(stage_dir: Path) -> Path:
@@ -16,11 +17,12 @@ def manifest_path(stage_dir: Path) -> Path:
 
 def write(stage_dir: Path, manifest: Manifest) -> Path:
     """Write the manifest so that it appears complete or not at all: it is
-    written beside the target and renamed over it, because a stage treats an
-    existing manifest as proof that its outputs are done."""
+    written to a unique temporary file beside the target and renamed over it,
+    because a stage treats an existing manifest as proof that its outputs are
+    done."""
     stage_dir.mkdir(parents=True, exist_ok=True)
     path = manifest_path(stage_dir)
-    part_path = path.with_name(path.name + ".part")
+    part_path = unique_part_path(path)
     try:
         part_path.write_text(
             manifest.model_dump_json(indent=2) + "\n", encoding="utf-8"

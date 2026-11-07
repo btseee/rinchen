@@ -16,12 +16,11 @@ from pydantic import (
     ConfigDict,
     Field,
     ValidationError,
-    ValidationInfo,
     field_validator,
     model_validator,
 )
 
-from rinchen.config.loader import REPO_ROOT
+from rinchen.config.loader import REPO_ROOT, anchor_at_repo_root, reject_blank_path
 from rinchen.errors import ConfigError
 from rinchen.lang.scripts import Script
 
@@ -40,21 +39,9 @@ _Cosine = Annotated[float, Field(strict=True, ge=-1, le=1, allow_inf_nan=False)]
 _DIRECTION_KEY = re.compile(r"[a-z]{2,3}_[A-Za-z]+->[a-z]{2,3}_[A-Za-z]+")
 
 
-def _reject_blank_path(value: object, info: ValidationInfo) -> object:
-    # Before validation: Path("") already collapses to ".", which anchoring
-    # would turn into the repo root itself.
-    if isinstance(value, str) and not value.strip():
-        raise ValueError(f"{info.field_name} must not be empty or blank")
-    return value
-
-
-def _anchor_at_repo_root(value: Path) -> Path:
-    return value if value.is_absolute() else REPO_ROOT / value
-
-
 # Relative paths mean the same thing from any working directory.
 _RepoPath = Annotated[
-    Path, BeforeValidator(_reject_blank_path), AfterValidator(_anchor_at_repo_root)
+    Path, BeforeValidator(reject_blank_path), AfterValidator(anchor_at_repo_root)
 ]
 
 StageName = Literal[
