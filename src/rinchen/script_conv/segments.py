@@ -37,8 +37,11 @@ _NNBSP = f"\\u{ord(NNBSP):04x}"
 
 # A Cyrillic letter is a letter of Script=Cyrillic; the combining marks that
 # directly follow it belong to the same segment. Apostrophes and hyphens are not
-# letters, so they end the run.
-_CYRILLIC_RUN = r"(?:(?=\p{L})\p{Script=Cyrillic}\p{M}*)+"
+# letters, so they end the run. The variation selectors are category Mn too, but
+# they belong to the Mongolian run, so a mark never matches a run character.
+_CYRILLIC_RUN = (
+    rf"(?:(?=\p{{L}})\p{{Script=Cyrillic}}(?:(?!{_RUN_CHARACTER})\p{{M}})*)+"
+)
 
 # An NNBSP joins a run only between a run character and a letter, so the gap
 # before a separated suffix stays inside its word.
@@ -56,6 +59,10 @@ def segment(text: str) -> tuple[Segment, ...]:
     between such a character and a letter. Every other stretch, however long, is
     one "other" segment, so a leading, trailing or doubled NNBSP, or one next to a
     space, lands there.
+
+    A run made only of selectors, vowel separators, nirugu strokes or joiners, with
+    no letter, is still a Mongolian segment; a caller that needs a Mongolian letter
+    in it must look for a member of `LETTERS` itself.
     """
     segments: list[Segment] = []
     position = 0

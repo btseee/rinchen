@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from rinchen.script_conv.alphabet import NNBSP
+from rinchen.script_conv.alphabet import FVS, NNBSP
 from rinchen.script_conv.segments import Segment, segment
 
 CYRILLIC = "cyrillic"
@@ -32,6 +32,10 @@ MONGOL = "".join(
 )
 SUFFIX_UN = chr(0x1824) + chr(0x1828)
 NOM = "".join(chr(code_point) for code_point in (0x1828, 0x1823, 0x182E))
+
+
+def _code_point_id(char: str) -> str:
+    return f"U+{ord(char):04X}"
 
 
 def _kinds(text: str) -> list[str]:
@@ -92,6 +96,54 @@ def test_a_joiner_between_letters_stays_in_the_mongolian_segment(
 
 def test_a_vowel_separator_and_a_nirugu_stay_in_the_mongolian_segment() -> None:
     text = A + MVS + NA + NIRUGU + A
+    assert segment(text) == (Segment(text, MONGOLIAN),)
+
+
+@pytest.mark.parametrize("separator", [NIRUGU, MVS], ids=["nirugu", "mvs"])
+def test_an_nnbsp_after_a_nirugu_or_a_vowel_separator_stays_in_the_segment(
+    separator: str,
+) -> None:
+    # The run rule only looks at the neighbours of the NNBSP, so the word stays whole.
+    # validate_traditional flags both sequences (misplaced_nnbsp, and for the MVS also
+    # orphan_selector) because the converter never emits them.
+    text = A + separator + NNBSP + NA
+    assert segment(text) == (Segment(text, MONGOLIAN),)
+
+
+@pytest.mark.parametrize("selector", sorted(FVS), ids=_code_point_id)
+def test_a_selector_after_a_cyrillic_letter_belongs_to_the_mongolian_run(
+    selector: str,
+) -> None:
+    # A selector is category Mn like a combining mark, but it is Mongolian.
+    assert _pairs("ы" + selector) == [("ы", CYRILLIC), (selector, MONGOLIAN)]
+    assert _pairs("ы" + COMBINING_ACUTE + selector + "ы") == [
+        ("ы" + COMBINING_ACUTE, CYRILLIC),
+        (selector, MONGOLIAN),
+        ("ы", CYRILLIC),
+    ]
+
+
+@pytest.mark.parametrize(
+    "control",
+    [FVS_SECOND, MVS, NIRUGU, ZWJ, ZWNJ],
+    ids=["fvs", "mvs", "nirugu", "zwj", "zwnj"],
+)
+def test_a_run_of_controls_without_a_letter_is_still_mongolian(control: str) -> None:
+    # The rule is literal: a caller that needs a Mongolian letter in the segment
+    # has to look for a member of LETTERS itself.
+    assert _pairs(" " + control + " ") == [
+        (" ", OTHER),
+        (control, MONGOLIAN),
+        (" ", OTHER),
+    ]
+
+
+def test_a_lone_selector_is_a_mongolian_segment() -> None:
+    assert segment(FVS_SECOND) == (Segment(FVS_SECOND, MONGOLIAN),)
+
+
+def test_a_selector_then_an_nnbsp_then_a_letter_is_one_mongolian_segment() -> None:
+    text = FVS_SECOND + NNBSP + NA
     assert segment(text) == (Segment(text, MONGOLIAN),)
 
 

@@ -66,13 +66,15 @@ def test_converting_every_word_correctly_scores_perfectly(words: list[str]) -> N
 
 
 @given(_PAIRED_TEXT)
-def test_word_accuracy_is_a_share_between_zero_and_one(
+def test_word_accuracy_is_the_exact_matches_over_the_length(
     pairs: list[tuple[str, str]],
 ) -> None:
     references = [reference for reference, _ in pairs]
     hypotheses = [hypothesis for _, hypothesis in pairs]
     exact = sum(reference == hypothesis for reference, hypothesis in pairs)
-    assert word_accuracy(references, hypotheses) == exact / len(pairs)
+    accuracy = word_accuracy(references, hypotheses)
+    assert accuracy == exact / len(pairs)
+    assert 0.0 <= accuracy <= 1.0
 
 
 _LENGTH_PAIRS = st.lists(

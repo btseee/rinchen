@@ -25,6 +25,13 @@ _BLOCK_TEXT = st.text(
         st.sampled_from([NNBSP, *JOINERS, chr(0x0301)]),
     )
 )
+# Cyrillic letters beside the selectors, which are category Mn like a combining mark.
+_CYRILLIC_WITH_SELECTORS = st.text(
+    alphabet=st.one_of(
+        st.characters(min_codepoint=0x0430, max_codepoint=0x044F),
+        st.sampled_from([*sorted(FVS), chr(0x0301)]),
+    )
+)
 _LETTER_WORD = st.text(alphabet=st.sampled_from(sorted(LETTERS)), min_size=1)
 
 
@@ -56,11 +63,12 @@ def test_segments_are_never_empty_and_never_repeat_a_kind_next_to_each_other(
     assert all(left.kind != right.kind for left, right in pairwise(pieces))
 
 
-@given(_BLOCK_TEXT)
+@given(st.one_of(_BLOCK_TEXT, _CYRILLIC_WITH_SELECTORS))
 def test_a_cyrillic_segment_is_letters_with_their_marks(text: str) -> None:
     for piece in segment(text):
         if piece.kind == "cyrillic":
             assert _CYRILLIC_LETTER.match(piece.text[0])
+            assert not set(piece.text) & _RUN_CHARACTERS
             assert all(
                 _CYRILLIC_LETTER.match(char) or _COMBINING_MARK.match(char)
                 for char in piece.text

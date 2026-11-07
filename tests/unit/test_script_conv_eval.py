@@ -45,6 +45,12 @@ def test_edit_distance_of_a_substitution_an_insertion_and_a_deletion() -> None:
     assert edit_distance("abd", "abcd") == 1
 
 
+def test_edit_distance_counts_a_transposition_as_two_edits() -> None:
+    # Plain Levenshtein, not Damerau: swapping two neighbours is two substitutions.
+    assert edit_distance("ab", "ba") == 2
+    assert edit_distance("ca", "abc") == 3
+
+
 def test_cer_of_identical_text_is_zero() -> None:
     assert cer(["abc"], ["abc"]) == 0.0
 
