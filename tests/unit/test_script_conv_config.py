@@ -148,18 +148,19 @@ FULL_MODEL = {
     "share_embeddings": True,
     "share_decoder_embeddings": True,
 }
-# The tiny values are the spike's (Eole 0.6.4, CPU), except the step counts.
+# The tiny values are the spike's (Eole 0.6.4, CPU), except the step counts and the
+# dropout: the tiny model memorises a fixture, so it trains without dropout.
 TINY_TRAINING = {
     "model_path": "work/run/ckpt",
-    "train_steps": 1500,
+    "train_steps": 1000,
     "valid_steps": 200,
-    "save_checkpoint_steps": 1500,
+    "save_checkpoint_steps": 1000,
     "keep_checkpoint": 2,
     "batch_type": "tokens",
     "batch_size": 1024,
     "accum_count": [1],
-    "dropout": [0.1],
-    "attention_dropout": [0.1],
+    "dropout": [0.0],
+    "attention_dropout": [0.0],
     "optim": "adamw",
     "learning_rate": 0.5,
     "decay_method": "noam",
@@ -839,7 +840,9 @@ def test_eole_loads_the_rendered_tiny_config_and_keeps_every_value(
     assert config.model.encoder.layers == 2
     assert config.model.decoder.layers == 2
     assert config.training.learning_rate == 0.5
-    assert config.training.train_steps == 1500
+    assert config.training.train_steps == 1000
+    assert config.training.dropout == [0.0]
+    assert config.training.attention_dropout == [0.0]
     assert config.training.bucket_size == 1024
     assert config.training.gpu_ranks == []
     assert config.share_vocab is True

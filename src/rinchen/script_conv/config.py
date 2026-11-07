@@ -113,7 +113,7 @@ class _ProfileSettings:
     training: Mapping[str, Any]  # the keys that differ per profile
 
 
-# Everything both profiles train alike.
+# What the profiles train alike unless one overrides it (the tiny profile's dropout).
 _BASE_TRAINING: Final[Mapping[str, Any]] = {
     "batch_type": "tokens",
     "accum_count": [1],
@@ -134,13 +134,18 @@ _PROFILES: Final[Mapping[str, _ProfileSettings]] = {
         heads=4,
         transformer_ff=128,
         training={
-            # Measured on the tiny reference list (tests/integration): 800 steps pass
-            # the CER gate but keep the NNBSP and selector counts in only 54% of the
-            # words that have them; 1400 steps keep 88% and 1500 keep 90%, the gate.
-            # Raise the steps, never the gate.
-            "train_steps": 1500,
+            # No dropout: the tiny profile exists to memorise a fixture. The steps are
+            # the smallest of 800, 1000, 1200 and 1500 that keep the NNBSP and selector
+            # counts in at least 93% of the words that have them (the test gate is
+            # 90%) with both CERs at most 0.10. Measured on the tiny reference list
+            # (tests/integration; 81 such words): 800 steps keep 91%, 1000 keep 96%,
+            # 1200 keep 96%, 1500 keep 99%. With dropout 0.1, 800 steps kept 54% and
+            # 1500 kept 90%. Raise the steps, never the gate.
+            "dropout": [0.0],
+            "attention_dropout": [0.0],
+            "train_steps": 1000,
             "valid_steps": 200,
-            "save_checkpoint_steps": 1500,
+            "save_checkpoint_steps": 1000,
             "keep_checkpoint": 2,
             "batch_size": 1024,
             # The Noam factor of 2.0 peaks near 0.025 at d64 and does not learn.

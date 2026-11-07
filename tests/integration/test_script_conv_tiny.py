@@ -18,7 +18,7 @@ from rinchen.script_conv import export
 from rinchen.script_conv.alphabet import FVS, MVS, NNBSP
 from rinchen.script_conv.eval import cer
 from rinchen.script_conv.export import export_ct2, parity
-from tests.integration.conftest import TO_CYRILLIC_TAG, TO_SCRIPT_TAG, TinyRun
+from tests.support.tiny_converter import TO_CYRILLIC_TAG, TO_SCRIPT_TAG, TinyRun
 
 MAX_CER = 0.15
 MAX_TRAIN_SECONDS = 150
@@ -110,5 +110,5 @@ def test_the_converter_fails_when_a_cuda_device_is_visible(
     # converter segfaults on a CUDA pointer and leaves an empty model.bin.
     monkeypatch.setattr(export, "export_environment", lambda: dict(os.environ))
 
-    with pytest.raises(UpstreamError):
+    with pytest.raises(UpstreamError, match="exit code -11"):
         export_ct2(tiny_run.ckpt_dir, tmp_path / "unhidden")

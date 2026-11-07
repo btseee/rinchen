@@ -1,6 +1,6 @@
 """Tests for `rinchen.script_conv.export`: the CTranslate2 export and the parity check.
 
-The export tests replace `subprocess.run` by a recorder that writes what the real
+The export tests replace `subprocess.Popen` by a recorder that writes what the real
 converter would. The parity tests train a real character model on a few Latin words
 (the model only has to hold the tags and some letters) and replace the CTranslate2
 translator by a stub, so no model is loaded.
@@ -24,33 +24,28 @@ from rinchen.script_conv.export import (
     ParityReport,
     export_ct2,
     export_environment,
+    export_log_path,
     parity,
 )
+from tests.support.fake_process import FakeProcess
 
 TO_SCRIPT_TAG = "<2mn_Mong>"
 DUMMY_PREFIX = chr(0x2581)
 
 
 class FakeConverter:
-    """Stands in for `subprocess.run` running the CTranslate2 converter: writes
+    """Stands in for `subprocess.Popen` running the CTranslate2 converter: writes
     `log_lines` to the log handle, then `model_bytes` as `model.bin` in the
     `--output_dir` (nothing when `model_bytes` is None), and exits with `exit_code`."""
 
-    def __init__(
-        self,
-        *,
-        exit_code: int = 0,
-        model_bytes: bytes | None = b"weights",
-        log_lines: Sequence[str] = ("converting",),
-    ) -> None:
-        self.exit_code = exit_code
-        self.model_bytes = model_bytes
-        self.log_lines = log_lines
+    def __init__(self) -> None:
+        self.exit_code = 0
+        self.model_bytes: bytes | None = b"weights"
+        self.log_lines: Sequence[str] = ("converting",)
         self.calls: list[tuple[list[str], dict[str, Any]]] = []
+        self.waits: list[float | None] = []
 
-    def __call__(
-        self, argv: Sequence[str], **kwargs: Any
-    ) -> subprocess.CompletedProcess[bytes]:
+    def __call__(self, argv: Sequence[str], **kwargs: Any) -> FakeProcess:
         self.calls.append((list(argv), kwargs))
         for line in self.log_lines:
             kwargs["stdout"].write(f"{line}\n".encode())
@@ -58,11 +53,13 @@ class FakeConverter:
         output_dir.mkdir(parents=True, exist_ok=True)
         if self.model_bytes is not None:
             (output_dir / "model.bin").write_bytes(self.model_bytes)
-        return subprocess.CompletedProcess(list(argv), self.exit_code)
+        return FakeProcess(self.exit_code, self.waits)
 
 
-def _install(monkeypatch: pytest.MonkeyPatch, fake: FakeConverter) -> FakeConverter:
-    monkeypatch.setattr(subprocess, "run", fake)
+@pytest.fixture
+def fake_converter(monkeypatch: pytest.MonkeyPatch) -> FakeConverter:
+    fake = FakeConverter()
+    monkeypatch.setattr(subprocess, "Popen", fake)
     return fake
 
 
@@ -93,16 +90,20 @@ def test_export_environment_keeps_the_rest_of_the_environment_and_leaves_the_par
 # ---- export_ct2 -----------------------------------------------------------------
 
 
+def test_export_log_path_is_beside_the_output_directory_not_inside_it() -> None:
+    # Inside the output directory the log would make the converter refuse to run.
+    assert export_log_path(Path("work") / "ct2") == Path("work") / "ct2.export.log"
+
+
 def test_export_ct2_runs_the_converter_with_the_isolated_interpreter(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    fake_converter: FakeConverter, tmp_path: Path
 ) -> None:
-    fake = _install(monkeypatch, FakeConverter())
     ckpt_dir = tmp_path / "run" / "ckpt"
     out_dir = tmp_path / "ct2"
 
     assert export_ct2(ckpt_dir, out_dir) == out_dir
 
-    ((argv, _),) = fake.calls
+    ((argv, _),) = fake_converter.calls
     assert argv == [
         sys.executable,
         "-I",
@@ -118,52 +119,50 @@ def test_export_ct2_runs_the_converter_with_the_isolated_interpreter(
 
 
 def test_export_ct2_hides_the_gpu_from_the_converter(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, fake_converter: FakeConverter, tmp_path: Path
 ) -> None:
     monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "0")
-    fake = _install(monkeypatch, FakeConverter())
 
     export_ct2(tmp_path / "ckpt", tmp_path / "ct2")
 
-    assert fake.calls[0][1]["env"]["CUDA_VISIBLE_DEVICES"] == ""
+    assert fake_converter.calls[0][1]["env"]["CUDA_VISIBLE_DEVICES"] == ""
 
 
 def test_export_ct2_writes_the_combined_log_beside_the_output_directory(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    fake_converter: FakeConverter, tmp_path: Path
 ) -> None:
-    # Inside the output directory it would make the converter refuse to run.
-    fake = _install(monkeypatch, FakeConverter(log_lines=("one", "two")))
+    fake_converter.log_lines = ("one", "two")
+    out_dir = tmp_path / "ct2"
 
-    export_ct2(tmp_path / "ckpt", tmp_path / "ct2")
+    export_ct2(tmp_path / "ckpt", out_dir)
 
-    log = tmp_path / "ct2.export.log"
-    assert log.read_text(encoding="utf-8") == "one\ntwo\n"
-    assert fake.calls[0][1]["stderr"] == subprocess.STDOUT
+    assert export_log_path(out_dir).read_text(encoding="utf-8") == "one\ntwo\n"
+    assert fake_converter.calls[0][1]["stderr"] == subprocess.STDOUT
+
+
+def test_export_ct2_bounds_the_converter_by_the_timeout_only_when_asked(
+    fake_converter: FakeConverter, tmp_path: Path
+) -> None:
+    export_ct2(tmp_path / "ckpt", tmp_path / "first")
+    export_ct2(tmp_path / "ckpt", tmp_path / "second", timeout=12.5)
+
+    assert fake_converter.waits == [None, 12.5]
 
 
 def test_export_ct2_creates_the_parent_of_the_output_directory(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    fake_converter: FakeConverter, tmp_path: Path
 ) -> None:
-    _install(monkeypatch, FakeConverter())
-
     export_ct2(tmp_path / "ckpt", tmp_path / "deep" / "er" / "ct2")
 
     assert (tmp_path / "deep" / "er" / "ct2" / "model.bin").is_file()
 
 
-@pytest.mark.parametrize(
-    ("model_bytes", "problem"), [(None, "missing"), (b"", "empty")]
-)
+@pytest.mark.parametrize("model_bytes", [None, b""], ids=["missing", "empty"])
 def test_export_ct2_fails_without_a_model_file_even_when_the_converter_exits_zero(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    model_bytes: bytes | None,
-    problem: str,
+    fake_converter: FakeConverter, tmp_path: Path, model_bytes: bytes | None
 ) -> None:
-    _install(
-        monkeypatch,
-        FakeConverter(model_bytes=model_bytes, log_lines=["last words"]),
-    )
+    fake_converter.model_bytes = model_bytes
+    fake_converter.log_lines = ["last words"]
 
     with pytest.raises(UpstreamError) as raised:
         export_ct2(tmp_path / "ckpt", tmp_path / "ct2")
@@ -174,23 +173,18 @@ def test_export_ct2_fails_without_a_model_file_even_when_the_converter_exits_zer
     assert message.endswith("last words")
 
 
-def test_export_ct2_reports_a_segfault_with_the_exit_code_and_the_log_tail(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+def test_export_ct2_reports_a_segfault_with_the_signal_the_exit_code_and_the_log_tail(
+    fake_converter: FakeConverter, tmp_path: Path
 ) -> None:
-    _install(
-        monkeypatch,
-        FakeConverter(
-            exit_code=-11,
-            model_bytes=b"",
-            log_lines=[f"line {number}" for number in range(1, 31)],
-        ),
-    )
+    fake_converter.exit_code = -11
+    fake_converter.model_bytes = b""
+    fake_converter.log_lines = [f"line {number}" for number in range(1, 31)]
 
     with pytest.raises(UpstreamError) as raised:
         export_ct2(tmp_path / "ckpt", tmp_path / "ct2")
 
     message = str(raised.value)
-    assert "exit code -11" in message
+    assert "killed by signal 11 (exit code -11)" in message
     assert message.endswith("\n".join(f"line {number}" for number in range(11, 31)))
     assert "line 10\n" not in message
 
