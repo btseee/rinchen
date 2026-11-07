@@ -1096,3 +1096,69 @@ words and fallback by a Mongolian reader, the `mn_Mong` length-ratio bounds for 
 filter (measured, not wired), and the training of the full profile on real parallel script
 data. The D3 gates assigned to D4 (abbreviation induction, o-like substitute counts) stay
 open as recorded there.
+
+## 2026-11-07: D5 final review - the `not_script_word` drop code and rulings V, W, X
+
+A whole-branch review of `d5-script-converter` (a reviewer other than the builder) found no
+Critical issue and four Important ones, and the build's controller ruled on them. The
+rulings are V, W and X; the numbers and letters continue the amendments A to U above, and
+the design (`docs/superpowers/specs/2026-11-07-d5-script-converter-design.md`) and the runbook
+carry the wording. Like the rulings above, each lists what it costs if wrong.
+
+[DESIGN: `not_script_word`.] `build_corpus` drops a pair whose NORMALIZED script side fails
+`validate.is_script_word`, after the validator's codes and before the duplicate check, and
+counts it under `not_script_word`; the order is empty, multiword, a validator code,
+`not_script_word`, duplicate. Reason: the bare validator lets running text through (ASCII
+letters, digits, punctuation, spaces), so a script word holding any of them was training
+data. All 1,005 lexicon spellings and the 500 tiny fixture words pass `is_script_word`, so the
+tiny gates did not move. Cost if wrong: a word that legitimately carries an ASCII character
+in its script spelling is dropped, and counted, not lost silently.
+
+[DESIGN: V. An empty valid split is an error.] This revises ruling H, which allowed it.
+The reviewer ran `eole train` on a corpus with no valid row: it died at the first
+validation step with a `ZeroDivisionError` (`eole/utils/statistics.py`), after the
+character model and the vocabulary were built. `build_corpus` now raises `DataError` for an
+empty valid split, before any directory or file is written, like the empty train split;
+`train` refuses a corpus whose `cyrl2mong.valid.src` has no row (a corpus built elsewhere),
+in a dry run too, before any write. The error text is "valid split is empty (pairs kept: N,
+valid_fraction F, seed S)". Cost if wrong: a one-pair or very small corpus can no longer be
+built; give it more pairs or another `--valid-fraction`. [EVIDENCE: the reviewer's run; this
+fix wave did not repeat it, and pinned the refusal with tests instead.]
+
+[DESIGN: W. The character model belongs to its run.] `train` writes it to
+`<run-dir>/converter_char.model` and `.vocab` by default, with `--spm-prefix PATH` to
+override, and `output_prefix` is removed from `configs/spm/converter_char.yaml` and from
+`CharModelConfig` (it would be a dead key; the YAML holds `vocab_size` only; the loader keeps
+its strict contract, so the old key is a `ConfigError`). This amends ruling I. The default
+used to be `data/script_conv/converter_char.*`, shared by every run: a second `train`
+overwrote the first run's model silently, and `export` bundled the overwritten file unchecked.
+`export` now compares the character model's SHA-256 with the run's train manifest
+(`<run-dir>/manifest.json`, stage `script_conv_train`) when it lists the model, and exits 3
+(`DataError`, both hashes in the message) before any write on a difference; a run directory
+without that manifest is trusted. The checked-in Eole configs name the new default path.
+Cost if wrong: runs are self-contained, but the character model is retrained for each run
+directory, the default path changed and the YAML lost a key.
+
+[DESIGN: X. The harvest scripts are not shipped.] The scripts that fetched and parsed the
+Wiktionary reference were scratch work. They are not in the repository, the report copy
+`tests/fixtures/script_conv/wiktionary_reference.report.md` stays byte for byte as the
+harvest wrote it (its line 4 names the scripts), and the runbook says so in its "What was
+not verified" list and no longer sends the reader to a harvester. Cost if wrong: refreshing
+the reference needs new tooling; the runbook states the contract it must meet (columns,
+validator-clean, one Mongolian-section spelling per word, the development and held-out split
+rule).
+
+[DESIGN: The profile reaches the validator.] `validate_converter_config(cfg, profile=None)`
+skips the CPU-only checks without a profile, and `run_training` used to validate without one.
+`run_training` takes an optional `profile`; the `train` command passes the profile it
+rendered, both when it plans the run and to `run_training`. A bare `run_training` call
+still skips the checks, and its docstring says so. The validator also rejects a string-valued
+`training` and `transforms_configs` (Eole evaluates such strings as code), a `$` in a key, and
+the other gaps closed in the parked minors. Cost if wrong: a caller that forgets the profile
+trains a tiny config on a GPU without a refusal.
+
+[EVIDENCE: The four gate commands on the tree of the final review fixes, run as one chain
+(`just` is not installed here): `ruff format --check .` 223 files already formatted, `ruff
+check .` all checks passed, `mypy src` no issues in 99 source files, `pytest -m "not
+network" -q` 2833 passed, 1 skipped, 10 deselected in 177 s. Each new test was proved by
+mutation: the code under test was broken and the test failed.]

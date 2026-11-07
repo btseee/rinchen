@@ -143,10 +143,11 @@ docs/runbooks/05_script_converter.md
 
 Layering: `alphabet` is the leaf; `validate`, `segments`, `eval` depend on it; `fallback` on
 nothing of the package; `rules` on `fallback`, `segments`, `alphabet`; `data` on `rules`,
-`validate`, `text.normalize`; `config`, `train` and `export` on `data`'s file layout only
-(`config` also on `char_model`'s tags, `train` on `char_model` and `_subprocess`); `runtime`
-on `segments`, `rules`, `validate`, `char_model`, `text.normalize`. The CLI is the only module
-that touches the manifest. No cycles.
+`validate`, `alphabet`, `text.normalize`; `config` on `char_model`'s tags (and it hard-codes
+`data`'s file layout by convention, which a test pins against `CORPUS_FILE_NAMES`); `train` on
+`config`, `char_model` and `_subprocess`; `export` on `char_model` and `_subprocess`;
+`runtime` on `segments`, `rules`, `validate`, `alphabet`, `char_model`, `text.normalize`.
+The CLI is the only module that touches the manifest. No cycles.
 
 ## Contracts
 
@@ -251,8 +252,9 @@ len(cyrillic)`, linear interpolation as `numpy.quantile`).
   equal Cyrillic words never straddle the split, and writes, under `out_dir`,
   `cyrl2mong.{train,valid}.{src,tgt}` and `mong2cyrl.{train,valid}.{src,tgt}` (the second four
   are the first four with the sides swapped; UTF-8, LF, one word per line, input order kept).
-  An empty train split is a `DataError` raised before any file is written; an empty valid split
-  writes empty files (ruling H). A side holding a line break or tab is a `DataError` naming the
+  An empty train split and an empty valid split are both a `DataError` raised before any file is
+  written (rulings H and V: Eole divides by the number of validation rows at its first validation
+  step). A side holding a line break or tab is a `DataError` naming the
   pair index. Each file appears whole (through a temporary file) but the eight are not written
   atomically as a set: the caller owns `begin_commit` before the call and the manifest last.
   `CorpusFiles(directory, files, rows, dropped)` are read-only mappings keyed by file name and,
@@ -278,21 +280,23 @@ every text has only known characters and decodes back to itself, so that every l
 and NNBSP of the training words round-trips. `load_char_processor(model)` opens a model with a
 directory guard (SentencePiece aborts the interpreter on a directory), and
 `load_char_model_config(path)` reads `configs/spm/converter_char.yaml`, which holds `vocab_size`
-(512) and `output_prefix` only (ruling I: the trainer is deterministic, a `seed` would be dead
-config).
+(512) only (rulings I and W: the trainer is deterministic, so a `seed` would be dead config, and
+where the model goes is chosen per run, so an `output_prefix` would be one path shared by every
+run). The loader stays strict: any other key, `output_prefix` included, is a `ConfigError`.
 
 ### `config`
 
 `render_converter_config(profile: Literal["tiny", "full"], *, data_dir, spm_model, run_dir) ->
 dict[str, Any]` returns the Eole config, every path a POSIX string;
-`validate_converter_config(cfg, *, profile=None)` is the schema check: known top-level keys
+`validate_converter_config(cfg, *, profile=None)` is the schema check (the `train` command and
+`run_training` give it the profile of the rendering; a bare call skips the CPU-only checks): known top-level keys
 only; no key of `FORBIDDEN_KEYS` at any depth, even with a neutral value (16 real Eole field
 names: `rope_config` and the other rotary fields, `relative_positions_buckets`,
 `sliding_window`, `layer_types`, `heads_kv`, `global_heads_kv`; a drift test imports Eole);
 `position_encoding_type == "SinusoidalInterleaved"` wherever it appears, and an
 `embeddings.position_encoding` that is present is `true`; `word_vec_size == hidden_size`, and so
-does a `hidden_size` set on the encoder or the decoder; no string-valued `encoder` or `decoder`
-(Eole evaluates such a string as code); `tgt_prefix == ""` on every corpus; the `transforms` of
+does a `hidden_size` set on the encoder or the decoder; no string-valued `encoder`, `decoder`,
+`training` or `transforms_configs` (Eole evaluates such a string as code); `tgt_prefix == ""` on every corpus; the `transforms` of
 every corpus list `sentencepiece` before `prefix`; the corpora `cyrl2mong`, `mong2cyrl` and
 `valid` present, each direction with its target-script tag as `src_prefix`; `share_vocab`; no
 `$` in any key or string value (Eole expands `$NAME` over the YAML text); and, with
@@ -326,8 +330,10 @@ from its file.
   command. SIGTERM and SIGHUP sent to the parent are not handled. An `UpstreamError` names the
   command, its exit code or signal, the log and the last 20 lines of it (each cut to 300
   characters). A timeout is per command, not a total.
-- `run_training(cfg_path, run_dir, *, threads: int = 2, timeout: float | None = None) -> Path`
-  validates the config, runs `eole build_vocab -n_sample -1` then `eole train` as subprocesses
+- `run_training(cfg_path, run_dir, *, threads: int = 2, timeout: float | None = None,
+  profile: Profile | None = None) -> Path` validates the config (for `profile` when it is
+  given: the CPU-only checks of the tiny profile run only then; the `train` command passes it),
+  runs `eole build_vocab -n_sample -1` then `eole train` as subprocesses
   (logs `build_vocab.log` and `train.log` in `run_dir`) with `OMP_NUM_THREADS` and
   `MKL_NUM_THREADS` set and the GPU hidden unless the config trains on one, and returns the
   config's `training.model_path`, which must lie inside `run_dir`. After a zero exit it requires a
@@ -397,8 +403,8 @@ cached).
 ```
 build-data (--pairs FILE | --words FILE) [--out-dir DIR] [--valid-fraction 0.1] [--seed 1234]
            [--allow-fallback]
-train --profile tiny|full --data-dir DIR --run-dir DIR [--spm-config FILE] [--threads 2]
-      [--dry-run] [--confirm-full] [--timeout SECONDS]
+train --profile tiny|full --data-dir DIR --run-dir DIR [--spm-config FILE] [--spm-prefix PREFIX]
+      [--threads 2] [--dry-run] [--confirm-full] [--timeout SECONDS]
 export --run-dir DIR [--config FILE] [--out-dir DIR] [--timeout 3600]
 apply --model-dir DIR --target Mong|Cyrl [FILE]
 eval --model-dir DIR --pairs FILE [--target Mong|Cyrl]
@@ -418,10 +424,13 @@ outputs).
   the canonical JSON of the parameters; the drop counts are `metrics`.
 - `train` owns the character model (ruling P): it reads the `cyrl2mong` corpus files only, since
   the `mong2cyrl` files hold the same words (ruling U), trains the character model with the
-  `vocab_size` and `output_prefix` of `--spm-config` (default `configs/spm/converter_char.yaml`),
-  runs `check_char_model` on the words, renders, validates (for the profile) and dumps the Eole
-  config into `<run-dir>/converter.yaml`, and runs `run_training`. All checks of the plan run
-  before any write, in a dry run too; `--dry-run` prints the character model path, the config
+  `vocab_size` of `--spm-config` (default `configs/spm/converter_char.yaml`) at `--spm-prefix`
+  (default `<run-dir>/converter_char`, ruling W: the model belongs to its run), runs
+  `check_char_model` on the words, renders, validates (for the profile) and dumps the Eole
+  config into `<run-dir>/converter.yaml`, and runs `run_training` with the same profile. All
+  checks of the plan run before any write, in a dry run too, among them that
+  `cyrl2mong.valid.src` holds a row (a corpus built elsewhere may not; `DataError`, exit 3,
+  ruling V); `--dry-run` prints the character model path, the config
   path and the two Eole commands and writes and runs nothing; `--profile full` without
   `--dry-run` refuses (exit 2) unless `--confirm-full`; `--timeout` bounds each Eole command and
   has no default. It prints `trained PROFILE: checkpoint PATH` and `manifest: PATH`. The
@@ -433,8 +442,12 @@ outputs).
 - `export` converts the newest checkpoint, copies the character model into the result as
   `converter_char.model` so that the model directory is self-contained (ruling O), and writes the
   manifest (stage `script_conv_export`) last. `--out-dir` defaults to `<run-dir>/ct2` and must
-  not exist; `--timeout` defaults to 3600 s. On a failure the model directory is removed and the
-  converter's log stays beside it.
+  not exist (checked again just before the converter runs, outside the cleanup that removes the
+  directory); `--timeout` defaults to 3600 s. When `<run-dir>/manifest.json` is a
+  `script_conv_train` manifest that lists the character model, `export` compares its SHA-256
+  with the recorded one and refuses a difference (`DataError`, exit 3, both hashes in the message)
+  before any write; without that manifest a hand-built run directory is trusted (ruling W). On a
+  failure the model directory is removed and the converter's log stays beside it.
 - `apply` converts the whole input as one text, its line breaks included (ruling R), writes it to
   standard output exactly (no newline added) and prints `rule_fallbacks=N invalid_outputs=M` on
   standard error; empty input exits 0 with no output; an unknown `--target` exits 2.
@@ -465,7 +478,7 @@ threshold):
   not split the word; splitting on U+0020 only.
 - Corpus: counts exact on a planted list (duplicates, a violating pair, a multiword pair, an
   empty pair, a pair whose script side is not one script word); train and valid disjoint;
-  deterministic for a seed; an empty train split is an error.
+  deterministic for a seed; an empty train split and an empty valid split are errors.
 - Char model: tags single pieces (by id); the training words round-trip, letters, FVS, MVS and
   NNBSP included; the same texts into the same prefix give identical files.
 - Config: rendered YAML equals the checked-in files; every forbidden key and every violated
@@ -554,8 +567,9 @@ Each is the builder's call; "cost" is what a wrong ruling costs.
     the source of the lexicon and tiny fixture, never as training data for a real model. Its
     revision ids are in the TSV. Wiktionary entries carry no guarantee of Mongolia-only
     provenance; the harvest filters out entries labelled Inner Mongolia, Chakhar and China and
-    takes only the `==Mongolian==` section, but a Mongolian reader has not checked it. Cost: a
-    wrong lexicon entry is wrong training data for the tiny fixture only.
+    takes only the `==Mongolian==` section, but a Mongolian reader has not checked it. The
+    harvest scripts are not in the repository (ruling X), so the fetch cannot be re-run from the
+    tree. Cost: a wrong lexicon entry is wrong training data for the tiny fixture only.
 12. **Digits and punctuation.** Digits pass through unchanged; `.` and `,` map to U+1803 and
     U+1802 (the marks the D3 splitter already treats as `mn_Mong` boundaries), except where the
     mark sits directly between two ASCII letters or digits (`3.5`, `1,000`, `a.b`; ruling F).
@@ -583,9 +597,10 @@ a decision with its cost in `DECISIONS.md`.
 - G. The data-free fallback lives in `fallback.py`; `rules.py` re-exports it and the fixture
   builder imports only `fallback`.
 - H. `rule_pairs` normalizes before the lookup; an empty train split is a `DataError` before any
-  file is written (an empty valid split is allowed); a side with a space is dropped under the new
-  code `multiword`.
-- I. `converter_char.yaml` has `vocab_size` and `output_prefix` only; no `seed`.
+  file is written (an empty valid split was allowed here; ruling V revises that); a side with a
+  space is dropped under the new code `multiword`.
+- I. `converter_char.yaml` has `vocab_size` and `output_prefix` only; no `seed` (ruling W later
+  removes `output_prefix`).
 - J. The character trainer reads `<prefix>.input.txt` (deterministic); the `.vocab` hash is the
   portable identity and manifests record both files.
 - K. The tiny profile uses dropout 0 and 1000 steps (ruling 6).
@@ -604,6 +619,19 @@ a decision with its cost in `DECISIONS.md`.
   call time (test seams).
 - T. The profile is not recorded in `Manifest.status`.
 - U. The character model is trained on the `cyrl2mong` files only.
+- V. An empty valid split is a `DataError` in `build_corpus`, before any write (revises H: `eole
+  train` dies with a `ZeroDivisionError` at its first validation step on a corpus with no valid
+  row), and `train` refuses a `cyrl2mong.valid.src` without a row before any write, in a dry run
+  too. Cost: a one-pair or very small corpus can no longer be built.
+- W. `train` writes the character model into the run directory, `<run-dir>/converter_char.*`,
+  unless `--spm-prefix` says otherwise, and `output_prefix` is removed from
+  `converter_char.yaml` and `CharModelConfig` (amends I); `export` compares the character model's
+  SHA-256 with the run's train manifest when that lists it. Cost: runs are self-contained, but
+  the character model is retrained per run directory, the default path changed and the YAML lost
+  a key.
+- X. The scripts that harvested the Wiktionary reference are scratch and are not in the
+  repository. Cost: refreshing the reference needs new tooling that meets the contract in the
+  runbook.
 
 ## Open gates (not done by D5, because no real data or reader exists)
 

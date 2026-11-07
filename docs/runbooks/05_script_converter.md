@@ -75,9 +75,12 @@ from where.
 `src/rinchen/cli/convert_script.py` holds the five commands. It is the only module
 that writes manifests. The layering is: `alphabet` is the leaf; `validate`,
 `segments` and `eval` depend on it; `fallback` on nothing of the package; `rules`
-on `fallback`, `segments` and `alphabet`; `data` on `rules`, `validate` and
-`rinchen.text.normalize`; `config`, `train` and `export` know `data`'s file layout
-only; `runtime` on `segments`, `rules`, `validate` and `char_model`.
+on `fallback`, `segments` and `alphabet`; `data` on `rules`, `validate`, `alphabet`
+and `rinchen.text.normalize`; `config` on `char_model`'s tags (it hard-codes the
+file layout of `data` by convention, and a test pins it against
+`CORPUS_FILE_NAMES`); `train` on `config`, `char_model` and `_subprocess`; `export`
+on `char_model` and `_subprocess`; `runtime` on `segments`, `rules`, `validate`,
+`alphabet`, `char_model` and `rinchen.text.normalize`.
 
 ## Commands
 
@@ -88,14 +91,15 @@ repository (`$W` stands for an empty scratch directory). The same chain is the
 integration test `test_the_whole_cli_chain_on_the_tiny_fixture` in
 `tests/integration/test_cli_convert_script.py`.
 
-The default character model config, `configs/spm/converter_char.yaml`, writes to
-`data/script_conv/converter_char.*` inside the repository, so the example points
-`--spm-config` at a file of its own (the tiny fixture needs only a small cap, see
-"Facts found on this machine"):
+The default character model config, `configs/spm/converter_char.yaml`, holds only
+`vocab_size: 512`. The tiny fixture needs a smaller cap (see "Facts found on this
+machine"), so the example points `--spm-config` at a file of its own. Where the
+character model goes is not in the config: `train` writes it into the run
+directory, `<run-dir>/converter_char.model` and `.vocab`, unless `--spm-prefix`
+says otherwise.
 
 ```bash
-printf 'vocab_size: 200\noutput_prefix: %s/char/converter_char\n' "$W" \
-    > $W/converter_char.yaml
+printf 'vocab_size: 200\n' > $W/converter_char.yaml
 ```
 
 ### build-data
@@ -132,11 +136,15 @@ letter, a digit, punctuation or a space); `duplicate`. A pair goes to the valid
 split when the SHA-256 of
 `"{seed}:{normalized Cyrillic word}"`, read as a fraction of 2**256, is below
 `--valid-fraction`, so equal Cyrillic words never straddle the split. An empty
-train split is an error; an empty valid split writes empty files.
+train split and an empty valid split are both errors (exit 3, before any file is
+written): `eole train` divides by the number of validation rows at its first
+validation step, so a corpus with no valid row cannot be trained on. A very small
+input can leave one split empty; give it more pairs or another `--valid-fraction`.
 
 ### train
 
-Look first, then run. A dry run checks the corpus files, the character model
+Look first, then run. A dry run checks the corpus files (a `cyrl2mong.valid.src`
+without a row is refused, exit 3, for a corpus built elsewhere), the character model
 config and the Eole configuration (rendered and validated, never written), refuses
 a foreign manifest in the run directory, and prints four lines:
 
@@ -145,7 +153,7 @@ uv run rinchen convert-script train --profile tiny --data-dir $W/corpus \
     --run-dir $W/run --spm-config $W/converter_char.yaml --dry-run
 ```
 ```
-$W/char/converter_char.model
+$W/run/converter_char.model
 $W/run/converter.yaml
 .../.venv/bin/eole build_vocab -config $W/run/converter.yaml -n_sample -1
 .../.venv/bin/eole train -config $W/run/converter.yaml
@@ -165,8 +173,8 @@ manifest: $W/run/manifest.json
 `train` owns the character model. In order: it hashes its inputs, reads the
 `cyrl2mong` corpus files (the `mong2cyrl` files hold the same words, so they would
 only count each word twice), removes the old manifest, trains the character model
-at `<output_prefix>.model` and `.vocab`, checks it on those words
-(`check_char_model`), writes `converter.yaml` into the run directory, and runs
+at `<run-dir>/converter_char.model` and `.vocab` (or at `--spm-prefix`), checks it
+on those words (`check_char_model`), writes `converter.yaml` into the run directory, and runs
 `eole build_vocab -n_sample -1` and `eole train` from random initialisation, each
 with its output in `build_vocab.log` and `train.log` of the run directory. The
 checks of the plan (profile, character model config, corpus files present, the
@@ -174,9 +182,15 @@ rendered and validated Eole config, no `$` in a path, the `eole` command
 installed) run in the dry run too, so a real run does not fail on something its
 dry run passed, nor after the character model is trained.
 
+The character model belongs to its run: a default shared by every run would be
+overwritten by the next one, and `export` would bundle the overwritten file. `export`
+therefore compares the model's SHA-256 with the one this manifest records.
+
 Options: `--profile tiny|full` (required), `--data-dir` (required), `--run-dir`
 (required; made absolute), `--spm-config` (default
-`configs/spm/converter_char.yaml`), `--threads` (default 2; sets `OMP_NUM_THREADS`
+`configs/spm/converter_char.yaml`; `vocab_size` only), `--spm-prefix` (where the
+character model is written, `<prefix>.model` and `.vocab`; default
+`<run-dir>/converter_char`; made absolute), `--threads` (default 2; sets `OMP_NUM_THREADS`
 and `MKL_NUM_THREADS` of each Eole run), `--dry-run`, `--confirm-full`,
 `--timeout` (seconds for each of the two Eole commands, no limit by default).
 `--profile full` without `--dry-run` refuses unless `--confirm-full` is given
@@ -194,7 +208,11 @@ manifest: $W/model/manifest.json
 
 Converts the newest checkpoint with CTranslate2's own converter (CUDA hidden, see
 "Facts found on this machine"), copies the character model into the result as
-`converter_char.model`, and writes the manifest last. 3.5 s here. Options:
+`converter_char.model`, and writes the manifest last. When `<run-dir>/manifest.json`
+is a `train` manifest that lists the character model, its SHA-256 must equal the
+recorded one, or `export` exits 3 with both hashes before it writes anything (another
+run overwrote the model after this checkpoint was trained); a run directory without
+that manifest is trusted. 3.5 s here. Options:
 `--run-dir` (required), `--config` (default `<run-dir>/converter.yaml`), `--out-dir`
 (default `<run-dir>/ct2`; it must not exist), `--timeout` (default 3600 seconds).
 The converter's output goes to `<out-dir>.export.log`, beside the directory.
@@ -246,7 +264,7 @@ Failures print `error: <message>` on standard error.
 | 0 | OK, including an empty `apply` input and a `--dry-run` |
 | 1 | an `OSError` while writing outputs, or any other `RinchenError` |
 | 2 | `ConfigError`: both or neither of `--pairs` and `--words`, a `--valid-fraction` outside (0, 0.5], an unknown profile or target, `--profile full` without `--confirm-full`, a `$` in a path or a rendered config string, an `--out-dir` that is the input's directory (`build-data`) or that exists (`export`), a character model config that does not hold |
-| 3 | `DataError`: a missing or unreadable corpus, pairs, checkpoint, character model or model file, input that is not UTF-8, no pair left after dropping, an empty train split, a pairs file with no pairs (`eval`), an out directory that holds another command's manifest |
+| 3 | `DataError`: a missing or unreadable corpus, pairs, checkpoint, character model or model file, input that is not UTF-8, no pair left after dropping, an empty train or valid split, a corpus whose `cyrl2mong.valid.src` has no row (`train`), a character model that differs from the one the train manifest recorded (`export`), a pairs file with no pairs (`eval`), an out directory that holds another command's manifest |
 | 4 | `UpstreamError`: an Eole or CTranslate2 command exits non-zero, times out, or leaves no usable output, the `eole` command is not installed, the translator answers wrongly (the message ends with the tail of the log) |
 
 ## Model directory and manifests
@@ -266,7 +284,9 @@ model.export.log          the converter's log, beside the directory
 `ScriptConverter(model_dir, model_dir / "converter_char.model")` opens it.
 
 The run directory of `train` holds `converter.yaml` (the rendered config),
-`vocab.src` (one vocabulary: both directions share it; 70 pieces for the tiny
+`converter_char.model` and `.vocab` (the character model, unless `--spm-prefix` put
+it elsewhere), `vocab.src` (one vocabulary: both directions share it, so Eole writes
+only this one although the config also names `vocab.tgt`; 70 pieces for the tiny
 fixture), `build_vocab.log`, `train.log`, `manifest.json`, and `ckpt/` with one
 `step_N/` directory per saved checkpoint plus links to the newest one
 (`model.00.safetensors`, `config.json`, `vocab.json`, `converter_char.model`).
@@ -331,7 +351,9 @@ The reference is the English Wiktionary harvest in
 `tests/fixtures/script_conv/wiktionary_reference.tsv`: 2,029 Khalkha Cyrillic
 words with their traditional-script spelling, fetched through the MediaWiki API on
 2026-11-07, one revision id per row, with its report beside it
-(`wiktionary_reference.report.md`). Entries labelled Inner Mongolia, China,
+(`wiktionary_reference.report.md`; its fourth line names the harvest scripts, which
+were scratch and are not in the repository, see "What was not verified"). Entries
+labelled Inner Mongolia, China,
 Chakhar or Southern Mongolia were filtered out, as were entries marked for
 verification, but Wiktionary gives no guarantee of Mongolia-only provenance. The
 spellings are dictionary (etymological) spellings, not letter for letter: the
@@ -573,9 +595,18 @@ reference are the stand-ins.
    duplicates, no blank lines (a malformed file is a `DataError` naming the line).
    Every spelling should satisfy `is_script_word`, so that it can stand in for an
    invalid model output; all 1,005 current ones do.
-3. **The reference.** Replace `tests/fixtures/script_conv/wiktionary_reference.tsv`
-   (columns `cyrillic` and `traditional` are read; the others are provenance) and
-   run `uv run python scripts/build_script_conv_fixtures.py`: it rewrites the
+3. **The reference.** A replacement reference needs its own tooling: the scripts
+   that harvested the current one are not in the repository. Its contract: a UTF-8
+   TSV, LF, headed with at least the columns `cyrillic` and `traditional` (the
+   builder reads those two; further columns are provenance); one row per word,
+   with one spelling taken from the Mongolian section of its source, not from an
+   Inner Mongolian variety; every `traditional` value clean under
+   `validate_traditional` (the builder drops rows that are not); and a word list
+   large enough for 100 golden rows. The development and held-out halves are fixed by
+   `fallback.development_split` (the parity of the SHA-256 of the word's UTF-8
+   bytes), not by the file. Put the file at
+   `tests/fixtures/script_conv/wiktionary_reference.tsv` and run
+   `uv run python scripts/build_script_conv_fixtures.py`: it rewrites the
    lexicon (development half), `rules_golden.tsv` (30 lexicon plus 70 fallback
    rows, 100 in all; `DataError` when the reference cannot give 100) and
    `tiny_words.tsv` (the first 500 pairs by sorted Cyrillic word). A test
@@ -642,6 +673,11 @@ Mongolian-reviewed sample.
   too, because a model directory without a manifest is untrusted. A power loss or
   SIGKILL during `export` can leave an unfinished directory: remove it by hand
   before retrying, because the converter refuses an existing one.
+- **One run per directory at a time.** Nothing guards a directory against two
+  `build-data` or two `train` runs at once: the second rewrites the first's files and
+  its manifest, and either manifest may then describe files the other wrote. Run one
+  command per output directory at a time; a character model of its own per run
+  directory (the default) keeps two `train` runs into different directories apart.
 - **A `.part` file** beside an output is a temporary file of a killed run; it is
   safe to delete.
 - **`predict`** has no command. It is a library function (`rinchen.script_conv.train.predict`)
@@ -661,6 +697,16 @@ Mongolian-reviewed sample.
 - **The tests.** The unit and property tests run in about a minute; the integration
   tests (marked `subprocess`) add real Eole trainings and bring the full gate to
   about three minutes. `uv run pytest tests/integration -q` runs them alone.
+- **CI and timing.** The integration tests train two tiny models: the session
+  fixture once, and the real CLI chain test once in a temporary directory. The
+  training gate of 150 seconds was measured at 35 to 37 seconds on a 20-core desktop
+  (`--threads 2`); a slower or busier runner can need more, and the gate is a
+  ceiling, never a number to raise without measuring. The process-timeout tests run
+  a child that sleeps 20 seconds under a timeout of 2 seconds, so each costs about
+  2 seconds and a runner so slow that a Python child needs longer than that to start
+  would fail them. Under `pytest -n` every worker builds its own session fixtures, so
+  each trains its own model: the run does not shrink, and the workers compete for the
+  same cores. Run the integration tests in one process.
 
 ## Open gates
 
@@ -693,6 +739,11 @@ o-like substitute counts) are also still open; they are listed in
   installed.
 - **The audit of U+200B, U+200C, U+200D, U+2060, U+FEFF, U+180A..U+180F and
   U+202F in real traditional-script text was not done.** There is no real text.
+- **The harvest cannot be re-run from the tree.** The scripts that fetched the
+  2,689 candidate titles and their wikitext and produced the rejection counts of
+  `wiktionary_reference.report.md` (line 4 of the report names them) were scratch
+  and are not in the repository. The TSV, with one revision id per row, and the
+  report are what remains; the report is kept byte for byte as the harvest wrote it.
 - **The Wiktionary reference may not be wholly independent of mechanical
   derivation,** and it cannot be guaranteed Mongolia-only although entries labelled
   Inner Mongolia, China or Chakhar were filtered out. Some editors may have derived

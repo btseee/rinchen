@@ -298,18 +298,24 @@ the `rinchen convert-script` commands `build-data`, `train`, `export`, `apply` a
 `scripts/build_script_conv_fixtures.py`, the Wiktionary reference and the fixtures built from
 it (`tests/fixtures/script_conv/`), `tests/integration/` with its helpers in `tests/support/`,
 `manifests/ucd_standardized_variants.json`, and `docs/runbooks/05_script_converter.md`.
-19 commits before this one (`ed7ead9` design and plan; `2186b83` through `7517915`
-the code and its review fixes), then the records commit. The design is
+24 commits ahead of `main` as of the final review fixes (`ed7ead9` design and plan,
+`2186b83` through `7517915` the code and its review fixes, `14e04ba` the runbook and
+records, then the parked minors, the final review fixes and their docs; the last commit is the
+one that records this). A whole-branch review found no Critical issue and four Important ones,
+all fixed: an empty valid split is refused because `eole train` divides by its row count
+(ruling V), the character model lives in the run directory and `export` checks its hash
+against the train manifest (W), the harvest scripts are not shipped and the runbook says so
+(X), and `run_training` takes the profile so the CPU-only checks run there. The design is
 `docs/superpowers/specs/2026-11-07-d5-script-converter-design.md` (updated to the finished
-code); its 13 rulings and the 21 amendments A to U, made without a review round because the
+code); its 13 rulings and the 24 amendments A to X, made without a review round because the
 user asked for no check-ins, are condensed in DECISIONS.md ("2026-11-07: D5 script
-converter"). Gates, run for real on Linux, CPython 3.14.10, 2026-11-07 (`just` is not
-installed here, so the four gate commands were run as one chain, on the tree of the records
-commit): `ruff format --check .` -- 223 files already formatted; `ruff check .` -- all
-checks passed; `mypy src` -- no issues found in 99 source files; `pytest -m "not
-network" -q` -- **2663 passed, 1 skipped, 10 deselected** in 172 s (176 s for the four commands)
-(1702 passed on `main`; the integration tests train real Eole models and make the suite
-slower).
+converter" and "2026-11-07: D5 final review"). Gates, run for real on Linux, CPython 3.14.10, 2026-11-07 (`just` is not
+installed here, so the four gate commands were run as one chain, on the tree of the final
+review fixes, before the docs commit): `ruff format --check .` -- 223 files already formatted;
+`ruff check .` -- all checks passed; `mypy src` -- no issues found in 99 source files; `pytest
+-m "not network" -q` -- **2833 passed, 1 skipped, 10 deselected** in 177 s (179 s for the four
+commands) (1702 passed on `main`; the integration tests train real Eole models and make the
+suite slower).
 Numeric gates, tiny profile (2/2 layers, d64, 1000 steps, dropout 0, `--threads 2`),
 CPU only: CER 0.0051 (Cyrillic to script) and 0.0128 (script to Cyrillic) on the 448
 training words (gate 0.15); NNBSP, MVS and selector counts kept in 78 of the 81 words that
@@ -354,7 +360,7 @@ built wheel (that the two data files ship); every threshold on real data; throug
 1,000 words on one machine. [EVIDENCE: the four gate commands, the integration runs, the
 worked example, the measurement scripts and the reproductions of both upstream defects
 described in the runbook and in `docs/VERIFY.md`, 2026-11-07, commits `ed7ead9` through
-`7517915`.]
+the final review fixes.]
 
 Branch status (updated 2026-11-07, after the D5 build): `main` holds D3, the D3
 research follow-up and D4, and is at `4eac98f` (the commit that records the D4
@@ -362,8 +368,9 @@ merge; `2346cea` was the D3 end and `b38eaae` the D4 merge tip, and no
 `d3-research-followup` or `d4-filtering-mining` ref remains). `main` is 56 commits
 ahead of `origin/main` (`9e7b0ec`); it is unpushed, and no CI run covers D3, D4 or
 D5. The full local gate was rerun on the merged tree: 1702 passed, 10 deselected.
-`d5-script-converter` is a separate branch cut from `main` at `4eac98f`, 19
-commits ahead before the records commit; it is not merged into `main` and not pushed.
+`d5-script-converter` is a separate branch cut from `main` at `4eac98f`, 24 commits
+ahead as of the final review fixes (counting the commit that records this); it is not
+merged into `main` and not pushed.
 
 Next step: D6 (Synthetic data). Nothing in D5 blocks it. Its inputs from D5: the converter
 is a scaffold, so no output of `ScriptConverter` should be treated as real `mn_Mong` data;
