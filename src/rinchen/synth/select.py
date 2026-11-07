@@ -3,22 +3,33 @@
 A generator returns several candidate translations of each real monolingual
 text. Per candidate, in this order and counting the first rule that fails:
 empty, script purity (the share of its letters in the scripts of the synthetic
-language), a reference-free QE floor (only when a scorer is given) and copy (the
-candidate is the real text). Of the survivors of a source, minimum Bayes risk
-over chrF picks the one the others agree with most; a lone survivor wins
-unscored. Every dropped candidate and every source without a winner is counted
-under a reason code, so nothing disappears silently.
+language), copy (the candidate is the real text) and a reference-free QE floor
+(only when a scorer is given); a copy is dropped before it costs a QE call. Of
+the survivors of a source, minimum Bayes risk over chrF picks the one the others
+agree with most; a lone survivor wins unscored. Every dropped candidate and
+every source without a winner is counted under a reason code, so nothing
+disappears silently.
+
+Purity is a script check, not a language check: Kazakh or Russian text in
+Cyrillic scores 1.0 for `khk_Cyrl`. Telling languages apart is the D4 `lid`
+stage's job. The thresholds are compared in float32, as the D4 stages do, so a
+value that rounds to a threshold passes in both.
+
+The translators clean their candidates before this stage: empty, duplicate,
+letterless and unencodable ones are gone and are not counted here (a refusal
+shows up as `no_candidates`).
 """
 
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from types import MappingProxyType
 from typing import Literal, get_args
 
+import numpy as np
 import polars as pl
 
 from rinchen.config.filters import QeConfig
@@ -29,7 +40,8 @@ from rinchen.errors import ConfigError, UpstreamError
 from rinchen.filter.qe import QEScorer
 from rinchen.lang.scripts import Script, script_of
 from rinchen.mbr import mbr
-from rinchen.mbr.utility import ChrfUtility
+from rinchen.mbr.utility import ChrfUtility, Utility
+from rinchen.synth._candidates import has_alphanumeric
 from rinchen.synth.tags import origin_for
 
 Kind = Literal["bt", "ft"]
@@ -55,11 +67,14 @@ COUNT_KEYS = (
     SELECTED,
 )
 
-QE_OK = "ok"
-QE_SKIPPED_NO_SCORER = "skipped: no scorer"
+QeStatus = Literal["ok", "skipped: no scorer"]
+QE_OK: QeStatus = "ok"
+QE_SKIPPED_NO_SCORER: QeStatus = "skipped: no scorer"
 
-_QE_COLUMNS = ("metricx_qe", "cometkiwi")
+# The scorers the D4 QeConfig names; each is also a field of `scores`.
+_QE_COLUMNS: tuple[str, ...] = get_args(QeConfig.model_fields["scorer"].annotation)
 _SCORE_FIELDS = tuple(SCORES_DTYPE.to_schema())
+_UTILITIES: Mapping[str, Callable[[], Utility]] = {"chrf": ChrfUtility}
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,13 +95,25 @@ class Selection:
     order. `chosen` is the index of the winning candidate in that source's
     original candidate list, or None when no candidate survived; the QE score
     and the purity are the winner's (None without a winner, and the QE score is
-    None too when no scorer ran). `counts` has every key of `COUNT_KEYS`."""
+    None too when no scorer ran). `qe_status` says whether a scorer ran.
+
+    `counts` has every key of `COUNT_KEYS`. `candidates` and the `dropped_*`
+    keys count candidates; `sources`, `no_candidates`, `no_survivor` and
+    `selected` count sources. Two invariants hold:
+
+    - sources == no_candidates + no_survivor + selected
+    - candidates == dropped_empty + dropped_purity + dropped_copy + dropped_qe
+      + the number of survivors (candidates that reached the MBR vote)
+
+    Candidates the translators already dropped (empty, duplicate, letterless,
+    unencodable) are not in `candidates`; a refusal is a source in
+    `no_candidates`."""
 
     chosen: tuple[int | None, ...]
     qe_scores: tuple[float | None, ...]
     purity: tuple[float | None, ...]
     counts: Mapping[str, int]
-    qe_status: str
+    qe_status: QeStatus
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,8 +138,9 @@ def select_candidates(
 
     `candidates[i]` are the generator's candidates for `sources.texts[i]`, all
     written in `synthetic_lang`; an empty list is a refusal and counts as
-    `no_candidates`. With a scorer, the candidates that passed the empty and
-    purity rules are scored `cfg.qe.batch_size` pairs per call, as (source,
+    `no_candidates`. A candidate is a copy when it equals the real text, both
+    stripped. With a scorer, the candidates that passed the empty, purity and
+    copy rules are scored `cfg.qe.batch_size` pairs per call, as (source,
     translation) in the orientation of the final corpus pair: for `bt` the
     candidate then the real text, for `ft` the real text then the candidate.
     Without a scorer the QE rule is skipped and `qe_status` says so.
@@ -120,12 +148,14 @@ def select_candidates(
     Raises `ValueError` for a `kind` other than bt or ft and for a candidate
     list count that differs from the source count, `TypeError` for a candidate
     list that is a string, `ConfigError` for a `synthetic_lang` outside the
-    language registry and `UpstreamError` when the scorer returns the wrong
-    number of scores. An exception raised by the scorer propagates unchanged.
+    language registry or an `mbr_utility` this module has no utility for, and
+    `UpstreamError` when the scorer returns the wrong number of scores. An
+    exception raised by the scorer propagates unchanged.
     """
     _require_kind(kind)
     _require_one_list_per_source(sources, candidates)
     scripts = _registry_scripts(synthetic_lang)
+    utility = _utility_named(cfg.mbr_utility)
 
     counts = dict.fromkeys(COUNT_KEYS, 0)
     counts[SOURCES] = len(sources.ids)
@@ -138,14 +168,14 @@ def select_candidates(
     ]
     remaining = _without_empty(remaining, counts)
     remaining = _without_impure(remaining, scripts, cfg.min_script_share, counts)
+    remaining = _without_copies(remaining, sources, counts)
     if scorer is None:
         qe_status = QE_SKIPPED_NO_SCORER
     else:
         qe_status = QE_OK
         remaining = _above_qe_floor(remaining, sources, kind, cfg.qe, scorer, counts)
-    remaining = _without_copies(remaining, sources, counts)
 
-    winners = _pick_winners(remaining)
+    winners = _pick_winners(remaining, utility)
     counts[NO_CANDIDATES] = sum(1 for texts in candidates if not texts)
     counts[NO_SURVIVOR] = sum(
         1 for source, texts in enumerate(candidates) if texts and source not in winners
@@ -173,13 +203,18 @@ def build_rows(
     `mono_lang`. A `bt` row has the candidate as `src` and the real text as
     `tgt`; an `ft` row the other way round. The purity of the winner goes to
     `scores.script_src` (`bt`) or `scores.script_tgt` (`ft`); its QE score goes
-    to the `scores` field named by `qe_scorer` (`metricx_qe` or `cometkiwi`,
-    None when no scorer ran). Every other score is null. `created` defaults to
-    now, in UTC.
+    to the `scores` field named by `qe_scorer` (`metricx_qe` or `cometkiwi`).
+    Every other score is null. `created` defaults to now, in UTC.
+
+    The caller passes the scorer name `select_candidates` ran with, which is
+    `cfg.qe.scorer`, or None when it ran without a scorer. Duplicate pairs are
+    not removed here: two sources with the same real text and the same winner
+    give two rows with the same id.
 
     Raises `ValueError` for a `kind` other than bt or ft, a `qe_scorer` that is
-    not a QE score field, QE scores in `selection` without a `qe_scorer`, and a
-    `selection` or `candidates` that does not belong to `sources`.
+    not a QE score field, a `qe_scorer` that does not match whether a scorer ran
+    (`selection.qe_status`), and a `selection` or `candidates` that does not
+    belong to `sources`.
     """
     _require_kind(kind)
     _require_one_list_per_source(sources, candidates)
@@ -203,8 +238,11 @@ def build_rows(
     return frame.with_columns(pl.Series("scores", scores, dtype=SCORES_DTYPE))
 
 
-def _is_empty(text: str) -> bool:
-    return not any(char.isalnum() for char in text)
+def _as_float32(value: float) -> np.float32:
+    """`value` as the float32 the D4 stages compare. A magnitude beyond the
+    float32 range becomes the infinity of its sign, without numpy's warning."""
+    with np.errstate(over="ignore"):
+        return np.float32(value)
 
 
 def _purity(text: str, scripts: Sequence[Script]) -> float:
@@ -214,18 +252,26 @@ def _purity(text: str, scripts: Sequence[Script]) -> float:
     return sum(shares.get(script, 0.0) for script in scripts)
 
 
+def _passes_purity(purity: float, min_script_share: float) -> bool:
+    """Compared in float32 like D4's script_ratio: the shares of a candidate
+    with several scripts are summed in float64, and exactly at the floor that
+    sum can land just below it."""
+    return bool(_as_float32(purity) >= _as_float32(min_script_share))
+
+
 def _passes_qe(score: float, cfg: QeConfig) -> bool:
     """A score exactly at the threshold passes. NaN compares false either way,
-    so it fails."""
-    if cfg.scorer == "metricx_qe":
-        return score <= cfg.max_metricx_qe  # lower is better
-    return score >= cfg.min_cometkiwi
+    so it fails. Compared in float32 like D4's qe stage."""
+    rounded = _as_float32(score)
+    if cfg.scorer == "metricx_qe":  # lower is better
+        return bool(rounded <= _as_float32(cfg.max_metricx_qe))
+    return bool(rounded >= _as_float32(cfg.min_cometkiwi))
 
 
 def _without_empty(
     remaining: list[_Candidate], counts: dict[str, int]
 ) -> list[_Candidate]:
-    kept = [item for item in remaining if not _is_empty(item.text)]
+    kept = [item for item in remaining if has_alphanumeric(item.text)]
     counts[DROPPED_EMPTY] += len(remaining) - len(kept)
     return kept
 
@@ -239,7 +285,7 @@ def _without_impure(
     kept = []
     for item in remaining:
         purity = _purity(item.text, scripts)
-        if purity >= min_script_share:
+        if _passes_purity(purity, min_script_share):
             kept.append(dataclasses.replace(item, purity=purity))
     counts[DROPPED_PURITY] += len(remaining) - len(kept)
     return kept
@@ -292,12 +338,20 @@ def _score_in_chunks(
 def _without_copies(
     remaining: list[_Candidate], sources: SourceRows, counts: dict[str, int]
 ) -> list[_Candidate]:
-    kept = [item for item in remaining if item.text != sources.texts[item.source]]
+    # The translators strip their candidates, so only the real text can carry
+    # whitespace that would hide a copy; strip both sides to be safe.
+    kept = [
+        item
+        for item in remaining
+        if item.text.strip() != sources.texts[item.source].strip()
+    ]
     counts[DROPPED_COPY] += len(remaining) - len(kept)
     return kept
 
 
-def _pick_winners(survivors: list[_Candidate]) -> dict[int, _Candidate]:
+def _pick_winners(
+    survivors: list[_Candidate], utility: Utility
+) -> dict[int, _Candidate]:
     """The winning survivor of every source that has one. A lone survivor wins
     unscored; the sources with several go through one MBR call, which scores
     each survivor against the other survivors of its source."""
@@ -311,7 +365,7 @@ def _pick_winners(survivors: list[_Candidate]) -> dict[int, _Candidate]:
     if contested:
         picks = mbr.select(
             [[item.text for item in items] for items in contested.values()],
-            ChrfUtility(),
+            utility,
         )
         for (source, items), pick in zip(contested.items(), picks, strict=True):
             winners[source] = items[pick]
@@ -322,7 +376,7 @@ def _selection(
     winners: Mapping[int, _Candidate],
     source_count: int,
     counts: dict[str, int],
-    qe_status: str,
+    qe_status: QeStatus,
 ) -> Selection:
     per_source = [winners.get(source) for source in range(source_count)]
     return Selection(
@@ -353,6 +407,15 @@ def _pair(
         "src": real,
         "tgt": synthetic,
     }
+
+
+def _utility_named(name: str) -> Utility:
+    factory = _UTILITIES.get(name)
+    if factory is None:
+        raise ConfigError(
+            f"no MBR utility named {name!r}; known: {', '.join(sorted(_UTILITIES))}"
+        )
+    return factory()
 
 
 def _row_scores(
@@ -420,5 +483,8 @@ def _require_qe_column(qe_scorer: str | None, selection: Selection) -> None:
             f"qe_scorer must be one of {', '.join(map(repr, _QE_COLUMNS))} or "
             f"None, got {qe_scorer!r}"
         )
-    if qe_scorer is None and any(score is not None for score in selection.qe_scores):
-        raise ValueError("the selection has QE scores: name their scorer in qe_scorer")
+    scorer_ran = selection.qe_status == QE_OK
+    if qe_scorer is None and scorer_ran:
+        raise ValueError("a QE scorer ran: name it in qe_scorer")
+    if qe_scorer is not None and not scorer_ran:
+        raise ValueError(f"qe_scorer is {qe_scorer!r} but no QE scorer ran")

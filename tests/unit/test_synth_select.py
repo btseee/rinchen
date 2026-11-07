@@ -1,22 +1,24 @@
-"""Selection of synthetic candidates: the empty, purity and QE filters with exact
-counts per reason, the copy rule, the minimum-Bayes-risk pick among the
-survivors, and the corpus rows built from the winners. The QE scorer is a fake,
-so nothing here needs a GPU or a model."""
+"""Selection of synthetic candidates: the empty, purity, copy and QE filters with
+exact counts per reason, the minimum-Bayes-risk pick among the survivors, and
+the corpus rows built from the winners. The QE scorer is a fake, so nothing
+here needs a GPU or a model."""
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 import math
+import warnings
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, get_args
 
 import polars as pl
 import pytest
 
 from rinchen.config.filters import QeConfig
 from rinchen.config.synth import SelectionConfig
-from rinchen.corpus.schema import CORPUS_SCHEMA, make_row_id
+from rinchen.corpus.schema import CORPUS_SCHEMA, SCORES_DTYPE, make_row_id
 from rinchen.errors import ConfigError, UpstreamError
 from rinchen.mbr import mbr
 from rinchen.metrics.bleu_chrf import chrf
@@ -410,6 +412,65 @@ def test_a_share_exactly_at_min_script_share_passes() -> None:
     assert above_the_floor.chosen == (None,)
 
 
+# Three scripts whose shares add up to 0.8999999999999999 and 0.9999999999999999
+# in float64: the comparison with the floor has to be done in float32, as the
+# D4 script_ratio stage does, or a candidate exactly at the floor fails.
+JAPANESE_NINE_TENTHS = "日本語" + "ですま" + "テスト" + "a"  # 3 + 3 + 3 + 1 letters
+PURE_JAPANESE_SPLITS = [(1, 6, 15), (6, 1, 15), (3, 8, 17)]
+
+
+def _japanese(han: int, hiragana: int, katakana: int) -> str:
+    return "日" * han + "あ" * hiragana + "ア" * katakana
+
+
+def test_a_three_script_candidate_exactly_at_the_floor_passes() -> None:
+    selection = _select(
+        _sources("real text"),
+        [[JAPANESE_NINE_TENTHS]],
+        synthetic_lang="jpn_Jpan",
+        cfg=_cfg(min_script_share=0.9),
+    )
+
+    assert selection.chosen == (0,)
+    assert selection.counts["dropped_purity"] == 0
+
+
+def test_a_three_script_candidate_just_below_the_floor_fails() -> None:
+    selection = _select(
+        _sources("real text"),
+        [[JAPANESE_NINE_TENTHS]],
+        synthetic_lang="jpn_Jpan",
+        cfg=_cfg(min_script_share=0.91),
+    )
+
+    assert selection.chosen == (None,)
+    assert selection.counts["dropped_purity"] == 1
+
+
+@pytest.mark.parametrize(("han", "hiragana", "katakana"), PURE_JAPANESE_SPLITS)
+def test_a_pure_japanese_candidate_passes_a_floor_of_one(
+    han: int, hiragana: int, katakana: int
+) -> None:
+    selection = _select(
+        _sources("real text"),
+        [[_japanese(han, hiragana, katakana)]],
+        synthetic_lang="jpn_Jpan",
+        cfg=_cfg(min_script_share=1.0),
+    )
+
+    assert selection.chosen == (0,)
+
+
+def test_a_single_script_candidate_at_nine_tenths_passes_and_eight_tenths_fails() -> (
+    None
+):
+    nine = _select(_sources("a"), [[CAT_SITS_SHORT + " k"]])
+    eight = _select(_sources("a"), [["муур суун ab"]])
+
+    assert nine.chosen == (0,)
+    assert eight.chosen == (None,)
+
+
 def test_a_mixed_candidate_at_eight_tenths_fails_the_default_floor() -> None:
     selection = _select(_sources("a"), [["муур суун ab"]])
 
@@ -426,12 +487,15 @@ def test_an_unknown_synthetic_language_is_a_config_error() -> None:
 
 
 def _kept_by_qe(cfg: SelectionConfig, score: float) -> bool:
-    selection = _select(
-        _sources("The cat."),
-        [[CAT_SITS]],
-        cfg=cfg,
-        scorer=FakeScorer({CAT_SITS: score}),
-    )
+    # A score beyond the float32 range must not leak numpy's overflow warning.
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        selection = _select(
+            _sources("The cat."),
+            [[CAT_SITS]],
+            cfg=cfg,
+            scorer=FakeScorer({CAT_SITS: score}),
+        )
     return selection.chosen == (0,)
 
 
@@ -443,12 +507,22 @@ def _kept_by_qe(cfg: SelectionConfig, score: float) -> bool:
         (8.0, 8.01, False),
         (8.0, 9.0, False),
         (8.0, math.inf, False),
+        (8.0, -math.inf, True),
         (8.0, math.nan, False),
         (8.0, 0.0, True),
         (8.0, -3.0, True),
         (5.0, 5.0, True),
         (5.0, 6.0, False),
         (5.0, 4.0, True),
+        # Compared in float32, as the D4 qe stage does: these round to the
+        # threshold and pass, a float64 comparison would reject them.
+        (8.0, 8.0000004, True),
+        (7.3, 7.30000019, True),
+        (7.3, 7.3000015, False),
+        # Beyond the float32 range a score is the infinity of its sign.
+        (8.0, 1e300, False),
+        (8.0, -1e300, True),
+        (1e300, 1e299, True),
     ],
 )
 def test_metricx_qe_rejects_a_score_above_the_threshold(
@@ -467,11 +541,20 @@ def test_metricx_qe_rejects_a_score_above_the_threshold(
         (0.55, 0.5499, False),
         (0.55, 0.0, False),
         (0.55, -math.inf, False),
+        (0.55, math.inf, True),
         (0.55, math.nan, False),
         (0.55, 9.0, True),
         (0.8, 0.8, True),
         (0.8, 0.7, False),
         (0.8, 0.9, True),
+        # Compared in float32, as the D4 qe stage does.
+        (0.55, 0.54999999, True),
+        (0.7, 0.699999988, True),
+        (0.7, 0.6999998, False),
+        # Beyond the float32 range a score is the infinity of its sign.
+        (0.55, 1e300, True),
+        (0.55, -1e300, False),
+        (-1e300, 0.5, True),
     ],
 )
 def test_cometkiwi_rejects_a_score_below_the_threshold(
@@ -510,7 +593,7 @@ def test_a_scorer_that_is_never_needed_still_reports_ok_and_is_not_called() -> N
     assert scorer.calls == []
 
 
-def test_the_scorer_sees_only_the_candidates_that_passed_empty_and_purity() -> None:
+def test_the_scorer_sees_only_candidates_that_passed_empty_purity_and_copy() -> None:
     scorer = FakeScorer(PLANTED_QE)
 
     _select(
@@ -522,14 +605,13 @@ def test_the_scorer_sees_only_the_candidates_that_passed_empty_and_purity() -> N
 
     assert scorer.calls == [
         (
-            ["The cat is sitting."] * 5 + [CAT_SLEEPS] * 2,
+            ["The cat is sitting."] * 5 + [CAT_SLEEPS],
             [
                 DOG_RUNS_PARTICLE,
                 DOG_RUNS_TWICE,
                 DOG_RUNS,
                 CAT_SITS,
                 CAT_SITS_PARTICLE,
-                CAT_SLEEPS,
                 CAT_SITS_SHORT,
             ],
         )
@@ -539,9 +621,14 @@ def test_the_scorer_sees_only_the_candidates_that_passed_empty_and_purity() -> N
 def test_the_scorer_is_called_in_chunks_of_batch_size() -> None:
     scorer = FakeScorer(PLANTED_QE)
 
-    _planted(scorer)
+    _select(
+        PLANTED_SOURCES,
+        PLANTED_CANDIDATES,
+        scorer=scorer,
+        cfg=_cfg(QeConfig(scorer="metricx_qe", batch_size=4)),
+    )
 
-    assert [len(sources) for sources, _ in scorer.calls] == [3, 3, 1]
+    assert [len(sources) for sources, _ in scorer.calls] == [4, 2]
     assert all(
         len(sources) == len(translations) for sources, translations in scorer.calls
     )
@@ -551,7 +638,6 @@ def test_the_scorer_is_called_in_chunks_of_batch_size() -> None:
         DOG_RUNS,
         CAT_SITS,
         CAT_SITS_PARTICLE,
-        CAT_SLEEPS,
         CAT_SITS_SHORT,
     ]
 
@@ -673,21 +759,66 @@ def test_a_copy_in_another_script_than_the_synthetic_side_fails_purity_first() -
     assert selection.counts["dropped_copy"] == 0
 
 
-def test_a_copy_that_also_fails_qe_counts_as_qe() -> None:
+def test_a_copy_that_would_also_fail_qe_counts_as_a_copy() -> None:
+    scorer = FakeScorer({CAT_SITS: 9.0})
+
+    selection = _select(_sources(CAT_SITS), [[CAT_SITS]], scorer=scorer)
+
+    assert selection.counts["dropped_copy"] == 1
+    assert selection.counts["dropped_qe"] == 0
+
+
+def test_a_copy_is_dropped_before_it_costs_a_qe_call() -> None:
+    scorer = FakeScorer()
+
+    _select(_sources(CAT_SITS), [[CAT_SITS, DOG_RUNS]], scorer=scorer)
+
+    assert scorer.calls == [([CAT_SITS], [DOG_RUNS])]
+
+
+def test_a_copy_of_a_real_text_with_trailing_whitespace_is_still_a_copy() -> None:
+    # The translator clients strip their candidates, so the real text has to be
+    # stripped for a copy to match it.
     selection = _select(
-        _sources(CAT_SITS), [[CAT_SITS]], scorer=FakeScorer({CAT_SITS: 9.0})
+        _sources("Hello world\n"),
+        [["Hello world"]],
+        synthetic_lang="eng_Latn",
     )
 
-    assert selection.counts["dropped_qe"] == 1
+    assert selection.chosen == (None,)
+    assert selection.counts["dropped_copy"] == 1
+
+
+def test_a_candidate_with_surrounding_whitespace_is_still_a_copy() -> None:
+    selection = _select(
+        _sources("Hello world"),
+        [["  Hello world\n"]],
+        synthetic_lang="eng_Latn",
+    )
+
+    assert selection.counts["dropped_copy"] == 1
+
+
+def test_a_candidate_that_differs_in_case_is_not_a_copy() -> None:
+    selection = _select(
+        _sources("Hello world"),
+        [["hello world"]],
+        synthetic_lang="eng_Latn",
+    )
+
+    assert selection.chosen == (0,)
     assert selection.counts["dropped_copy"] == 0
 
 
-def test_a_copy_is_still_sent_to_the_scorer_because_copy_comes_last() -> None:
-    scorer = FakeScorer()
+def test_whitespace_inside_the_text_makes_it_a_different_text() -> None:
+    selection = _select(
+        _sources("Hello world"),
+        [["Hello  world"]],
+        synthetic_lang="eng_Latn",
+    )
 
-    _select(_sources(CAT_SITS), [[CAT_SITS]], scorer=scorer)
-
-    assert scorer.calls == [([CAT_SITS], [CAT_SITS])]
+    assert selection.chosen == (0,)
+    assert selection.counts["dropped_copy"] == 0
 
 
 # --- inputs ----------------------------------------------------------------------------
@@ -713,6 +844,45 @@ def test_a_flat_list_of_strings_is_a_type_error() -> None:
 def test_source_rows_need_one_text_per_id() -> None:
     with pytest.raises(ValueError, match="2 ids but 1 texts"):
         SourceRows(ids=("a", "b"), texts=("text",))
+
+
+def test_selecting_does_not_change_its_inputs() -> None:
+    sources = SourceRows(ids=PLANTED_SOURCES.ids, texts=PLANTED_SOURCES.texts)
+    candidates = copy.deepcopy(PLANTED_CANDIDATES)
+
+    _select(sources, candidates, scorer=FakeScorer(PLANTED_QE))
+
+    assert candidates == PLANTED_CANDIDATES
+    assert sources == PLANTED_SOURCES
+
+
+def test_tuples_of_candidates_select_like_lists() -> None:
+    as_tuples = tuple(tuple(texts) for texts in PLANTED_CANDIDATES)
+
+    from_tuples = _select(PLANTED_SOURCES, as_tuples, scorer=FakeScorer(PLANTED_QE))
+
+    assert from_tuples == _planted()
+
+
+def test_equal_survivors_are_all_kept_and_mbr_takes_the_first_of_a_tie() -> None:
+    # Removing duplicates is the translator side's job: here both copies of
+    # CAT_SITS survive, agree perfectly with each other and tie.
+    selection = _select(_sources("a"), [[DOG_RUNS, CAT_SITS, CAT_SITS]])
+
+    assert selection.chosen == (1,)
+    assert selection.counts["candidates"] == 3
+    assert selection.counts["selected"] == 1
+    assert selection.counts["dropped_empty"] == 0
+    assert selection.counts["dropped_purity"] == 0
+    assert selection.counts["dropped_copy"] == 0
+    assert selection.counts["dropped_qe"] == 0
+
+
+def test_a_utility_other_than_chrf_is_a_config_error() -> None:
+    cfg = SelectionConfig.model_construct(mbr_utility="comet")
+
+    with pytest.raises(ConfigError, match="'comet'"):
+        _select(_sources("a"), [[CAT_SITS]], cfg=cfg)
 
 
 def test_selection_is_deterministic() -> None:
@@ -932,7 +1102,11 @@ def test_the_origin_comes_from_the_job_kind_and_generator_kind(
     kind: str, generator_kind: str, origin: str
 ) -> None:
     selection = Selection(
-        chosen=(0,), qe_scores=(None,), purity=(1.0,), counts={}, qe_status="x"
+        chosen=(0,),
+        qe_scores=(None,),
+        purity=(1.0,),
+        counts={},
+        qe_status="skipped: no scorer",
     )
 
     frame = _rows(
@@ -1007,7 +1181,7 @@ def test_a_selection_for_other_sources_is_a_value_error() -> None:
         qe_scores=(None, None),
         purity=(1.0, 1.0),
         counts={},
-        qe_status="",
+        qe_status="skipped: no scorer",
     )
 
     with pytest.raises(ValueError, match="2 chosen candidates for 1 sources"):
@@ -1031,7 +1205,11 @@ def test_a_kind_other_than_bt_or_ft_is_a_value_error_for_rows_too() -> None:
 @pytest.mark.parametrize("chosen", [1, -1])
 def test_a_chosen_index_outside_the_candidates_is_a_value_error(chosen: int) -> None:
     selection = Selection(
-        chosen=(chosen,), qe_scores=(None,), purity=(1.0,), counts={}, qe_status=""
+        chosen=(chosen,),
+        qe_scores=(None,),
+        purity=(1.0,),
+        counts={},
+        qe_status="skipped: no scorer",
     )
 
     with pytest.raises(ValueError, match="candidate list of 1"):
@@ -1046,10 +1224,82 @@ def test_qe_scores_without_the_name_of_the_scorer_are_a_value_error() -> None:
 
 
 def test_a_scorer_name_that_is_not_a_qe_column_is_a_value_error() -> None:
-    selection = _select(_sources("a"), [[CAT_SITS]])
+    selection = _select(_sources("a"), [[CAT_SITS]], scorer=FakeScorer())
 
     with pytest.raises(ValueError, match="'labse'"):
         _rows(_sources("a"), [[CAT_SITS]], selection, qe_scorer="labse")
+
+
+def test_a_scorer_name_for_a_selection_without_a_scorer_run_is_a_value_error() -> None:
+    selection = _select(_sources("a"), [[CAT_SITS]])
+    assert selection.qe_status == "skipped: no scorer"
+
+    with pytest.raises(ValueError, match="no QE scorer ran"):
+        _rows(_sources("a"), [[CAT_SITS]], selection, qe_scorer="metricx_qe")
+
+
+def test_a_scorer_that_ran_without_a_winner_still_needs_its_name() -> None:
+    selection = _select(_sources("Hello."), [["Hello"]], scorer=FakeScorer())
+    assert selection.qe_status == "ok"
+
+    with pytest.raises(ValueError, match="qe_scorer"):
+        _rows(_sources("Hello."), [["Hello"]], selection, qe_scorer=None)
+
+
+QE_SCORER_NAMES = get_args(QeConfig.model_fields["scorer"].annotation)
+
+
+@pytest.mark.parametrize("name", QE_SCORER_NAMES)
+def test_every_scorer_the_qe_config_allows_has_a_score_column(name: str) -> None:
+    assert name in SCORES_DTYPE.to_schema()
+    selection = _select(
+        _sources("a"),
+        [[CAT_SITS]],
+        cfg=_cfg(QeConfig(scorer=name, max_metricx_qe=8.0, min_cometkiwi=0.5)),
+        scorer=FakeScorer({CAT_SITS: 0.75}),
+    )
+
+    frame = _rows(_sources("a"), [[CAT_SITS]], selection, qe_scorer=name)
+
+    assert _score(frame, name) == [pytest.approx(0.75)]
+
+
+def test_pairs_that_are_equal_give_rows_with_the_same_id() -> None:
+    # Removing duplicate pairs is the filter stage's job, not this module's.
+    sources = _sources("one", "one")
+    candidates = [[CAT_SITS], [CAT_SITS]]
+    selection = _select(sources, candidates)
+
+    frame = _rows(
+        sources,
+        candidates,
+        selection,
+        kind="ft",
+        mono_lang="eng_Latn",
+        other_lang="khk_Cyrl",
+        qe_scorer=None,
+    )
+
+    assert frame.height == 2
+    assert frame["id"].n_unique() == 1
+
+
+def test_building_rows_does_not_change_its_inputs() -> None:
+    sources = SourceRows(ids=PLANTED_SOURCES.ids, texts=PLANTED_SOURCES.texts)
+    candidates = copy.deepcopy(PLANTED_CANDIDATES)
+    selection = _select(sources, candidates, scorer=FakeScorer(PLANTED_QE))
+
+    _rows(
+        sources,
+        candidates,
+        selection,
+        kind="ft",
+        mono_lang="eng_Latn",
+        other_lang="khk_Cyrl",
+    )
+
+    assert candidates == PLANTED_CANDIDATES
+    assert sources == PLANTED_SOURCES
 
 
 def test_selection_is_frozen() -> None:

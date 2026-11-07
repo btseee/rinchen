@@ -17,6 +17,13 @@ def is_utf8_encodable(text: str) -> bool:
     return True
 
 
+def has_alphanumeric(text: str) -> bool:
+    """Whether `text` has a letter or a digit. Text without one (only
+    whitespace, punctuation or invisible characters such as a zero-width space
+    or a byte order mark) is empty for every stage that handles candidates."""
+    return any(char.isalnum() for char in text)
+
+
 def clean_candidates(candidates: Iterable[str]) -> list[str]:
     """Stripped, in first-seen order, without duplicates. A candidate with no
     letter or digit at all (only whitespace, punctuation or invisible characters
@@ -28,7 +35,6 @@ def clean_candidates(candidates: Iterable[str]) -> list[str]:
         dict.fromkeys(
             candidate
             for candidate in stripped
-            if any(char.isalnum() for char in candidate)
-            and is_utf8_encodable(candidate)
+            if has_alphanumeric(candidate) and is_utf8_encodable(candidate)
         )
     )

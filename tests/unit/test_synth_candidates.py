@@ -1,11 +1,16 @@
-"""`clean_candidates` and `is_utf8_encodable`: what every generator backend
-does to the candidates it returns before the selection stage sees them."""
+"""`clean_candidates`, `has_alphanumeric` and `is_utf8_encodable`: what every
+generator backend does to the candidates it returns before the selection stage
+sees them."""
 
 from __future__ import annotations
 
 import pytest
 
-from rinchen.synth._candidates import clean_candidates, is_utf8_encodable
+from rinchen.synth._candidates import (
+    clean_candidates,
+    has_alphanumeric,
+    is_utf8_encodable,
+)
 
 NNBSP = chr(0x202F)
 NON_BMP = chr(0x1F600)
@@ -98,3 +103,18 @@ def test_is_utf8_encodable_is_false_only_for_surrogate_code_points(
     text: str, encodable: bool
 ) -> None:
     assert is_utf8_encodable(text) is encodable
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["", " \n\t", "...", ZERO_WIDTH_SPACE, BYTE_ORDER_MARK, f"{NNBSP}-!"],
+)
+def test_text_without_a_letter_or_digit_has_no_alphanumeric_character(
+    text: str,
+) -> None:
+    assert has_alphanumeric(text) is False
+
+
+@pytest.mark.parametrize("text", ["a", "7", "Өдөр", "  x  ", "-- 3 --", "Ж"])
+def test_a_letter_or_a_digit_is_an_alphanumeric_character(text: str) -> None:
+    assert has_alphanumeric(text) is True
