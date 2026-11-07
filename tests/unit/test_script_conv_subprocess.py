@@ -21,8 +21,10 @@ import pytest
 from rinchen.errors import UpstreamError
 from rinchen.script_conv._subprocess import LOG_TAIL_LINES, run_logged
 
-posix_only = pytest.mark.skipif(
-    sys.platform != "linux", reason="process groups, fork and /proc"
+pytestmark = pytest.mark.subprocess  # the tests start real child processes
+
+linux_only = pytest.mark.skipif(
+    sys.platform != "linux", reason="needs process groups, fork and /proc"
 )
 
 # The child forks a grandchild, records both pids and then sleeps. 20 s is far
@@ -142,7 +144,7 @@ def test_run_logged_reports_a_failing_exit_code_and_the_log_tail(
     assert message.endswith("first\nlast words")
 
 
-@posix_only
+@linux_only
 def test_run_logged_words_a_negative_exit_code_as_a_signal(tmp_path: Path) -> None:
     code = "import os, signal; os.kill(os.getpid(), signal.SIGTERM)"
 
@@ -189,7 +191,7 @@ def test_run_logged_returns_normally_for_a_child_inside_its_timeout(
     _run(_python("print('quick')"), tmp_path / "child.log", timeout=30)
 
 
-@posix_only
+@linux_only
 def test_run_logged_starts_the_child_in_a_session_of_its_own(tmp_path: Path) -> None:
     # The own session is what lets a timeout signal the child's whole group.
     code = "import os; print(os.getpgid(0) == os.getpid())"
@@ -203,7 +205,7 @@ def test_run_logged_starts_the_child_in_a_session_of_its_own(tmp_path: Path) -> 
 # ---- timeout and interrupt ------------------------------------------------------
 
 
-@posix_only
+@linux_only
 def test_run_logged_kills_the_child_and_its_grandchild_on_a_timeout(
     tmp_path: Path,
 ) -> None:
@@ -229,7 +231,7 @@ def test_run_logged_kills_the_child_and_its_grandchild_on_a_timeout(
     assert survivors == [], f"processes still running after the timeout: {survivors}"
 
 
-@posix_only
+@linux_only
 def test_run_logged_kills_the_process_group_when_it_is_interrupted(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

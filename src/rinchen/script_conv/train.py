@@ -12,14 +12,15 @@ import os
 import shutil
 import sys
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import yaml
 
-from rinchen.errors import ConfigError, UpstreamError
+from rinchen.errors import ConfigError, DataError, UpstreamError
 from rinchen.script_conv._subprocess import run_logged
+from rinchen.script_conv.char_model import load_char_processor
 from rinchen.script_conv.config import dump_config, validate_converter_config
 
 _PREDICT_BATCH_SIZE = 64
@@ -103,10 +104,24 @@ def run_training(
     return model_path
 
 
-def predict_side_paths(out_file: Path) -> tuple[Path, Path]:
-    """The files `predict` writes next to `out_file`: its log and its prediction
-    config (`<out_file>.log` and `<out_file>.predict.yaml`)."""
-    return Path(f"{out_file}.log"), Path(f"{out_file}.predict.yaml")
+class PredictSidePaths(NamedTuple):
+    """The files `predict` writes next to its output file."""
+
+    log: Path  # standard output and error of `eole predict`
+    config: Path  # the prediction config
+    token_source: Path  # the source lines as tokens, one line each, tag first
+    token_output: Path  # Eole's hypotheses as token lines
+
+
+def predict_side_paths(out_file: Path) -> PredictSidePaths:
+    """The files `predict` writes next to `out_file`: `<out_file>.log`,
+    `.predict.yaml`, `.tokens.src` and `.tokens.out`."""
+    return PredictSidePaths(
+        log=Path(f"{out_file}.log"),
+        config=Path(f"{out_file}.predict.yaml"),
+        token_source=Path(f"{out_file}.tokens.src"),
+        token_output=Path(f"{out_file}.tokens.out"),
+    )
 
 
 def predict(
@@ -119,61 +134,121 @@ def predict(
     threads: int = 2,
     timeout: float | None = None,
 ) -> Path:
-    """Convert the lines of `src_file` with the checkpoint in `ckpt_dir`, greedily and
-    on the CPU, as `eole predict`; return `out_file`.
+    """Convert the lines of `src_file` under `tag` with the checkpoint in `ckpt_dir`,
+    greedily and on the CPU, as `eole predict`; return `out_file`, which has one line
+    per line of `src_file` (an empty hypothesis is an empty line).
 
-    The log and the prediction config go next to the output (`predict_side_paths`).
-    Eole puts `tag` in front of each source line after the SentencePiece model at
-    `spm_model` has split it, as in training. A file already at `out_file` is removed
-    first. `timeout` (seconds) bounds the command; one that runs past it is killed
-    with everything it started.
+    Eole does not tokenise or tag here: this function does, and Eole reads and writes
+    token lines (pieces joined by U+0020, the tag first). Eole's own `sentencepiece`
+    and `prefix` transforms cannot be used, because Eole 0.6.4 copies the `valid`
+    corpus's `src_prefix` into `transforms_configs.prefix` when it saves the
+    checkpoint (`train_single.ValidationConfigurer`), and then lets the checkpoint's
+    `transforms_configs` override the prediction config, per transform name
+    (`config/run.py`, `_update_with_model_config`). Every prediction would run under
+    the tag of the validation direction, whatever `tag` says.
+
+    The side files go next to the output (`predict_side_paths`); a file already at
+    `out_file` or at the raw output is removed first. `timeout` (seconds) bounds the
+    command; one that runs past it is killed with everything it started.
 
     Raises:
-        ConfigError: the prediction config (every path and the tag) holds `$`, which
-            Eole would expand as a variable.
+        ConfigError: a path or the prediction config holds `$`, which Eole would
+            expand as a variable; or `tag` is not a piece of the model.
+        DataError: the character model at `spm_model` cannot be loaded, or `src_file`
+            cannot be read or has no lines.
         ValueError: `threads` is less than 1.
         UpstreamError: `eole predict` exits non-zero or runs past `timeout` (the
             message ends with the last lines of its log), the `eole` command is
-            missing, or it exits zero without writing `out_file`.
+            missing, or it exits zero without writing its output or with another
+            number of lines than the source has.
     """
+    side = predict_side_paths(out_file)
     cfg = {
         "model_path": ckpt_dir.as_posix(),
-        "src": src_file.as_posix(),
-        "output": out_file.as_posix(),
+        "src": side.token_source.as_posix(),
+        "output": side.token_output.as_posix(),
         "beam_size": 1,
         "batch_size": _PREDICT_BATCH_SIZE,
         "batch_type": "sents",
         "gpu_ranks": [],
         "world_size": 1,
-        "transforms": ["sentencepiece", "prefix"],
-        "transforms_configs": {
-            "sentencepiece": {
-                "src_subword_model": spm_model.as_posix(),
-                "tgt_subword_model": spm_model.as_posix(),
-            },
-            "prefix": {"src_prefix": tag, "tgt_prefix": ""},
-        },
+        "transforms": [],
     }
-    _reject_dollar("prediction config", yaml.safe_dump(cfg))
+    for name, value in (
+        ("checkpoint directory", ckpt_dir),
+        ("source file", src_file),
+        ("SentencePiece model", spm_model),
+        ("output file", out_file),
+        ("prediction config", yaml.safe_dump(cfg)),
+    ):
+        _reject_dollar(name, value)
+    processor = load_char_processor(spm_model)
+    if processor.piece_to_id(tag) == processor.unk_id():
+        raise ConfigError(f"the tag {tag!r} is not a piece of the model {spm_model}")
+    source_lines = _read_source_lines(src_file)
     eole = _eole_command()
     env = training_environment(threads, hide_gpu=True)
 
-    log_path, cfg_path = predict_side_paths(out_file)
     out_file.parent.mkdir(parents=True, exist_ok=True)
     out_file.unlink(missing_ok=True)
-    dump_config(cfg, cfg_path)
+    side.token_output.unlink(missing_ok=True)
+    _write_lines(
+        side.token_source,
+        [
+            " ".join([tag, *processor.encode(line, out_type=str)])
+            for line in source_lines
+        ],
+    )
+    dump_config(cfg, side.config)
     run_logged(
-        [eole, "predict", "-config", str(cfg_path)],
+        [eole, "predict", "-config", str(side.config)],
         env=env,
-        log_path=log_path,
+        log_path=side.log,
         what="eole predict",
         timeout=timeout,
     )
-    if not out_file.is_file():
+    if not side.token_output.is_file():
         raise UpstreamError(
-            f"eole predict exited with code 0 but wrote no output file {out_file}"
+            f"eole predict exited with code 0 but wrote no output file "
+            f"{side.token_output}"
         )
+    raw_lines = _split_lines(
+        side.token_output.read_text(encoding="utf-8", newline="\n")
+    )
+    if len(raw_lines) != len(source_lines):
+        raise UpstreamError(
+            f"eole predict wrote {len(raw_lines)} lines for {len(source_lines)} "
+            f"source lines: {side.token_output}"
+        )
+    # Pieces hold no U+0020, so splitting at it restores them; `str.split()` would
+    # also cut at the suffix gap U+202F, which is a piece of its own.
+    _write_lines(out_file, [processor.decode(line.split(" ")) for line in raw_lines])
     return out_file
+
+
+def _read_source_lines(src_file: Path) -> list[str]:
+    try:
+        text = src_file.read_text(encoding="utf-8", newline="\n")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise DataError(f"cannot read source file {src_file}: {exc}") from exc
+    lines = _split_lines(text)
+    if not lines:
+        raise DataError(f"source file {src_file} has no lines")
+    return lines
+
+
+def _split_lines(text: str) -> list[str]:
+    """The lines of `text`, split at LF only (other line separators belong to the
+    line), each ended by an LF; no text is no lines."""
+    if not text:
+        return []
+    return text.removesuffix("\n").split("\n")
+
+
+def _write_lines(path: Path, lines: Sequence[str]) -> None:
+    path.write_text(
+        "".join(f"{line}\n" for line in lines), encoding="utf-8", newline="\n"
+    )
 
 
 def _reject_dollar(what: str, value: Path | str) -> None:

@@ -15,6 +15,9 @@ from rinchen.script_conv.data import CorpusFiles
 
 TO_SCRIPT_TAG, TO_CYRILLIC_TAG = CONVERTER_TAGS
 DIRECTION_TAGS = {"cyrl2mong": TO_SCRIPT_TAG, "mong2cyrl": TO_CYRILLIC_TAG}
+# Bounds each Eole or CTranslate2 command of the integration tests, so a hung
+# subprocess fails the session instead of blocking it.
+COMMAND_TIMEOUT_SECONDS = 600
 
 
 def read_lines(path: Path) -> tuple[str, ...]:

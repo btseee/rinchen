@@ -19,9 +19,11 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import sentencepiece
 import yaml
 
-from rinchen.errors import ConfigError, UpstreamError
+from rinchen.errors import ConfigError, DataError, UpstreamError
+from rinchen.script_conv.char_model import train_char_model
 from rinchen.script_conv.config import dump_config, render_converter_config
 from rinchen.script_conv.train import (
     predict,
@@ -32,6 +34,9 @@ from rinchen.script_conv.train import (
 from tests.support.fake_process import FakeProcess
 
 TO_SCRIPT_TAG = "<2mn_Mong>"
+TO_CYRILLIC_TAG = "<2mn_Cyrl>"
+DUMMY_PREFIX = chr(0x2581)  # SentencePiece's dummy prefix, a piece of its own
+NNBSP = chr(0x202F)
 EOLE_NAMES = ("eole", "eole.exe")
 CHECKPOINT_FILE = "model.00.safetensors"  # what Eole links to its newest checkpoint
 
@@ -40,9 +45,14 @@ class FakeEole:
     """Stands in for `subprocess.Popen`: records every launch, writes `output` lines
     to the log handle it is given and exits with `exit_codes[subcommand]` (default 0).
     A finished `train` leaves a checkpoint (Eole's layout: a step directory and a
-    link to its file), a finished `predict` its output file, unless `writes_results`
-    is false. `checkpoint_age` is how many seconds before now the written
-    checkpoint's modification time is set."""
+    link to its file), a finished `predict` its raw token output file, unless
+    `writes_results` is false. `checkpoint_age` is how many seconds before now the
+    written checkpoint's modification time is set.
+
+    Every `predict` launch records the prediction config and the lines of the token
+    source file it names in `predict_inputs`. The raw output is `hypotheses` (one
+    token line each) or, when that is None, the source line without its tag: a
+    model that copies its input."""
 
     def __init__(self) -> None:
         self.calls: list[tuple[list[str], dict[str, Any]]] = []
@@ -51,10 +61,14 @@ class FakeEole:
         self.output: Sequence[str] = ("a log line",)
         self.writes_results = True
         self.checkpoint_age = 0.0
+        self.hypotheses: list[str] | None = None
+        self.predict_inputs: list[tuple[dict[str, Any], list[str]]] = []
 
     def __call__(self, argv: Sequence[str], **kwargs: Any) -> FakeProcess:
         self.calls.append((list(argv), kwargs))
         subcommand = argv[1]
+        if subcommand == "predict":
+            self._record_predict_input(Path(argv[3]))
         for line in self.output:
             kwargs["stdout"].write(f"{line}\n".encode())
         code = self.exit_codes.get(subcommand, 0)
@@ -67,7 +81,19 @@ class FakeEole:
         if subcommand == "train":
             self._write_checkpoint(Path(cfg["training"]["model_path"]))
         elif subcommand == "predict":
-            Path(cfg["output"]).write_text("predicted\n", encoding="utf-8")
+            source_lines = self.predict_inputs[-1][1]
+            hypotheses = self.hypotheses
+            if hypotheses is None:
+                hypotheses = [" ".join(line.split(" ")[1:]) for line in source_lines]
+            Path(cfg["output"]).write_text(
+                "".join(f"{hypothesis}\n" for hypothesis in hypotheses),
+                encoding="utf-8",
+            )
+
+    def _record_predict_input(self, config_path: Path) -> None:
+        cfg = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        source = Path(cfg["src"]).read_text(encoding="utf-8")
+        self.predict_inputs.append((cfg, source.removesuffix("\n").split("\n")))
 
     def _write_checkpoint(self, model_path: Path) -> None:
         step_dir = model_path / "step_1"
@@ -367,18 +393,18 @@ def test_run_training_accepts_a_checkpoint_that_replaces_an_older_runs(
     assert run_training(tiny_config, run_dir) == run_dir / "ckpt"
 
 
-def test_run_training_allows_for_file_systems_with_coarse_timestamps(
+def test_run_training_accepts_a_checkpoint_stamped_just_inside_the_two_second_slack(
     fake_eole: FakeEole, tiny_config: Path, run_dir: Path
 ) -> None:
-    fake_eole.checkpoint_age = 1.0
+    fake_eole.checkpoint_age = 1.8
 
     assert run_training(tiny_config, run_dir) == run_dir / "ckpt"
 
 
-def test_run_training_does_not_accept_a_checkpoint_written_long_before_the_launch(
+def test_run_training_rejects_a_checkpoint_stamped_just_outside_the_two_second_slack(
     fake_eole: FakeEole, tiny_config: Path, run_dir: Path
 ) -> None:
-    fake_eole.checkpoint_age = 30.0
+    fake_eole.checkpoint_age = 2.3
 
     with pytest.raises(UpstreamError, match="no new checkpoint under"):
         run_training(tiny_config, run_dir)
@@ -558,76 +584,175 @@ def test_run_training_reports_a_missing_eole_script_without_running_anything(
 
 # ---- predict --------------------------------------------------------------------
 
+WORDS = ("abc", "cab", "bca")
 
-def _predict(tmp_path: Path, **overrides: Any) -> Path:
+
+@pytest.fixture(scope="module")
+def spm_model(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A real character model that knows the tags, a, b, c and the suffix gap."""
+    prefix = tmp_path_factory.mktemp("predict_model") / "chars"
+    return train_char_model([*WORDS, f"a{NNBSP}b"], prefix, vocab_size=64)
+
+
+def _predict(
+    tmp_path: Path,
+    default_model: Path,
+    *,
+    lines: Sequence[str] = WORDS,
+    **overrides: Any,
+) -> Path:
+    src_file = tmp_path / "words.src"
+    src_file.write_text("".join(f"{line}\n" for line in lines), encoding="utf-8")
     arguments: dict[str, Any] = {
         "ckpt_dir": tmp_path / "run" / "ckpt",
-        "src_file": tmp_path / "words.src",
+        "src_file": src_file,
         "tag": TO_SCRIPT_TAG,
-        "spm_model": tmp_path / "converter_char.model",
+        "spm_model": default_model,
         "out_file": tmp_path / "out" / "pred.tgt",
     }
     arguments.update(overrides)
     return predict(arguments.pop("ckpt_dir"), arguments.pop("src_file"), **arguments)
 
 
-def test_predict_side_paths_are_the_log_and_the_predict_config_next_to_the_output() -> (
-    None
-):
+def _lines(path: Path) -> list[str]:
+    return path.read_text(encoding="utf-8").removesuffix("\n").split("\n")
+
+
+def test_predict_side_paths_are_the_log_the_config_and_the_two_token_files() -> None:
     out_file = Path("work") / "pred.tgt"
 
     assert predict_side_paths(out_file) == (
         Path("work") / "pred.tgt.log",
         Path("work") / "pred.tgt.predict.yaml",
+        Path("work") / "pred.tgt.tokens.src",
+        Path("work") / "pred.tgt.tokens.out",
     )
 
 
-def test_predict_writes_the_predict_config_next_to_the_output_file(
-    fake_eole: FakeEole, tmp_path: Path
+def test_predict_gives_eole_no_transforms_so_the_checkpoint_cannot_choose_the_tag(
+    fake_eole: FakeEole, tmp_path: Path, spm_model: Path
 ) -> None:
-    out_file = _predict(tmp_path)
+    # Eole copies the `valid` corpus's prefix into the checkpoint's transform configs
+    # and lets them override the prediction config, so a `prefix` transform would add
+    # the checkpoint's tag whatever tag is asked for.
+    out_file = _predict(tmp_path, spm_model)
 
-    _, config_path = predict_side_paths(out_file)
+    _, config_path, tokens_in, tokens_out = predict_side_paths(out_file)
     assert yaml.safe_load(config_path.read_text(encoding="utf-8")) == {
         "model_path": (tmp_path / "run" / "ckpt").as_posix(),
-        "src": (tmp_path / "words.src").as_posix(),
-        "output": out_file.as_posix(),
+        "src": tokens_in.as_posix(),
+        "output": tokens_out.as_posix(),
         "beam_size": 1,
         "batch_size": 64,
         "batch_type": "sents",
         "gpu_ranks": [],
         "world_size": 1,
-        "transforms": ["sentencepiece", "prefix"],
-        "transforms_configs": {
-            "sentencepiece": {
-                "src_subword_model": (tmp_path / "converter_char.model").as_posix(),
-                "tgt_subword_model": (tmp_path / "converter_char.model").as_posix(),
-            },
-            "prefix": {"src_prefix": TO_SCRIPT_TAG, "tgt_prefix": ""},
-        },
+        "transforms": [],
     }
+    assert "transforms_configs" not in fake_eole.predict_inputs[0][0]
 
 
-def test_predict_puts_the_requested_tag_in_the_prefix_transform(
-    fake_eole: FakeEole, tmp_path: Path
+@pytest.mark.parametrize("tag", [TO_SCRIPT_TAG, TO_CYRILLIC_TAG])
+def test_predict_starts_every_token_line_with_the_requested_tag(
+    fake_eole: FakeEole, tmp_path: Path, spm_model: Path, tag: str
 ) -> None:
-    out_file = _predict(tmp_path, tag="<2mn_Cyrl>")
+    _predict(tmp_path, spm_model, tag=tag)
 
-    _, config_path = predict_side_paths(out_file)
-    cfg = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    assert cfg["transforms_configs"]["prefix"]["src_prefix"] == "<2mn_Cyrl>"
+    ((_, token_lines),) = fake_eole.predict_inputs
+    assert token_lines == [
+        f"{tag} {DUMMY_PREFIX} a b c",
+        f"{tag} {DUMMY_PREFIX} c a b",
+        f"{tag} {DUMMY_PREFIX} b c a",
+    ]
+    assert all(line.split(" ")[0] == tag for line in token_lines)
+
+
+def test_predict_gives_a_blank_source_line_the_tag_alone(
+    fake_eole: FakeEole, tmp_path: Path, spm_model: Path
+) -> None:
+    _predict(tmp_path, spm_model, lines=["abc", "", "cab"])
+
+    ((_, token_lines),) = fake_eole.predict_inputs
+    assert token_lines[1] == TO_SCRIPT_TAG
+
+
+def test_predict_keeps_a_suffix_gap_as_a_token_of_its_own_through_both_files(
+    fake_eole: FakeEole, tmp_path: Path, spm_model: Path
+) -> None:
+    # NNBSP is not a separator: Eole splits token lines at U+0020 only, and so must
+    # `predict`, or the gap vanishes between a stem and its suffix.
+    out_file = _predict(tmp_path, spm_model, lines=[f"a{NNBSP}b"])
+
+    ((_, token_lines),) = fake_eole.predict_inputs
+    assert token_lines == [f"{TO_SCRIPT_TAG} {DUMMY_PREFIX} a {NNBSP} b"]
+    assert _lines(out_file) == [f"a{NNBSP}b"]
+
+
+def test_predict_decodes_the_token_lines_eole_wrote_into_the_output_file(
+    fake_eole: FakeEole, tmp_path: Path, spm_model: Path
+) -> None:
+    processor = sentencepiece.SentencePieceProcessor(model_file=str(spm_model))
+    fake_eole.hypotheses = [
+        f"{DUMMY_PREFIX} b c a",
+        f"{DUMMY_PREFIX} a b c",
+        f"{DUMMY_PREFIX} c a b",
+    ]
+
+    out_file = _predict(tmp_path, spm_model)
+
+    assert _lines(out_file) == ["bca", "abc", "cab"]
+    assert _lines(out_file) == [
+        processor.decode(hypothesis.split(" ")) for hypothesis in fake_eole.hypotheses
+    ]
+    assert out_file.read_text(encoding="utf-8") == "bca\nabc\ncab\n"
+
+
+def test_predict_turns_an_empty_hypothesis_into_an_empty_line(
+    fake_eole: FakeEole, tmp_path: Path, spm_model: Path
+) -> None:
+    fake_eole.hypotheses = [
+        "",
+        f"{DUMMY_PREFIX} a b c",
+        "",
+        f"{DUMMY_PREFIX} c a b",
+        "",
+    ]
+
+    out_file = _predict(tmp_path, spm_model, lines=["x", "abc", "y", "cab", "z"])
+
+    assert out_file.read_text(encoding="utf-8") == "\nabc\n\ncab\n\n"
+
+
+def test_predict_writes_one_output_line_per_source_line(
+    fake_eole: FakeEole, tmp_path: Path, spm_model: Path
+) -> None:
+    out_file = _predict(tmp_path, spm_model, lines=["abc", "", "cab", "bca"])
+
+    assert _lines(out_file) == ["abc", "", "cab", "bca"]
+
+
+def test_predict_reports_an_output_with_another_line_count_than_the_source(
+    fake_eole: FakeEole, tmp_path: Path, spm_model: Path
+) -> None:
+    fake_eole.hypotheses = [f"{DUMMY_PREFIX} a b c", f"{DUMMY_PREFIX} c a b"]
+
+    with pytest.raises(UpstreamError, match="2 lines for 3 source lines"):
+        _predict(tmp_path, spm_model)
 
 
 def test_predict_runs_eole_predict_on_the_cpu_and_returns_the_output_file(
-    monkeypatch: pytest.MonkeyPatch, fake_eole: FakeEole, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    fake_eole: FakeEole,
+    tmp_path: Path,
+    spm_model: Path,
 ) -> None:
     monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "0")
 
-    out_file = _predict(tmp_path, threads=4)
+    out_file = _predict(tmp_path, spm_model, threads=4)
 
     assert out_file == tmp_path / "out" / "pred.tgt"
     ((argv, kwargs),) = fake_eole.calls
-    _, config_path = predict_side_paths(out_file)
+    _, config_path, _, _ = predict_side_paths(out_file)
     assert Path(argv[0]).name in EOLE_NAMES
     assert argv[1:] == ["predict", "-config", str(config_path)]
     assert kwargs["env"]["CUDA_VISIBLE_DEVICES"] == ""
@@ -636,78 +761,122 @@ def test_predict_runs_eole_predict_on_the_cpu_and_returns_the_output_file(
 
 
 def test_predict_bounds_the_command_by_the_timeout_only_when_asked(
-    fake_eole: FakeEole, tmp_path: Path
+    fake_eole: FakeEole, tmp_path: Path, spm_model: Path
 ) -> None:
-    _predict(tmp_path)
-    _predict(tmp_path, timeout=3.5)
+    _predict(tmp_path, spm_model)
+    _predict(tmp_path, spm_model, timeout=3.5)
 
     assert fake_eole.waits == [None, 3.5]
 
 
 def test_predict_writes_the_combined_log_next_to_the_output_file(
-    fake_eole: FakeEole, tmp_path: Path
+    fake_eole: FakeEole, tmp_path: Path, spm_model: Path
 ) -> None:
     fake_eole.output = ("decoding",)
 
-    out_file = _predict(tmp_path)
+    out_file = _predict(tmp_path, spm_model)
 
-    log_path, _ = predict_side_paths(out_file)
+    log_path, _, _, _ = predict_side_paths(out_file)
     assert log_path.read_text(encoding="utf-8") == "decoding\n"
 
 
 def test_predict_reports_a_failure_with_the_log_tail(
-    fake_eole: FakeEole, tmp_path: Path
+    fake_eole: FakeEole, tmp_path: Path, spm_model: Path
 ) -> None:
     fake_eole.exit_codes = {"predict": 1}
     fake_eole.output = ["bad model"]
 
     with pytest.raises(UpstreamError) as raised:
-        _predict(tmp_path)
+        _predict(tmp_path, spm_model)
 
     assert "exit code 1" in str(raised.value)
     assert str(raised.value).endswith("bad model")
 
 
 def test_predict_fails_when_eole_exits_zero_without_an_output_file(
-    fake_eole: FakeEole, tmp_path: Path
+    fake_eole: FakeEole, tmp_path: Path, spm_model: Path
 ) -> None:
     fake_eole.writes_results = False
 
     with pytest.raises(UpstreamError, match="no output file"):
-        _predict(tmp_path)
+        _predict(tmp_path, spm_model)
 
 
-def test_predict_does_not_mistake_an_earlier_output_for_a_new_one(
-    fake_eole: FakeEole, tmp_path: Path
+def test_predict_does_not_mistake_outputs_of_an_earlier_run_for_new_ones(
+    fake_eole: FakeEole, tmp_path: Path, spm_model: Path
 ) -> None:
     out_file = tmp_path / "out" / "pred.tgt"
+    _, _, _, tokens_out = predict_side_paths(out_file)
     out_file.parent.mkdir()
     out_file.write_text("left from an earlier run\n", encoding="utf-8")
+    tokens_out.write_text("left from an earlier run\n", encoding="utf-8")
     fake_eole.writes_results = False
 
     with pytest.raises(UpstreamError, match="no output file"):
-        _predict(tmp_path)
+        _predict(tmp_path, spm_model)
+
+    assert not out_file.exists()
 
 
 def test_predict_creates_the_directory_of_the_output_file(
-    fake_eole: FakeEole, tmp_path: Path
+    fake_eole: FakeEole, tmp_path: Path, spm_model: Path
 ) -> None:
-    out_file = _predict(tmp_path, out_file=tmp_path / "a" / "b" / "pred.tgt")
+    out_file = _predict(tmp_path, spm_model, out_file=tmp_path / "a" / "b" / "pred.tgt")
 
     assert out_file.parent.is_dir()
 
 
-@pytest.mark.parametrize(
-    "field", ["ckpt_dir", "src_file", "spm_model", "out_file", "tag"]
-)
-def test_predict_rejects_a_dollar_sign_in_a_path_or_the_tag(
-    fake_eole: FakeEole, tmp_path: Path, field: str
+@pytest.mark.parametrize("field", ["ckpt_dir", "src_file", "spm_model", "out_file"])
+def test_predict_rejects_a_dollar_sign_in_a_path_before_writing_anything(
+    fake_eole: FakeEole, tmp_path: Path, spm_model: Path, field: str
 ) -> None:
-    # Eole expands `$VAR` in the whole prediction config, tag included.
-    bad = "<2$tag>" if field == "tag" else tmp_path / "out" / "$x"
-
-    with pytest.raises(ConfigError, match=r"\$"):
-        _predict(tmp_path, **{field: bad})
+    with pytest.raises(ConfigError, match=r"holds '\$'"):
+        _predict(tmp_path, spm_model, **{field: tmp_path / "out" / "$x"})
 
     assert fake_eole.calls == []
     assert not (tmp_path / "out").exists()
+
+
+def test_predict_rejects_a_tag_the_model_does_not_know_before_writing_anything(
+    fake_eole: FakeEole, tmp_path: Path, spm_model: Path
+) -> None:
+    # An unknown tag would reach Eole as <unk> and silently convert in no direction.
+    with pytest.raises(ConfigError, match="not a piece of the model"):
+        _predict(tmp_path, spm_model, tag="<2xx_Latn>")
+
+    assert fake_eole.calls == []
+    assert not (tmp_path / "out").exists()
+
+
+@pytest.mark.parametrize("problem", ["missing", "directory"])
+def test_predict_rejects_a_character_model_that_cannot_be_loaded(
+    fake_eole: FakeEole, tmp_path: Path, spm_model: Path, problem: str
+) -> None:
+    bad_model = tmp_path / "absent.model"
+    if problem == "directory":
+        bad_model.mkdir()
+
+    with pytest.raises(DataError, match="cannot load SentencePiece model"):
+        _predict(tmp_path, spm_model, spm_model=bad_model)
+
+    assert fake_eole.calls == []
+    assert not (tmp_path / "out").exists()
+
+
+def test_predict_rejects_a_source_file_without_lines(
+    fake_eole: FakeEole, tmp_path: Path, spm_model: Path
+) -> None:
+    with pytest.raises(DataError, match="no lines"):
+        _predict(tmp_path, spm_model, lines=[])
+
+    assert fake_eole.calls == []
+    assert not (tmp_path / "out").exists()
+
+
+def test_predict_rejects_a_missing_source_file(
+    fake_eole: FakeEole, tmp_path: Path, spm_model: Path
+) -> None:
+    with pytest.raises(DataError, match="cannot read"):
+        _predict(tmp_path, spm_model, src_file=tmp_path / "absent.src")
+
+    assert fake_eole.calls == []
