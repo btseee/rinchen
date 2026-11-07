@@ -188,7 +188,90 @@ records) and a last commit that corrects provenance and wording found in
 review. [EVIDENCE: live runs of the four gate commands and of the harness
 scripts, 2026-11-06.]
 
-Next step: D4 (Filtering & mining).
+**D4 (filtering and mining) is done on branch `d4-filtering-mining`; its STOP
+gate ("tiny filter run green") is met locally.** The branch is cut from `main`
+at `2346cea`, is not merged into `main` and is not pushed; no CI run covers it.
+Built: the corpus Parquet contract (`rinchen.corpus`: `CORPUS_SCHEMA`,
+`corpus_frame`, `scan_corpus`, `write_corpus`), `rinchen.config.filters` and
+`configs/data/filters.yaml`, the seven filter stages and `run_pipeline`
+(`rinchen.filter`: `script_ratio`, `numbers`, `length`, `lid` with the B7
+`GlotLID` wrapper, `minhash`, `labse`, `qe` with the MetricX-QE adapter
+`qe_eole.py`), `rinchen.mine` (`Embedder` and LaBSE, the B6 `align`,
+`match_documents`, `pairs`), `rinchen filter run` and `rinchen mine align`
+(`rinchen.cli.{filter,mine}`, with the error-to-exit-code mapping shared with
+`rinchen spm` in `cli/errors.py`), `Manifest.status`, test helpers in
+`tests/support/`, and `docs/runbooks/04_filtering_mining.md`. 22 commits before
+this one (`fb8c6d7` design and plan; `e882113` through `102509a` the code, its
+review fixes and the test hardening), then the records commit. The design is
+`docs/superpowers/specs/2026-11-06-d4-filtering-mining-design.md` (updated to
+the finished code); the 17 rulings, made without a review round because the
+user asked for no check-ins, are condensed in DECISIONS.md ("2026-11-07: D4
+filtering and mining"). STOP gate and gates, run for real on Linux, CPython
+3.14.10, 2026-11-07 (`just` is not installed here, so the four gate commands
+were run individually): `ruff format --check .` -- 174 files already formatted;
+`ruff check .` -- all checks passed; `mypy src` -- no issues found in 84 source
+files; `pytest -m "not network" -q` -- **1656 passed, 10 deselected** (938 on
+the branch point; the end-to-end test in `tests/unit/test_cli_filter.py` runs
+the CLI on the 50-row planted corpus and gets 28 kept rows with the planted
+reason counts exact, `qe` skipped). Numeric gates, on
+synthetic planted data: MinHash recall 0.98 and precision 1.0 (gate 0.95);
+aligner F1 0.989 on seed 11, mean 0.993 and minimum 0.978 over seeds 11 to 30,
+with `merge_penalty` 0.3 (0.906 without it; gate 0.95); numbers filter handles
+`1,5` and `1.5`; QE stage skipped cleanly without a scorer or CUDA. `network`
+checks, run with `uv run pytest -m network -q` on the RTX 5070 Ti machine
+(Intel Core Ultra 7 265K, 46 GiB RAM, driver 595.99.02, models in the local
+caches): **10 passed** (13.3 s and 12.6 s on two runs); four are D4's and ran against the real models
+-- GlotLID parity (wrapper top-1 label equals the raw fastText label for 200
+of 200 fixture lines; the 20 `mn_Mong` golden entries are synthetic) and the
+default-config check (no fixture line flagged), LaBSE (cosine 0.90 for a
+translation pair against 0.11 for an unrelated one) and MetricX-QE (0.0 and
+0.09 for good pairs against 9.9 and 25.0 for a mismatched pair); the other six
+are the older D0 checks (PyPI, the torch index, `uv lock`, the fasttext shim),
+which also passed. None could not run. Measured throughput and memory
+(`docs/runbooks/04_filtering_mining.md`, "Estimates"): GlotLID on CPU 77,000
+lines/s on all cores and 6,500 on one core (38-character lines; 55,000 and
+5,900 at 116 characters); LaBSE about 5,500 sentences/s at batch 128 (2,400 at
+117 characters), 2,091 MiB of GPU memory; MetricX-QE 500 pairs/s at batch 32
+(226 at 127/156 characters), 4,935 to 5,041 MiB. Real-model integration run
+(not a validation): 24 `khk_Cyrl` -> `eng_Latn` rows through `rinchen filter run`
+with the real GlotLID, LaBSE and MetricX-QE, 9.5 s wall; the 16 natural pairs
+were kept and the 8 planted bad rows (2 Russian sources, 2 changed numbers, 2
+mismatched translations, 1 exact duplicate, 1 very long target) were rejected as
+`lid_src`, `numbers`, `labse`, `duplicate`, `len_ratio_char`; one natural pair
+was close to a floor (`lid_src` 0.623, Buryat 0.377, floor 0.5). The Mongolian
+sentences were written by the assistant and not reviewed by a Mongolian
+reader. A 12-line `rinchen mine align` run gave 12 correct 1-1 rows in 6.3 s.
+Findings worth knowing: GlotLID v3 labels Chinese `cmn_Hani` or `wuu_Hani`,
+never `zho_Hans`, and has no `mn_Mong` (the default accept table and the
+wrapper's pre-detector handle both; Simplified versus Traditional is not
+checked); LaBSE stays on the GPU while the QE model runs (6,665 MiB allocated in
+all; the `run_pipeline` docstring says otherwise and should be corrected); the
+installed `huggingface_hub` ships `hf`, not `huggingface-cli`, and the download
+writes `models/lid/model_v3.bin` while the default config reads
+`models/lid/glotlid_v3.bin`. NOT verified: every threshold on real data (none
+exists), the aligner on real embeddings (calibrated on synthetic additive data
+only), the no-GPU path with the real adapter, LaBSE on CPU, `filter run` on more
+than 24 rows. The D3 gates assigned to D4 stay OPEN because they need real
+text: abbreviation induction and a boundary-error sample per language; counts
+of o-like Latin substitutes and uppercase `Y` in real khk_Cyrl; an audit of
+U+200C, U+200D, U+180A..U+180F and U+202F in real traditional-script text
+before D5. `match_documents` is a library function with no command yet, and
+there is no CometKiwi adapter. [EVIDENCE: the four gate commands, `uv run
+pytest -m network -q`, the scratch measurement scripts and the smoke runs
+described in the runbook, 2026-11-07, commits `fb8c6d7` through `102509a`.]
+
+Branch status (corrected 2026-11-07): `main` is at `2346cea`; it holds D3 and
+the D3 research follow-up (the follow-up branch was fast-forwarded into it, and
+no `d3-research-followup` ref remains), is 30 commits ahead of `origin/main`
+(`9e7b0ec`) and unpushed, and no CI run covers D3 or D4. `d4-filtering-mining`
+is `main` plus the D4 commits, not merged and not pushed.
+
+Next step: D5 (Cyrillic and traditional-script converter). Its inputs from D3
+and D4: the converter never emits ZWJ or ZWNJ (a validator enforces it), emits
+NNBSP before separated suffixes and is render-checked in the target fonts; the
+audit of U+200C, U+200D, U+180A..U+180F and U+202F in real traditional-script
+text has to be done before the strip-the-joiners policy is frozen; `mn_Mong`
+pairs will need their own length-ratio bounds once converter output exists.
 
 D0 (environment, skeleton, doctor): `pyproject.toml` restructured to the
 master plan's toolchain (see `docs/STACK.md` for resolved versions),

@@ -762,3 +762,106 @@ render-check a sample in the target fonts; decide the abbreviation and suffix
 questions that need a Mongolian reader. D8: the tag and prefix design of item 1
 with the tests listed there; decide per-direction corpora against a custom
 transform; sanitise reserved strings in raw text.
+
+## 2026-11-07: D4 filtering and mining - the rulings, made without a review round
+
+D4 (`src/rinchen/{corpus,filter,mine}/`, `src/rinchen/cli/{filter,mine,errors}.py`,
+`configs/data/filters.yaml`) filled gaps in the master plan with the rulings below.
+**They were made by the builder without a review round, because the user's
+instruction for this milestone was "don't respond back until you finish everything
+related to coding".** None is an approved decision; each lists what it costs if wrong
+so that it can be undone. The design with the full wording is
+`docs/superpowers/specs/2026-11-06-d4-filtering-mining-design.md` (rulings 1 to 17;
+the numbers below are the same); procedures, measured numbers and the known
+limitations are in `docs/runbooks/04_filtering_mining.md`. The work lives on branch
+`d4-filtering-mining`, which is not merged and not pushed.
+
+[DESIGN: 1. Twelve tasks on one branch, the pipeline last among the filters.] Cost if
+wrong: re-slicing, no code impact. [DESIGN: 2. `corpus/` (schema, readers, writers) is
+created now, because the master plan's contracts need it and D1-D3 did not build it;
+`dedup.py` and `splits.py` are left to the milestone that needs them (D6 onward).] Cost
+if wrong: they are added later. [DESIGN: 3. The numbers rule is the literal "digit
+multiset" of the master plan.] It compares the multiset of digit characters, not of
+number tokens, so `1,5` equals `1.5` but also `12` equals `21`. Cost if wrong: a few
+false accepts; the token form can replace it behind the same `num_ok` score. The lone
+CJK numerals `shi` (ten), `bai` and `wan` count as numbers, which gives false rejects
+against digit-free English ("very" reads as 10); the runbook lists them.
+
+[DESIGN: 4. Every stage scores every row; only `minhash` ignores rows that are already
+rejected.] Cost if wrong: GPU time spent on rejected rows; gain: complete scores for
+analysis. [DESIGN: 5. QE is a stage plus a `QEScorer` protocol.] The MetricX-QE
+adapter (`filter/qe_eole.py`, over Eole 0.6.4 helpers) was verified on the GPU and
+shipped; there is no CometKiwi adapter, and `qe.scorer: cometkiwi` skips the stage.
+Cost if wrong: the adapter depends on undocumented Eole helpers, so `eole==0.6.4` stays
+pinned for it and the `network` test is the only guard; first use downloads about 6 GB.
+[DESIGN: 6. LaBSE runs through sentence-transformers, 7. the aligner embeds overlap
+concatenations as text, 8. `Manifest.status` is added (optional, default empty), 9. the
+GlotLID parity reference is the raw fastText Python API on the same model because the
+command-line binary is not installed, 10. Latin letters in Cyrillic text are tolerated
+up to 10%.] Costs: (7) up to `max_k - 1` times more embedding calls; (8) a field in a
+shared contract; (9) weaker than the master plan's wording; (10) a brand-name tolerance
+that could hide real Latin contamination.
+
+[DESIGN: 11. Source files may hold visible non-ASCII letters (Cyrillic, Han, Hangul);
+invisible, look-alike and traditional Mongolian characters are built with `chr()`.]
+D3's "ASCII only" was a workaround for the editor tools. Cost if wrong: none.
+[DESIGN: 12. Letters of Script=Common or Inherited are neutral in `script_of`.] A
+Japanese sentence with the katakana long-vowel mark scored 0.778 and was falsely
+rejected at 0.9. Cost if wrong: `script_of` callers see slightly different shares for
+Common letters; reverting is three lines. [DESIGN: 13. The `lid` accept table defaults
+to `{zho_Hans: [cmn_Hani, wuu_Hani]}`.] The real GlotLID v3 never says `zho_Hans`
+(Mandarin is `cmn_Hani` 19 of 20, `wuu_Hani` 1 of 20) and calls traditional Mongolian
+`und_Mong`, which the wrapper's pre-detector replaces by `mn_Mong`. Cost if wrong: Wu
+text is accepted as Chinese and Simplified versus Traditional is not checked in D4
+(`Hani` does not separate them and neither does `script_ratio`).
+
+[DESIGN: 14. The pipeline collects after every stage.] Errors surface at the stage that
+caused them. Cost if wrong: no cross-stage lazy fusion, which does not matter. **A
+claim in the code is false and should be corrected:** the docstring of `run_pipeline`
+says the LID model, LaBSE and the QE model are never in memory together, but the CLI
+keeps the LaBSE embedder alive for the whole run, so about 1,800 MiB of LaBSE stay on
+the GPU during `qe` (6,665 MiB allocated in all, found in the 2026-11-07 smoke run).
+[DESIGN: 15. The aligner has a `merge_penalty` (edge weight `cost * (a + b) +
+merge_penalty * (a + b - 2)`, default 0.3).] With the plain weighting a weak pair rides
+on a strong neighbour and F1 on the planted data was 0.906; 0.3 gives 0.989 (mean
+0.993, minimum 0.978 over seeds 11 to 30). Cost if wrong: one more constant, tuned on
+synthetic additive data only; the real-data value is unknown. [DESIGN: 16. Missing
+neighbours in the aligner's margin term count as unrelated (distance 1.0).] Cost if
+wrong: a lone pair is accepted when its cosine distance is below about 0.87, which is
+lenient for LaBSE. [DESIGN: 17. One shared CLI error mapping, `cli/errors.py`, used by
+`cli/spm.py`, `cli/filter.py` and `cli/mine.py`; `mine align` gained `--merge-penalty`.]
+Cost if wrong: D3's `cli/spm.py` was edited (behaviour and tests unchanged).
+
+[EVIDENCE: Measured on the development machine (Intel Core Ultra 7 265K, RTX 5070 Ti,
+CPython 3.14.10), 2026-11-06 and 2026-11-07. Synthetic planted data: MinHash recall
+0.98, precision 1.0 (gates 0.95); aligner F1 0.989 (gate 0.95); planted reason counts
+exact (50 rows, 28 kept). Real models: GlotLID parity 200 of 200 top-1 labels (20 of
+the golden entries are synthetic traditional-script lines); LaBSE cosine 0.90 for a
+translation pair against 0.11 for an unrelated pair; MetricX-QE 0.0 and 0.09 for good
+pairs against 9.9 and 25.0 for a mismatched one. Throughput: GlotLID on CPU 77,000
+lines/s on all cores and 6,500 on one core (38-character lines); LaBSE about 5,500
+sentences/s at batch 128 (2,400 on 117-character lines); MetricX-QE 500 pairs/s at batch
+32 (226 on 127/156-character pairs), 4,935 to 5,041 MiB of GPU memory allocated. Integration run: 24
+rows through the real CLI with the three real models, 16 natural pairs kept, all 8
+planted bad rows rejected for the intended reason, 9.5 s wall; a 12-line alignment gave
+12 correct 1-1 rows. The Mongolian sentences of that run were written by the assistant
+and not reviewed by a Mongolian reader, so it is an integration check, not evidence of
+quality.]
+
+[EVIDENCE: Not verified. No threshold was checked on real data (none exists); the
+aligner was calibrated on synthetic additive embeddings only; the no-GPU path of `qe`
+was run with a fake scorer only; LaBSE on CPU, other GPUs, bf16 and fp16 QE, and
+`filter run` on anything larger than 24 rows were not measured; the `script_ratio` and
+`minhash` speeds are reviewer measurements that were not repeated; offline use of the
+cached models was not tried. Two small findings from setting up the runbook: the
+installed `huggingface_hub` ships `hf`, not `huggingface-cli`, and
+`hf download cis-lmu/glotlid model_v3.bin --local-dir models/lid` writes
+`model_v3.bin` while the default config reads `models/lid/glotlid_v3.bin`, so the file
+must be renamed or `lid.model_path` set.]
+
+[DESIGN: Gates.] The D3 gates that the master plan assigned to D4 stay OPEN because
+they need real text: abbreviation induction and a boundary-error sample per language;
+counts of o-like Latin substitutes and uppercase `Y` inside Cyrillic-majority tokens in
+real khk_Cyrl; an audit of U+200C, U+200D, U+180A..U+180F and U+202F in real
+traditional-script text before D5. Also open: a real-data check of every threshold, a
+re-tune of `merge_penalty` on real embeddings, and a decision on a CometKiwi adapter.

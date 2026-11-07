@@ -38,19 +38,24 @@ CLAUDE.md STATE.md DECISIONS.md pyproject.toml uv.lock justfile
 .pre-commit-config.yaml
 configs/base.yaml configs/profiles/{tiny,full}.yaml configs/{spm,eole,serve}/
 configs/languages.yaml configs/spm/{tiny_1k,student_64k,teacher_128k}.yaml
-configs/data/sources.yaml configs/data/sources.tiny.yaml
+configs/data/sources.yaml configs/data/sources.tiny.yaml configs/data/filters.yaml
 docs/STACK.md docs/VERIFY.md
 docs/runbooks/00_environment.md docs/runbooks/01_acquisition.md
 docs/runbooks/02_human_testsets.md docs/runbooks/03_tokenizer.md
+docs/runbooks/04_filtering_mining.md
 docs/research/  docs/superpowers/{specs,plans}/
-src/rinchen/{config,manifest,utils,cli,text,lang,split,spm,filter,synth,metrics,eval,serve}/
+src/rinchen/{config,manifest,utils,cli,text,lang,split,spm,corpus,filter,mine,synth,metrics,eval,serve}/
 src/rinchen/acquire/{http,opus,hf,warc,commoncrawl,registry}.py
 src/rinchen/annotate/{db,export,agreement,app,routes,models}.py
 src/rinchen/spm/{symbols,corpus,train,check}.py src/rinchen/split/rules.py
 src/rinchen/text/normalize.py src/rinchen/lang/scripts.py
+src/rinchen/corpus/{schema,readers,writers}.py src/rinchen/config/filters.py
+src/rinchen/filter/{reasons,script_ratio,numbers,length,lid,minhash,labse,qe,qe_eole,pipeline}.py
+src/rinchen/mine/{embed,align,docalign,pairs}.py src/rinchen/cli/{filter,mine,errors}.py
 src/rinchen/errors.py src/rinchen/__init__.py
 tests/ scripts/ plans/ reports/ manifests/
 tests/{unit,property,golden}/ tests/fixtures/{annot,golden,raw,spm}/
+tests/support/ (planted corpus and alignments, fake embedders, tiny LID model)
 scripts/build_spm_fixture.py (regenerates tests/fixtures/spm/tiny_corpus)
 data/{raw,clean,mined,synth,test}/ (gitignored content, tracked dirs)
 vendor/wheels/ (committed binary wheels with no cp314 upstream release)
@@ -71,8 +76,13 @@ Master plan switched 2026-10-29 to milestones D0-D15 (see below). D0, D1,
 and D2 are all done, all STOP gates fully met including green CI runs on
 `origin/main` (2026-11-02). D3 (Normalization & SentencePiece) is done: its
 STOP gate was met locally (2026-11-06), but only `tiny_1k` was ever trained
-(`student_64k`/`teacher_128k` are schema-validated only) and no CI run of D3
-is recorded yet. Next up: D4 (Filtering & mining). See `STATE.md`.
+(`student_64k`/`teacher_128k` are schema-validated only). D4 (Filtering &
+mining) is done: its STOP gate was met locally (2026-11-07) on branch
+`d4-filtering-mining`, which is not merged and not pushed; every threshold is
+an unvalidated prior because no real data exists, and the D3 gates assigned to
+D4 (abbreviation induction, o-like substitute counts, the traditional-script
+control-character audit) stay open. `main` is unpushed and no CI run covers D3
+or D4. Next up: D5 (Cyrillic/traditional converter). See `STATE.md`.
 
 ## Evidence and full plan
 
