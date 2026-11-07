@@ -4,7 +4,8 @@ Words are random concatenations of syllables from a per-language inventory, in
 the style of the tiny SentencePiece fixture (`scripts/build_spm_fixture.py`):
 they carry no meaning. The planted corpus and the tiny LID model's training
 text both draw from these inventories, so the model has seen the kind of text
-the corpus plants, though never the planted lines themselves.
+the corpus plants. It has not seen the 22 generated planted rows; the 28 clean
+rows are fixture lines, which its training text holds as well.
 """
 
 from __future__ import annotations

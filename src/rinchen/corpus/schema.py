@@ -156,6 +156,12 @@ def _check_row(index: int, row: Mapping[str, Any]) -> None:
             raise DataError(
                 f"row {index}: {key} {row[key]!r} is not one of {', '.join(allowed)}"
             )
+    seg_idx = row.get("seg_idx")
+    # bool is an int subclass; polars would store True as 1.
+    if seg_idx is not None and (
+        isinstance(seg_idx, bool) or not isinstance(seg_idx, int)
+    ):
+        raise DataError(f"row {index}: seg_idx must be an integer, got {seg_idx!r}")
 
 
 def _series(name: str, values: list[Any]) -> pl.Series:

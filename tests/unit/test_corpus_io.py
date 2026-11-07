@@ -74,14 +74,14 @@ def test_write_refuses_wrong_schema_and_creates_no_file(tmp_path: Path) -> None:
     path = tmp_path / "out" / "corpus.parquet"
     wrong = _frame().drop("src")
 
-    with pytest.raises(DataError, match="src"):
+    with pytest.raises(DataError, match=r"missing columns: src\b"):
         write_corpus(wrong, path)
 
     assert not path.exists()
     assert not path.parent.exists()
 
 
-def test_failed_write_keeps_existing_file_and_leaves_no_temporary(
+def test_write_that_fails_while_computing_keeps_the_existing_file(
     tmp_path: Path,
 ) -> None:
     path = tmp_path / "corpus.parquet"
@@ -98,6 +98,28 @@ def test_failed_write_keeps_existing_file_and_leaves_no_temporary(
     with pytest.raises(ValueError, match="planted failure"):
         write_corpus(failing, path)
 
+    assert [entry.name for entry in tmp_path.iterdir()] == ["corpus.parquet"]
+    assert scan_corpus(path).collect().equals(_frame())
+
+
+def test_failed_rename_removes_the_part_file_and_keeps_the_existing_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "corpus.parquet"
+    write_corpus(_frame(), path)
+    part_existed_at_rename: list[bool] = []
+
+    def failing_replace(self: Path, target: Path) -> Path:
+        part_existed_at_rename.append(self.is_file())
+        raise OSError("planted rename failure")
+
+    monkeypatch.setattr(Path, "replace", failing_replace)
+    replacement = _frame().with_columns(src=pl.lit("changed"))
+
+    with pytest.raises(OSError, match="planted rename failure"):
+        write_corpus(replacement, path)
+
+    assert part_existed_at_rename == [True]
     assert [entry.name for entry in tmp_path.iterdir()] == ["corpus.parquet"]
     assert scan_corpus(path).collect().equals(_frame())
 
@@ -120,7 +142,7 @@ def test_scan_wrong_schema_is_data_error(tmp_path: Path) -> None:
     path = tmp_path / "wrong.parquet"
     _frame().drop("src").write_parquet(path)
 
-    with pytest.raises(DataError, match="src"):
+    with pytest.raises(DataError, match=r"missing columns: src\b"):
         scan_corpus(path)
 
 

@@ -294,6 +294,11 @@ def test_loaded_config_is_immutable():
             id="blank-model-path",
         ),
         pytest.param(
+            {"length": {"spm_model": ""}},
+            "spm_model must not be empty",
+            id="blank-spm-model",
+        ),
+        pytest.param(
             {"lid": {"accept": {"khk_Cyrl": "khk_Cyrl"}}},
             "accept.*valid list",
             id="accept-not-a-list",
@@ -314,6 +319,12 @@ def test_loaded_config_is_immutable():
             id="threshold-above-one",
         ),
         pytest.param(
+            {"minhash": {"ngram": 0}}, "ngram.*greater than 0", id="zero-ngram"
+        ),
+        pytest.param(
+            {"minhash": {"seed": "1"}}, "seed.*valid integer", id="quoted-seed"
+        ),
+        pytest.param(
             {"labse": {"device": "tpu"}}, "device.*Input should be", id="unknown-device"
         ),
         pytest.param(
@@ -322,7 +333,32 @@ def test_loaded_config_is_immutable():
             id="cosine-above-one",
         ),
         pytest.param(
+            {"labse": {"min_cosine": -1.5}},
+            "min_cosine.*greater than or equal to -1",
+            id="cosine-below-minus-one",
+        ),
+        pytest.param(
+            {"labse": {"batch_size": 0}},
+            "labse.batch_size.*greater than 0",
+            id="zero-labse-batch",
+        ),
+        pytest.param(
+            {"labse": {"model": ""}},
+            "labse.model.*at least 1 character",
+            id="empty-labse-model",
+        ),
+        pytest.param(
             {"qe": {"scorer": "bleurt"}}, "scorer.*Input should be", id="unknown-scorer"
+        ),
+        pytest.param(
+            {"qe": {"max_metricx_qe": -1}},
+            "max_metricx_qe.*greater than or equal to 0",
+            id="negative-max-metricx-qe",
+        ),
+        pytest.param(
+            {"qe": {"min_cometkiwi": float("nan")}},
+            "min_cometkiwi.*finite",
+            id="nan-min-cometkiwi",
         ),
         pytest.param(
             {"qe": {"batch_size": 0}},

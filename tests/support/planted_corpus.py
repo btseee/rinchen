@@ -18,7 +18,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+import numpy as np
 import polars as pl
+from numpy.typing import NDArray
 
 from rinchen.config.loader import REPO_ROOT
 from rinchen.config.spm import load_spm_config
@@ -386,14 +388,16 @@ def _interleave(clean: list[_Row], planted: list[_Row]) -> list[_Row]:
 def _separated_concept_ids() -> Iterator[int]:
     """Concept ids whose Gaussian vectors are pairwise nearly orthogonal; the
     ids 0, 1, 2, ... themselves have pairs with a cosine above 0.4."""
-    chosen = []
-    seed = 0
-    while True:
+    chosen: list[NDArray[np.float32]] = []
+    for seed in range(_MAX_ATTEMPTS):
         vector = concept_vector(seed)
         if all(abs(float(vector @ other)) < _MAX_CONCEPT_COSINE for other in chosen):
             chosen.append(vector)
             yield seed
-        seed += 1
+    raise RuntimeError(
+        f"only {len(chosen)} pairwise separated concept ids among the first "
+        f"{_MAX_ATTEMPTS} seeds"
+    )
 
 
 def _concepts(rows: list[_Row]) -> dict[str, int]:

@@ -189,7 +189,7 @@ def test_corpus_frame_rejects_row_missing_required_key(key: str) -> None:
     row = _row()
     del row[key]
 
-    with pytest.raises(DataError, match=key):
+    with pytest.raises(DataError, match=rf"row 1: .*not text: {key}\b"):
         corpus_frame([_row(), row])
 
 
@@ -198,10 +198,17 @@ def test_corpus_frame_rejects_unexpected_key() -> None:
         corpus_frame([_row(docid="d1")])
 
 
-@pytest.mark.parametrize("seg_idx", ["3", 2**40])
-def test_corpus_frame_rejects_unrepresentable_seg_idx(seg_idx: object) -> None:
+def test_corpus_frame_rejects_unrepresentable_seg_idx() -> None:
     with pytest.raises(DataError, match="seg_idx"):
-        corpus_frame([_row(seg_idx=seg_idx)])
+        corpus_frame([_row(seg_idx=2**40)])
+
+
+@pytest.mark.parametrize("seg_idx", [True, False, "3", 3.0])
+def test_corpus_frame_rejects_a_seg_idx_that_is_not_an_integer(
+    seg_idx: object,
+) -> None:
+    with pytest.raises(DataError, match=r"row 1: seg_idx must be an integer"):
+        corpus_frame([_row(), _row(seg_idx=seg_idx)])
 
 
 def test_validate_corpus_schema_accepts_the_contract() -> None:
@@ -217,7 +224,7 @@ def test_validate_corpus_schema_reports_missing_extra_and_mistyped() -> None:
         validate_corpus_schema(pl.Schema(broken), source="data/clean/some.parquet")
 
     message = str(excinfo.value)
-    assert "src" in message
+    assert re.search(r"missing columns: src\b", message)
     assert re.search(r"\bx\b", message)
     assert "seg_idx" in message
     assert "data/clean/some.parquet" in message

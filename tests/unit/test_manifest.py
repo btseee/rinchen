@@ -1,6 +1,7 @@
 """Tests for the manifest model, store, and hash-based stage skip mechanism."""
 
 import importlib.metadata
+import os
 import re
 import subprocess
 import sys
@@ -217,6 +218,11 @@ def test_code_version_in_this_repository_is_a_short_sha_with_optional_dirty():
 
 
 def _git(repo: Path, *args: str) -> str:
+    # A GIT_DIR or GIT_INDEX_FILE inherited from a git hook would point git
+    # at the outer repository instead of `repo`.
+    environment = {
+        name: value for name, value in os.environ.items() if not name.startswith("GIT_")
+    }
     result = subprocess.run(
         [
             "git",
@@ -226,9 +232,12 @@ def _git(repo: Path, *args: str) -> str:
             "user.email=test@example.invalid",
             "-c",
             "commit.gpgsign=false",
+            "-c",
+            "core.hooksPath=/dev/null",
             *args,
         ],
         cwd=repo,
+        env=environment,
         capture_output=True,
         text=True,
         check=True,
@@ -237,7 +246,14 @@ def _git(repo: Path, *args: str) -> str:
 
 
 @pytest.fixture
-def committed_repo(tmp_path, monkeypatch) -> Path:
+def no_inherited_git_variables(monkeypatch) -> None:
+    """`stage.code_version` runs git with this process's environment."""
+    for name in [name for name in os.environ if name.startswith("GIT_")]:
+        monkeypatch.delenv(name)
+
+
+@pytest.fixture
+def committed_repo(tmp_path, monkeypatch, no_inherited_git_variables) -> Path:
     repo = tmp_path / "repo"
     repo.mkdir()
     _git(repo, "init", "--quiet")
@@ -272,7 +288,11 @@ def test_code_version_marks_an_untracked_file_dirty(committed_repo):
 
 
 @pytest.mark.subprocess
-def test_code_version_is_unknown_outside_a_repository(tmp_path, monkeypatch):
+def test_code_version_is_unknown_outside_a_repository(
+    tmp_path, monkeypatch, no_inherited_git_variables
+):
+    # Without a ceiling, git would find a repository above the temporary directory.
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path.parent))
     monkeypatch.setattr(stage, "REPO_ROOT", tmp_path)
 
     assert stage.code_version() == "unknown"
@@ -280,7 +300,7 @@ def test_code_version_is_unknown_outside_a_repository(tmp_path, monkeypatch):
 
 @pytest.mark.subprocess
 def test_code_version_is_unknown_for_a_repository_without_commits(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, no_inherited_git_variables
 ):
     _git(tmp_path, "init", "--quiet")
     monkeypatch.setattr(stage, "REPO_ROOT", tmp_path)
@@ -288,13 +308,59 @@ def test_code_version_is_unknown_for_a_repository_without_commits(
     assert stage.code_version() == "unknown"
 
 
-def test_code_version_is_unknown_when_git_is_not_installed(monkeypatch):
-    def missing_git(*args, **kwargs):
-        raise FileNotFoundError(2, "No such file or directory", "git")
+class RecordingLogger:
+    """Stands in for the structlog logger, which would bind the global
+    logging setup to the stream of whichever test calls it first."""
 
-    monkeypatch.setattr(stage.subprocess, "run", missing_git)
+    def __init__(self):
+        self.warnings = []
+
+    def warning(self, event, **fields):
+        self.warnings.append((event, fields))
+
+
+@pytest.mark.parametrize(
+    ("failure", "error_type", "git_stderr"),
+    [
+        pytest.param(
+            FileNotFoundError(2, "No such file or directory", "git"),
+            "FileNotFoundError",
+            None,
+            id="git-not-installed",
+        ),
+        pytest.param(
+            subprocess.TimeoutExpired("git", 30),
+            "TimeoutExpired",
+            None,
+            id="git-timed-out",
+        ),
+        pytest.param(
+            subprocess.CalledProcessError(
+                128, "git", stderr="fatal: not a git repository\n"
+            ),
+            "CalledProcessError",
+            "fatal: not a git repository",
+            id="git-exited-with-an-error",
+        ),
+    ],
+)
+def test_code_version_is_unknown_and_warns_once_when_git_fails(
+    monkeypatch, failure, error_type, git_stderr
+):
+    logger = RecordingLogger()
+    monkeypatch.setattr(stage, "get_logger", lambda name: logger)
+
+    def failing_git(*args, **kwargs):
+        raise failure
+
+    monkeypatch.setattr(stage.subprocess, "run", failing_git)
 
     assert stage.code_version() == "unknown"
+
+    [(event, fields)] = logger.warnings
+    assert event == "code_version_unknown"
+    assert fields["error"].startswith(f"{error_type}: ")
+    assert fields.get("git_stderr") == git_stderr
 
 
 def test_tool_versions_reports_installed_and_missing_packages():

@@ -11,6 +11,7 @@ from pathlib import Path
 from rinchen.config.loader import REPO_ROOT
 from rinchen.manifest import store
 from rinchen.manifest.model import ManifestFile
+from rinchen.utils.logging import get as get_logger
 
 
 def sha256_of(path: Path) -> str:
@@ -24,11 +25,13 @@ def sha256_of(path: Path) -> str:
 def code_version() -> str:
     """First 7 characters of the checkout's HEAD sha, plus `-dirty` when the
     working tree has uncommitted changes (untracked files included); `unknown`
-    when git is unavailable or the repository has no commit."""
+    when git is unavailable or the repository has no commit; the reason is
+    logged as a warning."""
     try:
         head = _git("rev-parse", "HEAD")
         dirty = _git("status", "--porcelain")
-    except OSError, subprocess.SubprocessError:
+    except (OSError, subprocess.SubprocessError) as error:
+        _warn_git_failed(error)
         return "unknown"
     return head[:7] + ("-dirty" if dirty else "")
 
@@ -53,6 +56,13 @@ def _git(*args: str) -> str:
         timeout=30,
     )
     return result.stdout.strip()
+
+
+def _warn_git_failed(error: OSError | subprocess.SubprocessError) -> None:
+    fields = {"error": f"{type(error).__name__}: {error}"}
+    if isinstance(error, subprocess.CalledProcessError):
+        fields["git_stderr"] = (error.stderr or "").strip()
+    get_logger(__name__).warning("code_version_unknown", **fields)
 
 
 def build_inputs(input_paths: list[Path]) -> list[ManifestFile]:

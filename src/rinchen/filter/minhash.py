@@ -1,8 +1,9 @@
 """The `minhash` stage: rejects a row whose `src + TAB + tgt` shares at least
-`threshold` of its character shingles with an earlier row, as `duplicate`.
+`threshold` of its character shingles with an earlier kept row, as `duplicate`.
 
-The first copy is kept. Rows that already carry a `filter_reason` are left
-out of the comparison, so a row rejected earlier never shadows a later one."""
+The first copy is kept. A kept row is one with no `filter_reason` that this
+stage did not reject itself, so a row rejected earlier, here or in another
+stage, never shadows a later one."""
 
 from __future__ import annotations
 
@@ -18,7 +19,8 @@ from rinchen.filter.reasons import FilterReason, flag
 def duplicate_flags(
     texts: Sequence[str], alive: Sequence[bool], cfg: MinHashConfig
 ) -> list[bool]:
-    """For each text, whether it duplicates an earlier alive text.
+    """For each text, whether it duplicates an earlier kept text, one that is
+    alive and was not itself flagged.
 
     A text that is not alive is never flagged and never compared against.
     Raises ValueError when `texts` and `alive` differ in length."""

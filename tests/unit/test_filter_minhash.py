@@ -4,9 +4,11 @@ earlier surviving row is rejected as `duplicate`."""
 from __future__ import annotations
 
 import random
+from typing import Any
 
 import polars as pl
 import pytest
+from datasketch import MinHashLSH
 
 from rinchen.config.filters import MinHashConfig
 from rinchen.corpus.schema import CORPUS_SCHEMA, corpus_frame
@@ -101,6 +103,26 @@ def test_a_row_that_is_not_alive_is_not_flagged_even_as_a_copy_of_a_live_row() -
     flags = duplicate_flags([LONG_TEXT, LONG_TEXT], [True, False], DEFAULT_CONFIG)
 
     assert flags == [False, False]
+
+
+def test_only_alive_rows_that_are_not_duplicates_enter_the_index(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    inserted: list[object] = []
+
+    class RecordingLSH(MinHashLSH):
+        def insert(self, key: Any, minhash: Any, check_duplication: bool = True) -> Any:
+            inserted.append(key)
+            return super().insert(key, minhash, check_duplication)
+
+    monkeypatch.setattr(minhash, "MinHashLSH", RecordingLSH)
+    texts = [LONG_TEXT, LONG_TEXT, OTHER_TEXT, OTHER_TEXT, LONG_TEXT, "a third text"]
+    alive = [True, True, True, False, True, True]
+
+    flags = duplicate_flags(texts, alive, DEFAULT_CONFIG)
+
+    assert flags == [False, True, False, False, True, False]
+    assert inserted == [0, 2, 5]
 
 
 def test_no_rows_give_no_flags() -> None:

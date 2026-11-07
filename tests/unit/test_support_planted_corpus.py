@@ -29,6 +29,7 @@ from rinchen.config.filters import FilterConfig
 from rinchen.config.loader import REPO_ROOT
 from rinchen.corpus.schema import CORPUS_SCHEMA, validate_corpus_schema
 from rinchen.lang.scripts import Script, script_of
+from tests.support import planted_corpus
 from tests.support.embedders import ConceptEmbedder, HashEmbedder
 from tests.support.planted_corpus import (
     PLANTED_REASON_COUNTS,
@@ -56,6 +57,8 @@ PURE_SCRIPT_SHARE = 0.97
 CONFIDENT_LID = 0.9
 LID_TRAINING_SECONDS = 10.0
 MAX_DIFFERENT_CONCEPT_COSINE = 0.4
+# Random 64-dimensional pairs sit near a cosine of 0.125; 0.6 is far beyond it.
+MAX_UNMAPPED_TEXT_COSINE = 0.6
 MIN_DUPLICATE_JACCARD = 0.9
 MIN_ORIGINAL_LENGTH = 80
 DIGITS = "0123456789"
@@ -72,9 +75,6 @@ STAGE_OF_REASON = {
     "duplicate": "minhash",
     "labse": "labse",
 }
-# Planted reason -> the extra stages its rows cannot avoid failing on their
-# own. Empty: every planted row fails exactly its own stage.
-KNOWN_CROSS_FAILURES: dict[str, set[str]] = {}
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,7 +94,7 @@ class Measured:
 
 
 def _effective_length(text: str) -> float:
-    # All scripts of this corpus weigh 1.0 under the default weights.
+    # Latin and Cyrillic weigh 1.0 under the default weights; a test checks it.
     return float(sum(1 for char in text if not char.isspace()))
 
 
@@ -336,6 +336,11 @@ def test_character_ratio_fails_exactly_the_three_length_rows(
     assert sum(ratio < 0.45 for ratio in ratios) == 1
 
 
+def test_default_char_weights_leave_latin_and_cyrillic_at_one() -> None:
+    assert Script.LATIN not in CONFIG.length.char_weights
+    assert Script.CYRILLIC not in CONFIG.length.char_weights
+
+
 def test_clean_rows_have_balanced_lengths(measured: list[Measured]) -> None:
     for row in _with_reason(measured, None):
         assert len(row.src) + len(row.tgt) >= MIN_ORIGINAL_LENGTH, row
@@ -443,6 +448,17 @@ def test_concept_ids_separate_the_labse_rows(planted: PlantedCorpus) -> None:
         assert same == (planted.expected_reason[row["id"]] != "labse")
 
 
+def test_separated_concept_ids_stop_with_an_error_after_the_attempt_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(planted_corpus, "_MAX_ATTEMPTS", 3)
+
+    with pytest.raises(
+        RuntimeError, match=r"only \d+ pairwise separated .* first 3 seeds"
+    ):
+        list(planted_corpus._separated_concept_ids())
+
+
 def test_concept_embedder_separates_concepts_in_the_planted_corpus(
     planted: PlantedCorpus,
 ) -> None:
@@ -488,6 +504,7 @@ def _failing_stages(
     failing: dict[str, set[str]] = {
         stage: set() for stage in set(STAGE_OF_REASON.values())
     }
+    embedder = ConceptEmbedder(planted.concepts)
     for position, row in enumerate(measured):
         if min(row.src_script_share, row.tgt_script_share) < MIN_SCRIPT_SHARE:
             failing["script_ratio"].add(row.row_id)
@@ -508,7 +525,8 @@ def _failing_stages(
             for earlier in measured[:position]
         ):
             failing["minhash"].add(row.row_id)
-        if planted.concepts[row.src] != planted.concepts[row.tgt]:
+        src_vector, tgt_vector = embedder.embed([row.src, row.tgt])
+        if _unit_cosine(src_vector, tgt_vector) < MIN_COSINE:
             failing["labse"].add(row.row_id)
     return failing
 
@@ -537,11 +555,7 @@ def test_every_planted_row_violates_exactly_its_own_stage(
         if reason is None:
             assert stages == set(), row_id
         else:
-            allowed = {
-                STAGE_OF_REASON[reason],
-                *KNOWN_CROSS_FAILURES.get(reason, set()),
-            }
-            assert stages == allowed, (row_id, reason)
+            assert stages == {STAGE_OF_REASON[reason]}, (row_id, reason)
 
 
 # --- fake embedders -----------------------------------------------------------
@@ -661,7 +675,7 @@ def test_concept_embedder_vector_for_unknown_text_depends_on_the_text() -> None:
 
     assert np.array_equal(first, again)
     assert np.linalg.norm(first) == pytest.approx(1.0, abs=1e-5)
-    assert abs(_unit_cosine(first, other)) < MAX_DIFFERENT_CONCEPT_COSINE + 0.2
+    assert abs(_unit_cosine(first, other)) < MAX_UNMAPPED_TEXT_COSINE
 
 
 def test_embedders_accept_an_empty_batch() -> None:
@@ -670,18 +684,33 @@ def test_embedders_accept_an_empty_batch() -> None:
 
 
 @pytest.mark.subprocess
-def test_embedders_do_not_depend_on_the_python_hash_seed() -> None:
+def test_support_does_not_depend_on_the_python_hash_seed(tmp_path: Path) -> None:
     snippet = (
-        "import hashlib\n"
+        "import hashlib, sys\n"
+        "import fasttext\n"
+        "from pathlib import Path\n"
         "from tests.support.embedders import ConceptEmbedder, HashEmbedder\n"
+        "from tests.support.planted_corpus import build_planted_corpus\n"
+        "from tests.support.tiny_lid import train_tiny_lid_model\n"
+        "def digest(text):\n"
+        "    return hashlib.sha256(text.encode('utf-8')).hexdigest()\n"
         "hashed = HashEmbedder().embed(['hello world', ''])\n"
         "concept = ConceptEmbedder({'a': 3}).embed(['a', 'unmapped text'])\n"
-        "print(hashlib.sha256(hashed.tobytes() + concept.tobytes()).hexdigest())\n"
+        "print('embedders', hashlib.sha256(\n"
+        "    hashed.tobytes() + concept.tobytes()).hexdigest())\n"
+        "planted = build_planted_corpus()\n"
+        "print('planted', digest(\n"
+        "    planted.frame.select('id', 'src', 'tgt').write_csv()\n"
+        "    + repr(planted.concepts) + repr(planted.expected_reason)))\n"
+        "model = fasttext.load_model(\n"
+        "    str(train_tiny_lid_model(Path(sys.argv[1]) / 'tiny.bin')))\n"
+        "lines = [*planted.frame['src'][:5], *planted.frame['tgt'][:5]]\n"
+        "print('lid', digest(repr([model.predict(line, k=-1) for line in lines])))\n"
     )
 
-    def digest(hash_seed: str) -> str:
+    def digests(hash_seed: str) -> str:
         completed = subprocess.run(
-            [sys.executable, "-c", snippet],
+            [sys.executable, "-c", snippet, str(tmp_path / hash_seed)],
             cwd=REPO_ROOT,
             env={**os.environ, "PYTHONHASHSEED": hash_seed},
             capture_output=True,
@@ -690,4 +719,4 @@ def test_embedders_do_not_depend_on_the_python_hash_seed() -> None:
         )
         return completed.stdout.strip()
 
-    assert digest("1") == digest("2") == digest("random")
+    assert digests("1") == digests("2") == digests("random")
