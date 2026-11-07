@@ -3,8 +3,9 @@
 The converter reads and writes characters: one piece per character, plus the two
 target tags as single pieces. This model is not one of the language models of
 `rinchen.spm`, which are unigram, byte-fallback and trained per language.
-`train_char_model` trains it, `check_char_model` verifies a trained one and
-`load_char_model_config` reads `configs/spm/converter_char.yaml`.
+`train_char_model` trains it, `check_char_model` verifies a trained one,
+`load_char_processor` opens one and `load_char_model_config` reads
+`configs/spm/converter_char.yaml`.
 """
 
 from __future__ import annotations
@@ -167,7 +168,7 @@ def check_char_model(model: Path, texts: Iterable[str]) -> None:
             a text has an unknown character or does not round-trip; the message names
             the tag, the character (by code point) or the text.
     """
-    processor = _load_processor(model)
+    processor = load_char_processor(model)
     for tag in CONVERTER_TAGS:
         defect = _tag_defect(processor, tag)
         if defect is not None:
@@ -176,7 +177,13 @@ def check_char_model(model: Path, texts: Iterable[str]) -> None:
         _check_text(processor, model, text)
 
 
-def _load_processor(model: Path) -> sentencepiece.SentencePieceProcessor:
+def load_char_processor(model: Path) -> sentencepiece.SentencePieceProcessor:
+    """The SentencePiece processor of the model file at `model`.
+
+    Raises:
+        DataError: `model` is a directory, cannot be read or is not a model; the
+            library's error is chained except for a directory.
+    """
     # SentencePiece aborts the whole interpreter on a directory, so it never gets to
     # see one.
     if model.is_dir():
