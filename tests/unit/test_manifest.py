@@ -10,7 +10,7 @@ import pytest
 
 from rinchen.errors import DataError
 from rinchen.manifest import stage, store
-from rinchen.manifest.model import Manifest
+from rinchen.manifest.model import Manifest, ManifestFile
 
 
 def _write_manifest(stage_dir: Path, config_sha256: str, inputs: list[Path]) -> None:
@@ -308,3 +308,23 @@ def test_tool_versions_reports_installed_and_missing_packages():
 
 def test_tool_versions_of_nothing_is_empty():
     assert stage.tool_versions([]) == {}
+
+
+def test_output_file_records_path_hash_size_and_rows(tmp_path):
+    written = tmp_path / "out.bin"
+    written.write_bytes(b"abcdef")
+
+    entry = stage.output_file(written, 3)
+
+    assert entry == ManifestFile(
+        path=str(written), sha256=stage.sha256_of(written), bytes=6, rows=3
+    )
+
+
+def test_output_file_without_a_row_count_leaves_rows_unset(tmp_path):
+    written = tmp_path / "out.bin"
+    written.write_bytes(b"")
+
+    entry = stage.output_file(written, None)
+
+    assert (entry.bytes, entry.rows) == (0, None)

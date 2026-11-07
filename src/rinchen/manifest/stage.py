@@ -62,6 +62,14 @@ def build_inputs(input_paths: list[Path]) -> list[ManifestFile]:
     ]
 
 
+def output_file(path: Path, rows: int | None) -> ManifestFile:
+    """The manifest entry of a file a stage has written; `rows` is its record
+    count when it is a table, else None."""
+    return ManifestFile(
+        path=str(path), sha256=sha256_of(path), bytes=path.stat().st_size, rows=rows
+    )
+
+
 def should_skip(
     stage_dir: Path,
     input_paths: list[Path],

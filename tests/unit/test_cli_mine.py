@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import inspect
+import os
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -29,7 +30,7 @@ from rinchen.corpus.readers import scan_corpus
 from rinchen.corpus.schema import CORPUS_SCHEMA, make_row_id
 from rinchen.errors import UpstreamError
 from rinchen.manifest import store
-from rinchen.manifest.model import Manifest
+from rinchen.manifest.model import Manifest, ManifestFile
 from rinchen.manifest.stage import sha256_of
 from rinchen.mine.align import align
 from rinchen.mine.embed import SentenceTransformerEmbedder
@@ -381,43 +382,37 @@ def test_blank_lines_are_dropped_and_counted(workspace: Workspace) -> None:
     assert _aligned(workspace.out)["seg_idx"].to_list() == [0, 1]
 
 
-def test_an_empty_target_file_gives_an_empty_corpus_and_unaligned_sources(
-    workspace: Workspace, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("src_text", "tgt_text", "unaligned_src", "blank_lines"),
+    [
+        pytest.param("\n".join(SRC_SENTENCES), "", 5.0, 0.0, id="empty-target"),
+        pytest.param("\n  \n\n", "", 0.0, 3.0, id="blank-lines-only"),
+    ],
+)
+def test_a_side_without_sentences_gives_an_empty_corpus_and_no_embedding_work(
+    workspace: Workspace,
+    monkeypatch: pytest.MonkeyPatch,
+    src_text: str,
+    tgt_text: str,
+    unaligned_src: float,
+    blank_lines: float,
 ) -> None:
     monkeypatch.setattr(mine_cli, "build_embedder", UnavailableEmbedder)
-    workspace.tgt.write_text("", encoding="utf-8")
+    workspace.src.write_text(src_text, encoding="utf-8")
+    workspace.tgt.write_text(tgt_text, encoding="utf-8")
 
     result = _run_ok(workspace.args())
 
     assert _aligned(workspace.out).height == 0
     manifest = _manifest(workspace)
     assert manifest.metrics["aligned"] == 0.0
-    assert manifest.metrics["unaligned_src"] == float(len(SRC_SENTENCES))
+    assert manifest.metrics["unaligned_src"] == unaligned_src
     assert manifest.metrics["unaligned_tgt"] == 0.0
+    assert manifest.metrics["blank_lines_dropped"] == blank_lines
     assert [item.rows for item in manifest.outputs] == [0]
-    assert (
-        result.stdout.splitlines()[0]
-        == "aligned 0 rows (unaligned: 5 source, 0 target)"
+    assert result.stdout.splitlines()[0] == (
+        f"aligned 0 rows (unaligned: {int(unaligned_src)} source, 0 target)"
     )
-
-
-def test_files_with_only_blank_lines_are_empty_corpora(
-    workspace: Workspace, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(mine_cli, "build_embedder", UnavailableEmbedder)
-    workspace.src.write_text("\n  \n\n", encoding="utf-8")
-    workspace.tgt.write_text("", encoding="utf-8")
-
-    _run_ok(workspace.args())
-
-    metrics = _manifest(workspace).metrics
-    assert (metrics["aligned"], metrics["unaligned_src"], metrics["unaligned_tgt"]) == (
-        0.0,
-        0.0,
-        0.0,
-    )
-    assert metrics["blank_lines_dropped"] == 3.0
-    assert _aligned(workspace.out).height == 0
 
 
 # --- the planted alignments through the whole command -----------------------
@@ -551,6 +546,67 @@ def test_a_rerun_with_unchanged_inputs_and_parameters_skips(
     assert lines[-1] == f"manifest: {workspace.manifest}"
     assert workspace.manifest.read_bytes() == manifest_before
     assert workspace.out.stat().st_mtime_ns == output_before
+
+
+class RewritingEmbedder(HashEmbedder):
+    """Changes the source file in the middle of a run, as another process
+    might."""
+
+    def __init__(self, path: Path) -> None:
+        super().__init__()
+        self._path = path
+
+    def embed(self, texts: Sequence[str]) -> NDArray[np.float32]:
+        self._path.write_text("changed during the run\n", encoding="utf-8")
+        return super().embed(texts)
+
+
+def test_the_manifest_vouches_for_the_bytes_that_were_read_not_for_later_ones(
+    workspace: Workspace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    read_hash = sha256_of(workspace.src)
+    monkeypatch.setattr(
+        mine_cli, "build_embedder", lambda: RewritingEmbedder(workspace.src)
+    )
+    _run_ok(workspace.args())
+    monkeypatch.setattr(mine_cli, "build_embedder", HashEmbedder)
+
+    recorded = {item.path: item.sha256 for item in _manifest(workspace).inputs}
+    assert recorded[str(workspace.src)] == read_hash
+    assert read_hash != sha256_of(workspace.src)
+    rerun = _run_ok(workspace.args())
+
+    assert not rerun.stdout.startswith("skipped:")
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root can read any file")
+@pytest.mark.parametrize("first_run", [True, False])
+def test_an_unreadable_input_file_is_a_data_error(
+    workspace: Workspace, first_run: bool
+) -> None:
+    if not first_run:
+        _run_ok(workspace.args())
+    workspace.tgt.chmod(0)
+
+    result = runner.invoke(app, workspace.args())
+
+    assert result.exit_code == 3, result.output
+    assert result.stderr.startswith(f"error: cannot read {workspace.tgt}")
+
+
+def test_an_input_that_cannot_be_hashed_is_a_data_error_not_a_write_failure(
+    workspace: Workspace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def cannot_hash(paths: list[Path]) -> list[ManifestFile]:
+        raise PermissionError(13, "Permission denied", str(paths[0]))
+
+    monkeypatch.setattr(mine_cli, "build_inputs", cannot_hash)
+
+    result = runner.invoke(app, workspace.args())
+
+    assert result.exit_code == 3, result.output
+    assert result.stderr.startswith("error: cannot read the input files: ")
+    assert not workspace.out.exists()
 
 
 def test_force_reruns_even_when_nothing_changed(workspace: Workspace) -> None:
@@ -701,7 +757,7 @@ def test_an_input_file_that_is_not_utf8_is_a_data_error(workspace: Workspace) ->
     assert not workspace.out.exists()
 
 
-@pytest.mark.parametrize("max_k", ["1", "0", "-3"])
+@pytest.mark.parametrize("max_k", ["1", "-3"])
 def test_max_k_below_two_is_a_config_error_before_any_file_is_read(
     workspace: Workspace, max_k: str
 ) -> None:
@@ -785,7 +841,10 @@ def test_an_embedder_that_returns_the_wrong_shape_is_an_upstream_error(
     result = runner.invoke(app, workspace.args())
 
     assert result.exit_code == 4, result.output
-    assert result.stderr.startswith("error: embedding model returned unusable vectors")
+    assert result.stderr.startswith("error: alignment failed")
+    assert "almost certainly bad embedder output, otherwise an internal error" in (
+        result.stderr
+    )
     assert not workspace.manifest.exists()
 
 

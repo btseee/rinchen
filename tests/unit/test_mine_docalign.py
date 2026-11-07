@@ -4,13 +4,15 @@ cosine between two texts is about the share of words they have in common."""
 
 from __future__ import annotations
 
+import tracemalloc
 from collections.abc import Sequence
-from datetime import date
+from datetime import date, timedelta
 
 import numpy as np
 import pytest
 from numpy.typing import NDArray
 
+from rinchen.mine import docalign
 from rinchen.mine.docalign import (
     DocMatch,
     Document,
@@ -43,6 +45,17 @@ class RecordingEmbedder:
 class WrongShapeEmbedder:
     def embed(self, texts: Sequence[str]) -> NDArray[np.float32]:
         return np.zeros((len(texts) + 1, 4), dtype=np.float32)
+
+
+class RandomUnitEmbedder:
+    """Unit-length random rows: enough for the size of the work, not its result."""
+
+    def __init__(self) -> None:
+        self._rng = np.random.default_rng(0)
+
+    def embed(self, texts: Sequence[str]) -> NDArray[np.float32]:
+        vectors = self._rng.standard_normal((len(texts), 64)).astype(np.float32)
+        return vectors / np.linalg.norm(vectors, axis=1, keepdims=True)
 
 
 def _doc(
@@ -115,13 +128,16 @@ LANGUAGE_MARKERS = (
 )
 
 
-@pytest.mark.parametrize("marker", LANGUAGE_MARKERS.split())
-def test_every_language_marker_is_dropped_as_a_path_segment_and_a_host_label(
-    marker: str,
-) -> None:
-    assert normalise_url(f"http://example.mn/{marker}/a") == "example.mn/a"
-    assert normalise_url(f"http://{marker}.example.mn/a") == "example.mn/a"
-    assert normalise_url(f"http://www.{marker}.example.mn/a") == "example.mn/a"
+def test_every_language_marker_is_dropped_as_a_path_segment_and_a_host_label() -> None:
+    markers = LANGUAGE_MARKERS.split()
+
+    assert len(markers) == 23
+    for marker in markers:
+        assert normalise_url(f"http://example.mn/{marker}/a") == "example.mn/a", marker
+        assert normalise_url(f"http://{marker}.example.mn/a") == "example.mn/a", marker
+        assert normalise_url(f"http://www.{marker}.example.mn/a") == "example.mn/a", (
+            marker
+        )
 
 
 def test_the_last_two_host_labels_are_never_dropped() -> None:
@@ -209,21 +225,8 @@ def test_a_document_without_a_url_is_never_matched_by_url() -> None:
     assert match_documents(src, tgt, HashEmbedder()) == []
 
 
-def test_documents_matched_by_url_are_not_matched_again() -> None:
-    src = [_doc("s1", BASE, url="http://example.mn/mn/a")]
-    tgt = [
-        _doc("t1", OTHER, url="http://example.mn/en/a"),
-        _doc("t2", BASE),
-    ]
-    embedder = RecordingEmbedder()
-
-    matches = match_documents(src, tgt, embedder)
-
-    assert _pairs(matches) == [("s1", "t1", "url")]
-    assert embedder.calls == []
-
-
-def test_the_embedding_pass_sees_only_the_documents_left_over() -> None:
+def test_documents_matched_by_url_are_not_matched_again_and_not_embedded() -> None:
+    # t3 has the text of s1 but s1 is taken by t1, which shares its URL.
     src = [
         _doc("s1", BASE, url="http://example.mn/mn/a"),
         _doc("s2", THIRD),
@@ -231,13 +234,14 @@ def test_the_embedding_pass_sees_only_the_documents_left_over() -> None:
     tgt = [
         _doc("t1", OTHER, url="http://example.mn/en/a"),
         _doc("t2", THIRD),
+        _doc("t3", BASE),
     ]
     embedder = RecordingEmbedder()
 
     matches = match_documents(src, tgt, embedder)
 
     assert _pairs(matches) == [("s1", "t1", "url"), ("s2", "t2", "embedding")]
-    assert embedder.calls == [[THIRD], [THIRD]]
+    assert embedder.calls == [[THIRD], [THIRD, BASE]]
 
 
 # --- the embedding pass -----------------------------------------------------
@@ -302,21 +306,26 @@ def test_each_side_picks_its_own_nearest_not_the_first_above_the_threshold() -> 
     assert _pairs(matches) == [("s2", "t2", "embedding")]
 
 
-def test_ties_go_to_the_lowest_index() -> None:
-    src = [_doc("s1", BASE)]
-    tgt = [_doc("t1", BASE), _doc("t2", BASE)]
+def test_ties_go_to_the_lowest_index_on_either_side() -> None:
+    twin_targets = match_documents(
+        [_doc("s1", BASE)], [_doc("t1", BASE), _doc("t2", BASE)], HashEmbedder()
+    )
+    twin_sources = match_documents(
+        [_doc("s1", BASE), _doc("s2", BASE)], [_doc("t1", BASE)], HashEmbedder()
+    )
 
-    assert _pairs(match_documents(src, tgt, HashEmbedder())) == [
-        ("s1", "t1", "embedding")
-    ]
+    assert _pairs(twin_targets) == [("s1", "t1", "embedding")]
+    assert _pairs(twin_sources) == [("s1", "t1", "embedding")]
 
 
 def test_a_date_gap_beyond_the_window_blocks_a_match() -> None:
     src = [_doc("s1", BASE, date=date(2025, 3, 1))]
     tgt = [_doc("t1", BASE, date=date(2025, 3, 10))]
 
+    widened = match_documents(src, tgt, HashEmbedder(), max_date_gap_days=9)
+
     assert match_documents(src, tgt, HashEmbedder()) == []
-    assert match_documents(src, tgt, HashEmbedder(), max_date_gap_days=9)
+    assert _pairs(widened) == [("s1", "t1", "embedding")]
 
 
 def test_a_gap_equal_to_the_window_is_allowed_in_either_direction() -> None:
@@ -329,7 +338,7 @@ def test_a_gap_equal_to_the_window_is_allowed_in_either_direction() -> None:
         [_doc("s1", BASE, date=late)], [_doc("t1", BASE, date=early)], HashEmbedder()
     )
 
-    assert len(forward) == len(backward) == 1
+    assert _pairs(forward) == _pairs(backward) == [("s1", "t1", "embedding")]
 
 
 def test_a_missing_date_on_either_side_does_not_block() -> None:
@@ -375,6 +384,18 @@ def test_each_side_is_embedded_in_one_call() -> None:
     match_documents(src, tgt, embedder)
 
     assert embedder.calls == [[BASE, OTHER, THIRD], [BASE, OTHER]]
+
+
+def test_text_that_is_blank_in_its_embedded_part_never_matches_by_embedding() -> None:
+    # Only the first 2000 characters are embedded, so a long run of spaces in
+    # front hides the text: both documents would embed as the blank vector.
+    hidden = " " * 2500
+    src = [_doc("s1", hidden + BASE)]
+    tgt = [_doc("t1", hidden + OTHER)]
+    embedder = RecordingEmbedder()
+
+    assert match_documents(src, tgt, embedder) == []
+    assert embedder.calls == []
 
 
 def test_documents_with_blank_text_never_match_by_embedding() -> None:
@@ -450,9 +471,69 @@ def test_a_negative_date_window_is_an_error() -> None:
         match_documents([], [], HashEmbedder(), max_date_gap_days=-1)
 
 
-def test_a_nan_threshold_is_an_error() -> None:
+@pytest.mark.parametrize("threshold", [float("nan"), float("inf"), float("-inf")])
+def test_a_non_finite_threshold_is_an_error(threshold: float) -> None:
     with pytest.raises(ValueError, match="min_cosine"):
-        match_documents([], [], HashEmbedder(), min_cosine=float("nan"))
+        match_documents([], [], HashEmbedder(), min_cosine=threshold)
+
+
+class ScaledEmbedder:
+    """Rows slightly longer than unit length, as float32 rounding can leave."""
+
+    def embed(self, texts: Sequence[str]) -> NDArray[np.float32]:
+        return np.full((len(texts), 1), 1.0000001, dtype=np.float32)
+
+
+def test_a_score_never_exceeds_one_whatever_rounding_the_embedder_leaves() -> None:
+    [match] = match_documents(
+        [_doc("s1", BASE)], [_doc("t1", BASE)], ScaledEmbedder(), min_cosine=1.0
+    )
+
+    assert match.score == 1.0
+
+
+@pytest.mark.parametrize("dated", [False, True], ids=["no-dates", "dates"])
+def test_the_embedding_pass_holds_about_one_float32_similarity_matrix(
+    dated: bool,
+) -> None:
+    # An n x n float64 matrix, a second copy of the float32 one, or a mask
+    # built for the whole matrix at once would each push the peak past 2x.
+    count = 2000
+    day = date(2025, 1, 1)
+    docs = [
+        _doc(f"d{n}", f"text {n}", date=day + timedelta(days=n % 30) if dated else None)
+        for n in range(count)
+    ]
+    matrix_bytes = count * count * np.dtype(np.float32).itemsize
+    tracemalloc.start()
+    try:
+        match_documents(docs, docs, RandomUnitEmbedder())
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    assert peak < 1.9 * matrix_bytes
+
+
+def test_the_date_window_applies_across_row_blocks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Five documents a side, in blocks of two rows: each source document has an
+    # identical target document 30 days away and a near one within the window.
+    monkeypatch.setattr(docalign, "_MATRIX_BLOCK_SIZE", 2)
+    words = [f"w{n}a w{n}b w{n}c w{n}d w{n}e w{n}f" for n in range(5)]
+    day = date(2025, 1, 1)
+    src = [_doc(f"s{n}", words[n], date=day) for n in range(5)]
+    tgt = [
+        _doc(f"far{n}", words[n], date=day + timedelta(days=30)) for n in range(5)
+    ] + [
+        _doc(f"near{n}", words[n] + " x", date=day + timedelta(days=1))
+        for n in range(5)
+    ]
+
+    matches = match_documents(src, tgt, HashEmbedder())
+
+    assert _pairs(matches) == [(f"s{n}", f"near{n}", "embedding") for n in range(5)]
 
 
 def test_documents_and_matches_are_frozen_values() -> None:

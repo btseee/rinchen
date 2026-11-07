@@ -23,7 +23,6 @@ from rinchen.cli.errors import (
 )
 from rinchen.config.languages import known_language_codes
 from rinchen.config.loader import REPO_ROOT
-from rinchen.corpus.schema import corpus_frame
 from rinchen.corpus.writers import write_corpus
 from rinchen.errors import ConfigError, DataError, UpstreamError
 from rinchen.manifest import store
@@ -31,12 +30,13 @@ from rinchen.manifest.model import Manifest, ManifestFile
 from rinchen.manifest.stage import (
     build_inputs,
     code_version,
-    sha256_of,
+    output_file,
     should_skip,
     tool_versions,
 )
 from rinchen.mine.align import Alignment, align
 from rinchen.mine.embed import Embedder, SentenceTransformerEmbedder
+from rinchen.mine.pairs import AlignmentCounts, aligned_corpus_frame, count_alignments
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -82,10 +82,24 @@ def build_embedder() -> Embedder:
 @app.command("align")
 def align_files(
     src: Annotated[
-        Path, typer.Option("--src", help="Source text file, one sentence per line.")
+        Path,
+        typer.Option(
+            "--src",
+            # Typer would reject an unreadable file as a usage error (exit 2);
+            # it is a data error here, like a missing one.
+            readable=False,
+            help="Source text file, one sentence per line.",
+        ),
     ],
     tgt: Annotated[
-        Path, typer.Option("--tgt", help="Target text file, one sentence per line.")
+        Path,
+        typer.Option(
+            "--tgt",
+            # Typer would reject an unreadable file as a usage error (exit 2);
+            # it is a data error here, like a missing one.
+            readable=False,
+            help="Target text file, one sentence per line.",
+        ),
     ],
     src_lang: Annotated[
         str, typer.Option("--src-lang", help="Source language code, e.g. khk_Cyrl.")
@@ -157,16 +171,26 @@ def align_files(
             typer.echo(f"manifest: {store.manifest_path(target.parent)}")
             return
 
+        # Hash before reading, so that the manifest vouches for the bytes that
+        # are read below even if a file changes during the run.
+        input_files = _hash_inputs([src, tgt])
         src_sentences = _read_sentences(src)
         tgt_sentences = _read_sentences(tgt)
         alignments = _align_sentences(run, src_sentences.lines, tgt_sentences.lines)
-        frame = _aligned_frame(
-            alignments, src_sentences.lines, tgt_sentences.lines, run, src.stem
+        counts = count_alignments(alignments)
+        frame = aligned_corpus_frame(
+            alignments,
+            src_sentences.lines,
+            tgt_sentences.lines,
+            src_lang=run.src_lang,
+            tgt_lang=run.tgt_lang,
+            corpus=run.corpus,
+            doc_id=src.stem,
         )
-        metrics = _metrics(run, alignments, src_sentences, tgt_sentences)
+        metrics = _metrics(run, counts, src_sentences, tgt_sentences)
         try:
             manifest_path = _write_run(
-                frame, target, config_sha256, build_inputs([src, tgt]), metrics
+                frame, target, config_sha256, input_files, metrics
             )
         except OSError as exc:
             exit_with_error(
@@ -174,8 +198,8 @@ def align_files(
                 FAILURE_EXIT_CODE,
             )
         typer.echo(
-            f"aligned {frame.height} rows (unaligned: "
-            f"{int(metrics['unaligned_src'])} source, {int(metrics['unaligned_tgt'])} target)"
+            f"aligned {counts.aligned} rows (unaligned: "
+            f"{counts.unaligned_src} source, {counts.unaligned_tgt} target)"
         )
         typer.echo(f"manifest: {manifest_path}")
 
@@ -221,6 +245,17 @@ def _config_sha256(run: _AlignRun) -> str:
 def _require_sentence_file(path: Path) -> None:
     if not path.is_file():
         raise DataError(f"sentence file not found: {path}")
+    try:
+        path.open("rb").close()
+    except OSError as exc:
+        raise DataError(f"cannot read {path}: {exc}") from exc
+
+
+def _hash_inputs(paths: list[Path]) -> list[ManifestFile]:
+    try:
+        return build_inputs(paths)
+    except OSError as exc:
+        raise DataError(f"cannot read the input files: {exc}") from exc
 
 
 def _read_sentences(path: Path) -> _Sentences:
@@ -273,52 +308,21 @@ def _align_sentences(run: _AlignRun, src: list[str], tgt: list[str]) -> list[Ali
     except ValueError as exc:
         # The parameters were checked, so this is the embedder's output.
         raise UpstreamError(
-            f"embedding model returned unusable vectors: {exc}"
+            "alignment failed, almost certainly bad embedder output, otherwise "
+            f"an internal error: {exc}"
         ) from exc
-
-
-def _aligned_frame(
-    alignments: list[Alignment],
-    src: list[str],
-    tgt: list[str],
-    run: _AlignRun,
-    doc_id: str,
-) -> pl.DataFrame:
-    """One row per alignment with sentences on both sides; the sentences of a
-    group are joined by one space. Deletions have no row."""
-    pairs = [a for a in alignments if a.src and a.tgt]
-    return corpus_frame(
-        [
-            {
-                "src_lang": run.src_lang,
-                "tgt_lang": run.tgt_lang,
-                "src": _joined(src, pair.src),
-                "tgt": _joined(tgt, pair.tgt),
-                "origin": "mined",
-                "corpus": run.corpus,
-                "split": "train",
-                "doc_id": doc_id,
-                "seg_idx": seg_idx,
-            }
-            for seg_idx, pair in enumerate(pairs)
-        ]
-    )
-
-
-def _joined(sentences: list[str], indexes: tuple[int, ...]) -> str:
-    return " ".join(sentences[index] for index in indexes)
 
 
 def _metrics(
     run: _AlignRun,
-    alignments: list[Alignment],
+    counts: AlignmentCounts,
     src: _Sentences,
     tgt: _Sentences,
 ) -> dict[str, float]:
     return {
-        "aligned": float(sum(1 for a in alignments if a.src and a.tgt)),
-        "unaligned_src": float(sum(1 for a in alignments if a.src and not a.tgt)),
-        "unaligned_tgt": float(sum(1 for a in alignments if a.tgt and not a.src)),
+        "aligned": float(counts.aligned),
+        "unaligned_src": float(counts.unaligned_src),
+        "unaligned_tgt": float(counts.unaligned_tgt),
         "src_sentences": float(len(src.lines)),
         "tgt_sentences": float(len(tgt.lines)),
         "blank_lines_dropped": float(src.blank_lines_dropped + tgt.blank_lines_dropped),
@@ -340,7 +344,7 @@ def _write_run(
     # The manifest is the commit marker: drop the old one before touching the
     # output, so a failure part-way leaves no manifest that vouches for it.
     store.manifest_path(out.parent).unlink(missing_ok=True)
-    output = _written_file(frame, out)
+    output = output_file(out, write_corpus(frame, out))
     manifest = Manifest(
         stage=_STAGE_NAME,
         created=datetime.now(UTC).isoformat(),
@@ -353,10 +357,3 @@ def _write_run(
         tool_versions=tool_versions(_TOOL_PACKAGES),
     )
     return store.write(out.parent, manifest)
-
-
-def _written_file(frame: pl.DataFrame, path: Path) -> ManifestFile:
-    rows = write_corpus(frame, path)
-    return ManifestFile(
-        path=str(path), sha256=sha256_of(path), bytes=path.stat().st_size, rows=rows
-    )

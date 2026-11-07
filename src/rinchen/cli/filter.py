@@ -36,6 +36,7 @@ from rinchen.manifest.model import Manifest, ManifestFile
 from rinchen.manifest.stage import (
     build_inputs,
     code_version,
+    output_file,
     sha256_of,
     should_skip,
     tool_versions,
@@ -237,9 +238,11 @@ def _write_run(
     # output, so a failure part-way leaves no manifest that vouches for a mix
     # of old and new outputs.
     store.manifest_path(out_dir).unlink(missing_ok=True)
+    scored_path = out_dir / _SCORED_FILE
+    kept_path = out_dir / _KEPT_FILE
     outputs = [
-        _written_file(result.frame, out_dir / _SCORED_FILE),
-        _written_file(kept, out_dir / _KEPT_FILE),
+        output_file(scored_path, write_corpus(result.frame, scored_path)),
+        output_file(kept_path, write_corpus(kept, kept_path)),
     ]
     manifest = Manifest(
         stage=_STAGE_NAME,
@@ -254,13 +257,6 @@ def _write_run(
         status=result.stage_status,
     )
     return store.write(out_dir, manifest)
-
-
-def _written_file(frame: pl.DataFrame, path: Path) -> ManifestFile:
-    rows = write_corpus(frame, path)
-    return ManifestFile(
-        path=str(path), sha256=sha256_of(path), bytes=path.stat().st_size, rows=rows
-    )
 
 
 def _metrics(result: PipelineResult, rows_kept: int) -> dict[str, float]:

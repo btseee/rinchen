@@ -8,10 +8,18 @@ embeddings: a source and a target document match when each is the other's most
 similar candidate and their cosine is at least `min_cosine`. When both dates
 are known, a candidate more than `max_date_gap_days` away does not count.
 
-The embedding pass holds the cosine matrix of the leftovers in memory, so it
-suits up to a few tens of thousands of documents per side. A document with
-blank text is left out of it: all blank texts embed alike, so two of them would
-match each other.
+The embedding pass holds the cosine matrix of the leftovers in memory, as
+float32, so it suits a few thousand to about 10 000 documents per side (a
+10 000 x 10 000 matrix is 400 MB). Measured with tracemalloc at 4000 documents
+per side, the peak is 74 MB without dates and 83 MB with dates, 1.15 and 1.3
+times the 64 MB matrix; before the matrix was kept as float32 and the date mask
+built in blocks it was 385 MB, three times a float64 matrix. Scores are
+cosines only if the embedder returns unit-length rows, as the `Embedder`
+contract says; otherwise they are plain dot products.
+
+A document is left out of the embedding pass when the part of its text that is
+embedded (the first 2000 characters) is blank: all blank texts embed alike, so
+two of them would match each other.
 """
 
 from __future__ import annotations
@@ -66,6 +74,10 @@ _WWW_PREFIX = "www."
 # language, and these never are.
 _REGISTERED_DOMAIN_LABELS = 2
 _EMBEDDED_CHARACTERS = 2000
+# Rows (or columns) of the similarity matrix handled at a time where numpy
+# would otherwise copy the whole matrix: the date mask and the best source per
+# target.
+_MATRIX_BLOCK_SIZE = 512
 
 MatchMethod = Literal["url", "embedding"]
 
@@ -148,14 +160,14 @@ def match_documents(
 ) -> list[DocMatch]:
     """Pair source with target documents, each document at most once; the
     result is sorted by source id. Raises `ValueError` for a negative
-    `max_date_gap_days`, a NaN `min_cosine`, or an embedder that returns the
-    wrong number of rows."""
+    `max_date_gap_days`, a non-finite `min_cosine`, or an embedder that returns
+    the wrong number of rows."""
     if max_date_gap_days < 0:
         raise ValueError(
             f"max_date_gap_days must not be negative, got {max_date_gap_days}"
         )
-    if math.isnan(min_cosine):
-        raise ValueError("min_cosine must not be NaN")
+    if not math.isfinite(min_cosine):
+        raise ValueError(f"min_cosine must be finite, got {min_cosine}")
 
     by_url = _match_by_url(src_docs, tgt_docs)
     by_embedding = _match_by_embedding(
@@ -213,20 +225,21 @@ def _match_by_embedding(
     max_date_gap_days: int,
     min_cosine: float,
 ) -> list[_Pair]:
-    src_candidates = [i for i in src_left if src_docs[i].text.strip()]
-    tgt_candidates = [j for j in tgt_left if tgt_docs[j].text.strip()]
+    src_candidates = [i for i in src_left if _has_embeddable_text(src_docs[i])]
+    tgt_candidates = [j for j in tgt_left if _has_embeddable_text(tgt_docs[j])]
     if not src_candidates or not tgt_candidates:
         return []
     src_side = [src_docs[i] for i in src_candidates]
     tgt_side = [tgt_docs[j] for j in tgt_candidates]
     similarity = _cosine_matrix(src_side, tgt_side, embed)
-    similarity[_blocked_by_date(src_side, tgt_side, max_date_gap_days)] = -np.inf
+    _exclude_by_date(similarity, src_side, tgt_side, max_date_gap_days)
     # argmax takes the lowest index among equals, which settles ties.
     best_tgt = similarity.argmax(axis=1)
-    best_src = similarity.argmax(axis=0)
+    best_src = _best_row_per_column(similarity)
     pairs = []
     for row, column in enumerate(best_tgt.tolist()):
-        score = float(similarity[row, column])
+        # Rounding can leave a float32 dot product a hair outside [-1, 1].
+        score = min(1.0, max(-1.0, float(similarity[row, column])))
         if best_src[column] == row and score >= min_cosine:
             pairs.append(
                 _Pair(src_candidates[row], tgt_candidates[column], score, "embedding")
@@ -234,19 +247,42 @@ def _match_by_embedding(
     return pairs
 
 
+def _best_row_per_column(similarity: NDArray[np.float32]) -> NDArray[np.intp]:
+    """`similarity.argmax(axis=0)`, a block of columns at a time: numpy copies
+    the matrix to find the maximum of a column, which would double the memory
+    of the pass."""
+    return np.concatenate(
+        [
+            similarity[:, start : start + _MATRIX_BLOCK_SIZE].argmax(axis=0)
+            for start in range(0, similarity.shape[1], _MATRIX_BLOCK_SIZE)
+        ]
+    )
+
+
+def _embedded_text(doc: Document) -> str:
+    return doc.text[:_EMBEDDED_CHARACTERS]
+
+
+def _has_embeddable_text(doc: Document) -> bool:
+    """False when the part of the text that is embedded is blank: the
+    embedding then says nothing about the document."""
+    return bool(_embedded_text(doc).strip())
+
+
 def _cosine_matrix(
     src_docs: Sequence[Document], tgt_docs: Sequence[Document], embed: Embedder
-) -> NDArray[np.float64]:
-    """Rows are source documents, columns target documents. The embedder's
-    rows are unit length, so the dot product is the cosine."""
+) -> NDArray[np.float32]:
+    """Rows are source documents, columns target documents. The dot product is
+    the cosine only if the embedder's rows are unit length, as its contract
+    says."""
     src_vectors = _embed_documents(src_docs, embed)
     tgt_vectors = _embed_documents(tgt_docs, embed)
     return src_vectors @ tgt_vectors.T
 
 
-def _embed_documents(docs: Sequence[Document], embed: Embedder) -> NDArray[np.float64]:
-    texts = [doc.text[:_EMBEDDED_CHARACTERS] for doc in docs]
-    vectors = np.asarray(embed.embed(texts), dtype=np.float64)
+def _embed_documents(docs: Sequence[Document], embed: Embedder) -> NDArray[np.float32]:
+    texts = [_embedded_text(doc) for doc in docs]
+    vectors = np.asarray(embed.embed(texts), dtype=np.float32)
     if vectors.ndim != 2 or vectors.shape[0] != len(texts):
         raise ValueError(
             f"embedder must return one row per text: expected {len(texts)} rows "
@@ -255,23 +291,34 @@ def _embed_documents(docs: Sequence[Document], embed: Embedder) -> NDArray[np.fl
     return vectors
 
 
-def _blocked_by_date(
-    src_docs: Sequence[Document], tgt_docs: Sequence[Document], max_gap_days: int
-) -> NDArray[np.bool_]:
-    """True where both dates are known and further apart than `max_gap_days`."""
+def _exclude_by_date(
+    similarity: NDArray[np.float32],
+    src_docs: Sequence[Document],
+    tgt_docs: Sequence[Document],
+    max_gap_days: int,
+) -> None:
+    """Set to -inf, in place, every pair whose dates are both known and further
+    apart than `max_gap_days`. Nothing is computed when one side has no date,
+    and otherwise the mask is built `_MATRIX_BLOCK_SIZE` rows at a time."""
     src_days, src_known = _day_numbers(src_docs)
     tgt_days, tgt_known = _day_numbers(tgt_docs)
-    gap = np.abs(src_days[:, np.newaxis] - tgt_days[np.newaxis, :])
-    both_known = src_known[:, np.newaxis] & tgt_known[np.newaxis, :]
-    return both_known & (gap > max_gap_days)
+    if not (src_known.any() and tgt_known.any()):
+        return
+    for start in range(0, len(src_docs), _MATRIX_BLOCK_SIZE):
+        rows = slice(start, start + _MATRIX_BLOCK_SIZE)
+        gap = src_days[rows, np.newaxis] - tgt_days[np.newaxis, :]
+        np.abs(gap, out=gap)
+        blocked = src_known[rows, np.newaxis] & tgt_known[np.newaxis, :]
+        blocked &= gap > max_gap_days
+        similarity[rows][blocked] = -np.inf
 
 
 def _day_numbers(
     docs: Sequence[Document],
-) -> tuple[NDArray[np.int64], NDArray[np.bool_]]:
+) -> tuple[NDArray[np.int32], NDArray[np.bool_]]:
     """The proleptic Gregorian ordinal of each date (0 when unknown) and
     whether it is known."""
     days = np.array(
-        [doc.date.toordinal() if doc.date else 0 for doc in docs], dtype=np.int64
+        [doc.date.toordinal() if doc.date else 0 for doc in docs], dtype=np.int32
     )
     return days, np.array([doc.date is not None for doc in docs], dtype=np.bool_)
