@@ -117,6 +117,15 @@ def _in_valid(
     return int(digest, 16) / 2**256 < fraction
 
 
+def _good_pairs(fraction: float = VALID_FRACTION) -> list[WordPair]:
+    """Two clean pairs, one the split sends to train and one to valid, so that a build
+    which also holds the pairs under test has a row in each split."""
+    indexes = range(99, 79, -1)
+    train = next(i for i in indexes if not _in_valid(_cyrillic_word(i), SEED, fraction))
+    valid = next(i for i in indexes if _in_valid(_cyrillic_word(i), SEED, fraction))
+    return [_pair(train), _pair(valid)]
+
+
 def _planted_pairs() -> tuple[list[WordPair], list[WordPair]]:
     """The 43 planted pairs and the 34 of them that must survive, in input order.
 
@@ -585,22 +594,50 @@ def test_a_write_that_fails_part_way_leaves_the_finished_files_whole(
         assert len(source) == len(target)
 
 
-def test_an_empty_valid_split_is_written_as_empty_files(tmp_path: Path) -> None:
+def test_an_empty_valid_split_is_a_data_error_raised_before_any_file(
+    tmp_path: Path,
+) -> None:
+    # Eole divides by the number of validation rows at its first validation step.
     train_word = next(
         word
         for word in map(_cyrillic_word, range(100))
         if not _in_valid(word, SEED, VALID_FRACTION)
     )
+    out_dir = tmp_path / "corpus"
+    with pytest.raises(
+        DataError,
+        match=r"valid split is empty \(pairs kept: 1, valid_fraction 0.25, seed 7\)",
+    ):
+        build_corpus(
+            [WordPair(train_word, A, "reference")],
+            out_dir,
+            valid_fraction=VALID_FRACTION,
+            seed=SEED,
+        )
+    assert not out_dir.exists()
+
+
+def test_a_split_that_leaves_both_corpora_rows_is_built(tmp_path: Path) -> None:
+    train_word = next(
+        word
+        for word in map(_cyrillic_word, range(100))
+        if not _in_valid(word, SEED, VALID_FRACTION)
+    )
+    valid_word = next(
+        word
+        for word in map(_cyrillic_word, range(100))
+        if _in_valid(word, SEED, VALID_FRACTION)
+    )
+
     result = build_corpus(
-        [WordPair(train_word, A, "reference")],
+        [WordPair(train_word, A, "reference"), WordPair(valid_word, NA, "reference")],
         tmp_path,
         valid_fraction=VALID_FRACTION,
         seed=SEED,
     )
-    assert result.rows["cyrl2mong.valid.src"] == 0
-    assert result.rows["mong2cyrl.valid.tgt"] == 0
-    assert result.files["cyrl2mong.valid.src"].read_bytes() == b""
+
     assert result.rows["cyrl2mong.train.src"] == 1
+    assert result.rows["cyrl2mong.valid.src"] == 1
 
 
 # --- build_corpus: the split key --------------------------------------------
@@ -643,10 +680,9 @@ def test_the_split_key_is_the_normalized_cyrillic_word(tmp_path: Path) -> None:
 
 
 def _dropped(tmp_path: Path, pairs: list[WordPair]) -> dict[str, int]:
-    """The drop counts of `pairs` plus one good pair that keeps the build legal."""
-    good = _pair(99)
+    """The drop counts of `pairs` plus two good pairs that keep both splits non-empty."""
     result = build_corpus(
-        [*pairs, good], tmp_path, valid_fraction=VALID_FRACTION, seed=SEED
+        [*pairs, *_good_pairs()], tmp_path, valid_fraction=VALID_FRACTION, seed=SEED
     )
     return dict(result.dropped)
 
@@ -843,28 +879,33 @@ def test_duplicates_are_found_after_normalization_and_the_first_is_kept(
         WordPair(lookalike, MONGOL, "rule"),
         WordPair(plain, A + NA, "reference"),
     ]
-    result = build_corpus(pairs, tmp_path, valid_fraction=0.5, seed=SEED)
+    good = _good_pairs(0.5)
+    result = build_corpus([*pairs, *good], tmp_path, valid_fraction=0.5, seed=SEED)
 
     assert dict(result.dropped) == {"duplicate": 1}
     words = _splits_by_cyrillic_word(result)
-    assert list(words) == [plain]
+    assert set(words) == {plain, *(pair.cyrillic for pair in good)}
     scripts = _lines(result.files["cyrl2mong.train.tgt"]) + _lines(
         result.files["cyrl2mong.valid.tgt"]
     )
-    assert sorted(scripts) == sorted([MONGOL, A + NA])
+    assert sorted(scripts) == sorted([MONGOL, A + NA, *(pair.script for pair in good)])
 
 
 def test_a_cyrillic_side_is_normalized_with_khk_cyrl(tmp_path: Path) -> None:
     plain = "мо" + "нгол"
     lookalike = plain.replace(CYRILLIC_O, LATIN_O)
     assert lookalike != plain
+    good = _good_pairs(0.5)
     result = build_corpus(
-        [WordPair(lookalike, MONGOL, "reference")],
+        [WordPair(lookalike, MONGOL, "reference"), *good],
         tmp_path,
         valid_fraction=0.5,
         seed=SEED,
     )
-    assert list(_splits_by_cyrillic_word(result)) == [plain]
+    assert set(_splits_by_cyrillic_word(result)) == {
+        plain,
+        *(pair.cyrillic for pair in good),
+    }
 
 
 # --- build_corpus: refusals -------------------------------------------------

@@ -16,9 +16,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import ctranslate2
-import sentencepiece
 
 from rinchen.script_conv._subprocess import failure_with_log_tail, run_logged
+from rinchen.script_conv.char_model import load_char_processor
 
 _MAX_REPORTED_MISMATCHES = 10
 _MODEL_FILE = "model.bin"
@@ -121,6 +121,8 @@ def parity(
 
     Raises:
         ValueError: the two line sequences differ in length, or are empty.
+        DataError: the character model at `spm_model` cannot be loaded (checked
+            before the CTranslate2 model is).
     """
     if len(src_lines) != len(eole_lines):
         raise ValueError(
@@ -129,7 +131,7 @@ def parity(
     if not src_lines:
         raise ValueError("cannot compare no lines")
 
-    processor = sentencepiece.SentencePieceProcessor(model_file=str(spm_model))
+    processor = load_char_processor(spm_model)
     translator = ctranslate2.Translator(str(ct2_dir), device="cpu", intra_threads=1)
     results = translator.translate_batch(
         [[tag, *processor.encode(line, out_type=str)] for line in src_lines],

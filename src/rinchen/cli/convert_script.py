@@ -92,6 +92,11 @@ _CHECKPOINT_SIDE_FILES = ("config.json", "vocab.json")
 # The two directions' corpus files hold the same words with the sides swapped, so the
 # character model is trained on one direction's files only.
 _CHAR_MODEL_CORPUS_PREFIX = "cyrl2mong."
+# The character model of a run, as a path prefix inside the run directory: a model
+# shared by several runs would be overwritten by the next one.
+_CHAR_MODEL_PREFIX = "converter_char"
+# The corpus file Eole validates on; with no row in it `eole train` divides by zero.
+_VALID_SOURCE_FILE = "cyrl2mong.valid.src"
 # The character model's name inside a model directory: with it there, `apply` and
 # `eval` need only the directory.
 _CHAR_MODEL_FILE = "converter_char.model"
@@ -313,12 +318,19 @@ def train_converter(
         Path,
         typer.Option(
             "--spm-config",
-            help=(
-                "Character model config (vocab_size and output_prefix); the model "
-                "is written to <output_prefix>.model and .vocab."
-            ),
+            help="Character model config (vocab_size).",
         ),
     ] = DEFAULT_CHAR_MODEL_CONFIG,
+    spm_prefix: Annotated[
+        Path | None,
+        typer.Option(
+            "--spm-prefix",
+            help=(
+                "Where the character model is written: <prefix>.model and "
+                "<prefix>.vocab. Default <run-dir>/converter_char."
+            ),
+        ),
+    ] = None,
     threads: Annotated[
         int,
         typer.Option(
@@ -363,6 +375,7 @@ def train_converter(
             data_dir,
             run_dir,
             spm_config,
+            spm_prefix,
             threads,
             timeout,
             dry_run=dry_run,
@@ -394,7 +407,8 @@ class _TrainingRun:
     profile: Profile
     spm_config: Path
     char_config: CharModelConfig
-    char_model: Path  # what the character trainer writes for the config's prefix
+    char_prefix: Path
+    char_model: Path  # what the character trainer writes for `char_prefix`
     char_vocab: Path
     corpus_files: list[Path]
     run_dir: Path
@@ -413,6 +427,7 @@ def _plan_training(
     data_dir: Path,
     run_dir: Path,
     spm_config: Path,
+    spm_prefix: Path | None,
     threads: int,
     timeout: float | None,
     *,
@@ -423,13 +438,14 @@ def _plan_training(
     the same checks for a dry run and a real one, so that a real run does not fail
     on something its dry run passed, nor after the character model is trained.
 
-    The directories and the character model config are made absolute, so that
+    The directories, the character model config and the character model prefix (by
+    default `converter_char` in the run directory) are made absolute, so that
     `converter.yaml` and the manifest mean the same from any working directory.
 
     Raises ConfigError for an unknown profile, an unconfirmed full run, a character
     model config or an Eole config that does not hold (a `$` in a path included),
-    DataError for a missing corpus file and UpstreamError when `eole` is not
-    installed."""
+    DataError for a missing corpus file or a valid corpus without a row, and
+    UpstreamError when `eole` is not installed."""
     selected = _profile(profile)
     if selected == "full" and not (dry_run or confirm_full):
         raise ConfigError(
@@ -440,7 +456,8 @@ def _plan_training(
     data_dir, run_dir = data_dir.resolve(), run_dir.resolve()
     spm_config = spm_config.resolve()
     corpus_files = _require_corpus_files(data_dir)
-    prefix = char_config.output_prefix
+    _require_valid_rows(data_dir / _VALID_SOURCE_FILE)
+    prefix = (spm_prefix or run_dir / _CHAR_MODEL_PREFIX).resolve()
     char_model, char_vocab = Path(f"{prefix}.model"), Path(f"{prefix}.vocab")
     cfg = render_converter_config(
         selected, data_dir=data_dir, spm_model=char_model, run_dir=run_dir
@@ -451,6 +468,7 @@ def _plan_training(
         selected,
         spm_config,
         char_config,
+        prefix,
         char_model,
         char_vocab,
         corpus_files,
@@ -485,9 +503,7 @@ def _commit_training(run: _TrainingRun) -> tuple[Path, Path]:
     # Just before the first write, and after everything that can fail on bad input:
     # the old manifest goes first, so that a failure part-way leaves none.
     begin_commit(run.run_dir, _TRAIN_STAGE)
-    train_char_model(
-        texts, run.char_config.output_prefix, vocab_size=run.char_config.vocab_size
-    )
+    train_char_model(texts, run.char_prefix, vocab_size=run.char_config.vocab_size)
     check_char_model(run.char_model, texts)
     run.run_dir.mkdir(parents=True, exist_ok=True)
     dump_config(run.cfg, run.config_path)
@@ -495,7 +511,11 @@ def _commit_training(run: _TrainingRun) -> tuple[Path, Path]:
     config_sha256 = sha256_of(run.config_path)
     checkpoint = (
         run_training(
-            run.config_path, run.run_dir, threads=run.threads, timeout=run.timeout
+            run.config_path,
+            run.run_dir,
+            threads=run.threads,
+            timeout=run.timeout,
+            profile=run.profile,
         )
         / CHECKPOINT_FILE
     )
@@ -538,6 +558,17 @@ def _require_corpus_files(data_dir: Path) -> list[Path]:
                 "`rinchen convert-script build-data`"
             )
     return paths
+
+
+def _require_valid_rows(valid_source: Path) -> None:
+    """A corpus built elsewhere may hold an empty valid file, which `eole train`
+    cannot validate on; `build_corpus` never writes one."""
+    text = _decode_utf8(_read_bytes(valid_source), str(valid_source))
+    if not any(text.split("\n")):
+        raise DataError(
+            f"{valid_source} has no rows: Eole cannot validate on it; build the "
+            "corpus again with more pairs or another --valid-fraction"
+        )
 
 
 def _corpus_texts(corpus_files: Sequence[Path]) -> list[str]:
@@ -606,6 +637,7 @@ def export_model(
 
 @dataclass(frozen=True)
 class _ExportRun:
+    run_dir: Path
     config_path: Path
     paths: ConverterPaths
     target: Path
@@ -636,6 +668,7 @@ def _plan_export(
     exists, and DataError for a checkpoint or character model that is not a file."""
     config_path = config if config is not None else run_dir / _CONVERTER_CONFIG
     run = _ExportRun(
+        run_dir,
         config_path,
         read_converter_paths(config_path),
         out_dir if out_dir is not None else run_dir / _CT2_DIR,
@@ -662,6 +695,7 @@ def _commit_export(run: _ExportRun) -> Path:
     # erase: no commit start is needed.
     config_sha256 = _config_sha256(run.config_path)
     input_files = _hash_inputs(run.input_paths)
+    _require_the_char_model_train_recorded(run, input_files)
     # Hashing a large checkpoint takes a while, and the plan's check is older than
     # that. Outside the `try`, because its cleanup removes `run.target`: a directory
     # that someone else created in the meantime is not this run's to remove.
@@ -687,6 +721,31 @@ def _commit_export(run: _ExportRun) -> Path:
     except BaseException:
         shutil.rmtree(run.target, ignore_errors=True)
         raise
+
+
+def _require_the_char_model_train_recorded(
+    run: _ExportRun, input_files: list[ManifestFile]
+) -> None:
+    """Refuse a character model that is not the one `train` recorded for this run.
+
+    The model path is in the config, and a path can be shared by several runs, so a
+    later run may have overwritten the file this checkpoint was trained with. Only a
+    train manifest in the run directory that lists the model can vouch for it: a
+    run directory built by hand, or a manifest of another stage, is trusted."""
+    train = store.read(run.run_dir)
+    if train is None or train.stage != _TRAIN_STAGE:
+        return
+    model = run.paths.char_model.resolve()
+    recorded = next((o for o in train.outputs if Path(o.path).resolve() == model), None)
+    actual = next((i for i in input_files if Path(i.path).resolve() == model), None)
+    if recorded is None or actual is None or recorded.sha256 == actual.sha256:
+        return
+    raise DataError(
+        f"the character model {run.paths.char_model} has sha256 {actual.sha256}, but "
+        f"the train manifest {store.manifest_path(run.run_dir)} recorded "
+        f"{recorded.sha256}: another run overwrote it after this checkpoint was "
+        "trained; train again with a character model of its own (--spm-prefix)"
+    )
 
 
 def _copy_into_place(source: Path, destination: Path) -> None:

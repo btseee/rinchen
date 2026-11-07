@@ -16,7 +16,12 @@ from typing import Literal, Protocol
 import ctranslate2
 
 from rinchen.errors import ConfigError, DataError, UpstreamError
-from rinchen.script_conv.alphabet import LETTERS, SCRIPT_TO_CYRILLIC_PUNCTUATION
+from rinchen.script_conv.alphabet import (
+    CYRILLIC_LANGUAGE,
+    LETTERS,
+    SCRIPT_LANGUAGE,
+    SCRIPT_TO_CYRILLIC_PUNCTUATION,
+)
 from rinchen.script_conv.char_model import (
     TO_CYRILLIC_TAG,
     TO_SCRIPT_TAG,
@@ -30,8 +35,6 @@ from rinchen.text.normalize import normalize
 Target = Literal["Mong", "Cyrl"]
 _Spelling = Literal["model", "rules", "kept"]
 
-_CYRILLIC = "khk_Cyrl"
-_SCRIPT = "mn_Mong"
 # Longer words are far outside what the model was trained on.
 _MAX_WORD_LENGTH = 80
 _MAX_DECODING_LENGTH = 256
@@ -101,7 +104,7 @@ def _is_cyrillic_word(piece: Segment) -> bool:
 
 
 def _normalize_cyrillic_word(word: str) -> str:
-    return normalize(word.lower(), _CYRILLIC)
+    return normalize(word.lower(), CYRILLIC_LANGUAGE)
 
 
 def _is_script_segment_with_letter(piece: Segment) -> bool:
@@ -110,7 +113,7 @@ def _is_script_segment_with_letter(piece: Segment) -> bool:
 
 
 def _normalize_script_word(word: str) -> str:
-    return normalize(word, _SCRIPT)
+    return normalize(word, SCRIPT_LANGUAGE)
 
 
 _TO_SCRIPT = _Direction(

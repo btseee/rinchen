@@ -13,11 +13,12 @@ import subprocess
 import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 import pytest
+import sentencepiece
 
-from rinchen.errors import UpstreamError
+from rinchen.errors import DataError, UpstreamError
 from rinchen.script_conv import export
 from rinchen.script_conv.char_model import train_char_model
 from rinchen.script_conv.export import (
@@ -333,6 +334,33 @@ def test_parity_passes_the_decoding_limit_to_the_translator(
 
     ((_, options),) = stub_translator.batches
     assert options["max_decoding_length"] == 7
+
+
+def test_parity_never_hands_a_directory_to_sentencepiece(
+    stub_translator: StubTranslator,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # SentencePiece aborts the whole interpreter on a directory, so the guard of
+    # `load_char_processor` has to run first.
+    def refuse(*args: object, **kwargs: object) -> NoReturn:
+        raise AssertionError("SentencePiece was handed a directory")
+
+    monkeypatch.setattr(sentencepiece, "SentencePieceProcessor", refuse)
+
+    with pytest.raises(DataError, match="is a directory"):
+        parity(tmp_path, tmp_path, WORDS, UPPER, tag=TO_SCRIPT_TAG)
+
+    assert stub_translator.built == []
+
+
+def test_parity_reports_a_character_model_that_is_not_there_as_a_data_error(
+    stub_translator: StubTranslator, tmp_path: Path
+) -> None:
+    with pytest.raises(DataError, match="cannot load SentencePiece model"):
+        parity(tmp_path, tmp_path / "absent.model", WORDS, UPPER, tag=TO_SCRIPT_TAG)
+
+    assert stub_translator.built == []
 
 
 def test_parity_rejects_line_lists_of_different_lengths(

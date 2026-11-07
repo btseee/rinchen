@@ -20,6 +20,7 @@ from types import MappingProxyType
 from typing import Literal, TextIO
 
 from rinchen.errors import ConfigError, DataError
+from rinchen.script_conv.alphabet import CYRILLIC_LANGUAGE, SCRIPT_LANGUAGE
 from rinchen.script_conv.rules import transliterate_word
 from rinchen.script_conv.validate import is_script_word, validate_traditional
 from rinchen.text.normalize import normalize
@@ -32,8 +33,6 @@ MULTIWORD = "multiword"
 NOT_SCRIPT_WORD = "not_script_word"
 DUPLICATE = "duplicate"
 
-_CYRILLIC = "khk_Cyrl"
-_SCRIPT = "mn_Mong"
 _TSV_HEADER = ("cyrillic", "script")
 _MAX_VALID_FRACTION = 0.5
 # A line break would split a word across lines and a tab would split a TSV field, so
@@ -115,7 +114,7 @@ def rule_pairs(
     """
     pairs: list[WordPair] = []
     for raw_word in words:
-        word = normalize(raw_word, _CYRILLIC)
+        word = normalize(raw_word, CYRILLIC_LANGUAGE)
         result = transliterate_word(word)
         if result.text and (allow_fallback or result.source == "lexicon"):
             pairs.append(WordPair(word, result.text, "rule"))
@@ -185,7 +184,7 @@ def _screen_pair(pair: WordPair) -> WordPair | _Drop:
     into spaces. A script side that passes the validator is never empty once
     normalized: it holds a character `normalize` keeps.
     """
-    cyrillic = normalize(pair.cyrillic, _CYRILLIC)
+    cyrillic = normalize(pair.cyrillic, CYRILLIC_LANGUAGE)
     if not cyrillic or _is_blank(pair.script):
         return _Drop(EMPTY)
     if " " in cyrillic or " " in pair.script.strip(" "):
@@ -193,7 +192,7 @@ def _screen_pair(pair: WordPair) -> WordPair | _Drop:
     violations = validate_traditional(pair.script)
     if violations:
         return _Drop(violations[0].code)
-    script = normalize(pair.script, _SCRIPT)
+    script = normalize(pair.script, SCRIPT_LANGUAGE)
     if not is_script_word(script):
         return _Drop(NOT_SCRIPT_WORD)
     return WordPair(cyrillic, script, pair.origin)
@@ -292,9 +291,11 @@ def build_corpus(
 
     A pair goes to valid when the SHA-256 of `"{seed}:{normalized Cyrillic word}"`,
     read as a fraction of 2**256, is below `valid_fraction`; so equal Cyrillic words
-    never straddle the split. Output keeps input order. A small input can leave
-    valid with no pair; its files are then written empty. An empty train split is an
-    error.
+    never straddle the split. Output keeps input order. An empty train split and an
+    empty valid split are both errors: a corpus with no valid row cannot be trained
+    on, because Eole divides by the number of validation rows at its first
+    validation step. A very small input can leave one split empty; give it more
+    pairs or another `valid_fraction`.
 
     Each of the eight files appears whole, through a temporary file, but they are
     not written atomically as a set: a failure part-way leaves the files finished so
@@ -305,7 +306,8 @@ def build_corpus(
     Raises:
         ConfigError: `valid_fraction` is outside (0, 0.5].
         DataError: a side holds a line break or tab (it names the pair's index in
-            `pairs`), no pair is left after dropping, or the train split is empty.
+            `pairs`), no pair is left after dropping, or the train or the valid split
+            is empty.
     """
     check_valid_fraction(valid_fraction)
     kept, dropped = _screen_pairs(pairs)
@@ -318,6 +320,11 @@ def build_corpus(
     if not train:
         raise DataError(
             f"train split is empty (pairs kept: {len(kept)}, valid_fraction"
+            f" {valid_fraction}, seed {seed})"
+        )
+    if not valid:
+        raise DataError(
+            f"valid split is empty (pairs kept: {len(kept)}, valid_fraction"
             f" {valid_fraction}, seed {seed})"
         )
     out_dir.mkdir(parents=True, exist_ok=True)

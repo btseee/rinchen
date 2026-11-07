@@ -37,8 +37,8 @@ data:
     tgt_prefix: ''
 transforms_configs:
   sentencepiece:
-    src_subword_model: data/script_conv/converter_char.model
-    tgt_subword_model: data/script_conv/converter_char.model
+    src_subword_model: data/script_conv/run/converter_char.model
+    tgt_subword_model: data/script_conv/run/converter_char.model
   filtertoolong:
     src_seq_length: 128
     tgt_seq_length: 128

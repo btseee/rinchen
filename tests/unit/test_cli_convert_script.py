@@ -35,7 +35,7 @@ from rinchen.cli.main import app
 from rinchen.config.loader import REPO_ROOT
 from rinchen.errors import DataError, RinchenError, UpstreamError
 from rinchen.manifest import store
-from rinchen.manifest.model import Manifest
+from rinchen.manifest.model import Manifest, ManifestFile
 from rinchen.script_conv.alphabet import NNBSP
 from rinchen.script_conv.config import (
     render_converter_config,
@@ -684,8 +684,13 @@ class TrainWorkspace:
         return self.run_dir / "converter.yaml"
 
     def args(
-        self, *extra: str, profile: str = "tiny", run_dir: Path | None = None
+        self,
+        *extra: str,
+        profile: str = "tiny",
+        run_dir: Path | None = None,
+        spm_prefix: Path | None = None,
     ) -> list[str]:
+        prefix = [] if spm_prefix is None else ["--spm-prefix", str(spm_prefix)]
         return [
             "train",
             "--profile",
@@ -696,6 +701,7 @@ class TrainWorkspace:
             str(self.run_dir if run_dir is None else run_dir),
             "--spm-config",
             str(self.spm_config),
+            *prefix,
             *extra,
         ]
 
@@ -719,17 +725,15 @@ def train_workspace(tmp_path: Path) -> TrainWorkspace:
     pairs = read_pairs_tsv(TINY_WORDS, origin="reference")[:60]
     data_dir = tmp_path / "corpus"
     build_corpus(pairs, data_dir, valid_fraction=0.1, seed=1234)
-    char_prefix = tmp_path / "char" / "converter_char"
     spm_config = tmp_path / "converter_char.yaml"
-    spm_config.write_text(
-        yaml.safe_dump({"vocab_size": 200, "output_prefix": str(char_prefix)}),
-        encoding="utf-8",
-    )
+    spm_config.write_text(yaml.safe_dump({"vocab_size": 200}), encoding="utf-8")
+    run_dir = tmp_path / "run"
     return TrainWorkspace(
         data_dir=data_dir,
-        run_dir=tmp_path / "run",
+        run_dir=run_dir,
         spm_config=spm_config,
-        char_prefix=char_prefix,
+        # `train` writes the character model into the run directory by default.
+        char_prefix=run_dir / "converter_char",
     )
 
 
@@ -747,6 +751,8 @@ class TrainSeams:
     checked_texts: list[str] = field(default_factory=list)
     configs_at_training: list[dict[str, Any]] = field(default_factory=list)
     vocab_sizes: list[int] = field(default_factory=list)
+    prefixes: list[Path] = field(default_factory=list)
+    profiles: list[str | None] = field(default_factory=list)
     threads: list[int] = field(default_factory=list)
     timeouts: list[float | None] = field(default_factory=list)
     # Called when the named seam is entered, after it is recorded: a test uses one
@@ -771,6 +777,7 @@ class TrainSeams:
         self.text_types["train"] = type(texts)
         self.trained_texts = list(texts)
         self.vocab_sizes.append(vocab_size)
+        self.prefixes.append(prefix)
         prefix.parent.mkdir(parents=True, exist_ok=True)
         Path(f"{prefix}.model").write_bytes(b"char model bytes")
         Path(f"{prefix}.vocab").write_text("<unk>\t0\n", encoding="utf-8")
@@ -788,8 +795,10 @@ class TrainSeams:
         *,
         threads: int = 2,
         timeout: float | None = None,
+        profile: str | None = None,
     ) -> Path:
         self._enter("run_training")
+        self.profiles.append(profile)
         cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
         self.configs_at_training.append(cfg)
         self.threads.append(threads)
@@ -851,12 +860,15 @@ def test_train_reads_both_sides_of_the_cyrl2mong_files_but_no_blank_line(
     train_workspace: TrainWorkspace, seams: TrainSeams
 ) -> None:
     for name in ("cyrl2mong.valid.src", "cyrl2mong.valid.tgt"):
-        (train_workspace.data_dir / name).write_text("", encoding="utf-8")
+        path = train_workspace.data_dir / name
+        path.write_text(path.read_text(encoding="utf-8") + "\n\n", encoding="utf-8")
 
     _run_ok(*train_workspace.args())
 
     assert "" not in seams.trained_texts
-    assert seams.trained_texts == train_workspace.expected_texts()
+    assert seams.trained_texts == [
+        text for text in train_workspace.expected_texts() if text
+    ]
 
 
 def test_train_leaves_the_mong2cyrl_files_unread_but_keeps_them_as_inputs(
@@ -1065,7 +1077,7 @@ def test_train_dry_run_writes_and_runs_nothing(
     assert not train_workspace.char_prefix.parent.exists()
 
 
-def test_train_dry_run_defaults_to_the_repository_char_model_config(
+def test_train_dry_run_defaults_to_the_repository_char_model_config_and_the_run_directory(
     train_workspace: TrainWorkspace, no_seam_runs: None
 ) -> None:
     args = [
@@ -1082,8 +1094,91 @@ def test_train_dry_run_defaults_to_the_repository_char_model_config(
     result = _run_ok(*args)
 
     assert result.stdout.splitlines()[0] == str(
-        REPO_ROOT / "data" / "script_conv" / "converter_char.model"
+        train_workspace.run_dir / "converter_char.model"
     )
+
+
+def test_train_dry_run_prints_the_char_model_of_the_spm_prefix(
+    train_workspace: TrainWorkspace, tmp_path: Path, no_seam_runs: None
+) -> None:
+    prefix = tmp_path / "elsewhere" / "chars"
+
+    result = _run_ok(*train_workspace.args("--dry-run", spm_prefix=prefix))
+
+    assert result.stdout.splitlines()[0] == f"{prefix}.model"
+    assert not prefix.parent.exists()
+
+
+def test_train_writes_the_char_model_into_the_run_directory_by_default(
+    train_workspace: TrainWorkspace, seams: TrainSeams
+) -> None:
+    _run_ok(*train_workspace.args())
+
+    assert seams.prefixes == [train_workspace.run_dir / "converter_char"]
+    config = yaml.safe_load(train_workspace.config.read_text(encoding="utf-8"))
+    sentencepiece = config["transforms_configs"]["sentencepiece"]
+    assert sentencepiece["src_subword_model"] == str(train_workspace.char_model)
+
+
+def test_train_writes_the_char_model_where_spm_prefix_says(
+    train_workspace: TrainWorkspace, seams: TrainSeams, tmp_path: Path
+) -> None:
+    prefix = tmp_path / "elsewhere" / "chars"
+
+    _run_ok(*train_workspace.args(spm_prefix=prefix))
+
+    assert seams.prefixes == [prefix]
+    config = yaml.safe_load(train_workspace.config.read_text(encoding="utf-8"))
+    sentencepiece = config["transforms_configs"]["sentencepiece"]
+    assert sentencepiece["src_subword_model"] == f"{prefix}.model"
+    outputs = [item.path for item in _manifest(train_workspace.run_dir).outputs]
+    assert f"{prefix}.model" in outputs
+    assert f"{prefix}.vocab" in outputs
+    assert not train_workspace.char_model.exists()
+
+
+def test_train_resolves_a_relative_spm_prefix_before_it_renders_the_config(
+    train_workspace: TrainWorkspace,
+    seams: TrainSeams,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    _run_ok(*train_workspace.args(spm_prefix=Path("chars") / "model"))
+
+    assert seams.prefixes == [tmp_path / "chars" / "model"]
+    config = yaml.safe_load(train_workspace.config.read_text(encoding="utf-8"))
+    sentencepiece = config["transforms_configs"]["sentencepiece"]
+    assert sentencepiece["src_subword_model"] == str(tmp_path / "chars" / "model.model")
+
+
+@pytest.mark.parametrize("profile", ["tiny", "full"])
+def test_train_hands_run_training_the_profile_it_validated_with(
+    train_workspace: TrainWorkspace, seams: TrainSeams, profile: str
+) -> None:
+    _run_ok(*train_workspace.args("--confirm-full", profile=profile))
+
+    assert seams.profiles == [profile]
+
+
+@pytest.mark.parametrize("extra", [[], ["--dry-run"]])
+@pytest.mark.parametrize("content", [b"", b"\n\n"], ids=["empty", "blank-lines"])
+def test_train_rejects_a_corpus_with_an_empty_valid_split_before_any_work(
+    train_workspace: TrainWorkspace,
+    no_seam_runs: None,
+    extra: list[str],
+    content: bytes,
+) -> None:
+    # Eole divides by the number of validation rows at its first validation step.
+    (train_workspace.data_dir / "cyrl2mong.valid.src").write_bytes(content)
+
+    result = _run(*train_workspace.args(*extra))
+
+    assert result.exit_code == 3, result.output
+    assert "cyrl2mong.valid.src" in result.stderr
+    assert "no rows" in result.stderr
+    assert not train_workspace.run_dir.exists()
 
 
 def test_train_dry_run_of_the_full_profile_needs_no_confirmation(
@@ -1342,7 +1437,7 @@ def test_train_fails_before_any_work_when_the_eole_script_is_missing(
     assert result.exit_code == 4, result.output
     assert "eole" in result.stderr
     assert _tree(train_workspace.run_dir) == before
-    assert not train_workspace.char_prefix.parent.exists()
+    assert not train_workspace.char_model.exists()
 
 
 @pytest.mark.parametrize("extra", [[], ["--dry-run"]])
@@ -1553,6 +1648,93 @@ def test_export_manifest_holds_the_hashes_from_before_the_work(
         str(path): before[path] for path in files
     }
     assert manifest.config_sha256 == before[export_workspace.config]
+
+
+def _train_manifest_of(
+    workspace: ExportWorkspace, *, sha256: str, stage: str = TRAIN_STAGE
+) -> Manifest:
+    """What `train` recorded for the character model of `workspace`."""
+    return Manifest(
+        stage=stage,
+        created="2026-11-07T00:00:00Z",
+        code_version="deadbeef",
+        config_sha256="cfg",
+        seed=0,
+        outputs=[ManifestFile(path=str(workspace.char_model), sha256=sha256)],
+    )
+
+
+def test_export_goes_ahead_when_the_char_model_is_the_one_train_recorded(
+    export_workspace: ExportWorkspace, export_seam: ExportSeam
+) -> None:
+    store.write(
+        export_workspace.run_dir,
+        _train_manifest_of(
+            export_workspace, sha256=_sha256(export_workspace.char_model)
+        ),
+    )
+
+    _run_ok(*export_workspace.args())
+
+    assert len(export_seam.calls) == 1
+
+
+def test_export_refuses_a_char_model_that_differs_from_the_one_train_recorded(
+    export_workspace: ExportWorkspace, export_seam: ExportSeam
+) -> None:
+    recorded = "ab" * 32
+    store.write(
+        export_workspace.run_dir, _train_manifest_of(export_workspace, sha256=recorded)
+    )
+    before = _tree(export_workspace.run_dir)
+
+    result = _run(*export_workspace.args())
+
+    assert result.exit_code == 3, result.output
+    assert _sha256(export_workspace.char_model) in result.stderr
+    assert recorded in result.stderr
+    assert str(export_workspace.char_model) in result.stderr
+    assert export_seam.calls == []
+    assert _tree(export_workspace.run_dir) == before
+
+
+@pytest.mark.parametrize(
+    "manifest",
+    [
+        pytest.param(
+            lambda workspace: _train_manifest_of(
+                workspace, sha256="cd" * 32, stage=EXPORT_STAGE
+            ),
+            id="another-stage",
+        ),
+        pytest.param(
+            lambda workspace: _train_manifest_of(
+                workspace, sha256="cd" * 32
+            ).model_copy(update={"outputs": []}),
+            id="char-model-not-listed",
+        ),
+    ],
+)
+def test_export_goes_ahead_when_the_manifest_does_not_vouch_for_the_char_model(
+    export_workspace: ExportWorkspace,
+    export_seam: ExportSeam,
+    manifest: Callable[[ExportWorkspace], Manifest],
+) -> None:
+    store.write(export_workspace.run_dir, manifest(export_workspace))
+
+    _run_ok(*export_workspace.args())
+
+    assert len(export_seam.calls) == 1
+
+
+def test_export_without_a_manifest_trusts_a_hand_built_run_directory(
+    export_workspace: ExportWorkspace, export_seam: ExportSeam
+) -> None:
+    assert not store.manifest_path(export_workspace.run_dir).exists()
+
+    _run_ok(*export_workspace.args())
+
+    assert len(export_seam.calls) == 1
 
 
 def test_export_takes_the_config_and_the_out_dir_from_its_options(

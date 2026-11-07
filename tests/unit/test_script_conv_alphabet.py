@@ -9,6 +9,7 @@ from __future__ import annotations
 import pytest
 
 from rinchen.script_conv.alphabet import (
+    CYRILLIC_LANGUAGE,
     CYRILLIC_TO_SCRIPT_PUNCTUATION,
     FVS,
     JOINERS,
@@ -16,12 +17,22 @@ from rinchen.script_conv.alphabet import (
     MVS,
     NIRUGU,
     NNBSP,
+    SCRIPT_LANGUAGE,
     SCRIPT_TO_CYRILLIC_PUNCTUATION,
 )
+from rinchen.text.normalize import normalize
 
 LETTER_A = chr(0x1820)
 LAST_KHALKHA_LETTER = chr(0x1842)
 FIRST_TODO_LETTER = chr(0x1843)
+
+
+def test_the_two_language_codes_are_the_normalizer_languages_of_the_converter() -> None:
+    assert CYRILLIC_LANGUAGE == "khk_Cyrl"
+    assert SCRIPT_LANGUAGE == "mn_Mong"
+    # `normalize` raises for a language it does not know.
+    assert normalize("ab", CYRILLIC_LANGUAGE) == "ab"
+    assert normalize(LETTER_A, SCRIPT_LANGUAGE) == LETTER_A
 
 
 def test_letters_cover_u1820_to_u1842() -> None:

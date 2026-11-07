@@ -20,6 +20,10 @@ FVS: frozenset[str] = frozenset(
     chr(code_point) for code_point in (0x180B, 0x180C, 0x180D, 0x180F)
 )
 
+# The two `rinchen.text.normalize.normalize` languages the converter reads and writes.
+CYRILLIC_LANGUAGE = "khk_Cyrl"
+SCRIPT_LANGUAGE = "mn_Mong"
+
 MVS = chr(0x180E)  # Mongolian vowel separator
 NNBSP = chr(0x202F)  # narrow no-break space, the gap before a separated suffix
 NIRUGU = chr(0x180A)  # Mongolian nirugu, the stroke that joins or extends a word

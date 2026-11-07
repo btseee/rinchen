@@ -59,7 +59,8 @@ CHECKED_IN = {
     "full": CONFIG_DIR / "converter.yaml",
 }
 PLACEHOLDER_DATA_DIR = Path("data/script_conv/corpus")
-PLACEHOLDER_SPM_MODEL = Path("data/script_conv/converter_char.model")
+# `train` puts the character model into the run directory by default.
+PLACEHOLDER_SPM_MODEL = Path("data/script_conv/run/converter_char.model")
 PLACEHOLDER_RUN_DIR = Path("data/script_conv/run")
 
 DATA_DIR = Path("work/corpus")
@@ -677,6 +678,17 @@ def test_a_string_valued_encoder_or_decoder_is_rejected(where: str, text: str) -
         validate_converter_config(cfg)
 
 
+@pytest.mark.parametrize("profile", [None, "tiny"])
+@pytest.mark.parametrize("section", ["training", "transforms_configs"])
+def test_a_string_valued_section_is_rejected(
+    section: str, profile: Literal["tiny"] | None
+) -> None:
+    # Eole evaluates a string given for either as Python code.
+    cfg = _set_top(_render("tiny"), section, "{'train_steps': 1}")
+    with pytest.raises(ConfigError, match=rf"{section}:.*string"):
+        validate_converter_config(cfg, profile=profile)
+
+
 @pytest.mark.parametrize("value", [False, None, "true"])
 def test_a_vocabulary_that_is_not_shared_is_rejected(value: object) -> None:
     cfg = _set_top(_render("tiny"), "share_vocab", value)
@@ -841,7 +853,7 @@ def test_the_checked_in_tiny_file_names_the_placeholder_paths() -> None:
     )
     assert loaded["src_vocab"] == "data/script_conv/run/vocab.src"
     assert loaded["transforms_configs"]["sentencepiece"]["src_subword_model"] == (
-        "data/script_conv/converter_char.model"
+        "data/script_conv/run/converter_char.model"
     )
 
 
@@ -968,6 +980,17 @@ def test_eole_loads_the_rendered_tiny_config_and_keeps_every_value(
     assert config.training.gpu_ranks == []
     assert config.share_vocab is True
     assert set(config.data) == set(CORPORA)
+
+
+@pytest.mark.subprocess
+def test_eole_writes_only_the_source_vocabulary_of_a_shared_vocabulary(
+    eole_run: EoleRun,
+) -> None:
+    # The config still names `vocab.tgt`, which Eole never writes: the vocabulary is
+    # shared, so `vocab.src` is the only one.
+    assert eole_run.config_dict["tgt_vocab"].endswith("vocab.tgt")
+    assert (eole_run.run_dir / "vocab.src").is_file()
+    assert not (eole_run.run_dir / "vocab.tgt").exists()
 
 
 @pytest.mark.subprocess

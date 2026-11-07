@@ -250,12 +250,11 @@ def test_the_whole_cli_chain_on_the_tiny_fixture(
     corpus_dir = tmp_path / "corpus"
     run_dir = tmp_path / "run"
     model_dir = tmp_path / "model"
-    char_prefix = tmp_path / "char" / "converter_char"
+    # `train` puts the character model into the run directory by default, and
+    # `export` checks it against the train manifest there.
+    char_prefix = run_dir / "converter_char"
     spm_config = tmp_path / "converter_char.yaml"
-    spm_config.write_text(
-        yaml.safe_dump({"vocab_size": 200, "output_prefix": str(char_prefix)}),
-        encoding="utf-8",
-    )
+    spm_config.write_text(yaml.safe_dump({"vocab_size": 200}), encoding="utf-8")
 
     _ok(
         _rinchen(

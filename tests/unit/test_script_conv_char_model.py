@@ -564,10 +564,7 @@ def test_check_reports_a_model_that_cannot_be_loaded(
 
 # --- config --------------------------------------------------------------------------
 
-_VALID_FIELDS: dict[str, str | None] = {
-    "vocab_size": "512",
-    "output_prefix": "out/converter_char",
-}
+_VALID_FIELDS: dict[str, str | None] = {"vocab_size": "512"}
 
 
 def _config_yaml(**fields: str | None) -> str:
@@ -588,40 +585,21 @@ def _write(tmp_path: Path, text: str) -> Path:
 def test_shipped_config_loads() -> None:
     config = load_char_model_config(CONFIG_PATH)
 
-    assert config.vocab_size == 512
-    assert config.output_prefix == REPO_ROOT / "data" / "script_conv" / "converter_char"
-    assert config.output_prefix.is_absolute()
+    assert config == CharModelConfig(vocab_size=512)
 
 
-def test_shipped_config_has_exactly_the_two_keys() -> None:
+def test_shipped_config_has_exactly_the_one_key() -> None:
+    # Where the model goes is the run's business (`train --spm-prefix`), not the
+    # config's: a path here would be shared by every run.
     raw = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
 
-    assert set(raw) == {"vocab_size", "output_prefix"}
-
-
-def test_relative_prefix_resolves_against_repo_root_and_absolute_stays(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    elsewhere = tmp_path / "elsewhere"
-    elsewhere.mkdir()
-    monkeypatch.chdir(elsewhere)
-    absolute = tmp_path / "abs" / "converter_char"
-
-    relative_config = load_char_model_config(_write(tmp_path, _config_yaml()))
-    absolute_config = load_char_model_config(
-        _write(tmp_path, _config_yaml(output_prefix=str(absolute)))
-    )
-
-    assert relative_config.output_prefix == REPO_ROOT / "out" / "converter_char"
-    assert absolute_config.output_prefix == absolute
+    assert set(raw) == {"vocab_size"}
 
 
 def test_valid_config_round_trips_every_field(tmp_path: Path) -> None:
     config = load_char_model_config(_write(tmp_path, _config_yaml()))
 
-    assert config == CharModelConfig(
-        vocab_size=512, output_prefix=REPO_ROOT / "out" / "converter_char"
-    )
+    assert config == CharModelConfig(vocab_size=512)
 
 
 def test_loaded_config_is_immutable(tmp_path: Path) -> None:
@@ -634,13 +612,11 @@ def test_loaded_config_is_immutable(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("yaml_text", "message_fragment"),
     [
+        pytest.param("{}\n", "vocab_size.*Field required", id="no-vocab"),
         pytest.param(
-            _config_yaml(vocab_size=None), "vocab_size.*Field required", id="no-vocab"
-        ),
-        pytest.param(
-            _config_yaml(output_prefix=None),
-            "output_prefix.*Field required",
-            id="no-prefix",
+            _config_yaml(output_prefix="out/converter_char"),
+            "output_prefix.*Extra inputs are not permitted",
+            id="prefix-is-not-a-key",
         ),
         pytest.param(
             _config_yaml(seed="1234"),
@@ -669,21 +645,6 @@ def test_loaded_config_is_immutable(tmp_path: Path) -> None:
             _config_yaml(vocab_size="true"),
             "vocab_size.*Input should be a valid integer",
             id="boolean-vocab",
-        ),
-        pytest.param(
-            _config_yaml(output_prefix="[a, b]"),
-            "output_prefix.*Input is not a valid path",
-            id="prefix-list",
-        ),
-        pytest.param(
-            _config_yaml(output_prefix='""'),
-            "Value error, output_prefix must not be empty",
-            id="empty-prefix",
-        ),
-        pytest.param(
-            _config_yaml(output_prefix='"   "'),
-            "Value error, output_prefix must not be empty",
-            id="blank-prefix",
         ),
         pytest.param(
             "- vocab_size: 512\n", "top level must be a mapping", id="top-level-list"

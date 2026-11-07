@@ -525,6 +525,58 @@ def test_run_training_validates_the_config_before_it_launches_anything(
     assert not run_dir.exists()
 
 
+@pytest.mark.parametrize(
+    ("key", "value"), [("gpu_ranks", [0]), ("compute_dtype", "bf16")]
+)
+def test_run_training_refuses_a_gpu_setting_of_a_tiny_config_when_given_the_profile(
+    fake_eole: FakeEole,
+    tmp_path: Path,
+    run_dir: Path,
+    key: str,
+    value: object,
+) -> None:
+    cfg_path, cfg = _write_config(tmp_path, run_dir)
+    cfg["training"][key] = value
+    dump_config(cfg, cfg_path)
+
+    with pytest.raises(ConfigError, match=rf"training\.{key}"):
+        run_training(cfg_path, run_dir, profile="tiny")
+
+    assert fake_eole.calls == []
+    assert not run_dir.exists()
+
+
+def test_run_training_without_a_profile_trains_a_tiny_config_as_written(
+    fake_eole: FakeEole, tmp_path: Path, run_dir: Path
+) -> None:
+    cfg_path, cfg = _write_config(tmp_path, run_dir)
+    cfg["training"]["gpu_ranks"] = [0]
+    dump_config(cfg, cfg_path)
+
+    run_training(cfg_path, run_dir)
+
+    assert fake_eole.subcommands == ["build_vocab", "train"]
+
+
+def test_run_training_accepts_the_profile_the_config_was_rendered_for(
+    fake_eole: FakeEole, tmp_path: Path, run_dir: Path
+) -> None:
+    cfg_path, _ = _write_config(tmp_path, run_dir, profile="full")
+
+    run_training(cfg_path, run_dir, profile="full")
+
+    assert fake_eole.subcommands == ["build_vocab", "train"]
+
+
+def test_run_training_rejects_an_unknown_profile_before_it_launches_anything(
+    fake_eole: FakeEole, tiny_config: Path, run_dir: Path
+) -> None:
+    with pytest.raises(ConfigError, match="profile"):
+        run_training(tiny_config, run_dir, profile="huge")  # type: ignore[arg-type]
+
+    assert fake_eole.calls == []
+
+
 def test_run_training_rejects_a_missing_config_file(
     fake_eole: FakeEole, tmp_path: Path, run_dir: Path
 ) -> None:

@@ -16,16 +16,8 @@ from typing import Annotated
 
 import sentencepiece
 import yaml
-from pydantic import (
-    AfterValidator,
-    BaseModel,
-    BeforeValidator,
-    ConfigDict,
-    Field,
-    ValidationError,
-)
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from rinchen.config.loader import anchor_at_repo_root, reject_blank_path
 from rinchen.errors import ConfigError, DataError, UpstreamError
 
 # The symbols the model must keep whole: each one tells the converter which script to
@@ -44,21 +36,17 @@ _TRAINER_MIN_LOG_LEVEL = 2
 # Strict so a quoted number or a YAML boolean is a typo to report, not a value to
 # coerce.
 _PositiveInt = Annotated[int, Field(strict=True, gt=0)]
-# Anchoring a blank path would put the model outside the repository.
-_RepoPath = Annotated[
-    Path, BeforeValidator(reject_blank_path), AfterValidator(anchor_at_repo_root)
-]
 
 
 class CharModelConfig(BaseModel):
-    """One training run of the converter's character model. There is no seed: the
-    character trainer is deterministic. A relative `output_prefix` is anchored at the
-    repo root, so the config means the same thing from any working directory."""
+    """One training run of the converter's character model. There is no seed (the
+    character trainer is deterministic) and no output path: where the model goes is
+    chosen per run, so that a config shared by every run cannot make two runs
+    overwrite each other's model."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     vocab_size: _PositiveInt
-    output_prefix: _RepoPath  # the trained model is <output_prefix>.model
 
 
 def load_char_model_config(path: Path) -> CharModelConfig:

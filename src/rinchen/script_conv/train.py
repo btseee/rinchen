@@ -21,7 +21,7 @@ import yaml
 from rinchen.errors import ConfigError, DataError, UpstreamError
 from rinchen.script_conv._subprocess import run_logged
 from rinchen.script_conv.char_model import CONVERTER_TAGS, load_char_processor
-from rinchen.script_conv.config import dump_config, validate_converter_config
+from rinchen.script_conv.config import Profile, dump_config, validate_converter_config
 
 _PREDICT_BATCH_SIZE = 64
 # Eole keeps its newest checkpoint under this name in `model_path` (a link to the file
@@ -47,7 +47,12 @@ def training_environment(threads: int, *, hide_gpu: bool) -> dict[str, str]:
 
 
 def run_training(
-    cfg_path: Path, run_dir: Path, *, threads: int = 2, timeout: float | None = None
+    cfg_path: Path,
+    run_dir: Path,
+    *,
+    threads: int = 2,
+    timeout: float | None = None,
+    profile: Profile | None = None,
 ) -> Path:
     """Build the vocabulary, then train, as `eole build_vocab` and `eole train` on the
     config at `cfg_path`; return the checkpoint directory, the config's
@@ -59,9 +64,16 @@ def run_training(
     trains on none (`training.gpu_ranks` empty). `timeout` (seconds) bounds each
     command; a command that runs past it is killed with everything it started.
 
+    `profile` is the profile the config was rendered for, handed to
+    `validate_converter_config`: with `"tiny"` a config that asks for a GPU or for
+    another compute type than fp32 is refused. Without it, the default, those
+    CPU-only checks are skipped and the config trains as written. The `train`
+    command passes the profile it rendered.
+
     Raises:
         ConfigError: the config file is missing, unparseable or fails
-            `validate_converter_config` (checked before anything runs); its
+            `validate_converter_config` (checked before anything runs), or `profile`
+            is unknown; its
             `training.model_path` is missing or not inside `run_dir`; or its path,
             its text or `run_dir` holds `$`, which Eole would expand as a variable.
         ValueError: `threads` is less than 1.
@@ -72,7 +84,7 @@ def run_training(
     _reject_dollar("config path", cfg_path)
     _reject_dollar("run directory", run_dir)
     cfg = _load_config(cfg_path)
-    validate_converter_config(cfg)
+    validate_converter_config(cfg, profile=profile)
     model_path = _model_path_inside(cfg, run_dir)
     build_vocab_command, train_command = eole_commands(cfg_path)
     training = cfg["training"]

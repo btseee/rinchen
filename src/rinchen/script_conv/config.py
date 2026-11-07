@@ -192,7 +192,8 @@ def render_converter_config(
 
     `data_dir` holds the corpus files `rinchen.script_conv.data.build_corpus` wrote,
     `spm_model` is the converter's character model, and `run_dir` takes the
-    vocabulary (`vocab.src`, `vocab.tgt`), `data` and the checkpoints (`ckpt`). Each
+    vocabulary, `data` and the checkpoints (`ckpt`). The vocabulary is shared, so
+    Eole writes only `vocab.src`, although the config also names `vocab.tgt`. Each
     call returns a new dict that shares nothing with the next one.
 
     Raises:
@@ -345,9 +346,10 @@ def validate_converter_config(
 
     Always checked: only the known top-level keys, all present; no key of
     `FORBIDDEN_KEYS` at any depth; no `$` in any key or string value (Eole expands
-    it as an environment variable in the whole YAML text); `model.encoder` and
-    `model.decoder`, when present, are not strings (Eole evaluates a string as Python
-    code, and it would hide a forbidden key); `position_encoding_type` is
+    it as an environment variable in the whole YAML text); `model.encoder`,
+    `model.decoder`, `training` and `transforms_configs`, when present, are not
+    strings (Eole evaluates a string as Python code, and it would hide a forbidden
+    key); `position_encoding_type` is
     `SinusoidalInterleaved` wherever it appears and is set on the embeddings, and an
     `embeddings.position_encoding` that is present is `true`; `word_vec_size` equals
     `hidden_size`, and so does a `hidden_size` set on the encoder or the decoder;
@@ -359,8 +361,9 @@ def validate_converter_config(
 
     The CPU-only checks (`gpu_ranks` is `[]`, `compute_dtype` is `fp32`) run only for
     `profile="tiny"`. Without `profile`, the default, they are SKIPPED, so a caller
-    that holds a tiny rendering has to say so: the CLI and `run_training` pass the
-    profile of the rendering they validate.
+    that holds a tiny rendering has to say so. The `train` command passes the profile
+    it rendered, both when it plans the run and to `run_training`; `run_training`
+    itself validates without a profile unless its caller gives one.
 
     Raises:
         ConfigError: any of these fails; the message names the key path.
@@ -372,7 +375,7 @@ def validate_converter_config(
     _check_top_level_keys(cfg)
     _check_no_forbidden_keys(cfg)
     _check_no_variable_references(cfg)
-    _check_layers_are_not_strings(cfg)
+    _check_sections_are_not_strings(cfg)
     _check_position_encoding(cfg)
     _check_embedding_size(cfg)
     _check_corpora(cfg)
@@ -462,15 +465,19 @@ def _layers(cfg: Mapping[str, Any]) -> Iterator[tuple[str, object]]:
             yield name, model[name]
 
 
-def _check_layers_are_not_strings(cfg: Mapping[str, Any]) -> None:
-    # Eole's `str_to_dict` validator runs `eval` on a string given for `encoder` or
-    # `decoder`. Such a string is not a mapping, so the key checks would not see into
-    # it.
-    for name, layer in _layers(cfg):
-        if isinstance(layer, str):
+def _check_sections_are_not_strings(cfg: Mapping[str, Any]) -> None:
+    # Eole's `str_to_dict` validators run `eval` on a string given for `encoder`,
+    # `decoder`, `training` or `transforms_configs`. Such a string is not a mapping,
+    # so the key checks would not see into it. (`model`, `embeddings` and `data`
+    # fail their own lookups when they are strings.)
+    sections = [(f"model.{name}", layer) for name, layer in _layers(cfg)]
+    sections += [(name, cfg[name]) for name in ("training", "transforms_configs")]
+    for path, section in sections:
+        if isinstance(section, str):
             _fail(
-                f"model.{name}",
-                f"must be a mapping, not a string: Eole evaluates a string as code ({layer!r})",
+                path,
+                "must be a mapping, not a string: Eole evaluates a string as code"
+                f" ({section!r})",
             )
 
 
