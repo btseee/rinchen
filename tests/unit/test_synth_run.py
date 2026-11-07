@@ -44,6 +44,10 @@ from tests.support.planted_synth import (
     planted_scorer,
     planted_script,
 )
+from tests.support.shard_files import (
+    change_a_candidate_keeping_the_digest,
+    drop_the_digest,
+)
 
 GENERATOR = "vllm_default"
 SEED = 7
@@ -610,7 +614,15 @@ def _another_shards_ids(path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "damage", [_garbage, _truncated, _empty_file, _another_shards_ids]
+    "damage",
+    [
+        _garbage,
+        _truncated,
+        _empty_file,
+        _another_shards_ids,
+        change_a_candidate_keeping_the_digest,
+        drop_the_digest,
+    ],
 )
 def test_a_damaged_shard_file_is_regenerated_and_counted(
     tmp_path: Path, damage: Callable[[Path], None]
@@ -633,6 +645,37 @@ def test_a_damaged_shard_file_is_regenerated_and_counted(
     assert _without_created(second.corpus).equals(_without_created(first.corpus))
     third = _run(tmp_path, translator=ScriptedTranslator({}))
     assert dict(third.shard_stats)["reused"] == 5
+
+
+def test_a_shard_whose_text_changed_on_disk_between_a_crash_and_the_resume_is_regenerated(
+    tmp_path: Path,
+) -> None:
+    crashing = ScriptedTranslator(
+        planted_script(planted_monolingual()), fail_on_call={2: UpstreamError("down")}
+    )
+    with pytest.raises(UpstreamError):
+        _run(tmp_path / "resumed", translator=crashing)
+    change_a_candidate_keeping_the_digest(
+        _shard_dir(tmp_path / "resumed") / SHARD_FILES[1]
+    )
+    resuming = ScriptedTranslator(planted_script(planted_monolingual()))
+
+    resumed = _run(tmp_path / "resumed", translator=resuming)
+
+    assert resuming.calls == [
+        (texts, "khk_Cyrl", "eng_Latn") for texts in _shard_texts(1, 2, 3, 4)
+    ]
+    assert dict(resumed.shard_stats) == {
+        "planned": 5,
+        "reused": 1,
+        "generated": 4,
+        "regenerated_invalid": 1,
+    }
+    uninterrupted = _run(tmp_path / "uninterrupted")
+    assert _without_created(resumed.corpus).equals(
+        _without_created(uninterrupted.corpus)
+    )
+    assert dict(resumed.counts) == PLANTED_COUNTS
 
 
 def test_force_regenerates_every_shard_and_reuses_none(tmp_path: Path) -> None:

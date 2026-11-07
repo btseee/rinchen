@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import importlib.metadata
 import json
+import sys
 from collections.abc import Callable, Sequence
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -1001,6 +1002,29 @@ def test_the_scorer_is_released_when_it_fails(
     assert not workspace.manifest.exists()
 
 
+class _UnreachableScorer:
+    requires_cuda = False
+
+    def score(self, sources: Sequence[str], translations: Sequence[str]) -> list[float]:
+        raise FileNotFoundError("no such model: metricx-24")
+
+
+def test_a_scorer_that_cannot_reach_its_files_is_an_upstream_error_not_a_write_error(
+    workspace: Workspace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    install_seams(
+        monkeypatch,
+        translator=ScriptedTranslator(planted_script(workspace.frame)),
+        scorer=_UnreachableScorer(),
+    )
+
+    result = runner.invoke(app, workspace.args())
+
+    _assert_one_error(result, 4, "the QE scorer failed: no such model: metricx-24")
+    assert "cannot write" not in result.stderr
+    assert not workspace.manifest.exists()
+
+
 def test_an_interrupt_exits_130_and_leaves_the_finished_shards_and_the_old_manifest(
     workspace: Workspace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1205,6 +1229,31 @@ def test_an_out_dir_below_the_directory_of_the_input_is_allowed(
     _run_ok(workspace.args(BT_JOB, out_dir=out_dir))
 
     assert (out_dir / "corpus.parquet").is_file()
+
+
+@pytest.mark.parametrize(
+    "name", ["out[1]", "out*?", "out[a-z]"], ids=["[1]", "wildcards", "[a-z]"]
+)
+def test_an_out_dir_that_looks_like_a_glob_gets_all_three_outputs(
+    workspace: Workspace, seams: Seams, tmp_path: Path, name: str
+) -> None:
+    if "*" in name and sys.platform == "win32":
+        pytest.skip("Windows file names cannot hold * or ?")
+    out_dir = tmp_path / name
+
+    _run_ok(workspace.args(BT_JOB, out_dir=out_dir))
+
+    assert sorted(path.name for path in out_dir.iterdir() if path.is_file()) == (
+        OUTPUT_NAMES
+    )
+    corpus = pl.read_parquet(out_dir / "corpus.parquet", glob=False)
+    assert corpus.height == PLANTED_COUNTS["selected"]
+    counts = json.loads((out_dir / "counts.json").read_text(encoding="utf-8"))
+    assert counts["counts"] == PLANTED_COUNTS
+    manifest = store.read(out_dir)
+    assert manifest is not None
+    assert manifest.metrics["count.selected"] == PLANTED_COUNTS["selected"]
+    assert _part_files(out_dir) == []
 
 
 def test_an_unknown_job_is_a_config_error_that_lists_the_configured_jobs(

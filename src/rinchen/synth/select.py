@@ -23,7 +23,8 @@ shows up as `no_candidates`).
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Callable, Mapping, Sequence
+import numbers
+from collections.abc import Callable, Iterable, Mapping, Sequence, Sized
 from dataclasses import dataclass
 from datetime import datetime
 from types import MappingProxyType
@@ -149,8 +150,9 @@ def select_candidates(
     list count that differs from the source count, `TypeError` for a candidate
     list that is a string, `ConfigError` for a `synthetic_lang` outside the
     language registry or an `mbr_utility` this module has no utility for, and
-    `UpstreamError` when the scorer returns the wrong number of scores. An
-    exception raised by the scorer propagates unchanged.
+    `UpstreamError` when the scorer returns the wrong number of scores or a
+    score that is not a number (text, None, a list) or raises an OSError. Any
+    other exception raised by the scorer propagates unchanged.
     """
     _require_kind(kind)
     _require_one_list_per_source(sources, candidates)
@@ -325,14 +327,35 @@ def _score_in_chunks(
     for start in range(0, len(source_texts), batch_size):
         chunk_sources = source_texts[start : start + batch_size]
         chunk_translations = translations[start : start + batch_size]
-        chunk_scores = scorer.score(chunk_sources, chunk_translations)
-        if len(chunk_scores) != len(chunk_sources):
-            raise UpstreamError(
-                f"QE scorer returned {len(chunk_scores)} scores "
-                f"for {len(chunk_sources)} pairs"
-            )
-        scores.extend(float(score) for score in chunk_scores)
+        try:
+            reply = scorer.score(chunk_sources, chunk_translations)
+        except OSError as error:
+            # Its weights or device, not the outputs: the CLI would call an
+            # OSError a failure to write them.
+            raise UpstreamError(f"the QE scorer failed: {error}") from error
+        scores.extend(_scores_of(reply, pairs=len(chunk_sources), first_pair=start))
     return scores
+
+
+def _scores_of(reply: object, *, pairs: int, first_pair: int) -> list[float]:
+    """The scorer's `reply` as floats. A reply that is not one number per pair
+    breaks the scorer's contract: an UpstreamError that names the pair and the
+    type, never a text."""
+    if not (isinstance(reply, Sized) and isinstance(reply, Iterable)):
+        raise UpstreamError(
+            f"QE scorer returned a {type(reply).__name__}, not a list of scores"
+        )
+    if len(reply) != pairs:
+        raise UpstreamError(f"QE scorer returned {len(reply)} scores for {pairs} pairs")
+    scores = list(reply)
+    for offset, score in enumerate(scores):
+        # Text is not a number even when it reads like one.
+        if not isinstance(score, numbers.Real):
+            raise UpstreamError(
+                f"QE scorer returned a {type(score).__name__} "
+                f"for pair {first_pair + offset}, not a number"
+            )
+    return [float(score) for score in scores]
 
 
 def _without_copies(

@@ -9,7 +9,7 @@ import hashlib
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
-from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, wait
+from concurrent.futures import FIRST_EXCEPTION, Future, ThreadPoolExecutor, wait
 from itertools import chain
 from typing import NamedTuple
 
@@ -28,6 +28,12 @@ _MAX_BACKOFF_EXPONENT = 10
 _RETRYABLE_STATUSES = frozenset({429, 500, 502, 503, 504})
 _RETRY_AFTER_STATUSES = frozenset({429, 503})
 _PREVIEW_CHARS = 200
+# With polars imported (every `rinchen` command has it) SIGINT is handled by a
+# handler that restarts a blocking call: an untimed `wait` is not woken and the
+# KeyboardInterrupt would be raised only after every queued request was sent,
+# while a wait with a timeout is interrupted at once. So the wait is made in
+# slices of this length (docs/VERIFY.md, D-POLARS-SIGINT).
+_INTERRUPT_POLL_S = 0.2
 
 
 def request_seed(src_lang: str, tgt_lang: str, n: int, text: str) -> int:
@@ -145,7 +151,7 @@ class ChatCompletionsTranslator[Config: (VllmConfig, LlamaCppConfig)](ABC):
         with ThreadPoolExecutor(max_workers=workers) as pool:
             try:
                 futures = [pool.submit(self._candidates, http, body) for body in bodies]
-                wait(futures, return_when=FIRST_EXCEPTION)
+                _wait_until_all_done_or_one_failed(futures)
             finally:
                 # However the wait ended (a request failed, all are done, an
                 # interrupt), requests that have not started are not worth
@@ -243,6 +249,18 @@ class ChatCompletionsTranslator[Config: (VllmConfig, LlamaCppConfig)](ABC):
                 f"{self._url} answered a message.content that is not a string"
             )
         return content
+
+
+def _wait_until_all_done_or_one_failed(futures: Sequence[Future]) -> None:
+    """Return when every future has finished or one has raised, waking every
+    `_INTERRUPT_POLL_S` so that a pending interrupt can be raised."""
+    pending = set(futures)
+    while pending:
+        done, pending = wait(
+            pending, timeout=_INTERRUPT_POLL_S, return_when=FIRST_EXCEPTION
+        )
+        if any(future.exception() is not None for future in done):
+            return
 
 
 def _require_http_url(base_url: str, endpoint: str) -> None:

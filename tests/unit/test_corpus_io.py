@@ -172,6 +172,28 @@ def test_scan_reads_the_file_named_not_one_a_glob_in_its_name_matches(
     assert scan_corpus(path).collect().equals(_frame())
 
 
+@pytest.mark.parametrize(
+    "relative",
+    [
+        Path("out[1]") / "corpus.parquet",
+        Path("corpus[1].parquet"),
+        Path("out*?") / "corpus[a-z]*.parquet",
+    ],
+    ids=["brackets in the directory", "brackets in the name", "wildcards"],
+)
+def test_write_reads_back_the_file_it_wrote_not_one_a_glob_in_its_path_matches(
+    tmp_path: Path, relative: Path
+) -> None:
+    if "*" in str(relative) and sys.platform == "win32":
+        pytest.skip("Windows file names cannot hold * or ?")
+    path = tmp_path / relative
+
+    assert write_corpus(_frame(), path) == 2
+
+    assert scan_corpus(path).collect().equals(_frame())
+    assert sorted(tmp_path.rglob("*.part")) == []
+
+
 def test_write_accepts_a_lazyframe(tmp_path: Path) -> None:
     path = tmp_path / "corpus.parquet"
 

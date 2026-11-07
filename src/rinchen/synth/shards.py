@@ -22,6 +22,8 @@ from rinchen.utils.part_file import unique_part_path
 _MONOLINGUAL_COLUMNS = ("id", "lang", "text")
 _SHARD_SCHEMA = pl.Schema({"id": pl.String(), "candidates": pl.List(pl.String())})
 _LANGUAGES_SHOWN = 5
+# Parquet key-value metadata key of a shard file's content digest.
+_DIGEST_KEY = "rinchen.content_sha256"
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +72,28 @@ def _read_parquet(path: Path, what: str) -> pl.DataFrame:
         return pl.read_parquet(path, glob=False)
     except (pl.exceptions.PolarsError, pl.exceptions.PanicException, OSError) as exc:
         raise DataError(f"cannot read {what} {path}: {exc}") from exc
+
+
+def _content_digest(ids: Sequence[str], candidates: Sequence[Sequence[str]]) -> str:
+    """The SHA-256 hex digest of a shard's content: the UTF-8 bytes of the JSON
+    text `{"ids":[...],"candidates":[[...],...]}`, with the keys in that order,
+    no whitespace, non-ASCII characters as they are (JSON escapes only quotes,
+    backslashes and control characters), the ids in shard order and one list of
+    candidates per id in generation order. Any change to an id, a candidate, an
+    order or a count changes it."""
+    document = {"ids": list(ids), "candidates": [list(texts) for texts in candidates]}
+    text = json.dumps(document, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _stored_digest(path: Path) -> str | None:
+    """The content digest in the file's key-value metadata, None when it has
+    none. The metadata is read by file name: this reader does not glob."""
+    try:
+        metadata = pl.read_parquet_metadata(path)
+    except (pl.exceptions.PolarsError, pl.exceptions.PanicException, OSError) as exc:
+        raise DataError(f"{path}: cannot read the file metadata: {exc}") from exc
+    return metadata.get(_DIGEST_KEY)
 
 
 def _require_dtypes(
@@ -212,8 +236,8 @@ class ShardStore:
 
     A file appears only whole, through a unique temporary file and a rename, so
     a crash leaves either the earlier file or none; `read` validates a file
-    against the planned ids, so a damaged or foreign one is regenerated instead
-    of trusted."""
+    against the planned ids and its content digest, so a damaged, foreign or
+    altered one is regenerated instead of trusted."""
 
     def __init__(self, directory: Path) -> None:
         self._directory = directory
@@ -238,7 +262,11 @@ class ShardStore:
         different lengths, a string where a list of candidates belongs, a
         candidate that is not a string) and DataError for a candidate UTF-8
         cannot encode (a lone surrogate), before the disk is touched. The
-        messages name the shard and the id, never a text."""
+        messages name the shard and the id, never a text.
+
+        The file carries the content digest of what was stored, in its Parquet
+        key-value metadata under `rinchen.content_sha256` (the recipe is
+        `_content_digest`'s), which `read` checks."""
         if len(ids) != len(candidates):
             raise ValueError(
                 f"ids and candidates differ in length ({len(ids)} vs {len(candidates)})"
@@ -254,7 +282,11 @@ class ShardStore:
         path.parent.mkdir(parents=True, exist_ok=True)
         part_path = unique_part_path(path)
         try:
-            frame.write_parquet(part_path, compression="zstd")
+            frame.write_parquet(
+                part_path,
+                compression="zstd",
+                metadata={_DIGEST_KEY: _content_digest(ids, candidates)},
+            )
             part_path.replace(path)
         finally:
             part_path.unlink(missing_ok=True)
@@ -281,8 +313,14 @@ class ShardStore:
         """The candidate lists of shard `index`, one per expected id in order.
         Raises DataError naming the file when it is missing, is not Parquet,
         has other columns or types than the store writes, has other ids than
-        `expected_ids` (rows missing, extra or in another order) or holds a
-        null where a list or a candidate belongs."""
+        `expected_ids` (rows missing, extra or in another order), holds a
+        null where a list or a candidate belongs, carries no content digest, has
+        an unreadable metadata block or has rows whose digest differs from the
+        stored one (a change to any id or text, which the Parquet reader does not
+        notice: it does not verify page checksums).
+
+        The cheap structural checks come first because they say more about what
+        is wrong; the digest, which hashes every text, comes last."""
         path = self.path_for(index)
         frame = _read_parquet(path, "shard file")
 
@@ -311,6 +349,18 @@ class ShardStore:
         null_candidates = sum(text is None for texts in lists for text in texts)
         if null_candidates:
             raise DataError(f"{path}: null candidates: {null_candidates}")
+
+        stored = _stored_digest(path)
+        if stored is None:
+            raise DataError(
+                f"{path}: no content digest in the file metadata (a shard written "
+                "before the store kept one, or by something else)"
+            )
+        if stored != _content_digest(frame["id"].to_list(), lists):
+            raise DataError(
+                f"{path}: the content digest does not match the rows: "
+                "the file changed after it was written"
+            )
         return lists
 
     def load(self, index: int, expected_ids: Sequence[str]) -> ShardLoad:

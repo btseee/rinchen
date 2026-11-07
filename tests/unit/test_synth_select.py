@@ -13,6 +13,7 @@ from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any, get_args
 
+import numpy as np
 import polars as pl
 import pytest
 
@@ -710,6 +711,109 @@ def test_a_wrong_number_of_scores_in_a_later_chunk_is_an_upstream_error() -> Non
             scorer=scorer,
             cfg=_cfg(QeConfig(scorer="metricx_qe", batch_size=2)),
         )
+
+
+@pytest.mark.parametrize(
+    ("bad", "type_name"),
+    [
+        ("high", "str"),
+        ("0.5", "str"),  # a number written as text is not a number
+        (None, "NoneType"),
+        ([0.5], "list"),
+        (b"1", "bytes"),
+    ],
+    ids=["text", "numeric text", "None", "nested list", "bytes"],
+)
+def test_a_score_that_is_not_a_number_is_an_upstream_error_naming_the_pair(
+    bad: object, type_name: str
+) -> None:
+    scorer = ScriptedScorer(lambda sources, translations: [0.5, 0.5, bad])
+    candidates = [[CAT_SITS, CAT_SITS_PARTICLE, DOG_RUNS]]
+
+    with pytest.raises(UpstreamError) as raised:
+        _select(_sources("a"), candidates, scorer=scorer)
+
+    assert str(raised.value) == (
+        f"QE scorer returned a {type_name} for pair 2, not a number"
+    )
+
+
+def test_the_pair_of_a_score_that_is_not_a_number_counts_from_the_first_chunk() -> None:
+    answers = iter([[0.5, 0.5], [0.5, None]])
+    scorer = ScriptedScorer(lambda sources, translations: next(answers))
+    candidates = [[CAT_SITS, CAT_SITS_PARTICLE, DOG_RUNS, CAT_SITS_SHORT]]
+
+    with pytest.raises(UpstreamError, match="returned a NoneType for pair 3,"):
+        _select(
+            _sources("a"),
+            candidates,
+            scorer=scorer,
+            cfg=_cfg(QeConfig(scorer="metricx_qe", batch_size=2)),
+        )
+
+
+@pytest.mark.parametrize(
+    ("reply", "type_name"),
+    [(None, "NoneType"), (0.5, "float"), (iter([0.5]), "list_iterator")],
+    ids=["None", "a bare number", "an iterator"],
+)
+def test_a_reply_that_is_not_a_list_of_scores_is_an_upstream_error(
+    reply: object, type_name: str
+) -> None:
+    scorer = ScriptedScorer(lambda sources, translations: reply)
+
+    with pytest.raises(UpstreamError) as raised:
+        _select(_sources("a"), [[CAT_SITS]], scorer=scorer)
+
+    assert str(raised.value) == (
+        f"QE scorer returned a {type_name}, not a list of scores"
+    )
+
+
+def test_an_error_about_the_scores_carries_no_text() -> None:
+    scorer = ScriptedScorer(lambda sources, translations: [None])
+
+    with pytest.raises(UpstreamError) as raised:
+        _select(_sources("a"), [[CAT_SITS]], scorer=scorer)
+
+    assert CAT_SITS not in str(raised.value)
+
+
+def test_non_finite_scores_are_numbers_and_the_threshold_decides() -> None:
+    # NaN and +inf fail a "lower is better" threshold, -inf passes it.
+    scorer = ScriptedScorer(
+        lambda sources, translations: [math.nan, math.inf, -math.inf]
+    )
+    candidates = [[CAT_SITS, CAT_SITS_PARTICLE, DOG_RUNS]]
+
+    selection = _select(_sources("a"), candidates, scorer=scorer)
+
+    assert selection.counts["dropped_qe"] == 2
+    assert selection.chosen == (2,)
+
+
+def test_scores_from_a_numpy_array_are_numbers() -> None:
+    scorer = ScriptedScorer(
+        lambda sources, translations: np.array([1.0, 9.0, 2.0], dtype=np.float32)
+    )
+    candidates = [[CAT_SITS, CAT_SITS_PARTICLE, DOG_RUNS]]
+
+    selection = _select(_sources("a"), candidates, scorer=scorer)
+
+    assert selection.counts["dropped_qe"] == 1  # 9.0 is above the 8.0 threshold
+
+
+def test_a_scorer_that_cannot_reach_its_files_is_an_upstream_error() -> None:
+    failure = FileNotFoundError("no such model: metricx-24")
+
+    def fail(sources: Sequence[str], translations: Sequence[str]) -> list[float]:
+        raise failure
+
+    with pytest.raises(UpstreamError) as raised:
+        _select(_sources("a"), [[CAT_SITS]], scorer=ScriptedScorer(fail))
+
+    assert str(raised.value) == "the QE scorer failed: no such model: metricx-24"
+    assert raised.value.__cause__ is failure
 
 
 def test_a_scorer_that_raises_propagates_unchanged() -> None:

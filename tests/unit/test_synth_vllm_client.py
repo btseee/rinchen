@@ -4,7 +4,11 @@ test runs against `FakeLlmServer`; nothing opens a socket."""
 
 from __future__ import annotations
 
+import importlib
+import os
+import signal
 import threading
+import time
 
 import httpx
 import pytest
@@ -928,6 +932,30 @@ def test_an_interrupt_while_waiting_cancels_the_requests_still_queued(monkeypatc
     with pytest.raises(KeyboardInterrupt):
         translator.translate([f"t{i}" for i in range(50)], ENG, KHK)
 
+    assert len(server.requests) <= 8
+
+
+@pytest.mark.timeout(30)
+def test_a_real_sigint_cancels_the_requests_still_queued():
+    # Once polars is imported (every `rinchen` command has it) a SIGINT sent to
+    # the process does not wake a `concurrent.futures.wait` that has no timeout:
+    # the interrupt would only be raised after the whole queue had been sent.
+    importlib.import_module("polars")
+    server = FakeLlmServer(echo_responder(), delay_s=0.3)
+    translator, _ = _translator(server, concurrency=2)
+    interrupter = threading.Timer(0.4, os.kill, (os.getpid(), signal.SIGINT))
+    interrupter.start()
+    started = time.perf_counter()
+
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            translator.translate([f"t{i}" for i in range(20)], ENG, KHK)
+    finally:
+        interrupter.cancel()
+
+    # Left alone the 20 requests take 3 s: the interrupt must stop the queue
+    # after the requests in flight (at most 2 at a time, 0.3 s each).
+    assert time.perf_counter() - started < 1.5
     assert len(server.requests) <= 8
 
 

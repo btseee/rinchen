@@ -5,6 +5,7 @@ per-shard generation results."""
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import re
 import sys
 import threading
@@ -28,6 +29,11 @@ from rinchen.synth.shards import (
     plan_shards,
     read_monolingual,
     shard_directory,
+)
+from tests.support.shard_files import (
+    change_a_candidate_keeping_the_digest,
+    drop_the_digest,
+    stored_digest,
 )
 
 NNBSP = chr(0x202F)
@@ -1558,6 +1564,187 @@ def test_the_load_outcomes_are_frozen_values() -> None:
     assert Invalid("why") != Invalid("another reason")
     assert Missing() != Invalid("why")
     assert Loaded([["a"]]) != Loaded([["b"]])
+
+
+# --- ShardStore: the content digest -------------------------------------------
+
+# sha256 of the canonical JSON text `{"ids":[...],"candidates":[[...],...]}`,
+# written out by hand and hashed with hashlib, not by the code under test.
+SIMPLE_SHARD_DIGEST = "35c755f493aa378aaadc38e5aed046184547c36c6de34856d1445169990d0a5b"
+AWKWARD_SHARD_DIGEST = (
+    "99e592de717f8acb07bfbaf15d12715f5f7b61cce0b3c8ee30337804b5111d7d"
+)
+
+
+def test_write_stores_the_sha256_of_the_canonical_json_of_the_shard(
+    store: ShardStore,
+) -> None:
+    store.write(0, ["a", "b"], [["x", "y"], []])
+
+    text = '{"ids":["a","b"],"candidates":[["x","y"],[]]}'
+    assert stored_digest(store.path_for(0)) == hashlib.sha256(text.encode()).hexdigest()
+    assert stored_digest(store.path_for(0)) == SIMPLE_SHARD_DIGEST
+
+
+def test_the_digest_of_a_shard_with_awkward_text_is_a_known_value(
+    store: ShardStore,
+) -> None:
+    # Pins the canonical form: key order, no spaces, UTF-8 for non-ASCII text
+    # (a no-break space, a non-BMP character), JSON escapes for a quote, a
+    # backslash and a NUL, an empty list for a text without candidates.
+    ids = ["a1", "б2", "c3"]
+    candidates = [
+        ["Сайн байна уу", f'quote " backslash \\ {NUL} {NON_BMP}'],
+        [],
+        [f"Хоёр{NNBSP}дахь"],
+    ]
+
+    store.write(0, ids, candidates)
+
+    assert stored_digest(store.path_for(0)) == AWKWARD_SHARD_DIGEST
+    assert store.read(0, ids) == candidates
+
+
+def test_the_digest_tells_apart_shards_that_differ_in_any_part_of_the_content(
+    store: ShardStore,
+) -> None:
+    variants: list[tuple[list[str], list[list[str]]]] = [
+        (["a", "b"], [["x", "y"], []]),
+        (["a", "c"], [["x", "y"], []]),  # another id
+        (["b", "a"], [["x", "y"], []]),  # the ids in another order
+        (["a", "b"], [["y", "x"], []]),  # the candidates in another order
+        (["a", "b"], [["x"], ["y"]]),  # a candidate moved to another text
+        (["a", "b"], [["x", "y"], [""]]),  # an empty candidate
+        (["a", "b"], [["x", "y"], ["z"]]),  # another candidate
+        (["a", "b"], [["xy"], []]),  # two candidates joined
+    ]
+
+    digests = []
+    for index, (ids, candidates) in enumerate(variants):
+        store.write(index, ids, candidates)
+        digests.append(stored_digest(store.path_for(index)))
+
+    assert len(set(digests)) == len(variants)
+
+
+def test_read_rejects_changed_text_in_a_file_whose_structure_is_intact(
+    store: ShardStore,
+) -> None:
+    store.write(0, IDS, CANDIDATES)
+    change_a_candidate_keeping_the_digest(store.path_for(0))
+
+    with pytest.raises(
+        DataError, match=r"shard-00000\.parquet.*content digest"
+    ) as caught:
+        store.read(0, IDS)
+
+    assert "!" not in str(caught.value)  # the message carries no candidate text
+
+
+def test_load_reports_changed_text_as_invalid_naming_the_file(
+    store: ShardStore,
+) -> None:
+    store.write(0, IDS, CANDIDATES)
+    change_a_candidate_keeping_the_digest(store.path_for(0))
+
+    outcome = store.load(0, IDS)
+
+    assert isinstance(outcome, Invalid)
+    assert "shard-00000.parquet" in outcome.reason
+    assert "content digest" in outcome.reason
+    plan = plan_shards(_letters("".join(IDS)), len(IDS))  # one shard of the ids
+    assert store.invalid(plan) == frozenset({0})
+    assert store.completed(plan) == frozenset()
+
+
+def test_read_rejects_a_file_without_a_digest(store: ShardStore) -> None:
+    store.write(0, IDS, CANDIDATES)
+    drop_the_digest(store.path_for(0))
+
+    with pytest.raises(DataError, match=r"shard-00000\.parquet.*no content digest"):
+        store.read(0, IDS)
+    assert isinstance(store.load(0, IDS), Invalid)
+
+
+def test_read_rejects_a_file_whose_stored_digest_is_not_that_of_its_rows(
+    store: ShardStore,
+) -> None:
+    store.write(0, IDS, CANDIDATES)
+    path = store.path_for(0)
+    pl.read_parquet(path, glob=False).write_parquet(
+        path, compression="zstd", metadata={"rinchen.content_sha256": "0" * 64}
+    )
+
+    with pytest.raises(DataError, match=r"shard-00000\.parquet.*content digest"):
+        store.read(0, IDS)
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        pl.exceptions.ComputeError("footer out of specification"),
+        pl.exceptions.PanicException("assertion failed in the metadata reader"),
+        OSError("input/output error"),
+    ],
+    ids=["polars error", "panic", "os error"],
+)
+def test_read_turns_an_unreadable_metadata_block_into_a_data_error(
+    store: ShardStore, monkeypatch: pytest.MonkeyPatch, failure: BaseException
+) -> None:
+    store.write(0, IDS, CANDIDATES)
+
+    def unreadable(*args: Any, **kwargs: Any) -> dict[str, str]:
+        raise failure
+
+    monkeypatch.setattr(pl, "read_parquet_metadata", unreadable)
+
+    with pytest.raises(DataError, match=r"shard-00000\.parquet.*metadata") as caught:
+        store.read(0, IDS)
+
+    assert caught.value.__cause__ is failure
+    assert isinstance(store.load(0, IDS), Invalid)
+
+
+def test_the_structural_problems_are_reported_before_the_missing_digest(
+    store: ShardStore,
+) -> None:
+    store.write(0, IDS, CANDIDATES)
+    drop_the_digest(store.path_for(0))
+
+    # Wrong ids and no digest: the cheap, more specific check speaks first.
+    with pytest.raises(DataError, match=r"id at index 1 is 'b', expected 'c'"):
+        store.read(0, ["a", "c", "b"])
+
+
+def test_every_single_bit_flip_that_changes_the_rows_is_reported_invalid(
+    store: ShardStore,
+) -> None:
+    # Page checksums are not verified by the Parquet reader, so a flipped bit
+    # often decodes to other text without any error. The digest must catch every
+    # such flip; the flips that raise or leave the rows as they were are fine.
+    # (A flip that aborts the process cannot be tested; none of the positions
+    # below does.) Every 7th byte, the bit cycling through all eight.
+    ids = [f"id-{n}" for n in range(8)]
+    candidates = [[f"Сайн байна уу {n}", f"Баярлалаа {n}", "", "ok"] for n in range(8)]
+    store.write(0, ids, candidates)
+    path = store.path_for(0)
+    original = path.read_bytes()
+    caught = 0
+
+    for position in range(0, len(original), 7):
+        damaged = bytearray(original)
+        damaged[position] ^= 1 << (position // 7 % 8)
+        path.write_bytes(damaged)
+        outcome = store.load(0, ids)
+        if isinstance(outcome, Loaded):
+            assert outcome.candidates == candidates, (
+                f"a flip of byte {position} was loaded as other text"
+            )
+        else:
+            assert isinstance(outcome, Invalid), f"byte {position}: {outcome}"
+            caught += 1
+
+    assert caught > 0  # the sweep reaches damage the store must report
 
 
 # --- paths that look like glob patterns ---------------------------------------

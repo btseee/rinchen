@@ -24,7 +24,9 @@ def write_corpus(frame: pl.DataFrame | pl.LazyFrame, path: Path) -> int:
     part_path = unique_part_path(path)
     try:
         lazy.select(CORPUS_SCHEMA.names()).sink_parquet(part_path, compression="zstd")
-        row_count = pl.scan_parquet(part_path).select(pl.len()).collect().item()
+        # The path is a file name: `[` or `*` in it must not match another file.
+        written = pl.scan_parquet(part_path, glob=False)
+        row_count = written.select(pl.len()).collect().item()
         part_path.replace(path)
     finally:
         part_path.unlink(missing_ok=True)
