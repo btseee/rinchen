@@ -1,19 +1,14 @@
-"""The vecalign-style sentence aligner (B6) against planted alignments.
-
-The planted data is built from a gold alignment of every type (1-1, 1-2, 2-1,
-2-2, 1-3, 3-1 and both deletions) with the real `HashEmbedder`: a sentence is a
-bag of concept words plus one or two noise words, so a span embeds as the sum
-of its sentences. The F1 and recall below are computed here with plain
-set arithmetic over exact `(src indexes, tgt indexes)` pairs, independent of
-the aligner.
-"""
+"""The vecalign-style sentence aligner (B6): quality gates on the planted
+alignments of `tests.support.planted_alignments` (real `HashEmbedder`, a gold
+alignment of every type), structural properties, edge cases, the embedder
+contract and a brute-force check of the cost formula and the DP."""
 
 from __future__ import annotations
 
+import itertools
 import random
 import time
-from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 
 import numpy as np
@@ -24,136 +19,19 @@ from numpy.typing import NDArray
 
 from rinchen.mine.align import Alignment, align
 from tests.support.embedders import HashEmbedder
-
-Pair = tuple[tuple[int, ...], tuple[int, ...]]
-
-SEED = 11
-NOISE_POOL_SIZE = 40
-SYLLABLES = (
-    "ba",
-    "ko",
-    "ti",
-    "ru",
-    "sen",
-    "lum",
-    "dor",
-    "fi",
-    "na",
-    "gar",
-    "mi",
-    "tho",
-    "vel",
-    "ju",
-    "pra",
-    "xo",
+from tests.support.planted_alignments import (
+    Pair,
+    Planted,
+    build_planted_alignments,
+    f1_score,
+    pairs_of,
+    recall_of_shape,
 )
-# (source sentences, target sentences) -> how many alignments of that shape.
-PLANNED_SHAPES = {
-    (1, 1): 94,
-    (1, 2): 10,
-    (2, 1): 10,
-    (2, 2): 4,
-    (1, 3): 3,
-    (3, 1): 3,
-    (1, 0): 6,
-    (0, 1): 6,
-}
-SENTENCES_PER_SIDE = 150
+
 MIN_F1 = 0.95
 MIN_ONE_TO_ONE_RECALL = 0.97
-MAX_DIAGONAL_BASELINE_F1 = 0.5
 ALIGN_SECONDS = 2.0
 DEFAULT_SKIP_COST = 0.9
-
-
-@dataclass(frozen=True)
-class Planted:
-    src: list[str]
-    tgt: list[str]
-    gold: list[Pair]
-    noise: frozenset[str]
-
-
-class _Vocabulary:
-    """Pseudo-words that are unique across the whole planted corpus."""
-
-    def __init__(self, rng: random.Random) -> None:
-        self._rng = rng
-        self._used: set[str] = set()
-
-    def fresh(self) -> str:
-        while True:
-            word = "".join(self._rng.choice(SYLLABLES) for _ in range(4))
-            if word not in self._used:
-                self._used.add(word)
-                return word
-
-
-def _side_sentences(
-    concept: Sequence[str], count: int, noise: Sequence[str], rng: random.Random
-) -> list[str]:
-    """`count` sentences that share the concept words out (at least two each)
-    and each add one or two noise words; no sentences for `count == 0`."""
-    if count == 0:
-        return []
-    words = list(concept)
-    rng.shuffle(words)
-    sizes = [2] * count
-    for _ in range(len(words) - 2 * count):
-        sizes[rng.randrange(count)] += 1
-    sentences = []
-    start = 0
-    for size in sizes:
-        sentence = words[start : start + size] + rng.sample(noise, rng.randint(1, 2))
-        rng.shuffle(sentence)
-        sentences.append(" ".join(sentence) + ".")
-        start += size
-    return sentences
-
-
-def build_planted_alignments() -> Planted:
-    rng = random.Random(SEED)
-    vocabulary = _Vocabulary(rng)
-    noise = [vocabulary.fresh() for _ in range(NOISE_POOL_SIZE)]
-    shapes = [shape for shape, count in PLANNED_SHAPES.items() for _ in range(count)]
-    rng.shuffle(shapes)
-    src: list[str] = []
-    tgt: list[str] = []
-    gold: list[Pair] = []
-    for src_count, tgt_count in shapes:
-        concept = [
-            vocabulary.fresh()
-            for _ in range(3 * max(src_count, tgt_count) + rng.randint(2, 4))
-        ]
-        gold.append(
-            (
-                tuple(range(len(src), len(src) + src_count)),
-                tuple(range(len(tgt), len(tgt) + tgt_count)),
-            )
-        )
-        src += _side_sentences(concept, src_count, noise, rng)
-        tgt += _side_sentences(concept, tgt_count, noise, rng)
-    return Planted(src=src, tgt=tgt, gold=gold, noise=frozenset(noise))
-
-
-def _pairs(alignments: Sequence[Alignment]) -> list[Pair]:
-    return [(alignment.src, alignment.tgt) for alignment in alignments]
-
-
-def _f1(predicted: Sequence[Pair], gold: Sequence[Pair]) -> float:
-    matched = len(set(predicted) & set(gold))
-    if matched == 0:
-        return 0.0
-    precision = matched / len(predicted)
-    recall = matched / len(gold)
-    return 2 * precision * recall / (precision + recall)
-
-
-def _recall_of_shape(
-    predicted: Sequence[Pair], gold: Sequence[Pair], shape: tuple[int, int]
-) -> float:
-    wanted = [pair for pair in gold if (len(pair[0]), len(pair[1])) == shape]
-    return len(set(predicted) & set(wanted)) / len(wanted)
 
 
 def _shape(alignment: Alignment) -> tuple[int, int]:
@@ -233,46 +111,16 @@ def aligned(planted: Planted) -> Timed:
     return Timed(alignments, time.perf_counter() - started)
 
 
-# --- the planted data ----------------------------------------------------------
-
-
-def test_planted_data_has_every_alignment_type(planted: Planted) -> None:
-    shapes = Counter((len(src), len(tgt)) for src, tgt in planted.gold)
-
-    assert dict(shapes) == PLANNED_SHAPES
-    assert len(planted.src) == len(planted.tgt) == SENTENCES_PER_SIDE
-    assert [i for src, _ in planted.gold for i in src] == list(range(len(planted.src)))
-    assert [j for _, tgt in planted.gold for j in tgt] == list(range(len(planted.tgt)))
-
-
-def test_planted_sentences_all_carry_noise_words(planted: Planted) -> None:
-    for sentence in planted.src + planted.tgt:
-        words = set(sentence.removesuffix(".").split())
-        assert words & planted.noise, sentence
-
-
-def test_planted_data_is_two_runs_equal() -> None:
-    first, second = build_planted_alignments(), build_planted_alignments()
-
-    assert first == second
-
-
-def test_planted_data_defeats_a_diagonal_baseline(planted: Planted) -> None:
-    diagonal = [((i,), (i,)) for i in range(SENTENCES_PER_SIDE)]
-
-    assert _f1(diagonal, planted.gold) < MAX_DIAGONAL_BASELINE_F1
-
-
 # --- quality gates ---------------------------------------------------------------
 
 
 def test_aligner_reaches_f1_0_95_on_planted_alignments(
     planted: Planted, aligned: Timed
 ) -> None:
-    predicted = _pairs(aligned.alignments)
+    predicted = pairs_of(aligned.alignments)
 
-    assert _f1(predicted, planted.gold) >= MIN_F1
-    assert _recall_of_shape(predicted, planted.gold, (1, 1)) >= MIN_ONE_TO_ONE_RECALL
+    assert f1_score(predicted, planted.gold) >= MIN_F1
+    assert recall_of_shape(predicted, planted.gold, (1, 1)) >= MIN_ONE_TO_ONE_RECALL
 
 
 def test_aligning_150_sentences_per_side_is_fast(aligned: Timed) -> None:
@@ -317,7 +165,7 @@ def test_identical_sides_align_one_to_one() -> None:
 
     alignments = align(sentences, sentences, HashEmbedder())
 
-    assert _pairs(alignments) == [((i,), (i,)) for i in range(20)]
+    assert pairs_of(alignments) == [((i,), (i,)) for i in range(20)]
     assert all(alignment.cost < 0.1 for alignment in alignments)
 
 
@@ -355,7 +203,7 @@ def test_one_empty_side_gives_only_deletions_without_embedding(
 
     alignments = align(src, tgt, spy, skip_cost=0.5)
 
-    assert _pairs(alignments) == expected
+    assert pairs_of(alignments) == expected
     assert [alignment.cost for alignment in alignments] == [0.5] * len(expected)
     assert spy.calls == []
 
@@ -363,14 +211,42 @@ def test_one_empty_side_gives_only_deletions_without_embedding(
 def test_single_sentence_each_aligns_when_they_are_the_same_text() -> None:
     alignments = align(["red moon sea"], ["red moon sea"], HashEmbedder())
 
-    assert _pairs(alignments) == [((0,), (0,))]
+    assert pairs_of(alignments) == [((0,), (0,))]
     assert alignments[0].cost == pytest.approx(0.0, abs=1e-4)
 
 
 def test_single_unrelated_sentences_are_both_deleted_source_first() -> None:
     alignments = align(["red moon sea"], ["cat dog sun"], HashEmbedder())
 
-    assert _pairs(alignments) == [((0,), ()), ((), (0,))]
+    assert pairs_of(alignments) == [((0,), ()), ((), (0,))]
+
+
+def test_single_matching_pair_aligns_without_being_identical() -> None:
+    alignments = align(
+        ["alpha beta gamma delta"], ["alpha beta gamma epsilon"], HashEmbedder()
+    )
+
+    assert pairs_of(alignments) == [((0,), (0,))]
+
+
+def test_one_source_sentence_that_joins_two_targets_aligns_one_to_two() -> None:
+    alignments = align(
+        ["alpha beta gamma delta oak"],
+        ["alpha beta elm", "gamma delta fir"],
+        HashEmbedder(),
+    )
+
+    assert pairs_of(alignments) == [((0,), (0, 1))]
+
+
+def test_two_source_sentences_that_split_one_target_align_two_to_one() -> None:
+    alignments = align(
+        ["alpha beta elm", "gamma delta fir"],
+        ["alpha beta gamma delta oak"],
+        HashEmbedder(),
+    )
+
+    assert pairs_of(alignments) == [((0, 1), (0,))]
 
 
 @pytest.mark.parametrize("max_k", [1, 0, -3])
@@ -389,10 +265,12 @@ def test_margin_k_below_one_raises() -> None:
         align(["a b"], ["a b"], HashEmbedder(), margin_k=0)
 
 
-@pytest.mark.parametrize("bad", [-0.1, float("nan")])
+@pytest.mark.parametrize("bad", [-0.1, float("nan"), float("inf")])
 @pytest.mark.parametrize("name", ["skip_cost", "merge_penalty"])
-def test_negative_or_nan_costs_raise(name: str, bad: float) -> None:
-    with pytest.raises(ValueError, match=name):
+def test_costs_that_are_not_finite_and_non_negative_raise(
+    name: str, bad: float
+) -> None:
+    with pytest.raises(ValueError, match=f"{name} must be finite and non-negative"):
         align(["a b"], ["a b"], HashEmbedder(), **{name: bad})
 
 
@@ -483,3 +361,124 @@ def test_embedder_returning_the_wrong_row_count_raises(bad_call: int) -> None:
 
     with pytest.raises(ValueError, match=r"expected 6 rows, got 5"):
         align(sentences, sentences, DroppingEmbedder(bad_call))
+
+
+# --- the cost formula and the DP against a brute-force search ---------------------
+
+_ORACLE_WORDS = ("red", "green", "blue", "cat", "dog", "sun", "moon", "sea", "ant")
+
+
+class _Oracle:
+    """The edge weights and the optimum, re-derived without the aligner's
+    batching: every text is embedded on its own and every segmentation is
+    enumerated. Each sentence carries a tag word nobody else has, so no two
+    spans are identical and float32 noise cannot decide a cost."""
+
+    def __init__(
+        self,
+        src: Sequence[str],
+        tgt: Sequence[str],
+        *,
+        skip_cost: float,
+        margin_k: int,
+        merge_penalty: float,
+    ) -> None:
+        self.src, self.tgt = src, tgt
+        self.skip_cost, self.margin_k, self.merge_penalty = (
+            skip_cost,
+            margin_k,
+            merge_penalty,
+        )
+        self._embedder = HashEmbedder()
+        self._vectors: dict[str, NDArray[np.float64]] = {}
+
+    def _distance(self, x: str, y: str) -> float:
+        for text in (x, y):
+            if text not in self._vectors:
+                self._vectors[text] = self._embedder.embed([text])[0].astype(np.float64)
+        return min(max(1.0 - float(self._vectors[x] @ self._vectors[y]), 0.0), 2.0)
+
+    def _margin(self, x: str, others: Sequence[str]) -> float:
+        nearest = sorted(self._distance(x, other) for other in others)[: self.margin_k]
+        # Fewer neighbours than margin_k: the missing ones are unrelated (1.0).
+        nearest += [1.0] * (self.margin_k - len(nearest))
+        return sum(nearest) / self.margin_k
+
+    @staticmethod
+    def _spans(sentences: Sequence[str], size: int) -> list[str]:
+        return [
+            " ".join(sentences[start : start + size])
+            for start in range(len(sentences) - size + 1)
+        ]
+
+    def weight(self, src_start: int, a: int, tgt_start: int, b: int) -> float:
+        if a == 0 or b == 0:
+            return self.skip_cost
+        x = " ".join(self.src[src_start : src_start + a])
+        y = " ".join(self.tgt[tgt_start : tgt_start + b])
+        margin = 0.5 * (
+            self._margin(x, self._spans(self.tgt, b))
+            + self._margin(y, self._spans(self.src, a))
+        )
+        cost = self._distance(x, y) / max(margin, 1e-6)
+        return cost * (a + b) + self.merge_penalty * (a + b - 2)
+
+    def segmentations(
+        self, i: int, j: int, max_k: int
+    ) -> Iterator[list[tuple[int, int, int, int]]]:
+        if (i, j) == (len(self.src), len(self.tgt)):
+            yield []
+            return
+        steps = [(1, 0), (0, 1)] + [
+            (a, b)
+            for a, b in itertools.product(range(1, max_k), repeat=2)
+            if a + b <= max_k
+        ]
+        for a, b in steps:
+            if i + a <= len(self.src) and j + b <= len(self.tgt):
+                for rest in self.segmentations(i + a, j + b, max_k):
+                    yield [(i, a, j, b), *rest]
+
+    def total(self, segmentation: Sequence[tuple[int, int, int, int]]) -> float:
+        return sum(self.weight(*step) for step in segmentation)
+
+
+def _oracle_sentences(rng: random.Random, side: str, count: int) -> list[str]:
+    return [
+        " ".join([*rng.sample(_ORACLE_WORDS, rng.randint(1, 3)), f"{side}{i}"])
+        for i in range(count)
+    ]
+
+
+def test_aligner_matches_a_brute_force_search_over_all_segmentations() -> None:
+    rng = random.Random(21)
+    for _ in range(30):
+        src = _oracle_sentences(rng, "s", rng.randint(1, 6))
+        tgt = _oracle_sentences(rng, "t", rng.randint(1, 6))
+        max_k = rng.randint(2, 5)
+        # margin_k == 1 is left out: with one neighbour a pair that is its own
+        # nearest neighbour costs 1.0 whatever its distance, and for
+        # near-identical spans the 1e-6 floor and float32 rounding, not the
+        # formula, decide the cost.
+        options = {
+            "skip_cost": rng.choice([0.5, 0.9, 1.5]),
+            "margin_k": rng.randint(2, 3),
+            "merge_penalty": rng.choice([0.0, 0.3]),
+        }
+        oracle = _Oracle(src, tgt, **options)
+
+        alignments = align(src, tgt, HashEmbedder(), max_k=max_k, **options)
+
+        chosen = [
+            (a.src[0] if a.src else 0, len(a.src), a.tgt[0] if a.tgt else 0, len(a.tgt))
+            for a in alignments
+        ]
+        best = min(oracle.total(s) for s in oracle.segmentations(0, 0, max_k))
+        assert oracle.total(chosen) == pytest.approx(best, rel=1e-4, abs=1e-6)
+        assert sum(a.cost for a in alignments) == pytest.approx(
+            best, rel=1e-4, abs=1e-6
+        )
+        for alignment, step in zip(alignments, chosen, strict=True):
+            assert alignment.cost == pytest.approx(
+                oracle.weight(*step), rel=1e-4, abs=1e-6
+            )
