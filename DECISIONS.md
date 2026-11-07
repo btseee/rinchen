@@ -1162,3 +1162,212 @@ trains a tiny config on a GPU without a refusal.
 check .` all checks passed, `mypy src` no issues in 99 source files, `pytest -m "not
 network" -q` 2833 passed, 1 skipped, 10 deselected in 177 s. Each new test was proved by
 mutation: the code under test was broken and the test failed.]
+
+## 2026-11-08: D6 synthetic data - the rulings, made without a review round
+
+D6 (`src/rinchen/mbr/`, `src/rinchen/synth/`, `src/rinchen/config/synth.py`,
+`src/rinchen/cli/synth.py`, `configs/data/synth.yaml`) filled gaps in the master plan with the
+rulings below. **They were made by the builder without a review round, because the user's
+instruction for this stretch was "Proceed. I'm going to sleep now. Don't stop until you finish
+everything. Commit everything."** None is an approved decision; each lists what it costs if wrong
+so that it can be undone. The design with the full wording is
+`docs/superpowers/specs/2026-11-08-d6-synthetic-data-design.md` (rulings 1 to 12, amended to match
+the finished code, and the amendments A to V; the numbers and letters below are the same);
+procedures, measured numbers and the known limitations are in `docs/runbooks/06_synthetic.md`.
+The work lives on branch `d6-synthetic-data`, cut from `main` at `0d534a3`; it is not merged and
+not pushed. The design and this entry carry the date 2026-11-08, the day the run was planned for;
+the commits and the measurements are stamped 2026-11-07 by the machine's clock.
+
+[DESIGN: 1. Origin encodes role and generator family.] `bt` jobs give `bt`; `ft` jobs give
+`synth_llm` or `synth_nmt` by generator kind; the `ft` origin itself stays reserved for forward
+translation by our own teacher (D10). The master plan lists the four origins without saying which
+job produces which. Cost if wrong: one table in `tags.py` and a re-labelling of produced corpora.
+[DESIGN: 2. One `Translator` protocol for every generator.] The master plan's
+`ct2_baselines.translate` signature is generalised to the LLM clients. Cost if wrong: LLM-specific
+features (system prompts, few-shot) are not expressible without a protocol change.
+[DESIGN: 3. Chat completions with one request per text,] server-side batching and `concurrency`
+threads on the client, instead of the completions endpoint with prompt lists (which would need the
+model's chat template in the client). Cost if wrong: more HTTP overhead per text.
+
+[DESIGN: 4. Prompt wording is the builder's,] not a published Hy-MT prompt: the master plan names
+the model but not its template and no source for it is available offline. It is three string
+constants joined by plain concatenation, with the Cyrillic instruction present exactly when the
+target is `khk_Cyrl`. Cost if wrong: translation quality of a real run may differ from the model's
+recommended prompt; the three constants are what to replace, and the shard fingerprint does not
+notice the change (run with `--force` or another `--seed`). [DESIGN: 5. Selection order empty,
+purity, copy, QE, MBR.] Cheap filters first; QE (GPU) only on survivors. Cost if wrong: a candidate
+that QE would have rated best but that fails a threshold never competes in MBR. [DESIGN: 6. QE
+thresholds are the D4 ones, reused through `QeConfig`.] `max_metricx_qe` 8.0 (lower is better) and
+`min_cometkiwi` 0.55, unvalidated priors. Cost if wrong: the numbers are arbitrary until real scores
+exist, and a change to the D4 defaults changes D6 too (the YAML pins them).
+
+[DESIGN: 7. Shard directory keyed by the job fingerprint] (input rows, job, generator config, shard
+size, seed). Cost if wrong: changing any config value regenerates everything; old shard
+directories stay until removed; the prompt wording and the weights behind a path or a served model
+name are not in the key, so changing those silently reuses stale shards. [DESIGN: 8. Per-request
+seeds derived from the request content,] not from global order, so a resumed run asks for the
+same sampling seed as an uninterrupted one. Cost if wrong: servers that ignore `seed` give
+non-reproducible text, and the job's `--seed` only names the shard directory: a new `--seed`
+regenerates every shard with the same sampling seeds. [DESIGN: 9. MBR utilities limited to chrF]
+(and the negation wrapper). Cost if wrong: no neural MBR until the COMET and MetricX
+reference-based scorers exist.
+
+[DESIGN: 10. Monolingual input contract is `id`, `lang`, `text`] (extras kept), not the full
+"Monolingual row" of the master plan, because that schema has no builder yet. Cost if wrong: one
+adapter when a monolingual stage exists. [DESIGN: 11. No `--force` skip logic beyond shard reuse.]
+A rerun reuses valid shards and recomputes selection; `--force` ignores existing shards. Cost if
+wrong: selection is recomputed on every run (cheap next to generation). [DESIGN: 12. A job never
+involves traditional script.] `JobConfig` rejects any registry language whose scripts include
+Mongolian script on either side: a generator produces Cyrillic Mongolian and the D5 converter owns
+traditional script. Cost if wrong: no direct synthetic `mn_Mong` data; it has to come from the
+converter, which is a scaffold.
+
+[DESIGN: Amendment A. The selection reads the real names of the corpus row-id helper and frame
+constructor from `rinchen.corpus.schema`.] No new schema. Cost if wrong: none; the rows follow the
+schema. [DESIGN: B. A NaN expected utility is a `ValueError` naming the segment and candidate,]
+also when the utilities cannot be averaged (+inf with -inf, overflow); strings and non-sequences are
+a `TypeError`. Cost if wrong: a utility that returns NaN stops the run instead of silently winning
+or losing at index 0; chrF cannot return NaN, a future neural utility might. [DESIGN: C. `selection.qe`
+is D4's `QeConfig` unchanged.] MetricX-QE is lower-is-better, CometKiwi higher-is-better; a wrong
+score count is an `UpstreamError`. Cost if wrong: see ruling 6; the first draft had one
+`qe_min_score` of -1.0 with "higher is better", which is wrong for MetricX-QE. [DESIGN: D. `JobConfig`
+rejects any registry language whose scripts include Mongolian script,] decided by the registry's
+scripts and not by a code. Cost if wrong: see ruling 12.
+
+[DESIGN: E. `Ct2Config.model_dir` and `spm_model` are repository-anchored, blank-rejected paths]
+like the D4 configs. Cost if wrong: the fingerprint, hence the shard directory, changes when the
+checkout moves. [DESIGN: F. `Ct2Config` rejects `n > beam_size`.] Cost if wrong: asking for more
+hypotheses than the beam needs a larger `beam_size`. [DESIGN: G. A config that supplies `generators`
+and no `jobs` gets no jobs.] Cost if wrong: a config that replaces the generators must list its
+jobs. [DESIGN: H. A choice with a null, absent or empty `message.content`, and `choices: []`, give
+no candidate and are not errors.] Cost if wrong: a server fault that arrives as an empty content looks
+like a refusal and shows as `no_candidates`. [DESIGN: I. The backoff exponent is capped]
+(`2**min(attempt, 10)`, and the sleep at 30 s). Cost if wrong: none. [DESIGN: J. Non-2xx errors carry
+a 200-character preview of the response body.] Cost if wrong: a server that echoes request fields in
+its error body can put a text fragment into an error message.
+
+[DESIGN: K. Both CT2 families append `</s>` to the source tokens and the MADLAD tag is encoded with
+the text.] The Hugging Face tokenizers do; the first spec line for MADLAD omitted the `</s>`. Cost if
+wrong: unverified against a real converted model; a wrong convention shows as poor or empty
+hypotheses on the first real run, and is a one-line change per family. [DESIGN: L. The CT2 backend
+passes `max_tokens` as `max_decoding_length`;] the library's default of 256 silently truncated long
+outputs; only `temperature` and `top_p` are ignored. Cost if wrong: none beyond longer decodes.
+[DESIGN: M. QE pairs follow the final pair orientation:] `bt` (candidate, real text), `ft` (real
+text, candidate). Cost if wrong: if the scorer should see the original source text rather than the
+synthetic one on a `bt` pair, the orientation is wrong for `bt`; one swap in `select.py`.
+[DESIGN: N. A candidate UTF-8 cannot encode is dropped by `clean_candidates`,] and
+`ShardStore.write` refuses one with a `DataError`. A server's JSON escape for a lone surrogate
+decodes to one, and the write after paid generation crashed with a bare `UnicodeEncodeError`. Cost
+if wrong: such a candidate is silently one fewer, or `no_candidates`.
+
+[DESIGN: O. The pipeline order is empty, purity, copy, QE.] A copy is dropped before it costs a QE
+call. Cost if wrong: a copy that would also fail QE counts as `dropped_copy`, so the counts differ
+from the first spec's order. [DESIGN: P. QE thresholds and the purity share are compared in
+float32,] as the D4 stages do. Cost if wrong: a value within float32 rounding of a threshold passes
+where float64 would fail. [DESIGN: Q. The copy rule compares the candidate with the real text,
+both stripped.] Cost if wrong: a candidate equal to the real text apart from surrounding whitespace
+is a copy. [DESIGN: R. `run_job` takes `generator_name` and `generator_cfg` as well.] The
+fingerprint and the corpus string need them. Cost if wrong: callers pass them explicitly.
+
+[DESIGN: S. Selection runs per shard and the counts are summed.] Memory is bounded by one shard plus
+the accumulated corpus rows instead of every candidate of the job. Cost if wrong: equality with one
+global selection holds only for scorers whose score depends on the (source, translation) pair
+alone, and a scorer call never spans two shards (a smaller last batch per shard). [DESIGN: T.
+`job.generator != generator_name` is a `ConfigError`.] Cost if wrong: none. [DESIGN: U. One decode per
+shard per run:] `ShardStore.load` returns `Loaded`, `Missing` or `Invalid(reason)`; `completed` and
+`invalid` are built on it and only the dry run calls `completed`. Cost if wrong: two methods with
+no production caller besides the dry run.
+
+[DESIGN: V. `created` is the stamp of the run, `begin_commit` goes right before the first output
+write, the manifest `status` carries the QE status, `counts.json` is an output, and the scorer is
+skipped with a recorded reason.] A rerun's corpus is identical to the first run's apart from
+`created` (the plan said byte-identical); the shards are resumable work files and not manifest
+outputs, so a failed generation must not erase an earlier manifest; `counts.json` (fingerprint, job,
+generator, counts, shard statistics) is hashed as an output; the scorer is skipped when it needs
+CUDA and none is available (`rinchen.filter.qe.skip_reason`) or with `--no-qe`. Cost if wrong: the
+corpus file is not byte-identical across runs; the earlier manifest stands while newer shards are
+being generated.
+
+[EVIDENCE: The first upstream finding, `D-POLARS-GLOB`. polars 2.1.0 `pl.read_parquet(path)` and
+`pl.scan_parquet(path)` expand `[`, `*` and `?` in a path as a pattern. Reproduced on 2026-11-07: a
+file `run[1]/shard-00000.parquet` raises `ComputeError: failed to retrieve first file schema
+(parquet): expanded paths were empty`, and `glob=False` reads it; a file named `a*.parquet` beside
+`ab.parquet` and `a1.parquet` returned the rows of all three until `glob=False`. In the shard store
+this made every existing shard unreadable and a resume silently regenerated everything (found in
+review); `glob=False` is now on every Parquet read in `shards.py` and `corpus/readers.py`. Open
+when this was written: `write_corpus` (`corpus/writers.py`) reads its output back through
+`pl.scan_parquet(part_path)` without it.]
+
+[EVIDENCE: The second upstream finding, `D-POLARS-PANIC`. A damaged Parquet file can raise
+`pyo3_runtime.PanicException` from polars 2.1.0; it derives from `BaseException`, not `Exception`,
+so `except Exception` does not catch it. Single-bit flips of a 3,324-byte shard-shaped file (8
+rows of 2 candidates), 150,000 trials, a parent process restarting the child after an abort,
+2026-11-07: 38,581 `PolarsError`, 45,528 decoded to the same frame, 65,607 decoded without error to
+a different frame, 276 `PanicException` and 8 aborts of the process ("memory allocation of
+2305843009213693952 bytes failed", SIGABRT, not catchable). A realistic 156,403-byte shard (512
+rows of 4 candidates, 3,000 flips): 1,101 errors, 22 unchanged, 1,877 different, no panic, no
+abort. The store catches the panic and treats the file as invalid; page checksums are not checked
+and no content checksum was added, so silent bit rot inside a stored candidate passes
+validation, and a rare damaged file can abort the process. Truncation and partial writes, the
+crash cases, are caught.]
+
+[EVIDENCE: The third upstream finding, `D-CT2-NUMHYP`. `ctranslate2.Translator.translate_batch`
+(4.8.4, CPU) raises `ValueError: The number of hypotheses cannot be greater than beam_size *
+patience` when `num_hypotheses` exceeds `beam_size` (`patience` defaults to 1 in this
+version's `translate_batch` signature, as `beam_size` does to 2). Reproduced on 2026-11-07 with the
+tiny converter model of a D5 test run: `beam_size=4, num_hypotheses=4` returns 4 hypotheses,
+`4, 5` and `1, 2` raise the error, `2, 1` returns 1. It would end a long run at its first batch, so
+`Ct2Config` rejects `n > beam_size` when the config is loaded.]
+
+[EVIDENCE: The D4 QE direction correction. The first spec draft had a QE floor `qe_min_score`
+(-1.0, "higher is better, the D4 convention"). D4's MetricX-QE threshold is a maximum
+(`max_metricx_qe` 8.0 on a 0 to 25 scale where lower is better) and CometKiwi's a minimum
+(`min_cometkiwi` 0.55); a floor of -1.0 on the MetricX-QE scale would have rejected nothing. The spec
+and plan were corrected before the first implementation task (commit `8182462`) and the selection
+config now reuses `QeConfig`.]
+
+[EVIDENCE: Per-shard selection against one global selection. Selection is per source and the QE
+batches only group calls, so selecting each shard on its own and summing the counts gives the same
+rows and counts as one selection over the whole frame for a scorer that depends on the (source,
+translation) pair alone. A test proves equality for shard sizes 1, 3, 7, 8, 40 and 100, for `bt`
+and `ft`, with and without a scorer (corpus, counts, status, each pair scored exactly once); the
+review of the combined diff compared 746 random cases and all were identical.]
+
+[EVIDENCE: The float32 comparison. Purity is a float64 sum of per-script shares and D4 compares
+float32. Three Han, three Hiragana, three Katakana and one Latin letter give shares 0.3, 0.3, 0.3
+and 0.1; the three 0.3 sum to 0.8999999999999999, which fails `>= 0.9` in float64 and passes in
+float32 (reproduced 2026-11-07 with `rinchen.synth.select`); three pure-Japanese splits sum to
+0.9999999999999999 and failed `min_script_share: 1.0` in float64. QE: a MetricX score of 7.30000019
+against the threshold 7.3, and 0.699999988 against 0.7, round to the same float32 and pass as in D4,
+and fail in float64. The review found it (an Important finding); both comparisons were changed and
+pinned with boundary tests.]
+
+[EVIDENCE: The tiny run, measured through the CLI in process on 2026-11-07 (Intel Core Ultra 7
+265K, 20 cores, 46 GiB, CPython 3.14.10, polars 2.1.0): the 40 planted rows give sources 40,
+candidates 60, empty 5, purity 10, QE 10, copy 0, no candidates 5, no survivor 20, selected 15 for
+`bt` and `ft` (without QE: QE 0, no survivor 10, selected 25), in 5 shards, 5 translator calls of 8
+texts, 42.5 ms of wall time (median of 7, 40.7 to 44.9 ms); `corpus.parquet` 7,718 bytes,
+`counts.json` 492, a shard file 1,217 to 1,225 bytes. MBR (single thread, chrF): `n * (n - 1)`
+calls, 12, 56 and 240 for n = 4, 8 and 16, 0.66, 3.06 and 13.57 s per 1,000 segments of 51
+characters and 2.16, 9.95 and 43.07 s per 1,000 of 189 characters. Input handling, 200,000 rows of
+about 200 Cyrillic characters: `read_monolingual` 0.16 to 0.20 s, `plan_shards` 0.10 to 0.11 s,
+`job_fingerprint` 0.55 to 0.57 s; RSS 65.2 MiB at start, 219.5 MiB after the read, 323.1 MiB after
+planning (about 544 bytes per row of tuples), peak 323.0 MiB. Mutation checks by hand, one mutant at
+a time, per task as recorded during the build: MBR 42, config 110, prompts 49, clients 121, CT2 52
+(and 18 in the fix round), shards 80, selection 58 (about 45 in the fix round), runner 60 (40
+after the refactor), CLI about 52, end batch 35; every survivor was shown to be equivalent.]
+
+[EVIDENCE: Not verified. No vLLM or llama.cpp server, no NLLB or MADLAD CTranslate2 model and no
+GPU was ever used, so the client paths ran against fakes only; the MADLAD and NLLB token
+conventions, a server's handling of `seed`, `n` and `Retry-After`, throughput and GPU memory are
+unknown; the prompts were never tried on a model; no Mongolian reader judged any output (none
+exists); every threshold and default is a prior; the real MetricX-QE scorer was not run inside D6;
+Windows and macOS were not run; concurrent runs into one output directory are not guarded; memory
+beyond 200,000 rows was extrapolated and the memory of a whole `run_job` was not measured.]
+
+[DESIGN: Gates.] Open, because they need a real generator, data or a reader: running any real
+generator, a Mongolian reader's judgement of the output, calibration of the QE floor and the script
+share, a language identifier on the synthetic side (purity cannot tell Mongolian from other
+Cyrillic text), COMET and MetricX as MBR utilities, and the training-time `<bt>` and `<ft>`
+insertion (D7 and D8). The D3 gates assigned to D4 and the D5 gates that need real text stay open as
+recorded there.

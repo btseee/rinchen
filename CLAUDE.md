@@ -39,11 +39,13 @@ CLAUDE.md STATE.md DECISIONS.md pyproject.toml uv.lock justfile
 configs/base.yaml configs/profiles/{tiny,full}.yaml configs/{spm,eole,serve}/
 configs/languages.yaml configs/spm/{tiny_1k,student_64k,teacher_128k}.yaml
 configs/data/sources.yaml configs/data/sources.tiny.yaml configs/data/filters.yaml
+configs/data/synth.yaml
 configs/eole/converter{,_tiny}.yaml configs/spm/converter_char.yaml
 docs/STACK.md docs/VERIFY.md
 docs/runbooks/00_environment.md docs/runbooks/01_acquisition.md
 docs/runbooks/02_human_testsets.md docs/runbooks/03_tokenizer.md
 docs/runbooks/04_filtering_mining.md docs/runbooks/05_script_converter.md
+docs/runbooks/06_synthetic.md
 docs/research/  docs/superpowers/{specs,plans}/
 src/rinchen/{config,manifest,utils,cli,text,lang,split,spm,corpus,filter,mine,script_conv,synth,metrics,eval,serve}/
 src/rinchen/acquire/{http,opus,hf,warc,commoncrawl,registry}.py
@@ -56,12 +58,16 @@ src/rinchen/mine/{embed,align,docalign,pairs}.py src/rinchen/cli/{filter,mine,er
 src/rinchen/script_conv/{alphabet,validate,segments,eval,fallback,rules,data,char_model,config,train,export,runtime,_subprocess}.py
 src/rinchen/script_conv/{lexicon,standardized_variants}.tsv (package data)
 src/rinchen/cli/convert_script.py
+src/rinchen/mbr/{utility,mbr}.py src/rinchen/config/synth.py src/rinchen/cli/synth.py
+src/rinchen/synth/{tags,translator,prompts,_chat_completions,vllm_client,llamacpp_client}.py
+src/rinchen/synth/{ct2_baselines,_candidates,_texts,shards,select,plan,bt,ft,run}.py
 src/rinchen/errors.py src/rinchen/__init__.py
 tests/ scripts/ plans/ reports/ manifests/
 manifests/ucd_standardized_variants.json
 tests/{unit,property,golden,integration}/ tests/fixtures/{annot,golden,raw,spm,script_conv}/
 tests/support/ (planted corpus and alignments, fake embedders, tiny LID model,
-  tiny_converter, stub_runtime, fake_process, script_reference)
+  tiny_converter, stub_runtime, fake_process, script_reference, planted_synth,
+  synth_cli, fake_llm_server)
 scripts/build_spm_fixture.py (regenerates tests/fixtures/spm/tiny_corpus)
 scripts/build_script_conv_fixtures.py (reference TSV -> lexicon, golden words, tiny fixture)
 data/{raw,clean,mined,synth,test}/ (gitignored content, tracked dirs)
@@ -97,7 +103,12 @@ a scaffold, not a quality converter: the rule baseline spells 237 of 1,022
 held-out dictionary words exactly, the tiny model memorises a 500-word fixture,
 the full profile was never trained, and the gates that need real script text or a
 Mongolian reader (the control-character audit, the render check, the review of the
-lexicon and the fallback) stay open. Next up: D6 (Synthetic data). See `STATE.md`.
+lexicon and the fallback) stay open. D6 (Synthetic data) is done locally on branch
+`d6-synthetic-data` (cut from `main` at `0d534a3`), not merged and not pushed, and no CI run
+covers it: its STOP gate (a tiny synth run through the CLI with a fake generator) is met on
+planted data. No generator, server, model or GPU ever ran (every client was tested against
+fakes), no real monolingual corpus exists, and the gates that need a real generator, real data
+or a Mongolian reader stay open. Next up: D7 (Multilingual ablations). See `STATE.md`.
 
 ## Evidence and full plan
 

@@ -364,19 +364,100 @@ worked example, the measurement scripts and the reproductions of both upstream d
 described in the runbook and in `docs/VERIFY.md`, 2026-11-07, commits `ed7ead9` through
 the final review fixes.]
 
-Branch status (updated 2026-11-07, after the D5 merge): `main` holds D3, the D3
-research follow-up, D4 and D5, and is at `862e176` (the D5 merge tip; `2346cea` was the
-D3 end, `b38eaae` the D4 merge tip and `4eac98f` the commit that recorded the D4 merge;
-no `d3-research-followup`, `d4-filtering-mining` or `d5-script-converter` ref remains).
-At the merge `main` was 81 commits ahead of `origin/main` (`9e7b0ec`); it is unpushed,
-and no CI run covers D3, D4 or D5. The full local gate was rerun on the merged tree: 2833 passed,
-1 skipped, 10 deselected, in 171 s.
+**D6 (synthetic data) is done on branch `d6-synthetic-data`; its STOP gate (a tiny synth
+run through the CLI with a fake generator) is met locally.** The branch was cut from `main`
+at `0d534a3` on 2026-11-07, is not merged and not pushed (the overnight run made no merge
+and no push), and no CI run covers it. It is 21 commits ahead of `main` as of `510258d`
+(the last code commit; the commit that records this is the next one). It is a tested
+pipeline, not a pipeline that ever ran: no vLLM or llama.cpp server, no NLLB or MADLAD
+CTranslate2 model and no GPU was used by any test or measurement, every client path was
+tested against fakes, no real monolingual corpus exists, the prompts are the builder's
+wording and were never tried on a model, and no Mongolian reader has judged anything.
+Built: `rinchen.mbr` (`Utility`, `ChrfUtility`, `NegatedUtility`, `select`), `rinchen.synth`
+(`tags`, `translator`, `prompts`, the shared `_chat_completions` base with the vLLM and
+llama.cpp clients, `ct2_baselines` for NLLB and MADLAD, `_candidates`, `_texts`, `shards`,
+`select`, `plan`, `bt`, `ft`, `run`), `rinchen.config.synth` with `configs/data/synth.yaml`,
+the command `rinchen synth run` (`rinchen.cli.synth`), the test helpers `planted_synth.py`,
+`synth_cli.py` and `fake_llm_server.py` in `tests/support/`, and
+`docs/runbooks/06_synthetic.md`. The design is
+`docs/superpowers/specs/2026-11-08-d6-synthetic-data-design.md` (updated to the finished code);
+its 12 rulings and the 22 amendments A to V, made without a review round because the user
+said "Proceed. I'm going to sleep now. Don't stop until you finish everything. Commit
+everything.", are condensed in DECISIONS.md ("2026-11-08: D6 synthetic data"). Every task was
+reviewed and fixed once, a batch of parked review minors followed (`510258d`), and a final
+whole-branch review and its fix wave were still to run when this was written. Gates, run for
+real on Linux, CPython 3.14.10, 2026-11-07 (`just` is not installed here, so the four gate
+commands were run as one chain), the last gate of the code, on `510258d`: `ruff format
+--check .` clean, `ruff check .` clean, `mypy src` clean, `pytest -m "not network" -q` --
+**4294 passed, 1 skipped, 10 deselected** in 192 s (3 min 15 s for the four commands) (2833
+passed at the D5 merge); rerun with these records added, the same counts in 225 s (3 min 47 s
+for the four commands).
+Evidence, all through the CLI in process with planted fakes: the 40 planted rows give exactly
+sources 40, candidates 60, empty 5, purity 10, QE 10, copy 0, no candidates 5, no survivor 20
+and selected 15 for both `bt` and `ft` (without QE: QE 0, no survivor 10, selected 25), in 5
+shards and 5 translator calls of 8 texts, 42 ms of wall time (median of 7); the corpus
+validates against `CORPUS_SCHEMA`; origins `bt` and `synth_llm`; a run that dies after shard 1
+exits 4, leaves two shards, and the resumed run requests only shards 3 to 5 and ends with the
+rows of an uninterrupted run (identical apart from the `created` stamp). MBR cost: `n * (n - 1)`
+chrF calls per segment (12, 56 and 240 for n = 4, 8 and 16), 2.2 s, 9.9 s and 43 s per 1,000
+189-character segments. Input handling, 200,000 rows of about 200 Cyrillic characters:
+`read_monolingual` 0.16 to 0.20 s, `plan_shards` 0.11 s (about 544 bytes per row of Python
+tuples), `job_fingerprint` 0.56 s, peak RSS about 323 MiB with 65 MiB at start (an extrapolation
+to ten times the rows, about 2.5 GiB, was not measured). Mutation checks done by hand during
+the build, one mutant at a time, as recorded per task: MBR 42, config 110, prompts 49, clients
+121, CT2 52 (and 18 more in the fix round), shards 80, selection 58 (about 45 more in the fix
+round), runner 60 (40 more after the refactor), CLI about 52, end batch 35; every survivor was
+shown to be an equivalent mutant.
+Findings worth knowing: three upstream facts, recorded in `docs/VERIFY.md`. `D-POLARS-GLOB`:
+`pl.read_parquet` and `pl.scan_parquet` expand `[`, `*` and `?` in a path as a pattern, so a
+shard directory named `run[1]` made every shard unreadable and a resume silently regenerated
+everything (`glob=False` everywhere). `D-POLARS-PANIC`: a damaged Parquet file can raise
+`PanicException`, a `BaseException` (caught); in 150,000 single-bit flips of a small shard-shaped
+file 276 panicked, 8 aborted the process with a Rust allocation failure (not catchable) and
+65,607 decoded without error to different data, so silent bit rot in a shard is not detected.
+`D-CT2-NUMHYP`: libctranslate2 4.8.4 raises "The number of hypotheses cannot be greater than
+beam_size * patience" at the first batch, so `Ct2Config` rejects `n > beam_size` at load. Also:
+the first draft of the spec had the QE floor in the wrong direction (MetricX-QE is lower-is-
+better, D4's `max_metricx_qe`); the selection compares purity and QE in float32 as D4 does (a
+three-script Japanese candidate sums to 0.8999999999999999 and failed 0.9 in float64); purity
+is a script check, not a language check (Kazakh and Russian Cyrillic score 1.0); the job
+fingerprint covers the operational knobs and omits the prompt wording and the model weights, so
+those silently reuse stale shards; `--seed` only names the shard directory and does not reach the
+server's sampling seed; per-shard selection equals one global selection for scorers that depend on
+the (source, translation) pair alone (746 random comparisons in review).
+Open gates (none can be done without a real generator, data or a reader): running any real
+generator (the servers, the NLLB and MADLAD models, their token conventions, prompt quality,
+throughput, GPU memory); a Mongolian reader's judgement of any output; calibrating the QE floor,
+the script share and every default; a language identifier on the synthetic side; COMET and MetricX
+as MBR utilities; training-time `<bt>` and `<ft>` insertion (D7 and D8). Known and open when this
+was written: `write_corpus` reads its output back through a path polars expands as a pattern (an
+out dir containing `[`, `*` or `?` fails after generation was paid for), concurrent runs into one
+out dir are not guarded, a scorer's `OSError` is worded as "cannot write the synth outputs". NOT
+verified: any real server or model, the MADLAD and NLLB token conventions, the real MetricX-QE
+scorer inside D6, Windows and macOS, memory beyond 200,000 rows and of a whole `run_job` beyond the
+tiny run. [EVIDENCE: the gate chain, the integration test, the worked example, the measurement
+scripts and the reproductions of the three upstream facts described in the runbook and in
+`docs/VERIFY.md`, 2026-11-07, commits `8d2cd7f` through `510258d`.]
 
-Next step: D6 (Synthetic data). Nothing in D5 blocks it. Its inputs from D5: the converter
-is a scaffold, so no output of `ScriptConverter` should be treated as real `mn_Mong` data;
-the D3 gates assigned to D4 and the D5 gates that need real text or a reader stay open;
-`mn_Mong` length-ratio bounds stay unwired in `configs/data/filters.yaml` until real
-script pairs exist.
+Branch status (updated 2026-11-07, after the D6 build): `main` holds D3, the D3
+research follow-up, D4 and D5, and is at `0d534a3` (the commit that records the D5 merge;
+`862e176` is the D5 merge tip, `2346cea` was the D3 end, `b38eaae` the D4 merge tip and
+`4eac98f` the commit that recorded the D4 merge; no `d3-research-followup`,
+`d4-filtering-mining` or `d5-script-converter` ref remains). D6 lives on its own branch,
+`d6-synthetic-data`, cut from `main` at `0d534a3`; it is not merged into `main` and not
+pushed. At the D5 merge `main` was 81 commits ahead of `origin/main` (`9e7b0ec`); it is
+unpushed, and no CI run covers D3, D4, D5 or D6. The full local gate was last run on the D6
+branch: 4294 passed, 1 skipped, 10 deselected (D6 included), on `510258d`; on the merged D5
+tree `main` gave 2833 passed.
+
+Next step: D7 (Multilingual ablations). Nothing in D6 blocks it. Its inputs from D6: `rinchen
+synth run` writes `corpus.parquet` (`CORPUS_SCHEMA` rows whose `origin` is `bt` for back-
+translation and `synth_llm` or `synth_nmt` for forward translation, `corpus` `<kind>:<generator>`),
+and `rinchen.synth.tags.data_origin_tag(origin)` gives the `<bt>` or `<ft>` tag a training row of
+that origin carries; inserting it into the source, and the bt ratio and tag placement ablations,
+are D7's and D8's. Nothing real exists to feed it: no generator ever ran and no real monolingual
+corpus exists, so D7 can only use planted or tiny data; the D3 gates assigned to D4, the D5 gates
+that need real text or a reader and the D6 gates above stay open.
 
 D0 (environment, skeleton, doctor): `pyproject.toml` restructured to the
 master plan's toolchain (see `docs/STACK.md` for resolved versions),
