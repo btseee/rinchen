@@ -233,7 +233,8 @@ Both HTTP clients subclass `ChatCompletionsTranslator` in the private module
   untimed `wait()`: once polars is imported a SIGINT does not wake an untimed wait (the handler
   polars installs restarts it), so the interrupt would be raised only after every queued request had
   been sent (`D-POLARS-SIGINT`; found by the final review, which measured exit 130 6.3 s after the
-  signal with all 40 requests received; a polled wait gives 0.27 s and 16 of 40).
+  signal with all 40 requests received; a polled wait gives 0.27 s and 16 of 40 in the first measurement, 0.77 to 1.06 s in five repeats: the bound is one
+  request in flight).
 - `LlamaCppTranslator(cfg: LlamaCppConfig, ...)`: the same contract, but it issues `n` separate
   requests per text with `n` 1 (the server's `n` support varies by build), each with
   `seed + k` (modulo 2**31), and merges the candidates in that order.

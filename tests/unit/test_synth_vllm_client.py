@@ -9,6 +9,7 @@ import os
 import signal
 import threading
 import time
+from concurrent.futures import Future
 
 import httpx
 import pytest
@@ -957,6 +958,19 @@ def test_a_real_sigint_cancels_the_requests_still_queued():
     # after the requests in flight (at most 2 at a time, 0.3 s each).
     assert time.perf_counter() - started < 1.5
     assert len(server.requests) <= 8
+
+
+@pytest.mark.timeout(10)
+def test_a_future_cancelled_while_waiting_is_not_a_failure():
+    # A queued request that was cancelled and then dequeued by a worker is
+    # `done` to `wait`; asking such a future for its exception raises.
+    cancelled: Future = Future()
+    finished: Future = Future()
+    assert cancelled.cancel()
+    assert not cancelled.set_running_or_notify_cancel()
+    finished.set_result(None)
+
+    chat_module._wait_until_all_done_or_one_failed([cancelled, finished])
 
 
 def test_a_client_the_translator_made_is_limited_to_its_concurrency(monkeypatch):

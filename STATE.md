@@ -367,9 +367,9 @@ the final review fixes.]
 **D6 (synthetic data) is done on branch `d6-synthetic-data`; its STOP gate (a tiny synth
 run through the CLI with a fake generator) is met locally.** The branch was cut from `main`
 at `0d534a3` on 2026-11-07, is not merged and not pushed (the overnight run made no merge
-and no push), and no CI run covers it. It is 23 commits ahead of `main` as of `38297c4`
-(the last code commit; the commit that records the final review's fixes in the documents is the
-next one). It is a tested
+and no push), and no CI run covers it. It is 25 commits ahead of `main` as of the commit `D6: re-review minors` (the last commit
+of the branch; `38297c4` was the last code commit of the final fix wave, and the re-review's
+minors followed it). It is a tested
 pipeline, not a pipeline that ever ran: no vLLM or llama.cpp server, no NLLB or MADLAD
 CTranslate2 model and no GPU was used by any test or measurement, every client path was
 tested against fakes, no real monolingual corpus exists, the prompts are the builder's
@@ -395,7 +395,8 @@ here, so the four gate commands were run as one chain), the last gate of the cod
 (2026-11-08): `ruff format --check .` clean, `ruff check .` clean, `mypy src` clean, `pytest -m
 "not network" -q` -- **4330 passed, 1 skipped, 10 deselected** in 193 s (3 min 16 s for the four
 commands; the same counts again with these records added) (4294 on `510258d`, 2833 at the D5
-merge).
+merge); **4331 passed** (199 s) after the re-review's one added test, the cancelled-future guard of
+the polled wait.
 Evidence, all through the CLI in process with planted fakes: the 40 planted rows give exactly
 sources 40, candidates 60, empty 5, purity 10, QE 10, copy 0, no candidates 5, no survivor 20
 and selected 15 for both `bt` and `ft` (without QE: QE 0, no survivor 10, selected 25), in 5
@@ -427,7 +428,7 @@ sampled, decoded to different rows without an error; the digest is not a signatu
 damaged file can still abort the process). `D-POLARS-SIGINT`: once polars is imported a SIGINT
 does not wake an untimed `concurrent.futures.wait()`, so Ctrl-C did not cancel the queued
 requests (through the real binary: exit 130 6.33 s after the signal with 40 of 40 requests
-sent); the clients now wait in 0.2 s slices (0.27 s and 16 of 40), and the requests already in
+sent); the clients now wait in 0.2 s slices (0.27 s and 16 of 40 once; 0.77 to 1.06 s in five repeats), and the requests already in
 flight still finish.
 `D-CT2-NUMHYP`: libctranslate2 4.8.4 raises "The number of hypotheses cannot be greater than
 beam_size * patience" at the first batch, so `Ct2Config` rejects `n > beam_size` at load. Also:
@@ -468,7 +469,7 @@ research follow-up, D4 and D5, and is at `0d534a3` (the commit that records the 
 `d6-synthetic-data`, cut from `main` at `0d534a3`; it is not merged into `main` and not
 pushed. At the D5 merge `main` was 81 commits ahead of `origin/main` (`9e7b0ec`); it is
 unpushed, and no CI run covers D3, D4, D5 or D6. The full local gate was last run on the D6
-branch: 4330 passed, 1 skipped, 10 deselected (D6 included), on `38297c4`; on the merged D5
+branch: 4331 passed, 1 skipped, 10 deselected (D6 included), on `D6: re-review minors`; on the merged D5
 tree `main` gave 2833 passed.
 
 Next step: D7 (Multilingual ablations). Nothing in D6 blocks it. Its inputs from D6: `rinchen

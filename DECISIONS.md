@@ -1482,3 +1482,11 @@ entry has no CPython 3.14 assertion except `doctor` (as in D4 and D5), and an un
 `manifest.json` is overwritten by the D4 manifest store's design. Not examined: whether the polars
 SIGINT behaviour shows in D4 and D5 commands, and a call into a C++ extension such as CTranslate2's
 `translate_batch`.
+
+[EVIDENCE: addendum to the D6 final review entry, same date, from its scoped re-review. The exit 130 delay of 0.27 s
+is one sample: the delay depends on where the signal falls in the requests in flight, and five repeats gave 0.77 to
+1.06 s, so the bound is the time of one request. The wait is polled every 0.2 s, which costs a pass over the
+pending futures: 0.19 ms at the default shard_size of 512, 8.3 ms at 20,000. A future that a worker dequeued after
+it was cancelled is `done` to the wait and raises when asked for its exception: the poll skips cancelled futures
+(unreachable today, since only the finally block cancels, after the wait). Cost if wrong: none beyond the
+documentation.]

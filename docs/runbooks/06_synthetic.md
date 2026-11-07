@@ -272,7 +272,11 @@ and the interrupt would have been raised only after every queued request had bee
 `docs/VERIFY.md`, `D-POLARS-SIGINT`. Measured through the real binary on 2026-11-08 against
 a loopback server that sleeps 1 s per request (`concurrency` 4, 40 texts in one shard,
 SIGINT 4.5 s after the start): exit 130, 0.27 s after the signal, 16 of the 40 requests
-received (before the fix: 6.33 s after the signal, 40 of 40). The CTranslate2 backend was
+received (before the fix: 6.33 s after the signal, 40 of 40). The delay depends on where the
+signal falls in the requests in flight: five repeats by the re-reviewer gave 0.77 to 1.06 s, so
+the bound is the time of one request, not 0.27 s. The poll costs a pass over the pending futures
+every 0.2 s: 0.19 ms at the default `shard_size` of 512 and 8.3 ms at 20,000 (measured by the
+re-reviewer), negligible unless `shard_size` is made very large. The CTranslate2 backend was
 not examined: it runs in process and is not a request queue.
 
 ### Options

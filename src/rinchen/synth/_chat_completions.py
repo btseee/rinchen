@@ -259,7 +259,9 @@ def _wait_until_all_done_or_one_failed(futures: Sequence[Future]) -> None:
         done, pending = wait(
             pending, timeout=_INTERRUPT_POLL_S, return_when=FIRST_EXCEPTION
         )
-        if any(future.exception() is not None for future in done):
+        if any(
+            not future.cancelled() and future.exception() is not None for future in done
+        ):
             return
 
 
