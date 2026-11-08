@@ -859,6 +859,146 @@ def test_train_steps_may_stop_exactly_at_a_step_that_was_saved(
     )
 
 
+# ---- a checkpoint of another model --------------------------------------------------
+#
+# Eole resumes into the model its checkpoint says and ignores the config's, so a step
+# directory copied in from a run of another architecture is not a resume point.
+
+
+def copy_in_a_checkpoint_of_another_model(run_dir: Path, step: int) -> Path:
+    return step_dirs.make_step_dir(
+        run_dir / "ckpt", step, model=step_dirs.eole_model_section(hidden_size=128)
+    )
+
+
+def test_a_newer_checkpoint_of_another_model_is_passed_over_and_reported(
+    config_path: Path, run_dir: Path, fake: FakeEole
+) -> None:
+    start_and_crash(fake, config_path, run_dir, step=120)  # steps 50 and 100
+    copy_in_a_checkpoint_of_another_model(run_dir, 150)
+
+    result = go(config_path, run_dir)
+
+    assert (result.status, result.resumed_from, result.incomplete_skipped) == (
+        "completed",
+        100,
+        (150,),
+    )
+    assert fake.trains[1].config["training"]["train_from"] == str(
+        run_dir / "ckpt" / "step_100"
+    )
+    # Eole wrote step 150 again on the way to the end: it is this run's now.
+    saved = json.loads((run_dir / "ckpt/step_150/config.json").read_text())
+    assert saved["model"]["hidden_size"] == 64
+
+
+def test_an_older_checkpoint_of_another_model_is_not_looked_at(
+    config_path: Path, run_dir: Path, fake: FakeEole
+) -> None:
+    start_and_crash(fake, config_path, run_dir, step=120)
+    shutil.rmtree(run_dir / "ckpt" / "step_50")
+    copy_in_a_checkpoint_of_another_model(run_dir, 50)
+
+    result = go(config_path, run_dir)
+
+    assert (result.resumed_from, result.incomplete_skipped) == (100, ())
+
+
+def test_only_checkpoints_of_another_model_are_refused_naming_the_first_difference(
+    config_path: Path, run_dir: Path, fake: FakeEole
+) -> None:
+    start_and_crash(fake, config_path, run_dir, step=70)  # the record, and step 50
+    shutil.rmtree(run_dir / "ckpt")
+    copy_in_a_checkpoint_of_another_model(run_dir, 100)
+    calls, files = len(fake.calls), files_under(run_dir)
+
+    with pytest.raises(ConfigError) as raised:
+        go(config_path, run_dir)
+
+    message = str(raised.value)
+    assert str(run_dir / "ckpt") in message
+    assert (
+        "step_100: config.json: model.hidden_size is 128 in the checkpoint but 64 "
+        "in the config" in message
+    )
+    assert len(fake.calls) == calls
+    assert files_under(run_dir) == files
+
+
+def test_the_refusal_names_the_newest_checkpoint_of_another_model(
+    config_path: Path, run_dir: Path, fake: FakeEole
+) -> None:
+    start_and_crash(fake, config_path, run_dir, step=70)
+    shutil.rmtree(run_dir / "ckpt")
+    copy_in_a_checkpoint_of_another_model(run_dir, 100)
+    step_dirs.make_step_dir(
+        run_dir / "ckpt", 150, model=step_dirs.eole_model_section(encoder_layers=6)
+    )
+
+    with pytest.raises(ConfigError) as raised:
+        go(config_path, run_dir)
+
+    assert "step_150: config.json: model.encoder.layers is 6" in str(raised.value)
+
+
+def test_a_checkpoint_of_another_model_is_refused_by_write_only_too(
+    config_path: Path, run_dir: Path, fake: FakeEole
+) -> None:
+    start_and_crash(fake, config_path, run_dir, step=70)
+    shutil.rmtree(run_dir / "ckpt")
+    copy_in_a_checkpoint_of_another_model(run_dir, 100)
+    files = files_under(run_dir)
+
+    with pytest.raises(ConfigError, match=r"model\.hidden_size is 128"):
+        go(config_path, run_dir, write_only=True)
+
+    assert files_under(run_dir) == files
+
+
+def test_a_damaged_checkpoint_beside_one_of_another_model_is_not_blamed_on_the_model(
+    config_path: Path, run_dir: Path, fake: FakeEole
+) -> None:
+    start_and_crash(fake, config_path, run_dir, step=70)
+    shutil.rmtree(run_dir / "ckpt")
+    step_dir = copy_in_a_checkpoint_of_another_model(run_dir, 100)
+    step_dirs.truncate(step_dir, step_dirs.WEIGHTS_FILE, 5)
+
+    result = go(config_path, run_dir)
+
+    assert (result.status, result.resumed_from, result.incomplete_skipped) == (
+        "completed",
+        None,
+        (100,),
+    )
+
+
+def test_a_checkpoint_that_records_no_model_is_resumed_from(
+    config_path: Path, run_dir: Path, fake: FakeEole
+) -> None:
+    start_and_crash(fake, config_path, run_dir, step=70)
+    shutil.rmtree(run_dir / "ckpt")
+    step_dirs.make_step_dir(run_dir / "ckpt", 50)
+
+    result = go(config_path, run_dir)
+
+    assert (result.status, result.resumed_from) == ("completed", 50)
+
+
+def test_a_checkpoint_of_another_model_above_the_last_step_does_not_hide_the_end_of_the_run(
+    config_path: Path, run_dir: Path, fake: FakeEole
+) -> None:
+    start_and_crash(fake, config_path, run_dir, step=120)
+    copy_in_a_checkpoint_of_another_model(run_dir, 300)  # train_steps is 200
+
+    result = go(config_path, run_dir)
+
+    assert (result.status, result.steps, result.incomplete_skipped) == (
+        "completed",
+        200,
+        (300,),
+    )
+
+
 # ---- the identity of a run --------------------------------------------------------
 
 

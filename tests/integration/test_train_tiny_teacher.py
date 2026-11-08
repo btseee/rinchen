@@ -92,6 +92,11 @@ MAX_SECONDS_TO_DIE = 10.0
 # (seconds later), so a short grace tells the two apart.
 ORPHAN_GRACE_SECONDS = 3.0
 SIGTERM_EXIT_CODE = 128 + signal.SIGTERM
+# `UpstreamError` of a command that failed, as the CLI exits.
+UPSTREAM_EXIT_CODE = 4
+# The group of a killed leader is swept before the launcher returns; this is only the
+# kernel's time to tear the processes down.
+SWEEP_GRACE_SECONDS = 0.5
 POLL_SECONDS = 0.1
 _REPORT_LINE = re.compile(r"Step\s+[0-9]+/\s*[0-9]+;")
 
@@ -1293,3 +1298,99 @@ def test_a_second_launch_into_a_run_being_launched_is_refused_naming_the_lock(
         assert str(rivals.lock) in rival.stderr
     assert rivals.first_still_running
     assert rivals.files_after == rivals.files_before
+
+
+# ---------------------------------------------------------------------------------
+# Scenario I: the `eole train` leader killed on its own (a crash or an OOM-kill).
+
+
+@dataclass(frozen=True)
+class LeaderKilled:
+    """Scenario I: `eole train` killed by SIGKILL while the launcher waited for it, and
+    the launch that followed."""
+
+    returncode: int
+    output: str
+    group_before: dict[int, str]
+    survivors: list[int]
+    group_gone: bool
+    lock_free: bool
+    manifest_left: bool
+    after: RunState
+
+
+@pytest.fixture(scope="module")
+def leader_killed(workspace: Workspace, prepared: Prepared) -> LeaderKilled:
+    run = RunPaths(workspace.root / "leader_killed" / "run")
+    config = _config_copy(
+        prepared.config_path, workspace.root / "leader_killed" / "config.yaml", run
+    )
+    output = workspace.root / "leader_killed" / "launch.out"
+    process = _start_launcher(config, run, output)
+    try:
+        _wait_for_the_first_report(process, run, output)
+        table = _process_table()
+        (leader,) = [
+            pid for pid in _descendants(process.pid) if table[pid][0] == process.pid
+        ]
+        group_before = {
+            pid: started
+            for pid, started in _descendants(process.pid).items()
+            if os.getpgid(pid) == leader
+        }
+        os.kill(leader, signal.SIGKILL)  # the leader only, as the OOM killer does
+        returncode = process.wait(timeout=SUBPROCESS_TIMEOUT_SECONDS)
+    except BaseException:
+        _stop_launcher(process)
+        raise
+
+    _wait_for(
+        lambda: not _still_running(group_before) and _group_gone(leader),
+        SWEEP_GRACE_SECONDS,
+    )
+    survivors = _still_running(group_before)
+    group_gone = _group_gone(leader)
+    for pid in survivors:  # the test reports them; they must not outlive it
+        os.kill(pid, signal.SIGKILL)
+    lock_free = True
+    try:
+        with holding_the_run(run.run_dir / "launch" / "lock"):
+            pass
+    except ConfigError:
+        lock_free = False
+    return LeaderKilled(
+        returncode=returncode,
+        output=output.read_text("utf-8", "replace"),
+        group_before=group_before,
+        survivors=survivors,
+        group_gone=group_gone,
+        lock_free=lock_free,
+        manifest_left=(run.run_dir / "manifest.json").exists(),
+        after=_state(run.run_dir, _ok(_launch(config, run.run_dir))),
+    )
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="reads /proc")
+def test_a_killed_eole_leader_fails_the_launch_and_takes_its_whole_group_with_it(
+    leader_killed: LeaderKilled,
+) -> None:
+    assert leader_killed.returncode == UPSTREAM_EXIT_CODE, leader_killed.output
+    assert "eole train failed: killed by signal 9" in leader_killed.output
+    # Besides the leader: the data-loader workers and the resource tracker.
+    assert len(leader_killed.group_before) >= 2
+    assert leader_killed.survivors == []
+    assert leader_killed.group_gone
+    assert leader_killed.lock_free
+    assert not leader_killed.manifest_left
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="reads /proc")
+def test_the_launch_after_a_killed_eole_leader_finishes_the_run(
+    leader_killed: LeaderKilled,
+) -> None:
+    after = leader_killed.after
+
+    assert after.facts["status"] == "completed"
+    assert after.facts["steps"] == str(FINAL_STEP)
+    assert after.facts["attempt"] == "2"
+    assert after.curve.non_finite_step is None

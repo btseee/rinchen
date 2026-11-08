@@ -185,6 +185,15 @@ def wait_until(condition: Callable[[], bool], what: str) -> None:
         time.sleep(0.02)
 
 
+def wait_until_gone(pid: int) -> bool:
+    deadline = time.monotonic() + 10
+    while is_running(pid):
+        if time.monotonic() > deadline:
+            return False
+        time.sleep(0.02)
+    return True
+
+
 @pytest.fixture
 def started_processes(world: World) -> Iterator[list[subprocess.Popen[bytes]]]:
     """The launchers a test starts; on the way out, they and every fake Eole of the
@@ -288,3 +297,75 @@ def test_the_lock_outlives_a_launcher_killed_with_sigkill_until_its_eole_ends(
     assert third.returncode == 0, third.stdout + third.stderr
     assert "status: already_complete" in third.stdout
     assert [subcommand for _, subcommand in world.invocations()].count("train") == 1
+
+
+# `eole train` as far as a crash of its parent is concerned: it starts a rank of its own
+# (descriptors closed, so the lock is not inherited, as torch spawns the real ones),
+# saves one step on a fresh start, and exits with status 1 while the rank sleeps on.
+CRASHING_EOLE = """#!{python}
+import os, subprocess, sys, time
+from pathlib import Path
+
+import yaml
+
+sys.path.insert(0, {repo!r})
+from tests.support import step_dirs
+
+cfg = yaml.safe_load(Path(sys.argv[sys.argv.index("-config") + 1]).read_text())
+if sys.argv[1] == "build_vocab":
+    Path(cfg["src_vocab"]).write_text("a\\nb\\n")
+    sys.exit(0)
+rank = subprocess.Popen(
+    [sys.executable, "-c", "import time; time.sleep(60)"], close_fds=True
+)
+with (Path(os.environ["FAKE_DIR"]) / "ranks").open("a") as ranks:
+    ranks.write(str(rank.pid) + "\\n")
+model_path = Path(cfg["training"]["model_path"])
+if not model_path.exists():
+    step_dirs.make_step_dir(model_path, 50)
+print("[INFO] Step 10/  200; acc: 1; ppl: 2; xent: 1.5; lr: 1e-3; sents: 1;", flush=True)
+sys.exit(1)
+"""
+
+
+def test_a_crashed_eole_leaves_no_rank_running_and_the_next_launch_is_accepted(
+    world: World,
+) -> None:
+    crashing = world.root / "crashing-eole"
+    crashing.write_text(
+        CRASHING_EOLE.format(python=sys.executable, repo=str(REPO_ROOT)),
+        encoding="utf-8",
+    )
+    crashing.chmod(0o755)
+    environment = {"FAKE_DIR": str(world.fake_dir)}
+
+    def ranks() -> list[int]:
+        path = world.fake_dir / "ranks"
+        return [int(line) for line in path.read_text().split()] if path.exists() else []
+
+    try:
+        with pytest.raises(UpstreamError, match="eole train failed: exit code 1"):
+            launch(
+                world.config, world.run_dir, eole=str(crashing), extra_env=environment
+            )
+        (first_rank,) = ranks()
+        first_survived = not wait_until_gone(first_rank)
+        lock_held = lock_is_held(world.lock)
+
+        # Accepted: it runs Eole (and meets the crash again), it is not turned away.
+        with pytest.raises(UpstreamError, match="eole train failed: exit code 1"):
+            launch(
+                world.config, world.run_dir, eole=str(crashing), extra_env=environment
+            )
+        second_rank = ranks()[1]
+        second_survived = not wait_until_gone(second_rank)
+    finally:
+        for pid in ranks():
+            if is_running(pid):
+                os.kill(pid, signal.SIGKILL)
+
+    assert not first_survived, "the rank of the crashed Eole is still running"
+    assert not lock_held
+    assert len(ranks()) == 2
+    assert not second_survived, "the rank of the second crashed Eole is still running"
+    assert (world.run_dir / "launch" / "attempt-2.log").exists()

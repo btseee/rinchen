@@ -4,7 +4,8 @@ A COMPLETE `step_<N>` directory holds what Eole 0.6.4 writes into one (spike, D8
 weights as a real safetensors file (written through the `safetensors` package), an
 `optimizer.pt` that is a real zip archive (its content is not loadable by torch), a
 `config.json` and a `vocab.json` that parse as JSON objects, and the SentencePiece
-artifact. The files are tiny; the damage helpers truncate, delete, overwrite or replace
+artifact. The `config.json` carries a `model` section, laid out as Eole saves it
+(`eole_model_section`), when the test gives one. The files are tiny; the damage helpers truncate, delete, overwrite or replace
 one of them the way an interrupted save or a bad disk would.
 
 Eole also links the files of the newest step into the checkpoint directory itself,
@@ -13,6 +14,7 @@ through relative symbolic links (`link_newest_step`); a resume never goes throug
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import struct
@@ -35,6 +37,78 @@ UTF8_MEMBER = "optimizer/төлөв.pkl"
 # The four files that make a step directory complete, then the artifact Eole also writes.
 REQUIRED_FILES = (WEIGHTS_FILE, OPTIMIZER_FILE, CONFIG_FILE, VOCAB_FILE)
 ALL_FILES = (*REQUIRED_FILES, SPM_ARTIFACT)
+
+
+# The `model` section of the `config.json` that Eole 0.6.4 saved into `step_20` of a real
+# CPU run of the tiny teacher (64 wide, 2+2 layers, 4 heads, feed-forward 128), copied key
+# for key: what the config sets, and what Eole fills in beside it (`tgt_word_vec_size`,
+# `n_positions`, `with_cross_attn`, the stacks' own copies of the width and the heads).
+_EOLE_MODEL_SECTION: dict[str, Any] = {
+    "hidden_size": 64,
+    "transformer_ff": 128,
+    "position_encoding_type": "SinusoidalInterleaved",
+    "architecture": "transformer",
+    "share_embeddings": True,
+    "heads": 4,
+    "share_decoder_embeddings": True,
+    "embeddings": {
+        "tgt_word_vec_size": 64,
+        "src_word_vec_size": 64,
+        "position_encoding_type": "SinusoidalInterleaved",
+        "word_vec_size": 64,
+    },
+    "decoder": {
+        "layers": 2,
+        "transformer_ff": 128,
+        "hidden_size": 64,
+        "with_cross_attn": True,
+        "position_encoding_type": "SinusoidalInterleaved",
+        "heads": 4,
+        "n_positions": None,
+        "tgt_word_vec_size": 64,
+        "decoder_type": "transformer",
+    },
+    "encoder": {
+        "layers": 2,
+        "transformer_ff": 128,
+        "hidden_size": 64,
+        "position_encoding_type": "SinusoidalInterleaved",
+        "encoder_type": "transformer",
+        "heads": 4,
+        "n_positions": None,
+        "src_word_vec_size": 64,
+    },
+}
+
+
+def eole_model_section(
+    *,
+    hidden_size: int = 64,
+    heads: int = 4,
+    transformer_ff: int = 128,
+    encoder_layers: int = 2,
+    decoder_layers: int = 2,
+) -> dict[str, Any]:
+    """The `model` section Eole saves for a transformer of these sizes: the real one of the
+    tiny teacher (64, 4, 128, 2, 2 by default) with the sizes replaced wherever they
+    appear."""
+    section = copy.deepcopy(_EOLE_MODEL_SECTION)
+    section["hidden_size"] = hidden_size
+    section["heads"] = heads
+    section["transformer_ff"] = transformer_ff
+    section["embeddings"]["word_vec_size"] = hidden_size
+    section["embeddings"]["tgt_word_vec_size"] = hidden_size
+    section["embeddings"]["src_word_vec_size"] = hidden_size
+    for name, layers in (("encoder", encoder_layers), ("decoder", decoder_layers)):
+        section[name].update(
+            layers=layers,
+            hidden_size=hidden_size,
+            heads=heads,
+            transformer_ff=transformer_ff,
+        )
+    section["encoder"]["src_word_vec_size"] = hidden_size
+    section["decoder"]["tgt_word_vec_size"] = hidden_size
+    return section
 
 
 def default_tensors(step: int) -> dict[str, NDArray[np.float32]]:
@@ -110,12 +184,15 @@ def make_step_dir(
     *,
     tensors: Mapping[str, NDArray[Any]] | None = None,
     weights: bytes | None = None,
+    model: Mapping[str, Any] | None = None,
 ) -> Path:
     """Create `model_path/step_<step>` as a COMPLETE step directory and return it.
 
     The weights are `tensors` (default `default_tensors(step)`) written by
     `safetensors.numpy.save_file`, or, when `weights` is given, those bytes as the
-    weights file (`safetensors_bytes`). `model_path` is created when missing.
+    weights file (`safetensors_bytes`). `model` is the `model` section of `config.json`
+    (`eole_model_section`); without it the config has none. `model_path` is created
+    when missing.
     """
     from safetensors.numpy import save_file
 
@@ -141,10 +218,13 @@ def make_step_dir(
     )
     (step_dir / SPM_ARTIFACT).write_bytes(b"sentencepiece model of the toy corpus")
     # Eole writes the config last, so it is the file that says the rest was saved.
-    (step_dir / CONFIG_FILE).write_text(
-        json.dumps({"training": {"model_path": str(model_path)}, "saved_at": step}),
-        encoding="utf-8",
-    )
+    saved_config: dict[str, Any] = {
+        "training": {"model_path": str(model_path)},
+        "saved_at": step,
+    }
+    if model is not None:
+        saved_config["model"] = dict(model)
+    (step_dir / CONFIG_FILE).write_text(json.dumps(saved_config), encoding="utf-8")
     return step_dir
 
 

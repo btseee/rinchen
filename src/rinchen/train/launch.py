@@ -15,8 +15,11 @@ names:
     launch/lock         the lock of a running launch (see below); empty, never removed
     launch/build_vocab.log
     launch/train-<k>.yaml   the effective config of attempt k: the config file with the
-                        `world_size` and `gpu_ranks` overrides laid over it, and, when
-                        the attempt resumes, `training.train_from`
+                        `world_size` and `gpu_ranks` overrides laid over it, the default
+                        `tensorboard_log_dir` (`<run_dir>/tensorboard`, when `tensorboard`
+                        is true and the config names none: Eole's own default is the
+                        relative `runs/eole`, outside the run) and, when the attempt
+                        resumes, `training.train_from`
     launch/attempt-<k>.log  standard output and error of `eole train` in attempt k
 
 The config file given is never changed. Each attempt has its own config and log, so what
@@ -28,7 +31,13 @@ take the identity of the run, take the lock of the run, look at the checkpoints
 (unless `write_only`) build the vocabulary when its file is missing, run `eole train` and
 decide from its log and the step directories how it ended. A resume names the newest
 COMPLETE step directory of the run, never `model_path` (Eole's saver is not atomic), and
-only the run's own: the config files never hold `train_from`.
+only the run's own: the config files never hold `train_from`. Eole ignores the config's
+`model` section when it resumes and takes the checkpoint's own, so a complete step
+directory whose saved model differs from the config's in a key both name (`hidden_size`,
+the layers, the heads, ...) is not resumed from either: it is skipped like an incomplete
+one, and when no directory is left the launch is refused, naming the key and both values.
+That is a guard against a checkpoint copied in from another run; it cannot prove where a
+checkpoint of the same architecture came from.
 
 `write_only` writes `command.sh`, the attempt's config and `launch.json` and runs
 nothing. The record is what lets a run that an operator started by hand from `command.sh`
@@ -72,8 +81,9 @@ resume config included (only needed when the vocabulary file is missing at a res
 `eole build_vocab` accepts `training.train_from` in it is not measured).
 
 Eole is reached only through `run_logged`, which runs it in a process group of its own
-and kills the group on Ctrl-C, SIGTERM, SIGHUP and a timeout; the run stays resumable
-after any of them.
+and kills the group on Ctrl-C, SIGTERM, SIGHUP, a timeout, and when Eole's leader exits
+non-zero by itself (the per-rank processes of a multi-GPU run would otherwise train on
+without the lock after a crash of the parent); the run stays resumable after any of them.
 """
 
 from __future__ import annotations
@@ -147,8 +157,9 @@ class LaunchResult:
     log: this attempt's `eole train` log; None when none was run.
     attempt: the number of the attempt (`launch/train-<attempt>.yaml`, `attempt-<attempt>.log`);
         0 when no attempt was prepared.
-    incomplete_skipped: the steps of the incomplete step directories above the resume
-        point, which Eole overwrites if the run reaches them again.
+    incomplete_skipped: the steps of the step directories above the resume point that
+        cannot be resumed from (incomplete, or of another model), which Eole overwrites
+        if the run reaches them again.
     """
 
     status: LaunchStatus
@@ -212,8 +223,9 @@ def launch(
             text holds `$` (or the checkpoint directory a glob character), the run's
             step directories have no `launch.json` or the config is not the run's
             (only `training.train_steps` may change), `train_steps` is below the
-            newest complete step, or another launch holds the run (its lock file is
-            named; also for `write_only`).
+            newest complete step, no step directory is of the config's model while
+            some are of another one (see above), or another launch holds the run (its
+            lock file is named; also for `write_only`).
         DataError: `launch.json` is not a launch record, or the checkpoint directory
             cannot be listed.
         ValueError: `threads` is less than 1.
@@ -269,8 +281,9 @@ def _launch_guarded(work: _Work, lock_fds: tuple[int, ...]) -> LaunchResult:
     plan, run_dir, command, env = work.plan, work.run_dir, work.command, work.env
     timeout, write_only = work.timeout, work.write_only
     record = read_launch_record(run_dir)
-    point = latest_complete(plan.model_path)
+    point = _resume_point(plan)
     _require_the_same_run(plan, run_dir, record, point)
+    _refuse_checkpoints_of_another_model(plan, point)
     skipped = tuple(directory.step for directory in point.incomplete_newer)
     newest = point.directory
     if newest is not None:
@@ -391,6 +404,7 @@ def _plan(
         )
     train_steps = _explicit_train_steps(cfg)
     src_vocab = _vocabulary_file(cfg)
+    cfg = _with_tensorboard_directory(cfg, run_dir)
     overrides: dict[str, Any] = {}
     if world_size is not None:
         overrides["world_size"] = world_size
@@ -416,6 +430,23 @@ def _plan(
         train_steps,
         identity_of(effective),
     )
+
+
+def _with_tensorboard_directory(cfg: dict[str, Any], run_dir: Path) -> dict[str, Any]:
+    """`cfg` with `tensorboard_log_dir` set to `<run_dir>/tensorboard` (absolute) when
+    `tensorboard` is true and the config names no directory; else `cfg` itself.
+
+    Eole's own default is the relative `runs/eole`: the event files would land in the
+    working directory of whoever launches, one directory per attempt, outside the run.
+    The default is an effective value like the others: it is in every attempt config
+    and in the identity of the run, so a run directory that moves is another run (its
+    `training.model_path` has to be edited then too). A directory the config names was
+    validated with the rest of it; the default is plain text of a run directory that has
+    passed the `$` check, so it needs no second look."""
+    if cfg.get("tensorboard") is not True or "tensorboard_log_dir" in cfg:
+        return cfg
+    directory = Path(os.path.abspath(run_dir / "tensorboard")).as_posix()
+    return merge(cfg, {"tensorboard_log_dir": directory})
 
 
 def _explicit_train_steps(cfg: Mapping[str, Any]) -> int:
@@ -505,6 +536,31 @@ def _require_the_same_run(
             "Only training.train_steps may change when a run is resumed: Eole keeps "
             "the optimiser options of the checkpoint and ignores new ones, and a "
             "different GPU count is a different batch. Restore the original config or "
+            "use a new run directory"
+        )
+
+
+def _resume_point(plan: _Plan) -> ResumePoint:
+    # Eole resumes into the model of the checkpoint and ignores the config's, so a
+    # directory that saved another model is not one to resume from.
+    return latest_complete(plan.model_path, model=plan.cfg["model"])
+
+
+def _refuse_checkpoints_of_another_model(plan: _Plan, point: ResumePoint) -> None:
+    """Raise when no step directory can be resumed from and the reason is that the
+    complete ones are of another model (a checkpoint copied in from another run): they
+    must be neither ignored, which would start the run again beside them, nor
+    overwritten. With a resume point, the newer ones of another model are skipped like
+    incomplete ones; Eole overwrites them when the run reaches their step."""
+    if point.directory is not None:
+        return
+    foreign = [d for d in point.incomplete_newer if d.of_another_model]
+    if foreign:
+        newest = foreign[-1]
+        raise ConfigError(
+            f"no step directory in {plan.model_path} is of the model this config "
+            f"trains, so none can be resumed from, and a checkpoint of another model "
+            f"is not overwritten: {newest.path.name}: {newest.problem}. Remove it, or "
             "use a new run directory"
         )
 
@@ -627,7 +683,7 @@ def _ended(
     and left its log ended."""
     log = attempt.log
     curve = parse_train_log(log.read_text(encoding="utf-8", errors="replace"))
-    newest = latest_complete(plan.model_path).directory
+    newest = _resume_point(plan).directory
     stopped_early = (
         curve.early_stopped
         and newest is not None

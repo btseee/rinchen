@@ -11,6 +11,13 @@ that mix two steps (spike, D8). A resume therefore names a step directory that
 short, and the checks catch every cut the spike tried. A flipped bit inside a complete
 file is not caught here.
 
+Eole ignores the `model` section of the config it is given when it resumes: it builds the
+model its checkpoint's saved `config.json` describes. A step directory copied in from a
+run of another model would therefore be trained on as if it were this run's, so
+`latest_complete` can be given the config's model section and passes over a directory
+whose saved one differs (`architecture_mismatch`). It is a best-effort guard against a
+mistake, not proof of where a checkpoint came from: a copy of the same architecture passes.
+
 `launch.json` in the run directory is the record of what the run was started with. Its
 `identity` is the hash of the effective config without the keys a run may change and
 still be the same run (`identity_of`); a launch whose identity differs from the recorded
@@ -59,6 +66,29 @@ _STEP_NAME: Final = re.compile(r"step_([1-9][0-9]*)")
 # What `zipfile` raises for a damaged archive besides `BadZipFile`; ValueError includes
 # the UnicodeDecodeError of a damaged name.
 _UNREADABLE_ARCHIVE: Final = (ValueError, NotImplementedError, OverflowError, EOFError)
+# The paths into the `model` section that the config and Eole's saved config both use for
+# the shape of the model, in the order they are compared. The embedding sizes follow from
+# `hidden_size` (a config must set them equal) and are not repeated.
+_ARCHITECTURE_KEYS: Final = (
+    ("architecture",),
+    ("hidden_size",),
+    ("heads",),
+    ("transformer_ff",),
+    ("embeddings", "word_vec_size"),
+    ("embeddings", "position_encoding_type"),
+    *(
+        (stack, key)
+        for stack in ("encoder", "decoder")
+        for key in (
+            "layers",
+            "hidden_size",
+            "heads",
+            "transformer_ff",
+            "position_encoding_type",
+        )
+    ),
+)
+_ABSENT: Final = object()
 _MAX_RECORD_BYTES: Final = 64 * 1024
 _SHA256_HEX: Final = r"^[0-9a-f]{64}$"
 _SCHEMA_VERSION: Final = 1
@@ -69,12 +99,15 @@ class StepDirectory:
     """A `step_<N>` directory of a checkpoint directory.
 
     `step` is N, `path` the directory (the checkpoint directory joined with its name),
-    `problem` why it is not complete (`is_complete`) or None when it is.
+    `problem` why it is not a resume point (`is_complete`, or, when `latest_complete` is
+    given a model, `architecture_mismatch`) or None when it is. `of_another_model` is
+    true for a directory that is complete but saved the model of another config.
     """
 
     step: int
     path: Path
     problem: str | None
+    of_another_model: bool = False
 
     @property
     def complete(self) -> bool:
@@ -83,10 +116,10 @@ class StepDirectory:
 
 @dataclass(frozen=True, slots=True)
 class ResumePoint:
-    """Where a run resumes: `directory` is the newest complete step directory (None when
-    there is none) and `incomplete_newer` the incomplete directories above it (all of
-    them when `directory` is None), oldest first. Eole overwrites them when the run
-    reaches their step again."""
+    """Where a run resumes: `directory` is the newest step directory that can be resumed
+    from (None when there is none) and `incomplete_newer` the directories above it that
+    cannot, incomplete or of another model (all of them when `directory` is None), oldest
+    first. Eole overwrites them when the run reaches their step again."""
 
     directory: StepDirectory | None
     incomplete_newer: tuple[StepDirectory, ...]
@@ -119,19 +152,97 @@ def step_of(directory: Path) -> int | None:
     return int(match.group(1)) if match else None
 
 
-def latest_complete(model_path: Path) -> ResumePoint:
+def latest_complete(
+    model_path: Path, *, model: Mapping[str, Any] | None = None
+) -> ResumePoint:
     """The newest complete step directory of `model_path` and the incomplete ones above
     it. Only directories newer than the answer are examined; same errors as
-    `step_directories`."""
+    `step_directories`.
+
+    With `model`, the `model` section of the config the run trains, a complete directory
+    whose saved config describes another model (`architecture_mismatch`) is passed over
+    like an incomplete one, with `of_another_model` set and the mismatch as its problem.
+    Without it the model is not looked at."""
     skipped: list[StepDirectory] = []
     for step, path in reversed(_listed(model_path)):
         problem = is_complete(path)
+        of_another_model = False
+        if problem is None and model is not None:
+            mismatch = _saved_model_mismatch(path, model)
+            if mismatch is not None:
+                problem = f"{CONFIG_FILE}: {mismatch}"
+                of_another_model = True
         if problem is None:
             return ResumePoint(
                 StepDirectory(step, path, None), tuple(reversed(skipped))
             )
-        skipped.append(StepDirectory(step, path, problem))
+        skipped.append(StepDirectory(step, path, problem, of_another_model))
     return ResumePoint(None, tuple(reversed(skipped)))
+
+
+@dataclass(frozen=True, slots=True)
+class ArchitectureMismatch:
+    """A key of the `model` section that the config and a checkpoint say differently:
+    `key` is its dotted path inside the section (`encoder.layers`), `saved` the
+    checkpoint's value and `wanted` the config's."""
+
+    key: str
+    saved: Any
+    wanted: Any
+
+    def __str__(self) -> str:
+        return (
+            f"model.{self.key} is {self.saved!r} in the checkpoint but "
+            f"{self.wanted!r} in the config"
+        )
+
+
+def architecture_mismatch(
+    saved_config: Mapping[str, Any], model: Mapping[str, Any]
+) -> ArchitectureMismatch | None:
+    """The first key of the shape of the model that `model`, the `model` section of a
+    config, and the one in `saved_config`, the parsed `config.json` of a checkpoint, set
+    to different values; None when there is none.
+
+    The keys are `architecture`, `hidden_size`, `heads`, `transformer_ff`, the embedding
+    width and position scheme, and the layers, width, heads, feed-forward size and
+    position scheme of the encoder and of the decoder, compared in that order. A key
+    that either side does not have is not compared, so a checkpoint that records no
+    model section is never a mismatch. Best effort: it catches a checkpoint of another
+    architecture, not one of the same architecture that this run did not write.
+    """
+    saved_model = saved_config.get("model")
+    if not isinstance(saved_model, Mapping):
+        return None
+    for path in _ARCHITECTURE_KEYS:
+        saved = _value_at(saved_model, path)
+        wanted = _value_at(model, path)
+        if saved is not _ABSENT and wanted is not _ABSENT and saved != wanted:
+            return ArchitectureMismatch(".".join(path), saved, wanted)
+    return None
+
+
+def _value_at(section: Mapping[str, Any], path: tuple[str, ...]) -> Any:
+    node: Any = section
+    for key in path:
+        if not isinstance(node, Mapping) or key not in node:
+            return _ABSENT
+        node = node[key]
+    return node
+
+
+def _saved_model_mismatch(
+    step_dir: Path, model: Mapping[str, Any]
+) -> ArchitectureMismatch | None:
+    try:
+        saved_config = json.loads((step_dir / CONFIG_FILE).read_bytes())
+    except OSError, ValueError, RecursionError:
+        # `is_complete` has just parsed it: failing now is a race, and the guard is a
+        # best-effort one, so the directory is not held back on its account.
+        return None
+    if not isinstance(saved_config, Mapping):
+        return None
+    return architecture_mismatch(saved_config, model)
 
 
 def is_complete(step_dir: Path) -> str | None:
@@ -145,7 +256,8 @@ def is_complete(step_dir: Path) -> str | None:
     is loaded and no archive member is read. The SentencePiece artifact is not needed:
     it is written before `config.json`.
 
-    Never raises for a damaged directory: a file that cannot be read is a problem too.
+    Never raises for a damaged directory: a file that cannot be read is a problem too,
+    worded `<name>: cannot be read (<exception class>: <reason>)`.
     """
     if not step_dir.is_dir():
         what = "is not a directory" if os.path.lexists(step_dir) else "does not exist"
@@ -154,7 +266,8 @@ def is_complete(step_dir: Path) -> str | None:
         try:
             problem = _file_problem(step_dir / name)
         except OSError as error:
-            problem = f"{name}: cannot be read ({error.strerror or error!r})"
+            reason = error.strerror or str(error)
+            problem = f"{name}: cannot be read ({type(error).__name__}: {reason})"
         if problem is not None:
             return problem
     return None
@@ -348,6 +461,9 @@ def _archive_problem(path: Path) -> str | None:
 def _weights_problem(path: Path) -> str | None:
     from safetensors import SafetensorError, safe_open
 
+    # safetensors words every failed open as FileNotFoundError, a refused one included:
+    # opening the file first lets the error say what really happened.
+    path.open("rb").close()
     try:
         with safe_open(str(path), framework="numpy") as tensors:
             if not list(tensors.keys()):

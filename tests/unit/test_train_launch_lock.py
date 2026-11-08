@@ -150,9 +150,9 @@ def test_the_lock_is_held_while_the_state_of_the_run_is_read(
     real = launch_module.latest_complete
     seen: list[bool] = []
 
-    def looking(model_path: Path) -> Any:
+    def looking(model_path: Path, **options: Any) -> Any:
         seen.append(lock_is_held(run_dir))
-        return real(model_path)
+        return real(model_path, **options)
 
     monkeypatch.setattr(launch_module, "latest_complete", looking)
 

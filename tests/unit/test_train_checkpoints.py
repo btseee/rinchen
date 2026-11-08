@@ -10,6 +10,7 @@ that file.
 from __future__ import annotations
 
 import copy
+import errno
 import json
 import os
 import random
@@ -24,8 +25,10 @@ from rinchen.errors import ConfigError, DataError
 from rinchen.train import checkpoints
 from rinchen.train.checkpoints import (
     LAUNCH_FILE,
+    ArchitectureMismatch,
     RunIdentity,
     StepDirectory,
+    architecture_mismatch,
     identity_of,
     is_complete,
     latest_complete,
@@ -35,6 +38,7 @@ from rinchen.train.checkpoints import (
     write_launch_record,
 )
 from tests.support import step_dirs
+from tests.support.eole_train_config import make_config
 from tests.support.step_dirs import (
     CONFIG_FILE,
     OPTIMIZER_FILE,
@@ -42,6 +46,7 @@ from tests.support.step_dirs import (
     SPM_ARTIFACT,
     VOCAB_FILE,
     WEIGHTS_FILE,
+    eole_model_section,
     make_run,
     make_step_dir,
 )
@@ -417,6 +422,49 @@ def test_a_file_that_cannot_be_read_is_a_problem_not_an_error(
     assert problem.startswith(f"{CONFIG_FILE}: cannot be read (")
 
 
+@pytest.mark.parametrize("name", REQUIRED_FILES)
+def test_a_file_that_is_not_allowed_to_be_read_is_named_with_its_real_error(
+    step_dir: Path, name: str
+) -> None:
+    # safetensors words a refused open as FileNotFoundError ("No such file"): the
+    # problem has to say what happened, not what the library says.
+    if os.geteuid() == 0:
+        pytest.skip("root reads files whatever their mode")
+    (step_dir / name).chmod(0)
+    try:
+        problem = is_complete(step_dir)
+    finally:
+        (step_dir / name).chmod(0o644)
+
+    assert problem == f"{name}: cannot be read (PermissionError: Permission denied)"
+
+
+def test_an_os_error_while_opening_the_weights_is_reported_with_its_class(
+    monkeypatch: pytest.MonkeyPatch, step_dir: Path
+) -> None:
+    def failing_open(*args: object, **kwargs: object) -> None:
+        raise OSError(errno.EIO, "Input/output error")
+
+    monkeypatch.setattr("safetensors.safe_open", failing_open)
+
+    assert is_complete(step_dir) == (
+        f"{WEIGHTS_FILE}: cannot be read (OSError: Input/output error)"
+    )
+
+
+def test_an_os_error_without_a_message_of_its_own_is_reported_with_its_class(
+    monkeypatch: pytest.MonkeyPatch, step_dir: Path
+) -> None:
+    def failing_open(*args: object, **kwargs: object) -> None:
+        raise FileNotFoundError("no such thing")
+
+    monkeypatch.setattr("safetensors.safe_open", failing_open)
+
+    assert is_complete(step_dir) == (
+        f"{WEIGHTS_FILE}: cannot be read (FileNotFoundError: no such thing)"
+    )
+
+
 def test_the_first_problem_in_the_order_eole_saves_them_backwards_is_reported(
     step_dir: Path,
 ) -> None:
@@ -769,6 +817,228 @@ def test_latest_complete_stops_examining_at_the_first_complete_directory(
     (model_path / "step_50" / CONFIG_FILE).write_bytes(b"{")
 
     assert latest_complete(model_path).directory is not None
+
+
+# ---- the model of a checkpoint --------------------------------------------------
+#
+# Eole ignores the `model` section of the config when it resumes and builds the model of
+# the checkpoint's own saved config, so a step directory copied in from another run would
+# be trained on as if it were this one's. `architecture_mismatch` compares what the two
+# sides both say. The saved sections here are the real layout (`eole_model_section`).
+
+
+def wanted_model() -> dict[str, Any]:
+    """The `model` section of the config the real tiny run was started from."""
+    model = make_config()["model"]
+    assert isinstance(model, dict)
+    return model
+
+
+def test_the_model_section_of_a_real_checkpoint_matches_the_config_it_came_from() -> (
+    None
+):
+    saved = {"model": eole_model_section()}
+
+    assert architecture_mismatch(saved, wanted_model()) is None
+
+
+@pytest.mark.parametrize(
+    ("path", "other", "saved_value"),
+    [
+        (("architecture",), "transformer_lm", "transformer"),
+        (("hidden_size",), 128, 64),
+        (("heads",), 8, 4),
+        (("transformer_ff",), 256, 128),
+        (("embeddings", "word_vec_size"), 128, 64),
+        (
+            ("embeddings", "position_encoding_type"),
+            "Rotary",
+            "SinusoidalInterleaved",
+        ),
+        (("encoder", "layers"), 6, 2),
+        (("decoder", "layers"), 3, 2),
+        (("encoder", "hidden_size"), 128, 64),
+        (("encoder", "heads"), 8, 4),
+        (("encoder", "transformer_ff"), 256, 128),
+        (("encoder", "position_encoding_type"), "Rotary", "SinusoidalInterleaved"),
+        (("decoder", "hidden_size"), 128, 64),
+        (("decoder", "heads"), 8, 4),
+        (("decoder", "transformer_ff"), 256, 128),
+        (("decoder", "position_encoding_type"), "Rotary", "SinusoidalInterleaved"),
+    ],
+    ids=lambda value: ".".join(value) if isinstance(value, tuple) else str(value),
+)
+def test_a_key_that_differs_is_named_with_both_values(
+    path: tuple[str, ...], other: object, saved_value: object
+) -> None:
+    wanted = wanted_model()
+    section = wanted
+    for key in path[:-1]:
+        section = section.setdefault(key, {})
+    section[path[-1]] = other
+
+    mismatch = architecture_mismatch({"model": eole_model_section()}, wanted)
+
+    assert mismatch == ArchitectureMismatch(".".join(path), saved_value, other)
+
+
+def test_the_mismatch_reads_as_a_sentence_with_both_values() -> None:
+    wanted = wanted_model()
+    wanted["encoder"]["layers"] = 24
+
+    mismatch = architecture_mismatch({"model": eole_model_section()}, wanted)
+
+    assert str(mismatch) == (
+        "model.encoder.layers is 2 in the checkpoint but 24 in the config"
+    )
+
+
+def test_the_first_key_that_differs_is_the_one_reported() -> None:
+    wanted = wanted_model()
+    wanted["decoder"]["layers"] = 12
+    wanted["hidden_size"] = 128
+
+    mismatch = architecture_mismatch({"model": eole_model_section()}, wanted)
+
+    assert mismatch is not None
+    assert mismatch.key == "hidden_size"
+
+
+def test_a_key_the_config_does_not_set_is_not_compared() -> None:
+    wanted = wanted_model()
+    del wanted["heads"]
+    del wanted["encoder"]
+    saved = {"model": eole_model_section(heads=16, encoder_layers=24)}
+
+    assert architecture_mismatch(saved, wanted) is None
+
+
+@pytest.mark.parametrize(
+    "saved_config",
+    [
+        pytest.param({}, id="no model section"),
+        pytest.param({"model": None}, id="a null model section"),
+        pytest.param({"model": "transformer"}, id="a text model section"),
+        pytest.param({"model": {}}, id="an empty model section"),
+        pytest.param({"model": {"transformer_ff": 999}}, id="a key the config lacks"),
+        pytest.param({"model": {"encoder": "x", "embeddings": 3}}, id="odd stacks"),
+        pytest.param({"training": {"model_path": "x"}}, id="only a training section"),
+    ],
+)
+def test_a_saved_config_without_the_keys_is_not_comparable(
+    saved_config: dict[str, Any],
+) -> None:
+    wanted = {"hidden_size": 64, "encoder": {"layers": 2}, "heads": 4}
+
+    assert architecture_mismatch(saved_config, wanted) is None
+
+
+def test_a_saved_value_of_another_kind_is_a_mismatch_not_an_error() -> None:
+    saved = {"model": eole_model_section()}
+    saved["model"]["hidden_size"] = "64"
+
+    mismatch = architecture_mismatch(saved, wanted_model())
+
+    assert mismatch == ArchitectureMismatch("hidden_size", "64", 64)
+
+
+def test_the_comparison_leaves_both_sections_as_they_were() -> None:
+    saved = {"model": eole_model_section()}
+    wanted = wanted_model()
+    wanted["heads"] = 8
+    before = copy.deepcopy((saved, wanted))
+
+    architecture_mismatch(saved, wanted)
+
+    assert (saved, wanted) == before
+
+
+def test_latest_complete_without_a_model_compares_nothing(model_path: Path) -> None:
+    make_step_dir(model_path, 100, model=eole_model_section(hidden_size=128))
+
+    point = latest_complete(model_path)
+
+    assert point.directory is not None
+    assert point.directory.step == 100
+
+
+def test_latest_complete_resumes_from_a_checkpoint_of_the_config_s_model(
+    model_path: Path,
+) -> None:
+    make_step_dir(model_path, 100, model=eole_model_section())
+
+    point = latest_complete(model_path, model=wanted_model())
+
+    assert point.directory == StepDirectory(100, model_path / "step_100", None)
+    assert point.incomplete_newer == ()
+
+
+def test_latest_complete_skips_a_newer_checkpoint_of_another_model(
+    model_path: Path,
+) -> None:
+    make_step_dir(model_path, 100, model=eole_model_section())
+    make_step_dir(model_path, 200, model=eole_model_section(hidden_size=128))
+
+    point = latest_complete(model_path, model=wanted_model())
+
+    assert point.directory is not None
+    assert point.directory.step == 100
+    (skipped,) = point.incomplete_newer
+    assert skipped.step == 200
+    assert not skipped.complete
+    assert skipped.of_another_model
+    assert skipped.problem == (
+        "config.json: model.hidden_size is 128 in the checkpoint but 64 in the config"
+    )
+
+
+def test_a_directory_that_is_damaged_is_not_called_a_checkpoint_of_another_model(
+    model_path: Path,
+) -> None:
+    step_dir = make_step_dir(model_path, 200, model=eole_model_section(hidden_size=128))
+    step_dirs.truncate(step_dir, WEIGHTS_FILE, 5)
+
+    point = latest_complete(model_path, model=wanted_model())
+
+    assert point.directory is None
+    (skipped,) = point.incomplete_newer
+    assert not skipped.of_another_model
+    assert skipped.problem is not None
+    assert skipped.problem.startswith(f"{WEIGHTS_FILE}:")
+
+
+def test_with_only_checkpoints_of_another_model_there_is_no_resume_point(
+    model_path: Path,
+) -> None:
+    make_step_dir(model_path, 100, model=eole_model_section(encoder_layers=6))
+    make_step_dir(model_path, 200, model=eole_model_section(hidden_size=128))
+
+    point = latest_complete(model_path, model=wanted_model())
+
+    assert point.directory is None
+    assert [(d.step, d.of_another_model) for d in point.incomplete_newer] == [
+        (100, True),
+        (200, True),
+    ]
+
+
+def test_a_checkpoint_whose_config_has_no_model_section_is_resumable(
+    model_path: Path,
+) -> None:
+    make_step_dir(model_path, 100)
+
+    point = latest_complete(model_path, model=wanted_model())
+
+    assert point.directory is not None
+    assert point.directory.step == 100
+
+
+def test_step_directories_do_not_compare_the_model(model_path: Path) -> None:
+    make_step_dir(model_path, 100, model=eole_model_section(hidden_size=128))
+
+    (listed,) = step_directories(model_path)
+
+    assert listed.complete
 
 
 # ---- identity_of ----------------------------------------------------------------

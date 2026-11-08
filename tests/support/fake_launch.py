@@ -52,6 +52,19 @@ def launch_config(run_dir: Path, **training: Any) -> dict[str, Any]:
     return cfg
 
 
+def saved_model_section(model: dict[str, Any]) -> dict[str, Any]:
+    """The `model` section Eole saves into `config.json` for the `model` section `model`
+    of a config (as `launch_config` writes it): the real layout with the sizes the config
+    sets."""
+    return step_dirs.eole_model_section(
+        hidden_size=model["hidden_size"],
+        heads=model["heads"],
+        transformer_ff=model["transformer_ff"],
+        encoder_layers=model["encoder"]["layers"],
+        decoder_layers=model["decoder"]["layers"],
+    )
+
+
 def write_config(path: Path, cfg: dict[str, Any]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
@@ -170,7 +183,9 @@ class FakeEole:
             existing = model_path / f"step_{step}"
             if existing.exists():
                 shutil.rmtree(existing)
-            made = step_dirs.make_step_dir(model_path, step)
+            made = step_dirs.make_step_dir(
+                model_path, step, model=saved_model_section(call.config["model"])
+            )
             if step in script.cut:
                 step_dirs.truncate(made, step_dirs.WEIGHTS_FILE, 10)
         if script.error is not None:

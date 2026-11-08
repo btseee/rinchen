@@ -804,3 +804,139 @@ def test_run_logged_stops_waiting_at_its_timeout_whatever_the_poll(
 
     assert f"the child timed out after {wording} s and was killed" in str(raised.value)
     assert time.monotonic() - started < 2.5
+
+
+# ---- what a leader that exits on its own leaves behind ----------------------------
+#
+# Eole's per-rank processes are spawned with close_fds and share the leader's session.
+# When the `eole train` parent crashes or is OOM-killed they keep training. A failure
+# that was not a timeout or an interrupt must therefore end the whole group; a clean
+# exit has no such survivors and is left alone.
+
+# The child starts a long-sleeping process of its own with close_fds (as a spawned rank
+# is started), records its pid, and exits with the status of its second argument.
+_CHILD_THAT_LEAVES_A_RANK = """
+import os, subprocess, sys
+rank = subprocess.Popen(
+    [sys.executable, "-c", "import time; time.sleep(30)"], close_fds=True
+)
+with open(sys.argv[1] + ".tmp", "w") as handle:
+    handle.write(str(rank.pid))
+os.replace(sys.argv[1] + ".tmp", sys.argv[1])
+sys.exit(int(sys.argv[2]))
+"""
+
+
+@linux_only
+@pytest.mark.parametrize("exit_code", [1, 3, 137])
+def test_run_logged_kills_what_the_child_left_running_when_it_exits_non_zero(
+    tmp_path: Path, exit_code: int
+) -> None:
+    pid_file = tmp_path / "pids"
+    log_path = tmp_path / "child.log"
+
+    try:
+        with pytest.raises(UpstreamError) as raised:
+            _run(
+                _python(_CHILD_THAT_LEAVES_A_RANK, str(pid_file), str(exit_code)),
+                log_path,
+            )
+        (rank,) = _read_pids(pid_file)
+        survived = not _wait_until_gone(rank)
+    finally:
+        if pid_file.exists():
+            _kill_quietly(_read_pids(pid_file))
+
+    assert not survived, "the rank the child left behind is still running"
+    assert str(raised.value).startswith(f"the child failed: exit code {exit_code};")
+
+
+@linux_only
+def test_run_logged_leaves_what_the_child_started_when_it_exits_zero(
+    tmp_path: Path,
+) -> None:
+    # A clean exit is no crash: nothing it left behind is killed on its behalf.
+    pid_file = tmp_path / "pids"
+
+    try:
+        _run(_python(_CHILD_THAT_LEAVES_A_RANK, str(pid_file), "0"), tmp_path / "log")
+        (rank,) = _read_pids(pid_file)
+        time.sleep(0.3)
+        still_running = _is_running(rank)
+    finally:
+        if pid_file.exists():
+            _kill_quietly(_read_pids(pid_file))
+
+    assert still_running
+
+
+@linux_only
+def test_run_logged_cleans_up_after_a_child_killed_from_outside(
+    tmp_path: Path,
+) -> None:
+    # The OOM killer's way: the leader dies by SIGKILL, its group does not.
+    pid_file = tmp_path / "pids"
+    stop = threading.Event()
+
+    def kill_the_leader() -> None:
+        while not pid_file.exists():
+            if stop.wait(0.02):
+                return
+        os.kill(_read_pids(pid_file)[0], signal.SIGKILL)
+
+    killer = threading.Thread(target=kill_the_leader)
+    killer.start()
+    try:
+        with pytest.raises(UpstreamError) as raised:
+            _run(_python(_CHILD_WITH_GRANDCHILD, str(pid_file)), tmp_path / "log")
+        _, grandchild = _read_pids(pid_file)
+        survived = not _wait_until_gone(grandchild)
+    finally:
+        stop.set()
+        killer.join()
+        if pid_file.exists():
+            _kill_quietly(_read_pids(pid_file))
+
+    assert "killed by signal 9 (exit code -9)" in str(raised.value)
+    assert not survived, "the grandchild of the killed leader is still running"
+
+
+@linux_only
+@pytest.mark.parametrize("error", [ProcessLookupError, PermissionError])
+def test_a_group_that_cannot_be_signalled_is_not_an_error_of_its_own(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, error: type[OSError]
+) -> None:
+    # Gone already (ProcessLookupError), or a member of it that is not ours to signal.
+    def cannot_signal(pgid: int, signum: int) -> None:
+        raise error(1, "refused")
+
+    monkeypatch.setattr(os, "killpg", cannot_signal)
+
+    with pytest.raises(UpstreamError) as raised:
+        _run(_python("import sys; sys.exit(3)"), tmp_path / "child.log")
+
+    assert str(raised.value).startswith("the child failed: exit code 3;")
+
+
+@linux_only
+def test_run_logged_sends_sigkill_to_the_group_of_the_child_once_and_only_after_a_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    sent: list[tuple[int, int]] = []
+    real_killpg = os.killpg
+
+    def recording_killpg(pgid: int, signum: int) -> None:
+        sent.append((pgid, signum))
+        real_killpg(pgid, signum)
+
+    monkeypatch.setattr(os, "killpg", recording_killpg)
+    code = "import os, sys; print(os.getpid()); sys.exit(int(sys.argv[1]))"
+    ok_log, failed_log = tmp_path / "ok.log", tmp_path / "failed.log"
+
+    _run(_python(code, "0"), ok_log)
+    assert sent == []
+
+    with pytest.raises(UpstreamError):
+        _run(_python(code, "2"), failed_log)
+    leader = int(failed_log.read_text(encoding="utf-8"))
+    assert sent == [(leader, signal.SIGKILL)]

@@ -11,7 +11,11 @@ inherit_fds=...)`; `holding_the_run` yields its number). `launch` hands it to th
 commands it starts: Eole leads a session of its own and survives a SIGKILL of the
 launcher, and the lock then stays held by that Eole until it exits. So the next launch is
 refused while the orphan trains, instead of starting a second training into the same
-checkpoint directory.
+checkpoint directory. The holder is Eole's leader (`eole train` itself): the per-rank
+processes of a multi-GPU run are started by torch with their descriptors closed and do not
+hold it, so the lock lasts as long as the leader, not as long as every rank. A leader that
+dies on its own takes the group with it at the launcher (`run_logged`); after a SIGKILL of
+the launcher itself nothing does, and a rank that outlives the leader is not covered.
 
 The file is empty and is never removed (removing a lock file while others may open it
 breaks the lock). The lock is advisory and local: it stops other callers of this module

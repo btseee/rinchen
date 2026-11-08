@@ -73,6 +73,13 @@ def run_logged(
     not end a long run). SIGKILL cannot be caught: a child left running after `kill
     -9` of this process is a known limit.
 
+    A command that exits with a non-zero code or by a signal on its own also has its
+    group killed: its helper processes (the per-rank trainers of `eole train` are
+    started with their descriptors closed and keep running after a crash or an
+    OOM-kill of the parent) must not outlive the failure that is reported. A command
+    that exits with 0 is left as it is: it has no such survivors, and one that
+    deliberately leaves a process running is not this call's to stop.
+
     Raises:
         UpstreamError: the command exits with a non-zero code, or runs past
             `timeout` (it is then killed and reaped); `failure_with_log_tail` builds
@@ -101,6 +108,9 @@ def run_logged(
         except BaseException:
             _kill_with_descendants(process)
             raise
+        if returncode != 0:
+            # Before the log is read for the message, so that nothing writes to it any more.
+            _kill_what_the_leader_left_behind(process)
     if returncode != 0:
         raise failure_with_log_tail(f"{what} failed: {_describe(returncode)}", log_path)
 
@@ -166,6 +176,22 @@ def _kill_with_descendants(process: subprocess.Popen[bytes]) -> None:
     else:
         process.kill()
     process.wait()
+
+
+def _kill_what_the_leader_left_behind(process: subprocess.Popen[bytes]) -> None:
+    """SIGKILL the process group of `process`, which has exited and been reaped: what
+    is left is what it started. Where there are no process groups there is nothing
+    to do.
+
+    The group id is the leader's pid, which stays reserved while any member lives; with
+    none left the call finds no group. (A pid that the system recycled for a new group
+    between the reap and this call would be hit; it hands pids out in sequence, so that
+    takes a wrap-around within microseconds.)"""
+    if _POSIX:
+        # ProcessLookupError: nothing is left. PermissionError: a member of the group
+        # is not ours to signal, and there is no more to be done about it.
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.killpg(process.pid, signal.SIGKILL)
 
 
 def failure_with_log_tail(problem: str, log_path: Path) -> UpstreamError:
