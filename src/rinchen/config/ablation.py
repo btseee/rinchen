@@ -12,7 +12,7 @@ no feature package."""
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Final, Literal, get_args
 
 import yaml
 from pydantic import (
@@ -32,6 +32,7 @@ from rinchen.errors import ConfigError
 # is out: Eole's `suffix` transform raises KeyError at the start of training unless a
 # workaround corpus is configured.
 TagPlacement = Literal["src", "tgt"]
+_PLACEMENTS: Final = get_args(TagPlacement)
 
 # Strict so a quoted number or a YAML boolean is a typo to report, not a value to
 # coerce.
@@ -39,6 +40,14 @@ _PositiveInt = Annotated[int, Field(strict=True, gt=0)]
 _NonNegativeInt = Annotated[int, Field(strict=True, ge=0)]
 _Temperature = Annotated[float, Field(strict=True, gt=0, allow_inf_nan=False)]
 _BtRatio = Annotated[float, Field(strict=True, ge=0, allow_inf_nan=False)]
+
+
+def require_placement(placement: object) -> None:
+    """Raise ValueError unless `placement` is `src` or `tgt`."""
+    if placement not in _PLACEMENTS:
+        raise ValueError(
+            f"placement must be one of {', '.join(_PLACEMENTS)}, got {placement!r}"
+        )
 
 
 def id_number(value: float) -> str:

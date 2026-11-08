@@ -1,5 +1,5 @@
-"""The temporary name a writer gives a file before it renames the file into
-place."""
+"""Writing a file so that it appears whole: a temporary name beside it, then a rename
+over it."""
 
 from __future__ import annotations
 
@@ -13,3 +13,14 @@ def unique_part_path(path: Path) -> Path:
     file is not created: its permissions then follow the umask, as an ordinary
     new file's do (a `mkstemp` file would be private to its owner)."""
     return path.with_name(f"{path.name}.{uuid.uuid4().hex}.part")
+
+
+def replace_file(path: Path, content: bytes) -> None:
+    """Write `content` so that `path` appears whole: it is written to a temporary file
+    beside it and renamed over it, and a failure leaves any earlier file."""
+    part_path = unique_part_path(path)
+    try:
+        part_path.write_bytes(content)
+        part_path.replace(path)
+    finally:
+        part_path.unlink(missing_ok=True)

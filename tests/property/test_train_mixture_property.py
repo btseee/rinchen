@@ -23,13 +23,9 @@ from hypothesis import strategies as st
 
 from rinchen.corpus.schema import ORIGINS, SPLITS, corpus_frame, make_row_id
 from rinchen.corpus.writers import write_corpus
-from rinchen.train.mixture import (
-    DevSet,
-    build_corpora,
-    dev_line_ranges,
-    load_training_rows,
-    source_collision_rate,
-)
+from rinchen.train.corpus_files import build_corpora
+from rinchen.train.mixture import DevSet, load_training_rows, source_collision_rate
+from rinchen.train.validation_corpus import dev_line_ranges
 
 _LANGUAGES = ("eng_Latn", "khk_Cyrl", "rus_Cyrl")
 _EXCLUDED_ORIGINS = ("ft", "synth_llm", "synth_nmt")

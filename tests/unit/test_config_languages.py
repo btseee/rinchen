@@ -8,6 +8,7 @@ import yaml
 
 from rinchen.config.languages import (
     LANGUAGES_PATH,
+    direction_tag,
     known_language_codes,
     load_languages,
 )
@@ -110,6 +111,26 @@ def test_sixteen_directions():
 
 def test_known_language_codes_matches_registry():
     assert known_language_codes() == frozenset(entry.code for entry in load_languages())
+
+
+def test_direction_tag_of_a_code_is_the_registry_tag():
+    assert direction_tag("khk_Cyrl") == "<2khk_Cyrl>"
+    assert direction_tag("eng_Latn") == "<2eng_Latn>"
+
+
+def test_every_registry_code_has_its_own_direction_tag():
+    for entry in load_languages():
+        assert direction_tag(entry.code) == entry.direction_tag
+
+
+@pytest.mark.parametrize(
+    "code", ["xx_Latn", "", "khk_cyrl", " khk_Cyrl", "<2khk_Cyrl>"]
+)
+def test_direction_tag_of_a_code_outside_the_registry_is_a_config_error(code):
+    with pytest.raises(
+        ConfigError, match=f"language {code!r} is not in the language registry"
+    ):
+        direction_tag(code)
 
 
 def test_jpn_has_three_scripts():

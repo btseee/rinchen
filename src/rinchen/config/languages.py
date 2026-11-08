@@ -88,3 +88,23 @@ def known_language_codes() -> frozenset[str]:
     """Codes of the default registry; cached, so tests needing a custom
     registry call `load_languages(path)` directly."""
     return frozenset(entry.code for entry in load_languages())
+
+
+@functools.cache
+def _direction_tags() -> dict[str, str]:
+    return {entry.code: entry.direction_tag for entry in load_languages()}
+
+
+def direction_tag(code: str) -> str:
+    """The direction tag of the language `code` in the default registry, such as
+    `<2khk_Cyrl>`; cached like `known_language_codes`.
+
+    Raises:
+        ConfigError: `code` is not in the registry.
+    """
+    try:
+        return _direction_tags()[code]
+    except KeyError:
+        raise ConfigError(
+            f"language {code!r} is not in the language registry"
+        ) from None

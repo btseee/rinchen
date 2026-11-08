@@ -17,7 +17,12 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from rinchen.config.ablation import AblationMatrix, Axes, load_ablation
+from rinchen.config.ablation import (
+    AblationMatrix,
+    Axes,
+    load_ablation,
+    require_placement,
+)
 from rinchen.config.loader import REPO_ROOT
 from rinchen.errors import ConfigError
 
@@ -526,3 +531,16 @@ def test_the_loader_is_a_config_module_that_never_imports_the_train_package() ->
     )
 
     assert done.returncode == 0, done.stdout + done.stderr
+
+
+@pytest.mark.parametrize("placement", ["src", "tgt"])
+def test_a_supported_placement_passes_the_placement_check(placement: str) -> None:
+    require_placement(placement)
+
+
+@pytest.mark.parametrize("placement", ["suffix", "SRC", "", None, 1, ["src"]])
+def test_any_other_placement_is_a_value_error_that_lists_the_supported_ones(
+    placement: object,
+) -> None:
+    with pytest.raises(ValueError, match=r"placement must be one of src, tgt, got "):
+        require_placement(placement)
