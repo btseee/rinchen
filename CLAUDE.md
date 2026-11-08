@@ -136,7 +136,7 @@ crashed Eole leader was not killed, so the rank processes of a multi-GPU run cou
 events landed outside the run directory) and seven Minor ones; the fix wave (two commits, gate 7187 passed, 1 skipped,
 10 deselected) fixed the two Important ones, a guard against a resumed checkpoint of another architecture and the
 wording of an unreadable-file message, and left four findings open on purpose (`DECISIONS.md`); a scoped re-review of
-the fix wave had not run when this was written. Next up: D9 (Document-level). See
+the fix wave approved it with minors, and the one that needed code is fixed. Next up: D9 (Document-level). See
 `STATE.md`, `docs/runbooks/07_ablations.md` and `docs/runbooks/08_teacher.md`.
 
 ## Evidence and full plan

@@ -882,6 +882,29 @@ def test_a_key_that_differs_is_named_with_both_values(
     assert mismatch == ArchitectureMismatch(".".join(path), saved_value, other)
 
 
+def test_numbers_written_as_text_in_the_config_are_the_numbers_eole_saved() -> None:
+    # Eole accepts `hidden_size: "64"` and saves 64: a run whose config quotes its
+    # numbers must not see its own checkpoint taken for another model's.
+    wanted = wanted_model()
+    wanted["hidden_size"] = str(wanted["hidden_size"])
+    wanted["encoder"]["layers"] = str(wanted["encoder"]["layers"])
+    wanted["heads"] = " " + str(wanted["heads"]) + " "
+
+    assert architecture_mismatch({"model": eole_model_section()}, wanted) is None
+
+
+@pytest.mark.parametrize("other", ["128", "sixty-four", "6e1", "6_4", "-64", ""])
+def test_text_that_is_not_the_saved_number_is_still_a_mismatch(other: str) -> None:
+    wanted = wanted_model()
+    wanted["hidden_size"] = other
+
+    mismatch = architecture_mismatch({"model": eole_model_section()}, wanted)
+
+    assert mismatch is not None
+    assert mismatch.key == "hidden_size"
+    assert mismatch.wanted == other
+
+
 def test_the_mismatch_reads_as_a_sentence_with_both_values() -> None:
     wanted = wanted_model()
     wanted["encoder"]["layers"] = 24
@@ -935,11 +958,11 @@ def test_a_saved_config_without_the_keys_is_not_comparable(
 
 def test_a_saved_value_of_another_kind_is_a_mismatch_not_an_error() -> None:
     saved = {"model": eole_model_section()}
-    saved["model"]["hidden_size"] = "64"
+    saved["model"]["hidden_size"] = [64]  # not "64": decimal text is the number
 
     mismatch = architecture_mismatch(saved, wanted_model())
 
-    assert mismatch == ArchitectureMismatch("hidden_size", "64", 64)
+    assert mismatch == ArchitectureMismatch("hidden_size", [64], 64)
 
 
 def test_the_comparison_leaves_both_sections_as_they_were() -> None:

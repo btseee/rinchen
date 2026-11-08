@@ -208,7 +208,8 @@ def architecture_mismatch(
     width and position scheme, and the layers, width, heads, feed-forward size and
     position scheme of the encoder and of the decoder, compared in that order. A key
     that either side does not have is not compared, so a checkpoint that records no
-    model section is never a mismatch. Best effort: it catches a checkpoint of another
+    model section is never a mismatch, and a number written as decimal text equals the
+    number. Best effort: it catches a checkpoint of another
     architecture, not one of the same architecture that this run did not write.
     """
     saved_model = saved_config.get("model")
@@ -217,9 +218,21 @@ def architecture_mismatch(
     for path in _ARCHITECTURE_KEYS:
         saved = _value_at(saved_model, path)
         wanted = _value_at(model, path)
-        if saved is not _ABSENT and wanted is not _ABSENT and saved != wanted:
+        if saved is _ABSENT or wanted is _ABSENT:
+            continue
+        if _as_number(saved) != _as_number(wanted):
             return ArchitectureMismatch(".".join(path), saved, wanted)
     return None
+
+
+def _as_number(value: Any) -> Any:
+    """`value`, or the integer a plain decimal text spells: Eole accepts
+    `hidden_size: "64"` in a config and saves 64, so the two are the same setting."""
+    if isinstance(value, str):
+        text = value.strip()
+        if text.isascii() and text.isdecimal():
+            return int(text)
+    return value
 
 
 def _value_at(section: Mapping[str, Any], path: tuple[str, ...]) -> Any:

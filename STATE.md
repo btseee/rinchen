@@ -615,7 +615,9 @@ after an early stop does nothing), M-3 (two hand runs appended to one attempt lo
 and M-7 (design notes); the records in `DECISIONS.md` ("2026-11-08: D8 final review - corrections and fixes")
 correct the statements the review showed false (the group was NOT always killed; the TensorBoard events did NOT
 stay in the run directory; `eole_cfg.py` has 837 lines, not "about 844"). **A scoped re-review of the fix wave
-had not run when these records were written.** Gates, run for real on Linux, CPython 3.14.10: `ruff format --check .`, `ruff check .` and
+ran afterwards: approved with minors (a quoted number in a config was taken for a foreign checkpoint: fixed in
+`D8: re-review minors`, gate 7194 passed, 1 skipped, 10 deselected in 10 min 23 s; the other minors are documented in
+the runbook).** Gates, run for real on Linux, CPython 3.14.10: `ruff format --check .`, `ruff check .` and
 `mypy src` clean and `pytest -m "not network" -q` -- 6148 passed after Task 1, 6485 after Task 2, 6588 and 6829
 after Tasks 3 and 4, 6853 and 7020 after the two commits of Task 5, 7048 after Task 6 (10 min 36 s on a loaded
 machine), 7085 and then **7114 passed, 1 skipped, 10 deselected** after the interlude (10 min 10 s and 10 min 50
@@ -691,8 +693,8 @@ on the D8 branch: 7114 passed, 1 skipped, 10 deselected (D6, D7 and D8 included)
 launcher` (`3e357ae`; 7020 after Task 5, 5968 on D7's last commit, `D7: re-review minors`) and again, with the final
 review's fixes, on `D8: final review fixes` (`0378265`): 7187 passed, 1 skipped, 10 deselected; on D6's last
 commit (`D6: re-review minors`) it gave 4331 passed; on the merged D5 tree `main` gave 2833 passed. The
-whole-branch review of D8 ran (above); a scoped re-review of its fix wave had not run when this paragraph was
-written.
+whole-branch review of D8 ran (above); its fix wave's scoped re-review approved it with minors and the minor
+that needed code is fixed (`D8: re-review minors`).
 
 Next step: D9 (Document-level). Nothing in D8 blocks it. Its inputs from D8: `rinchen train launch` (the
 resumable launcher: start, resume from the newest complete checkpoint, `already_complete`, the NaN gate, the

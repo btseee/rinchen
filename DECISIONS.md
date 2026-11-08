@@ -2317,3 +2317,17 @@ directories skipped` line of the CLI with the incomplete ones (its reason is pri
 directory is left); a rank process outliving a leader that died while the launcher was gone too is
 covered by nothing; everything on a GPU and under NCCL. A scoped re-review of the fix wave had not
 run when this entry was written.
+
+[EVIDENCE: addendum to the D8 final review entry, from its scoped re-review (approved with minors, no Critical or Important
+finding). (1) The checkpoint-shape guard compared the config's model numbers with the checkpoint's by plain equality, and Eole
+accepts `hidden_size: "64"` (and the other integer keys as text) and saves 64: a run whose config quoted its numbers trained to
+step_40, then every relaunch was refused as another model's checkpoint (repro: real Eole, 40 steps). Fixed in `D8: re-review
+minors`: a decimal text equals the number it spells (an existing test that used the text "64" as its example of a value of another
+kind now uses a list; its intent, a mismatch and not an error, is unchanged). (2) A config that omits `encoder.layers`,
+`decoder.layers`, `heads` or `transformer_ff` lets a same-width checkpoint of another depth through: documented in runbook 08
+(set them all; `teacher.yaml` does). (3) An explicit relative `tensorboard_log_dir` is kept as written, so its events land relative
+to the launch directory: documented (give an absolute path or none). (4) The runbook 05 and 07 descriptions of `run_logged` and
+the D5 spec do not mention the sweep of the process group after a non-zero leader exit; nothing in them is false. Left as is: the
+documented pid-reuse window of that sweep (the pid_max is 4194304 and pids are handed out sequentially, so a reuse needs a full
+wrap within microseconds; an exact fix with `waitid(WNOWAIT)` would replace the polled wait that the D5 and D7 tests record).
+Cost if wrong: none beyond the documentation.]
