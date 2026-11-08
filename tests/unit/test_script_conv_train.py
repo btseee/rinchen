@@ -4,7 +4,7 @@ No test starts Eole. `subprocess.Popen` is replaced by a recorder that writes wh
 the real tool would (log lines, the checkpoint files, the prediction file), so each
 test pins the commands, the environment and the failure handling. The runner's own
 process handling (timeouts, killing a process group) is tested with real children in
-`test_script_conv_subprocess.py`; the real Eole run is the integration test in
+`test_utils_logged_process.py`; the real Eole run is the integration test in
 `tests/integration/test_script_conv_tiny.py`.
 """
 

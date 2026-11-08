@@ -19,9 +19,9 @@ from typing import Any, NamedTuple
 import yaml
 
 from rinchen.errors import ConfigError, DataError, UpstreamError
-from rinchen.script_conv._subprocess import run_logged
 from rinchen.script_conv.char_model import CONVERTER_TAGS, load_char_processor
 from rinchen.script_conv.config import Profile, dump_config, validate_converter_config
+from rinchen.utils.logged_process import run_logged
 
 _PREDICT_BATCH_SIZE = 64
 # Eole keeps its newest checkpoint under this name in `model_path` (a link to the file

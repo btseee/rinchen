@@ -17,8 +17,8 @@ from pathlib import Path
 
 import ctranslate2
 
-from rinchen.script_conv._subprocess import failure_with_log_tail, run_logged
 from rinchen.script_conv.char_model import load_char_processor
+from rinchen.utils.logged_process import failure_with_log_tail, run_logged
 
 _MAX_REPORTED_MISMATCHES = 10
 _MODEL_FILE = "model.bin"

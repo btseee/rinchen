@@ -1,4 +1,4 @@
-"""Tests for `rinchen.script_conv._subprocess`: the logged subprocess runner that
+"""Tests for `rinchen.utils.logged_process`: the logged subprocess runner that
 Eole and the CTranslate2 converter run through.
 
 These tests start real children (the test interpreter running a few lines), because
@@ -19,7 +19,7 @@ from typing import Any
 import pytest
 
 from rinchen.errors import UpstreamError
-from rinchen.script_conv._subprocess import LOG_TAIL_LINES, run_logged
+from rinchen.utils.logged_process import LOG_TAIL_LINES, run_logged
 
 pytestmark = pytest.mark.subprocess  # the tests start real child processes
 

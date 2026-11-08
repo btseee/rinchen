@@ -1,8 +1,8 @@
 """Run a command with its output kept in a log file.
 
-The converter starts Eole and the CTranslate2 converter as subprocesses; both
-write the combined output of the tool to a log and turn a failure into an
-`UpstreamError` that carries the end of that log.
+Eole and the CTranslate2 converter run as subprocesses; both write the combined
+output of the tool to a log and turn a failure into an `UpstreamError` that carries
+the end of that log.
 """
 
 from __future__ import annotations
