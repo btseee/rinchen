@@ -45,7 +45,8 @@ CPU_FRESH = """\
 # It starts the run from scratch: no checkpoint of it was complete when this was written.
 # What it resumes from is fixed at that moment: write it again with
 # `rinchen train launch --write-only` after the run changed.
-# Unlike `rinchen train launch` it writes no launch.json and does not look for NaN.
+# launch.json beside it records the run, so `rinchen train launch` can resume a run started
+# with this script. The script itself does not look for NaN in the log.
 set -euo pipefail
 export OMP_NUM_THREADS=2
 export MKL_NUM_THREADS=2
@@ -61,7 +62,8 @@ EIGHT_GPUS = """\
 # It starts the run from scratch: no checkpoint of it was complete when this was written.
 # What it resumes from is fixed at that moment: write it again with
 # `rinchen train launch --write-only` after the run changed.
-# Unlike `rinchen train launch` it writes no launch.json and does not look for NaN.
+# launch.json beside it records the run, so `rinchen train launch` can resume a run started
+# with this script. The script itself does not look for NaN in the log.
 set -euo pipefail
 export OMP_NUM_THREADS=4
 export MKL_NUM_THREADS=4
@@ -77,7 +79,8 @@ RESUME = """\
 # It resumes from step 150 (training.train_from of the config it names).
 # What it resumes from is fixed at that moment: write it again with
 # `rinchen train launch --write-only` after the run changed.
-# Unlike `rinchen train launch` it writes no launch.json and does not look for NaN.
+# launch.json beside it records the run, so `rinchen train launch` can resume a run started
+# with this script. The script itself does not look for NaN in the log.
 set -euo pipefail
 export OMP_NUM_THREADS=2
 export MKL_NUM_THREADS=2
@@ -93,7 +96,8 @@ GPU_NOT_REQUESTED = """\
 # It starts the run from scratch: no checkpoint of it was complete when this was written.
 # What it resumes from is fixed at that moment: write it again with
 # `rinchen train launch --write-only` after the run changed.
-# Unlike `rinchen train launch` it writes no launch.json and does not look for NaN.
+# launch.json beside it records the run, so `rinchen train launch` can resume a run started
+# with this script. The script itself does not look for NaN in the log.
 set -euo pipefail
 export OMP_NUM_THREADS=2
 export MKL_NUM_THREADS=2

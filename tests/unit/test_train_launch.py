@@ -1384,6 +1384,7 @@ def test_attempts_are_numbered_one_after_the_logs_there_are(
         "attempt-2.log",
         "attempt-3.log",
         "build_vocab.log",
+        "lock",
         "train-1.yaml",
         "train-2.yaml",
         "train-3.yaml",
@@ -1444,7 +1445,8 @@ GOLDEN_HEADER = """\
 {origin}
 # What it resumes from is fixed at that moment: write it again with
 # `rinchen train launch --write-only` after the run changed.
-# Unlike `rinchen train launch` it writes no launch.json and does not look for NaN.
+# launch.json beside it records the run, so `rinchen train launch` can resume a run started
+# with this script. The script itself does not look for NaN in the log.
 set -euo pipefail
 export OMP_NUM_THREADS={threads}
 export MKL_NUM_THREADS={threads}
@@ -1500,7 +1502,11 @@ def test_write_only_writes_the_script_and_the_attempt_config_and_runs_nothing(
         incomplete_skipped=(),
     )
     assert fake.calls == []
-    assert sorted(files_under(run_dir)) == ["command.sh", "launch/train-1.yaml"]
+    assert sorted(files_under(run_dir)) == [
+        "command.sh",
+        "launch.json",
+        "launch/train-1.yaml",
+    ]
     assert (
         yaml.safe_load(
             (run_dir / "launch" / "train-1.yaml").read_text(encoding="utf-8")
@@ -1513,17 +1519,107 @@ def test_write_only_writes_the_script_and_the_attempt_config_and_runs_nothing(
     assert config_path.read_bytes() == before
 
 
-def test_write_only_creates_no_launch_record_and_leaves_an_existing_one_alone(
-    config_path: Path, run_dir: Path, fake: FakeEole
+def test_write_only_records_the_run_the_way_a_real_launch_does(
+    config_path: Path, run_dir: Path, base_cfg: dict[str, Any], fake: FakeEole
 ) -> None:
     go(config_path, run_dir, write_only=True)
-    assert not (run_dir / LAUNCH_FILE).exists()
+
+    record = read_launch_record(run_dir)
+    assert record is not None
+    assert record.identity == identity_of(base_cfg)
+    assert (record.world_size, record.gpu_ranks) == (1, ())
+    assert fake.calls == []
+
+
+def test_write_only_records_the_overrides_of_a_gpu_run(
+    tmp_path: Path, run_dir: Path, base_cfg: dict[str, Any], fake: FakeEole
+) -> None:
+    config = write_config(tmp_path / "gpu.yaml", config_with(base_cfg, timeout=3600))
+
+    go(config, run_dir, world_size=2, gpu_ranks=[0, 1], write_only=True)
+
+    record = json.loads((run_dir / LAUNCH_FILE).read_text(encoding="utf-8"))
+    assert (record["world_size"], record["gpu_ranks"]) == (2, [0, 1])
+    effective = config_with(base_cfg, timeout=3600, world_size=2, gpu_ranks=[0, 1])
+    assert record["identity"] == identity_of(effective)
+
+
+def test_write_only_leaves_a_record_that_matches_alone(
+    config_path: Path, run_dir: Path, fake: FakeEole
+) -> None:
     start_and_crash(fake, config_path, run_dir)
+    # An old time stamp, so that a rewrite could not give the same bytes.
+    document = json.loads((run_dir / LAUNCH_FILE).read_text(encoding="utf-8"))
+    document["created"] = "2020-01-01T00:00:00+00:00"
+    (run_dir / LAUNCH_FILE).write_text(json.dumps(document), encoding="utf-8")
     record = (run_dir / LAUNCH_FILE).read_bytes()
 
     go(config_path, run_dir, write_only=True)
 
     assert (run_dir / LAUNCH_FILE).read_bytes() == record
+
+
+def test_a_run_started_by_hand_from_a_write_only_script_is_resumed_by_launch(
+    config_path: Path, run_dir: Path, fake: FakeEole
+) -> None:
+    go(config_path, run_dir, write_only=True)
+    # What running command.sh by hand leaves behind: step directories, no launch.json
+    # written by it (the record is the one write_only made).
+    step_dirs.make_step_dir(run_dir / "ckpt", 50)
+    step_dirs.make_step_dir(run_dir / "ckpt", 100)
+    (run_dir / "vocab.src").write_text("a\nb\n", encoding="utf-8")
+
+    result = go(config_path, run_dir)
+
+    assert (result.status, result.resumed_from, result.steps) == ("completed", 100, 200)
+    assert fake.vocabularies == []
+    assert fake.trains[0].config["training"]["train_from"] == str(
+        run_dir / "ckpt" / "step_100"
+    )
+
+
+def test_write_only_after_a_hand_run_refuses_another_config_like_a_real_launch(
+    tmp_path: Path,
+    config_path: Path,
+    run_dir: Path,
+    base_cfg: dict[str, Any],
+    fake: FakeEole,
+) -> None:
+    go(config_path, run_dir, write_only=True)
+    step_dirs.make_step_dir(run_dir / "ckpt", 50)
+    other = write_config(
+        tmp_path / "other.yaml", config_with(base_cfg, learning_rate=0.3)
+    )
+    before = files_under(run_dir)
+
+    with pytest.raises(ConfigError, match="not the one this run was started with"):
+        go(other, run_dir, write_only=True)
+    assert files_under(run_dir) == before
+    with pytest.raises(ConfigError, match="not the one this run was started with"):
+        go(other, run_dir)
+
+    # A real launch is refused after it took the lock: the empty lock file is all it
+    # leaves.
+    assert files_under(run_dir) == {**before, "launch/lock": b""}
+    assert fake.calls == []
+
+
+def test_write_only_starts_a_new_record_for_a_run_without_step_directories(
+    tmp_path: Path,
+    config_path: Path,
+    run_dir: Path,
+    base_cfg: dict[str, Any],
+    fake: FakeEole,
+) -> None:
+    go(config_path, run_dir, write_only=True)
+    other_cfg = config_with(base_cfg, learning_rate=0.3)
+    other = write_config(tmp_path / "other.yaml", other_cfg)
+
+    go(other, run_dir, write_only=True)
+
+    record = read_launch_record(run_dir)
+    assert record is not None
+    assert record.identity == identity_of(other_cfg)
 
 
 def test_write_only_twice_gives_the_same_script(

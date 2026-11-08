@@ -7,8 +7,9 @@ launch works in `run_dir` and writes only there, besides the paths the config it
 names:
 
     launch.json         what the run was started with (`checkpoints.identity_of`),
-                        written before Eole starts
+                        written before Eole starts, and by `write_only` too
     command.sh          the commands of the latest attempt, for an operator to run by hand
+    launch/lock         the lock of a running launch (see below); empty, never removed
     launch/build_vocab.log
     launch/train-<k>.yaml   the effective config of attempt k: the config file with the
                         `world_size` and `gpu_ranks` overrides laid over it, and, when
@@ -19,12 +20,29 @@ The config file given is never changed. Each attempt has its own config and log,
 ran is on disk, and an earlier attempt's log is never read as a later one's.
 
 The order of the work: read and validate the config, apply the GPU rules (`gpu_rules`),
-take the identity of the run, look at the checkpoints (`checkpoints.latest_complete`),
-write the attempt's files, then (unless `write_only`) write `launch.json`, build the
-vocabulary when its file is missing, run `eole train` and decide from its log and the
-step directories how it ended. A resume names the newest COMPLETE step directory of the
-run, never `model_path` (Eole's saver is not atomic), and only the run's own: the config
-files never hold `train_from`.
+take the identity of the run, take the lock of the run, look at the checkpoints
+(`checkpoints.latest_complete`), write the attempt's files and `launch.json`, then
+(unless `write_only`) build the vocabulary when its file is missing, run `eole train` and
+decide from its log and the step directories how it ended. A resume names the newest
+COMPLETE step directory of the run, never `model_path` (Eole's saver is not atomic), and
+only the run's own: the config files never hold `train_from`.
+
+`write_only` writes `command.sh`, the attempt's config and `launch.json` and runs
+nothing. The record is what lets a run that an operator started by hand from `command.sh`
+be resumed by `launch` afterwards: step directories without a record are refused, a
+record without step directories is just a fresh start. The same refusals hold for it as
+for a real launch (another config than the run's, the NaN guard).
+
+One launch at a time (`run_lock`). A real launch holds an exclusive, non-blocking `flock`
+on `launch/lock` from before it reads the state of the run until it returns, however it
+ends. The lock belongs to the open file, so a crash or a kill releases it and no stale
+lock is left; the Eole processes do not inherit it. A second launch into the same run
+directory is a `ConfigError` naming the lock file. A launch refused for what it finds in
+the run directory (another config, a NaN) has taken the lock by then and leaves the empty
+lock file, nothing else; one refused for its config or options writes nothing.
+`write_only` takes no lock: it only looks at one that exists and is refused while another
+launch holds it, since it would replace the config that launch runs. The look is not a
+lock; a launch that starts after it is not stopped.
 
 How a run ends (an `UpstreamError` for each failure, with the log named):
 
@@ -43,10 +61,9 @@ last attempt early-stopped at the newest complete step) runs nothing. Neither do
 launch of a run whose last attempt logged a NaN at or before its newest complete step:
 that checkpoint holds the damage, so it is refused instead of resumed or called finished.
 
-Not done: a lock against two launches into one run directory at once, and a live abort on
-NaN. The vocabulary is built on the attempt's own config, a resume config included (only
-needed when the vocabulary file is missing at a resume; that `eole build_vocab` accepts
-`training.train_from` in it is not measured).
+Not done: a live abort on NaN. The vocabulary is built on the attempt's own config, a
+resume config included (only needed when the vocabulary file is missing at a resume; that
+`eole build_vocab` accepts `training.train_from` in it is not measured).
 
 Eole is reached only through `run_logged`, which runs it in a process group of its own
 and kills the group on Ctrl-C, SIGTERM, SIGHUP and a timeout; the run stays resumable
@@ -90,11 +107,13 @@ from rinchen.train.eole_run import (
 )
 from rinchen.train.gpu_rules import GpuSettings, check_gpu_rules
 from rinchen.train.launch_command import render_command_sh
+from rinchen.train.run_lock import holding_the_run, refuse_a_held_run
 from rinchen.utils.logged_process import run_logged
 from rinchen.utils.part_file import replace_file
 
 LAUNCH_DIR: Final = "launch"
 COMMAND_FILE: Final = "command.sh"
+LOCK_FILE: Final = "lock"
 LaunchStatus = Literal["completed", "early_stopped", "already_complete", "written"]
 
 _WHAT: Final = "Eole config"
@@ -167,7 +186,7 @@ def launch(
     hidden from the process exactly when the run uses none, and `cuda_visible_devices`
     (digits separated by commas, at least as many as ranks) sets which GPUs a GPU run
     sees. `timeout` (seconds) bounds each Eole command. `write_only` writes
-    `command.sh` and the attempt's config and runs nothing, writes no `launch.json`.
+    `command.sh`, the attempt's config and `launch.json` and runs nothing.
     `eole` is the command to run (default: the `eole` next to the interpreter, or the
     caller's choice in tests); `extra_env` is laid over the process environment of the
     commands, a hook for a test shim that is never read from the environment here.
@@ -178,14 +197,16 @@ def launch(
             `run_dir`, the GPU rules or the device list are broken, the path or the
             text holds `$` (or the checkpoint directory a glob character), the run's
             step directories have no `launch.json` or the config is not the run's
-            (only `training.train_steps` may change), or `train_steps` is below the
-            newest complete step.
+            (only `training.train_steps` may change), `train_steps` is below the
+            newest complete step, or another launch holds the run (its lock file is
+            named; also for `write_only`).
         DataError: `launch.json` is not a launch record, or the checkpoint directory
             cannot be listed.
         ValueError: `threads` is less than 1.
         UpstreamError: `eole` is not installed, a command exits non-zero (unless the run
             early-stopped) or runs past `timeout`, `eole train` exits 0 without
             finishing the run, or the loss in its log is NaN or infinite.
+        OSError: the run directory or the lock file cannot be created or opened.
     """
     reject_dollar("config path", cfg_path)
     reject_dollar("run directory", run_dir)
@@ -193,6 +214,43 @@ def launch(
     devices = _devices(cuda_visible_devices, plan.settings)
     command = eole if eole is not None else eole_command()
     env = _environment(threads, plan.settings, devices, extra_env)
+    work = _Work(
+        plan=plan,
+        run_dir=run_dir,
+        command=command,
+        env=env,
+        threads=threads,
+        timeout=timeout,
+        devices=devices,
+        write_only=write_only,
+    )
+    lock = run_dir / LAUNCH_DIR / LOCK_FILE
+    if write_only:
+        refuse_a_held_run(lock)
+        return _launch_guarded(work)
+    with holding_the_run(lock):
+        return _launch_guarded(work)
+
+
+@dataclass(frozen=True, slots=True)
+class _Work:
+    """Everything `_launch_guarded` needs, decided before the run was looked at."""
+
+    plan: _Plan
+    run_dir: Path
+    command: str
+    env: dict[str, str]
+    threads: int
+    timeout: float | None
+    devices: str | None
+    write_only: bool
+
+
+def _launch_guarded(work: _Work) -> LaunchResult:
+    """The work of `launch` once the run is guarded: the lock is held, or `write_only`
+    has found nobody holding it."""
+    plan, run_dir, command, env = work.plan, work.run_dir, work.command, work.env
+    timeout, write_only = work.timeout, work.write_only
     record = read_launch_record(run_dir)
     point = latest_complete(plan.model_path)
     _require_the_same_run(plan, run_dir, record, point)
@@ -215,10 +273,11 @@ def launch(
         plan,
         run_dir,
         command=command,
-        threads=threads,
-        exported_devices=_exported_devices(plan.settings, devices),
+        threads=work.threads,
+        exported_devices=_exported_devices(plan.settings, work.devices),
         resume_step=resume_step,
     )
+    _record_the_run(run_dir, plan, record)
     if write_only:
         return LaunchResult(
             status="written",
@@ -231,7 +290,6 @@ def launch(
             incomplete_skipped=skipped,
         )
 
-    _record_the_run(run_dir, plan, record)
     if not plan.src_vocab.exists():
         run_logged(
             [command, "build_vocab", "-config", str(attempt.config), "-n_sample", "-1"],

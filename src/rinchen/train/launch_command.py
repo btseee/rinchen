@@ -7,9 +7,10 @@ it is golden-tested; every path in it is absolute, so it runs from anywhere (the
 `cd` line is for the relative paths a config may hold).
 
 The script fixes the state of the run at the moment it is written: which checkpoint it
-resumes from is in the config it names. It writes no `launch.json` and looks at no log,
-so a NaN in the loss is for the `rinchen train launch` that resumes or finishes the run
-to find.
+resumes from is in the config it names. `launch.json`, the record of the run that lets
+`rinchen train launch` take over a run started by hand with this script, is written by
+the launcher beside it, not by the script; the script looks at no log, so a NaN in the
+loss is for the `rinchen train launch` that resumes or finishes the run to find.
 """
 
 from __future__ import annotations
@@ -71,9 +72,10 @@ def render_command_sh(
         "# What it resumes from is fixed at that moment: write it again with",
         "# `rinchen train launch --write-only` after the run changed.",
         (
-            "# Unlike `rinchen train launch` it writes no launch.json and does not "
-            "look for NaN."
+            "# launch.json beside it records the run, so `rinchen train launch` can "
+            "resume a run started"
         ),
+        "# with this script. The script itself does not look for NaN in the log.",
         "set -euo pipefail",
         f"export OMP_NUM_THREADS={threads}",
         f"export MKL_NUM_THREADS={threads}",
