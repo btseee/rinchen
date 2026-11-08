@@ -46,6 +46,7 @@ def run_logged(
     log_path: Path,
     what: str,
     timeout: float | None = None,
+    inherit_fds: Sequence[int] = (),
 ) -> None:
     """Run `command` with `env`, standard output and error combined into `log_path`
     (created, with its directory, and replaced if it exists).
@@ -55,6 +56,12 @@ def run_logged(
     would kill only the direct child, and a grandchild (a data-loader worker, say)
     would keep running and keep the log open. `timeout` is in seconds; None waits
     for as long as the command runs.
+
+    The child inherits the open descriptors listed in `inherit_fds` and no other (Python
+    opens its own descriptors uninheritable, and they stay so in this process). A caller
+    uses it to let the command keep alive something that is tied to an open file, such
+    as an `flock` taken on it: the lock then lasts as long as the command, also when this
+    process is killed (SIGKILL, below). The default hands the child nothing.
 
     The child's own session also keeps it out of reach of a SIGTERM or SIGHUP sent
     to this process, which would then die and leave the command running. So while
@@ -82,6 +89,7 @@ def run_logged(
             stdout=log,
             stderr=subprocess.STDOUT,
             start_new_session=_POSIX,
+            pass_fds=tuple(inherit_fds),
         )
         try:
             returncode = _wait_for_exit(process, timeout)

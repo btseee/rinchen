@@ -8,7 +8,10 @@ names:
 
     launch.json         what the run was started with (`checkpoints.identity_of`),
                         written before Eole starts, and by `write_only` too
-    command.sh          the commands of the latest attempt, for an operator to run by hand
+    command.sh          the commands of the latest attempt, for an operator to run by hand;
+                        it appends the output of `eole train` to launch/attempt-<k>.log
+                        and that of `eole build_vocab` to launch/build_vocab.log, so a
+                        hand-run attempt leaves the log a later launch reads
     launch/lock         the lock of a running launch (see below); empty, never removed
     launch/build_vocab.log
     launch/train-<k>.yaml   the effective config of attempt k: the config file with the
@@ -35,11 +38,14 @@ for a real launch (another config than the run's, the NaN guard).
 
 One launch at a time (`run_lock`). A real launch holds an exclusive, non-blocking `flock`
 on `launch/lock` from before it reads the state of the run until it returns, however it
-ends. The lock belongs to the open file, so a crash or a kill releases it and no stale
-lock is left; the Eole processes do not inherit it. A second launch into the same run
-directory is a `ConfigError` naming the lock file. A launch refused for what it finds in
-the run directory (another config, a NaN) has taken the lock by then and leaves the empty
-lock file, nothing else; one refused for its config or options writes nothing.
+ends. The lock belongs to the open file, so a crash releases it and no stale lock is left.
+Both Eole commands inherit the descriptor (`run_logged`'s `inherit_fds`): Eole leads a
+session of its own and outlives a SIGKILL of the launcher, and the lock then stays held by
+that Eole until it exits, so the next launch cannot start a second training into the same
+checkpoint directory. A second launch into the same run directory is a `ConfigError`
+naming the lock file. A launch refused for what it finds in the run directory (another
+config, a NaN) has taken the lock by then and leaves the empty lock file, nothing else;
+one refused for its config or options writes nothing.
 `write_only` takes no lock: it only looks at one that exists and is refused while another
 launch holds it, since it would replace the config that launch runs. The look is not a
 lock; a launch that starts after it is not stopped.
@@ -116,6 +122,7 @@ COMMAND_FILE: Final = "command.sh"
 LOCK_FILE: Final = "lock"
 LaunchStatus = Literal["completed", "early_stopped", "already_complete", "written"]
 
+_BUILD_VOCAB_LOG: Final = "build_vocab.log"
 _WHAT: Final = "Eole config"
 _ATTEMPT_LOG: Final = re.compile(r"attempt-([0-9]+)\.log")
 _DEVICE_LIST: Final = re.compile(r"[0-9]+(,[0-9]+)*")
@@ -234,9 +241,9 @@ def launch(
     lock = run_dir / LAUNCH_DIR / LOCK_FILE
     if write_only:
         refuse_a_held_run(lock)
-        return _launch_guarded(work)
-    with holding_the_run(lock):
-        return _launch_guarded(work)
+        return _launch_guarded(work, ())
+    with holding_the_run(lock) as descriptor:
+        return _launch_guarded(work, (descriptor,))
 
 
 @dataclass(frozen=True, slots=True)
@@ -254,9 +261,10 @@ class _Work:
     before_writing: Callable[[], None] | None
 
 
-def _launch_guarded(work: _Work) -> LaunchResult:
-    """The work of `launch` once the run is guarded: the lock is held, or `write_only`
-    has found nobody holding it."""
+def _launch_guarded(work: _Work, lock_fds: tuple[int, ...]) -> LaunchResult:
+    """The work of `launch` once the run is guarded: the lock is held (`lock_fds` is its
+    descriptor, which both Eole commands inherit), or `write_only` has found nobody
+    holding it (no descriptor)."""
     plan, run_dir, command, env = work.plan, work.run_dir, work.command, work.env
     timeout, write_only = work.timeout, work.write_only
     record = read_launch_record(run_dir)
@@ -304,9 +312,10 @@ def _launch_guarded(work: _Work) -> LaunchResult:
         run_logged(
             [command, "build_vocab", "-config", str(attempt.config), "-n_sample", "-1"],
             env=env,
-            log_path=run_dir / LAUNCH_DIR / "build_vocab.log",
+            log_path=run_dir / LAUNCH_DIR / _BUILD_VOCAB_LOG,
             what="eole build_vocab",
             timeout=timeout,
+            inherit_fds=lock_fds,
         )
     failure: UpstreamError | None = None
     try:
@@ -316,6 +325,7 @@ def _launch_guarded(work: _Work) -> LaunchResult:
             log_path=attempt.log,
             what="eole train",
             timeout=timeout,
+            inherit_fds=lock_fds,
         )
     except UpstreamError as error:
         failure = error
@@ -352,6 +362,8 @@ def _prepare_attempt(
         eole=command,
         config=config,
         src_vocab=Path(os.path.abspath(plan.src_vocab)),
+        attempt_log=Path(os.path.abspath(_attempt_log(launch_dir, number))),
+        build_vocab_log=Path(os.path.abspath(launch_dir / _BUILD_VOCAB_LOG)),
         threads=threads,
         cuda_visible_devices=exported_devices,
         attempt=number,

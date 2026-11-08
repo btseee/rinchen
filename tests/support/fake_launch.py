@@ -15,6 +15,7 @@ Every call is recorded with the environment, the parsed config and the state of
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 from collections.abc import Sequence
@@ -89,6 +90,10 @@ class Call:
     timeout: float | None
     config: dict[str, Any]
     launch_json: bytes | None  # run_dir/launch.json when the command started
+    inherit_fds: tuple[int, ...]  # the descriptors the launcher handed the command
+    # (st_dev, st_ino) of the file behind each of them when the command started: the
+    # numbers alone do not say what they were
+    inherited_files: tuple[tuple[int, int], ...]
 
     @property
     def subcommand(self) -> str:
@@ -124,6 +129,7 @@ class FakeEole:
         log_path: Path,
         what: str,
         timeout: float | None = None,
+        inherit_fds: Sequence[int] = (),
     ) -> None:
         launch_json = self.run_dir / "launch.json"
         call = Call(
@@ -134,6 +140,11 @@ class FakeEole:
             timeout=timeout,
             config=yaml.safe_load(Path(command[3]).read_text(encoding="utf-8")),
             launch_json=launch_json.read_bytes() if launch_json.exists() else None,
+            inherit_fds=tuple(inherit_fds),
+            inherited_files=tuple(
+                (status.st_dev, status.st_ino)
+                for status in (os.fstat(number) for number in inherit_fds)
+            ),
         )
         self.calls.append(call)
         log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -151,18 +162,11 @@ class FakeEole:
         vocabulary.write_text("a\nb\n", encoding="utf-8")
 
     def _train(self, call: Call) -> None:
-        training = call.config["training"]
         script = self.scripts.pop(0) if self.scripts else Script()
-        model_path = Path(training["model_path"])
-        start = _step_of(training.get("train_from"))
-        end = script.early_stop_at or script.to_step or training["train_steps"]
-        saves = _saves(start, end, script, call.config)
-        call.log_path.write_text(
-            "\n".join(_log_lines(start, end, saves, script, call.config, model_path))
-            + "\n",
-            encoding="utf-8",
-        )
-        for step in saves:
+        model_path = Path(call.config["training"]["model_path"])
+        outcome = simulate_training(call.config, script)
+        call.log_path.write_text("\n".join(outcome.log_lines) + "\n", encoding="utf-8")
+        for step in outcome.saves:
             existing = model_path / f"step_{step}"
             if existing.exists():
                 shutil.rmtree(existing)
@@ -171,6 +175,26 @@ class FakeEole:
                 step_dirs.truncate(made, step_dirs.WEIGHTS_FILE, 10)
         if script.error is not None:
             raise script.error
+
+
+@dataclass(frozen=True)
+class Training:
+    """What an `eole train` on a config leaves, as `simulate_training` says: the lines of
+    its log and the steps it saves."""
+
+    log_lines: list[str]
+    saves: list[int]
+
+
+def simulate_training(cfg: dict[str, Any], script: Script) -> Training:
+    """The log and the saved steps of an `eole train` of `script` on the config `cfg`
+    (resuming from its `training.train_from` when it has one)."""
+    training = cfg["training"]
+    start = _step_of(training.get("train_from"))
+    end = script.early_stop_at or script.to_step or training["train_steps"]
+    saves = _saves(start, end, script, cfg)
+    model_path = Path(training["model_path"])
+    return Training(_log_lines(start, end, saves, script, cfg, model_path), saves)
 
 
 def _step_of(train_from: object) -> int:

@@ -29,6 +29,8 @@ OPTIMIZER_FILE = "optimizer.pt"
 CONFIG_FILE = "config.json"
 VOCAB_FILE = "vocab.json"
 SPM_ARTIFACT = "toy.model"
+# A member of `optimizer.pt` whose name is not ASCII (Mongolian "state").
+UTF8_MEMBER = "optimizer/төлөв.pkl"
 
 # The four files that make a step directory complete, then the artifact Eole also writes.
 REQUIRED_FILES = (WEIGHTS_FILE, OPTIMIZER_FILE, CONFIG_FILE, VOCAB_FILE)
@@ -130,6 +132,9 @@ def make_step_dir(
     with zipfile.ZipFile(step_dir / OPTIMIZER_FILE, "w") as archive:
         archive.writestr("optimizer/data.pkl", b"not a pickle: torch cannot load this")
         archive.writestr("optimizer/byteorder", "little")
+        # A member name that is not ASCII is stored with the UTF-8 flag, so the reader
+        # decodes it: damage in the central directory can then raise a decoding error.
+        archive.writestr(UTF8_MEMBER, b"x")
     (step_dir / VOCAB_FILE).write_text(
         json.dumps({"src": [["a", 0], ["b", 1]], "tgt": [["a", 0]], "specials": {}}),
         encoding="utf-8",

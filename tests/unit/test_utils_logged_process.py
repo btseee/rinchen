@@ -138,6 +138,107 @@ def test_run_logged_gives_the_child_no_standard_input(tmp_path: Path) -> None:
     assert log_path.read_text(encoding="utf-8") == "''\n"
 
 
+# ---- descriptors handed to the child -----------------------------------------------
+
+# Says which of the descriptor numbers it is given (as arguments) it can use.
+_REPORT_USABLE_DESCRIPTORS = """
+import os, sys
+usable = []
+for number in sys.argv[1:]:
+    try:
+        os.fstat(int(number))
+    except OSError:
+        continue
+    usable.append(number)
+print(" ".join(usable))
+"""
+
+
+@linux_only
+def test_run_logged_hands_the_child_the_descriptors_it_is_told_to(
+    tmp_path: Path,
+) -> None:
+    read_end, write_end = os.pipe()
+    try:
+        _run(
+            _python(
+                "import os, sys; os.write(int(sys.argv[1]), b'hello')", str(write_end)
+            ),
+            tmp_path / "child.log",
+            inherit_fds=[write_end],
+        )
+
+        assert os.read(read_end, 5) == b"hello"
+    finally:
+        os.close(read_end)
+        os.close(write_end)
+
+
+@linux_only
+def test_run_logged_hands_the_child_no_descriptor_by_default(tmp_path: Path) -> None:
+    # Descriptors that Python opens are not inheritable: without `inherit_fds` the
+    # child has no way to reach them.
+    read_end, write_end = os.pipe()
+    log_path = tmp_path / "child.log"
+    try:
+        _run(
+            _python(_REPORT_USABLE_DESCRIPTORS, str(read_end), str(write_end)),
+            log_path,
+        )
+    finally:
+        os.close(read_end)
+        os.close(write_end)
+
+    assert log_path.read_text(encoding="utf-8") == "\n"
+
+
+@linux_only
+def test_run_logged_hands_the_child_only_the_descriptors_in_the_list(
+    tmp_path: Path,
+) -> None:
+    first_read, first_write = os.pipe()
+    second_read, second_write = os.pipe()
+    log_path = tmp_path / "child.log"
+    try:
+        _run(
+            _python(
+                _REPORT_USABLE_DESCRIPTORS,
+                str(first_read),
+                str(first_write),
+                str(second_read),
+                str(second_write),
+            ),
+            log_path,
+            inherit_fds=[first_write, second_read],
+        )
+    finally:
+        for descriptor in (first_read, first_write, second_read, second_write):
+            os.close(descriptor)
+
+    assert log_path.read_text(encoding="utf-8") == f"{first_write} {second_read}\n"
+
+
+@linux_only
+def test_a_descriptor_given_to_the_child_stays_uninheritable_in_this_process(
+    tmp_path: Path,
+) -> None:
+    read_end, write_end = os.pipe()
+    try:
+        _run(
+            _python("pass"),
+            tmp_path / "child.log",
+            inherit_fds=[write_end],
+        )
+
+        assert not os.get_inheritable(write_end)
+        # And it is still open here.
+        os.write(write_end, b"x")
+        assert os.read(read_end, 1) == b"x"
+    finally:
+        os.close(read_end)
+        os.close(write_end)
+
+
 def test_run_logged_reports_a_failing_exit_code_and_the_log_tail(
     tmp_path: Path,
 ) -> None:

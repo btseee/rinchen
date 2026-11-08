@@ -100,15 +100,17 @@ def files_under(root: Path) -> dict[str, bytes]:
 
 
 class Observing:
-    """Stands in for `run_logged` like `FakeEole`, and asks `look` at each command
-    before the fake runs it."""
+    """Stands in for `run_logged` like `FakeEole`, and asks `look` at each command and
+    the options it was given before the fake runs it."""
 
-    def __init__(self, fake: FakeEole, look: Callable[[Sequence[str]], None]) -> None:
+    def __init__(
+        self, fake: FakeEole, look: Callable[[Sequence[str], dict[str, Any]], None]
+    ) -> None:
         self.fake = fake
         self.look = look
 
     def __call__(self, command: Sequence[str], **options: Any) -> None:
-        self.look(command)
+        self.look(command, options)
         self.fake(command, **options)
 
 
@@ -132,7 +134,8 @@ def test_the_lock_is_held_while_each_eole_command_runs(
         launch_module,
         "run_logged",
         Observing(
-            fake, lambda command: seen.append((command[1], lock_is_held(run_dir)))
+            fake,
+            lambda command, options: seen.append((command[1], lock_is_held(run_dir))),
         ),
     )
 
@@ -159,23 +162,66 @@ def test_the_lock_is_held_while_the_state_of_the_run_is_read(
     assert seen == [True, True]
 
 
-def test_the_lock_descriptor_is_not_inherited_by_the_commands_a_launch_starts(
+def lock_identity(run_dir: Path) -> tuple[int, int]:
+    """(st_dev, st_ino) of the lock file: what `FakeEole` records for a descriptor."""
+    status = os.stat(lock_file(run_dir))
+    return (status.st_dev, status.st_ino)
+
+
+def test_both_eole_commands_are_handed_the_lock_descriptor_and_nothing_else(
+    config_path: Path, run_dir: Path, fake: FakeEole
+) -> None:
+    # The Eole process keeps the lock alive when the launcher is killed (see
+    # test_train_launch_orphan.py); the descriptor goes to these two commands only.
+    go(config_path, run_dir)
+
+    assert [
+        (call.subcommand, len(call.inherit_fds), call.inherited_files)
+        for call in fake.calls
+    ] == [
+        ("build_vocab", 1, (lock_identity(run_dir),)),
+        ("train", 1, (lock_identity(run_dir),)),
+    ]
+
+
+def test_the_descriptor_a_command_gets_is_the_open_file_the_launch_locked(
     config_path: Path, run_dir: Path, fake: FakeEole, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # An inherited descriptor would keep the lock alive in a surviving Eole process
-    # after the launch is gone.
-    inheritable: list[bool] = []
+    # Locking again through the handed descriptor succeeds only when it is the very
+    # open file the launch holds the lock on: a second open of the lock file would
+    # be refused. So the command's copy keeps that lock alive.
+    relocked: list[int] = []
 
-    def look(command: Sequence[str]) -> None:
-        for entry in Path("/proc/self/fd").iterdir():
-            if os.path.realpath(entry) == str(lock_file(run_dir).resolve()):
-                inheritable.append(os.get_inheritable(int(entry.name)))
+    def look(command: Sequence[str], options: dict[str, Any]) -> None:
+        (descriptor,) = options["inherit_fds"]
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        relocked.append(descriptor)
 
     monkeypatch.setattr(launch_module, "run_logged", Observing(fake, look))
 
     go(config_path, run_dir)
 
-    assert inheritable == [False, False]
+    assert len(relocked) == 2
+
+
+def test_a_write_only_launch_starts_no_command_and_hands_out_no_descriptor(
+    config_path: Path, run_dir: Path, fake: FakeEole
+) -> None:
+    go(config_path, run_dir, write_only=True)
+
+    assert fake.calls == []
+
+
+def test_the_lock_message_names_the_launch_and_the_eole_it_started(
+    config_path: Path, run_dir: Path, fake: FakeEole, held_by_a_test_descriptor: Path
+) -> None:
+    with pytest.raises(ConfigError) as raised:
+        go(config_path, run_dir)
+
+    message = str(raised.value)
+    assert str(held_by_a_test_descriptor) in message
+    assert "another launch holds this run" in message
+    assert "or by an Eole process it started" in message
 
 
 def test_a_launch_of_a_finished_run_takes_the_lock_and_gives_it_back(

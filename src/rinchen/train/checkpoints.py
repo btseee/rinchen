@@ -56,6 +56,9 @@ _REQUIRED_FILES: Final = (CONFIG_FILE, VOCAB_FILE, OPTIMIZER_FILE, WEIGHTS_FILE)
 # [0-9], not \d, which matches the digits of other scripts; no leading zero, so one step
 # has one name.
 _STEP_NAME: Final = re.compile(r"step_([1-9][0-9]*)")
+# What `zipfile` raises for a damaged archive besides `BadZipFile`; ValueError includes
+# the UnicodeDecodeError of a damaged name.
+_UNREADABLE_ARCHIVE: Final = (ValueError, NotImplementedError, OverflowError, EOFError)
 _MAX_RECORD_BYTES: Final = 64 * 1024
 _SHA256_HEX: Final = r"^[0-9a-f]{64}$"
 _SCHEMA_VERSION: Final = 1
@@ -334,6 +337,11 @@ def _archive_problem(path: Path) -> str | None:
                 return f"{path.name}: is a zip archive with no entry"
     except zipfile.BadZipFile as error:
         return f"{path.name}: is not a complete zip archive ({error})"
+    except _UNREADABLE_ARCHIVE as error:
+        # Damage the reader trips over without calling it a bad zip: a name that is not
+        # UTF-8 (a ValueError), a version it does not know, offsets or a record that
+        # do not add up.
+        return f"{path.name}: is not a readable zip archive ({type(error).__name__}: {error})"
     return None
 
 

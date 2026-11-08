@@ -9,8 +9,10 @@ it is golden-tested; every path in it is absolute, so it runs from anywhere (the
 The script fixes the state of the run at the moment it is written: which checkpoint it
 resumes from is in the config it names. `launch.json`, the record of the run that lets
 `rinchen train launch` take over a run started by hand with this script, is written by
-the launcher beside it, not by the script; the script looks at no log, so a NaN in the
-loss is for the `rinchen train launch` that resumes or finishes the run to find.
+the launcher beside it, not by the script. The script appends the output of `eole train`
+to the attempt log (`launch/attempt-<k>.log`, through `tee -a`, with `pipefail` so that the
+exit status stays Eole's), so the `rinchen train launch` that later resumes or finishes
+the run reads a NaN or an early stop in a hand-run attempt exactly as it reads its own.
 """
 
 from __future__ import annotations
@@ -30,6 +32,8 @@ def render_command_sh(
     eole: str,
     config: Path,
     src_vocab: Path,
+    attempt_log: Path,
+    build_vocab_log: Path,
     threads: int,
     cuda_visible_devices: str | None,
     attempt: int,
@@ -40,6 +44,9 @@ def render_command_sh(
     `config` is the rendered config of that attempt (it holds `train_from` when
     `resumes_from`, the step it resumes from, is set), `eole` the `eole` command and
     `src_vocab` the vocabulary file: when it is missing the script builds it first.
+    The output of `eole train` is appended to `attempt_log` and that of `eole
+    build_vocab` to `build_vocab_log` (`mkdir -p` makes their directory first); the
+    output still reaches the terminal.
     The script exports `threads` as the OpenMP and MKL thread count, runs from
     `working_directory`, and exports `CUDA_VISIBLE_DEVICES` as `cuda_visible_devices`
     (empty hides every GPU) unless that is None, which leaves the variable to the
@@ -56,11 +63,15 @@ def render_command_sh(
         ("eole", Path(eole)),
         ("config", config),
         ("src_vocab", src_vocab),
+        ("attempt_log", attempt_log),
+        ("build_vocab_log", build_vocab_log),
     ):
         if not path.is_absolute():
             raise ValueError(f"{name} must be an absolute path, got {str(path)!r}")
     command = shlex.quote(eole)
     config_argument = shlex.quote(str(config))
+    # json.dumps, as for the run directory: a line break stays inside the comment.
+    log_in_run = json.dumps(f"{attempt_log.parent.name}/{attempt_log.name}")
     lines = [
         _SHEBANG,
         # json.dumps: a line break in the path stays inside the comment.
@@ -75,20 +86,35 @@ def render_command_sh(
             "# launch.json beside it records the run, so `rinchen train launch` can "
             "resume a run started"
         ),
-        "# with this script. The script itself does not look for NaN in the log.",
+        (
+            f"# with this script. The output of `eole train` is appended to {log_in_run}, "
+            "which"
+        ),
+        (
+            "# `rinchen train launch` reads for a NaN or an early stop when it takes the "
+            "run over."
+        ),
         "set -euo pipefail",
         f"export OMP_NUM_THREADS={threads}",
         f"export MKL_NUM_THREADS={threads}",
     ]
     if cuda_visible_devices is not None:
         lines.append(f"export CUDA_VISIBLE_DEVICES={shlex.quote(cuda_visible_devices)}")
+    log_directories = {
+        shlex.quote(str(log.parent)) for log in (build_vocab_log, attempt_log)
+    }
     lines += [
         f"cd {shlex.quote(str(working_directory))}",
+        "mkdir -p " + " ".join(sorted(log_directories)),
         (
             f"[ -f {shlex.quote(str(src_vocab))} ] || {command} build_vocab "
-            f"-config {config_argument} -n_sample -1"
+            f"-config {config_argument} -n_sample -1 2>&1 | "
+            f"tee -a {shlex.quote(str(build_vocab_log))}"
         ),
-        f"{command} train -config {config_argument}",
+        (
+            f"{command} train -config {config_argument} 2>&1 | "
+            f"tee -a {shlex.quote(str(attempt_log))}"
+        ),
     ]
     return "\n".join(lines) + "\n"
 

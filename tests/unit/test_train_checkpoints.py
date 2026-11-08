@@ -12,6 +12,9 @@ from __future__ import annotations
 import copy
 import json
 import os
+import random
+import struct
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -204,12 +207,133 @@ def test_an_optimizer_file_that_is_not_a_zip_archive_is_named(step_dir: Path) ->
 
 
 def test_an_optimizer_archive_with_no_entry_is_named(step_dir: Path) -> None:
-    import zipfile
-
     with zipfile.ZipFile(step_dir / OPTIMIZER_FILE, "w"):
         pass
 
     assert is_complete(step_dir) == f"{OPTIMIZER_FILE}: is a zip archive with no entry"
+
+
+def _region_positions(optimizer: Path) -> dict[str, list[int]]:
+    """The byte positions of the parts of the zip archive `optimizer`: the local headers
+    (with their names), the central directory and the end-of-central-directory record
+    (the archive has no comment, so it is the last 22 bytes)."""
+    content = optimizer.read_bytes()
+    with zipfile.ZipFile(optimizer) as archive:
+        central_start = archive.start_dir
+        offsets = [info.header_offset for info in archive.infolist()]
+    local: list[int] = []
+    for offset in offsets:
+        name_length, extra_length = struct.unpack_from("<HH", content, offset + 26)
+        local += range(offset, offset + 30 + name_length + extra_length)
+    return {
+        "local headers": local,
+        "central directory": list(range(central_start, len(content) - 22)),
+        "end record": list(range(len(content) - 22, len(content))),
+    }
+
+
+FLIPS_PER_REGION = 1000
+
+
+@pytest.mark.parametrize("region", ["local headers", "central directory", "end record"])
+def test_a_flipped_bit_in_the_zip_structure_is_a_problem_never_an_exception(
+    step_dir: Path, region: str
+) -> None:
+    # `is_complete` is documented never to raise: a damaged zip reader error of any
+    # kind (a name that is not UTF-8, a version it cannot read) is a named problem.
+    optimizer = step_dir / OPTIMIZER_FILE
+    original = optimizer.read_bytes()
+    positions = _region_positions(optimizer)[region]
+    random_flips = random.Random(20261108)
+    problems = 0
+
+    for _ in range(FLIPS_PER_REGION):
+        damaged = bytearray(original)
+        damaged[random_flips.choice(positions)] ^= 1 << random_flips.randrange(8)
+        optimizer.write_bytes(bytes(damaged))
+
+        problem = is_complete(step_dir)
+
+        assert problem is None or problem.startswith(f"{OPTIMIZER_FILE}: ")
+        problems += problem is not None
+
+    # The matrix does reach the code that reads the damage: most flips in the
+    # central directory and the end record are found out.
+    if region != "local headers":
+        assert problems > FLIPS_PER_REGION // 10
+
+
+def test_the_optimizer_archive_has_a_member_name_stored_as_utf8(step_dir: Path) -> None:
+    # The fabricated archive must hold what lets a flip in the central directory break
+    # the decoding of a name (the flag says: decode as UTF-8), beside the plain names.
+    with zipfile.ZipFile(step_dir / OPTIMIZER_FILE) as archive:
+        members = archive.infolist()
+
+    assert [m.filename for m in members if m.flag_bits & 0x800] == [
+        step_dirs.UTF8_MEMBER
+    ]
+    assert [m.filename for m in members if not m.flag_bits & 0x800] == [
+        "optimizer/data.pkl",
+        "optimizer/byteorder",
+    ]
+
+
+def test_a_member_name_that_is_not_valid_utf8_is_named_as_a_problem(
+    step_dir: Path,
+) -> None:
+    optimizer = step_dir / OPTIMIZER_FILE
+    content = bytearray(optimizer.read_bytes())
+    # The second copy of the name is the one in the central directory.
+    name = step_dirs.UTF8_MEMBER.encode("utf-8")
+    central_copy = content.rindex(name)
+    content[central_copy + 11] = 0xFD  # inside a two-byte letter: no UTF-8 sequence
+    optimizer.write_bytes(bytes(content))
+
+    problem = is_complete(step_dir)
+
+    assert problem is not None
+    assert problem.startswith(f"{OPTIMIZER_FILE}: is not a readable zip archive (")
+
+
+def test_a_zip_version_the_reader_does_not_know_is_named_as_a_problem(
+    step_dir: Path,
+) -> None:
+    optimizer = step_dir / OPTIMIZER_FILE
+    content = bytearray(optimizer.read_bytes())
+    # "version needed to extract" of the first central directory header.
+    content[content.index(b"PK\x01\x02") + 6] = 0x7F
+    optimizer.write_bytes(bytes(content))
+
+    problem = is_complete(step_dir)
+
+    assert problem is not None
+    assert problem.startswith(f"{OPTIMIZER_FILE}: is not a readable zip archive (")
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        OverflowError("Python int too large to convert to C long"),
+        EOFError("Ran out of input"),
+    ],
+    ids=["overflow", "end-of-file"],
+)
+def test_the_other_errors_a_zip_reader_can_raise_are_problems_too(
+    step_dir: Path, monkeypatch: pytest.MonkeyPatch, error: Exception
+) -> None:
+    # Not reproduced by flipping bits (the fuzz above finds only the three kinds), but
+    # offset arithmetic and short reads of a damaged archive can end this way.
+    def failing_reader(*_: object, **__: object) -> zipfile.ZipFile:
+        raise error
+
+    monkeypatch.setattr(checkpoints.zipfile, "ZipFile", failing_reader)
+
+    problem = is_complete(step_dir)
+
+    assert problem == (
+        f"{OPTIMIZER_FILE}: is not a readable zip archive "
+        f"({type(error).__name__}: {error})"
+    )
 
 
 @pytest.mark.parametrize("name", [CONFIG_FILE, VOCAB_FILE])

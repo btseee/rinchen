@@ -1446,13 +1446,15 @@ GOLDEN_HEADER = """\
 # What it resumes from is fixed at that moment: write it again with
 # `rinchen train launch --write-only` after the run changed.
 # launch.json beside it records the run, so `rinchen train launch` can resume a run started
-# with this script. The script itself does not look for NaN in the log.
+# with this script. The output of `eole train` is appended to "launch/attempt-{attempt}.log", which
+# `rinchen train launch` reads for a NaN or an early stop when it takes the run over.
 set -euo pipefail
 export OMP_NUM_THREADS={threads}
 export MKL_NUM_THREADS={threads}
 {devices}cd {cwd}
-[ -f {run}/vocab.src ] || {eole} build_vocab -config {run}/launch/train-{attempt}.yaml -n_sample -1
-{eole} train -config {run}/launch/train-{attempt}.yaml
+mkdir -p {run}/launch
+[ -f {run}/vocab.src ] || {eole} build_vocab -config {run}/launch/train-{attempt}.yaml -n_sample -1 2>&1 | tee -a {run}/launch/build_vocab.log
+{eole} train -config {run}/launch/train-{attempt}.yaml 2>&1 | tee -a {run}/launch/attempt-{attempt}.log
 """
 FROM_SCRATCH = "# It starts the run from scratch: no checkpoint of it was complete when this was written."
 
