@@ -21,8 +21,10 @@ import pytest
 from rinchen.train.corpus_files import (
     BuiltCorpora,
     CorpusFiles,
+    bt_usage_by_direction,
     build_corpora,
     corpus_sizes,
+    planned_corpus_sizes,
 )
 from rinchen.train.mixture import load_training_rows
 from rinchen.train.sampling import CorpusSize
@@ -669,3 +671,118 @@ def test_a_build_leaves_no_temporary_file_behind(tmp_path: Path) -> None:
     )
 
     assert not list((tmp_path / "data").rglob("*.part"))
+
+
+# --- planned_corpus_sizes: what a build would write, without writing ---------------
+
+_RATIOS = [0.0, 0.1, 0.25, 0.5, 1.0, 2.5, 1e308]
+
+
+@pytest.mark.parametrize("ratio", _RATIOS)
+def test_the_planned_sizes_are_the_sizes_of_the_corpora_a_build_writes(
+    tmp_path: Path, ratio: float
+) -> None:
+    training = toy_training_rows(tmp_path)
+
+    planned = planned_corpus_sizes(training, ratio)
+    built = build_corpora(training, bt_ratio=ratio, seed=1, data_dir=tmp_path / "data")
+
+    assert planned == corpus_sizes(built.corpora)
+    assert bt_usage_by_direction(training, ratio) == built.bt_by_direction
+
+
+@pytest.mark.parametrize("bt_rows", [0, 3, 10])
+@pytest.mark.parametrize("ratio", [0.0, 0.5, 1.5, 3.0])
+def test_the_plan_equals_the_build_for_a_direction_with_few_or_no_bt_rows(
+    tmp_path: Path, ratio: float, bt_rows: int
+) -> None:
+    rows = [
+        *numbered_rows(5),
+        *numbered_rows(bt_rows, origin="bt"),
+        *numbered_rows(2, src_lang="rus_Cyrl", origin="web"),
+        *numbered_rows(4, src_lang="khk_Cyrl", tgt_lang="rus_Cyrl", origin="bt"),
+    ]
+    training = training_from_rows(tmp_path / "in", rows)
+
+    built = build_corpora(training, bt_ratio=ratio, seed=7, data_dir=tmp_path / "data")
+
+    assert planned_corpus_sizes(training, ratio) == corpus_sizes(built.corpora)
+    assert bt_usage_by_direction(training, ratio) == built.bt_by_direction
+
+
+def test_the_planned_sizes_of_the_toy_rows_are_the_hand_counted_ones(
+    tmp_path: Path,
+) -> None:
+    training = toy_training_rows(tmp_path)
+
+    assert planned_corpus_sizes(training, 0.0) == [
+        CorpusSize(f"{EN_MN}.auth", EN_MN, 1200),
+        CorpusSize(f"{MN_EN}.auth", MN_EN, 1200),
+        CorpusSize(f"{MN_RU}.auth", MN_RU, 600),
+        CorpusSize(f"{RU_MN}.auth", RU_MN, 600),
+    ]
+    # 0.2 * 1200 = 240 and 0.2 * 600 = 120 of the 300 bt rows each direction has.
+    assert planned_corpus_sizes(training, 0.2) == [
+        CorpusSize(f"{EN_MN}.auth", EN_MN, 1200),
+        CorpusSize(f"{EN_MN}.bt", EN_MN, 240),
+        CorpusSize(f"{MN_EN}.auth", MN_EN, 1200),
+        CorpusSize(f"{MN_EN}.bt", MN_EN, 240),
+        CorpusSize(f"{MN_RU}.auth", MN_RU, 600),
+        CorpusSize(f"{MN_RU}.bt", MN_RU, 120),
+        CorpusSize(f"{RU_MN}.auth", RU_MN, 600),
+        CorpusSize(f"{RU_MN}.bt", RU_MN, 120),
+    ]
+
+
+def test_a_direction_with_bt_rows_only_has_no_planned_corpus_but_a_usage_entry(
+    tmp_path: Path,
+) -> None:
+    rows = [*numbered_rows(4), *numbered_rows(3, src_lang="rus_Cyrl", origin="bt")]
+    training = training_from_rows(tmp_path / "in", rows)
+
+    assert planned_corpus_sizes(training, 1.0) == [
+        CorpusSize(f"{EN_MN}.auth", EN_MN, 4)
+    ]
+    usage = bt_usage_by_direction(training, 1.0)
+    assert list(usage) == [EN_MN, RU_MN]
+    assert (usage[RU_MN].bt_available, usage[RU_MN].bt_used) == (3, 0)
+
+
+@pytest.mark.parametrize("ratio", [-0.5, float("nan"), float("inf")])
+def test_the_planned_sizes_refuse_the_ratios_a_build_refuses(
+    tmp_path: Path, ratio: float
+) -> None:
+    training = training_from_rows(tmp_path / "in", numbered_rows(2))
+
+    with pytest.raises(ValueError, match="bt_ratio"):
+        planned_corpus_sizes(training, ratio)
+    with pytest.raises(ValueError, match="bt_ratio"):
+        bt_usage_by_direction(training, ratio)
+
+
+def test_planning_writes_nothing_and_leaves_the_rows_as_they_were(
+    tmp_path: Path,
+) -> None:
+    training = toy_training_rows(tmp_path)
+    before = sorted(path.name for path in tmp_path.rglob("*"))
+    frame = training.frame.clone()
+
+    planned_corpus_sizes(training, 0.5)
+
+    assert sorted(path.name for path in tmp_path.rglob("*")) == before
+    assert training.frame.equals(frame)
+
+
+def test_a_direction_with_one_authentic_row_is_planned_and_built(
+    tmp_path: Path,
+) -> None:
+    rows = [*numbered_rows(1), *numbered_rows(1, origin="bt")]
+    training = training_from_rows(tmp_path / "in", rows)
+
+    built = build_corpora(training, bt_ratio=1.0, seed=1, data_dir=tmp_path / "data")
+
+    assert planned_corpus_sizes(training, 1.0) == [
+        CorpusSize(f"{EN_MN}.auth", EN_MN, 1),
+        CorpusSize(f"{EN_MN}.bt", EN_MN, 1),
+    ]
+    assert corpus_sizes(built.corpora) == planned_corpus_sizes(training, 1.0)

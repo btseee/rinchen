@@ -83,14 +83,40 @@ def build_corpora(
     """Write the corpus files of one variant and describe them.
 
     Every direction with authentic rows gets an `auth` corpus. It also gets a `bt`
-    corpus of `min(available, round(bt_ratio * authentic rows))` back-translated rows
-    (a ratio so large that the product overflows a float asks for more than there are),
-    when that is more than 0: those with the smallest `sha256(f"{seed}\\t{id}")` (hex
-    digest; ties by id, source, target), so the rows do not depend on the order of the
-    input rows or files or on the polars version. `round` is Python's: a half goes to
-    the even integer (2.5 gives 2, 3.5 gives 4). A direction with bt rows and no
-    authentic rows gets no corpus; `bt_by_direction` records what was available,
-    asked for and used.
+    corpus of the back-translated rows `bt_usage_by_direction` says to use, when that
+    is more than 0: those with the smallest `sha256(f"{seed}\\t{id}")` (hex digest; ties
+    by id, source, target), so the rows do not depend on the order of the input rows
+    or files or on the polars version. A direction with bt rows and no authentic rows
+    gets no corpus; `bt_by_direction` records what was available, asked for and used.
+    The corpora written are those `planned_corpus_sizes` lists, with those row counts.
+
+    Raises:
+        ValueError: `bt_ratio` is not a finite number of at least 0.
+    """
+    usage = bt_usage_by_direction(rows, bt_ratio)
+    parts = rows.frame.partition_by("direction", "group", as_dict=True)
+    bt_directory = data_dir / "bt" / f"r{id_number(bt_ratio)}_s{seed}"
+    corpora: list[CorpusFiles] = []
+    for direction, direction_usage in usage.items():
+        authentic = parts.get((direction, AUTH_GROUP))
+        back_translated = parts.get((direction, BT_GROUP))
+        if authentic is not None:
+            corpora.append(
+                _write_corpus(authentic, data_dir / AUTH_GROUP, direction, AUTH_GROUP)
+            )
+        if back_translated is not None and direction_usage.bt_used:
+            sample = _smallest_hashes(back_translated, direction_usage.bt_used, seed)
+            corpora.append(_write_corpus(sample, bt_directory, direction, BT_GROUP))
+    return BuiltCorpora(corpora=tuple(corpora), bt_by_direction=usage)
+
+
+def bt_usage_by_direction(rows: TrainingRows, bt_ratio: float) -> dict[str, BtUsage]:
+    """The back-translated rows of every direction that has rows, by direction in
+    sorted order, as a build with `bt_ratio` would use them: `min(available,
+    round(bt_ratio * authentic rows))`, where `round` is Python's (a half goes to the
+    even integer: 2.5 gives 2, 3.5 gives 4) and a ratio so large that the product
+    overflows a float asks for more than there are. A direction without authentic rows
+    asks for none. Nothing is written.
 
     Raises:
         ValueError: `bt_ratio` is not a finite number of at least 0.
@@ -99,31 +125,57 @@ def build_corpora(
         raise ValueError(
             f"bt_ratio must be a finite number of at least 0, got {bt_ratio}"
         )
-    parts = rows.frame.partition_by("direction", "group", as_dict=True)
-    bt_directory = data_dir / "bt" / f"r{id_number(bt_ratio)}_s{seed}"
-    corpora: list[CorpusFiles] = []
+    counts = _rows_by_direction_and_group(rows)
     usage: dict[str, BtUsage] = {}
-    for direction in sorted({key[0] for key in parts}):
-        authentic = parts.get((direction, AUTH_GROUP))
-        back_translated = parts.get((direction, BT_GROUP))
-        authentic_rows = 0 if authentic is None else authentic.height
-        available = 0 if back_translated is None else back_translated.height
+    for direction in sorted({key[0] for key in counts}):
+        authentic_rows = counts.get((direction, AUTH_GROUP), 0)
+        available = counts.get((direction, BT_GROUP), 0)
         asked = bt_ratio * authentic_rows
-        # `min` before `round`: a product that overflowed a float is `inf`, which
-        # `round` cannot turn into an integer.
-        used = round(min(available, asked))
-        requested = _rows_asked(bt_ratio, authentic_rows, asked)
-        if authentic is not None:
-            corpora.append(
-                _write_corpus(authentic, data_dir / AUTH_GROUP, direction, AUTH_GROUP)
-            )
-        if back_translated is not None and used:
-            sample = _smallest_hashes(back_translated, used, seed)
-            corpora.append(_write_corpus(sample, bt_directory, direction, BT_GROUP))
         usage[direction] = BtUsage(
-            bt_available=available, bt_requested=requested, bt_used=used
+            bt_available=available,
+            bt_requested=_rows_asked(bt_ratio, authentic_rows, asked),
+            # `min` before `round`: a product that overflowed a float is `inf`, which
+            # `round` cannot turn into an integer.
+            bt_used=round(min(available, asked)),
         )
-    return BuiltCorpora(corpora=tuple(corpora), bt_by_direction=usage)
+    return usage
+
+
+def planned_corpus_sizes(rows: TrainingRows, bt_ratio: float) -> list[CorpusSize]:
+    """The corpora `build_corpora(rows, bt_ratio=bt_ratio, ...)` writes, with their
+    row counts, in the order it writes them (by direction, `auth` before `bt`): one
+    `auth` corpus per direction with authentic rows and a `bt` corpus where the usage
+    is above 0. The one place the sizes of a variant's corpora are decided, so a plan
+    cannot disagree with the build. Nothing is written.
+
+    Raises:
+        ValueError: `bt_ratio` is not a finite number of at least 0.
+    """
+    counts = _rows_by_direction_and_group(rows)
+    sizes: list[CorpusSize] = []
+    for direction, usage in bt_usage_by_direction(rows, bt_ratio).items():
+        authentic_rows = counts.get((direction, AUTH_GROUP), 0)
+        if authentic_rows:
+            sizes.append(
+                CorpusSize(
+                    _corpus_name(direction, AUTH_GROUP), direction, authentic_rows
+                )
+            )
+        if usage.bt_used:
+            sizes.append(
+                CorpusSize(_corpus_name(direction, BT_GROUP), direction, usage.bt_used)
+            )
+    return sizes
+
+
+def _corpus_name(direction: str, group: str) -> str:
+    """The name of the corpus of `group` rows in `direction`: `<direction>.<group>`."""
+    return f"{direction}.{group}"
+
+
+def _rows_by_direction_and_group(rows: TrainingRows) -> dict[tuple[str, str], int]:
+    counts = rows.frame.group_by("direction", "group").len().iter_rows()
+    return {(direction, group): count for direction, group, count in counts}
 
 
 def _rows_asked(bt_ratio: float, authentic_rows: int, product: float) -> int:
@@ -156,7 +208,7 @@ def _smallest_hashes(frame: pl.DataFrame, count: int, seed: int) -> pl.DataFrame
 def _write_corpus(
     frame: pl.DataFrame, directory: Path, direction: str, group: str
 ) -> CorpusFiles:
-    name = f"{direction}.{group}"
+    name = _corpus_name(direction, group)
     ordered = frame.sort("id", "src", "tgt")
     src_bytes = lines_as_bytes(ordered["src"])
     tgt_bytes = lines_as_bytes(ordered["tgt"])
