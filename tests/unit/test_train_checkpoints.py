@@ -28,6 +28,7 @@ from rinchen.train.checkpoints import (
     latest_complete,
     read_launch_record,
     step_directories,
+    step_of,
     write_launch_record,
 )
 from tests.support import step_dirs
@@ -1038,3 +1039,50 @@ def test_a_launch_file_that_is_a_link_to_nothing_is_a_data_error(
 
 def test_a_timestamp_with_z_is_accepted() -> None:
     assert record(created="2026-11-08T12:00:00Z").created == "2026-11-08T12:00:00Z"
+
+
+# ---- step_of --------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("name", "step"),
+    [("step_1", 1), ("step_200", 200), ("step_9" + "0" * 20, 9 * 10**20)],
+)
+def test_step_of_reads_the_number_of_a_step_directory_name(
+    name: str, step: int
+) -> None:
+    assert step_of(Path("/runs/a/ckpt") / name) == step
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "step_0",
+        "step_007",
+        "step_",
+        "step_x",
+        "step_-3",
+        "step_5.1",
+        "step_5 ",
+        "Step_5",
+        "xstep_5",
+        "step_5_old",
+        "step_" + chr(0x0663),
+        "step_1" + chr(0x0663),
+        "averaged",
+        "",
+    ],
+)
+def test_step_of_is_none_for_any_other_name(name: str) -> None:
+    assert step_of(Path("/runs/a/ckpt") / name) is None
+
+
+def test_step_of_agrees_with_what_step_directories_lists(model_path: Path) -> None:
+    for name in ("step_5", "step_007", "step_x", "averaged"):
+        (model_path / name).mkdir(parents=True)
+
+    listed = {d.path.name for d in step_directories(model_path)}
+
+    assert listed == {
+        path.name for path in model_path.iterdir() if step_of(path) is not None
+    }

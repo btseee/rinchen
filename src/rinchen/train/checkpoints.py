@@ -109,6 +109,13 @@ def step_directories(model_path: Path) -> list[StepDirectory]:
     ]
 
 
+def step_of(directory: Path) -> int | None:
+    """N when `directory` is named `step_<N>` (N in digits, positive, no leading zero:
+    the names `step_directories` lists), else None. Only the name is read."""
+    match = _STEP_NAME.fullmatch(directory.name)
+    return int(match.group(1)) if match else None
+
+
 def latest_complete(model_path: Path) -> ResumePoint:
     """The newest complete step directory of `model_path` and the incomplete ones above
     it. Only directories newer than the answer are examined; same errors as
@@ -282,9 +289,10 @@ def _listed(model_path: Path) -> list[tuple[int, Path]]:
     try:
         with os.scandir(model_path) as entries:
             for entry in entries:
-                match = _STEP_NAME.fullmatch(entry.name)
-                if match and entry.is_dir(follow_symlinks=False):
-                    found.append((int(match.group(1)), model_path / entry.name))
+                path = model_path / entry.name
+                step = step_of(path)
+                if step is not None and entry.is_dir(follow_symlinks=False):
+                    found.append((step, path))
     except OSError as error:
         raise DataError(
             f"cannot list the checkpoint directory {model_path}: {error}"

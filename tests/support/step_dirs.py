@@ -15,9 +15,11 @@ from __future__ import annotations
 
 import json
 import os
+import struct
 import zipfile
 from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
@@ -44,26 +46,87 @@ def default_tensors(step: int) -> dict[str, NDArray[np.float32]]:
     }
 
 
+def safetensors_bytes(
+    entries: Mapping[str, tuple[str, tuple[int, ...], bytes]],
+    metadata: Mapping[str, str] | None = None,
+) -> bytes:
+    """The bytes of a safetensors file holding `entries`, each name mapped to its
+    safetensors dtype code (`BF16`, `F8_E4M3`, ...), shape and little-endian data, in
+    the order given. Written by hand, for the dtypes numpy cannot write (bfloat16 has
+    no numpy dtype)."""
+    header: dict[str, object] = {} if metadata is None else {"__metadata__": metadata}
+    offset = 0
+    for name, (dtype, shape, data) in entries.items():
+        header[name] = {
+            "dtype": dtype,
+            "shape": list(shape),
+            "data_offsets": [offset, offset + len(data)],
+        }
+        offset += len(data)
+    text = json.dumps(header, separators=(",", ":")).encode("utf-8")
+    text += b" " * (-len(text) % 8)
+    body = b"".join(data for _, _, data in entries.values())
+    return struct.pack("<Q", len(text)) + text + body
+
+
+def read_safetensors_raw(path: Path) -> dict[str, tuple[str, tuple[int, ...], bytes]]:
+    """The tensors of the safetensors file `path` as (dtype code, shape, little-endian
+    data) by name, read without safetensors (so any dtype can be read). The reverse of
+    `safetensors_bytes`."""
+    content = path.read_bytes()
+    (length,) = struct.unpack("<Q", content[:8])
+    header = json.loads(content[8 : 8 + length])
+    body = content[8 + length :]
+    found: dict[str, tuple[str, tuple[int, ...], bytes]] = {}
+    for name, entry in header.items():
+        if name == "__metadata__":
+            continue
+        start, end = entry["data_offsets"]
+        found[name] = (entry["dtype"], tuple(entry["shape"]), body[start:end])
+    assert sum(len(data) for _, _, data in found.values()) == len(body)
+    return found
+
+
+def safetensors_metadata(path: Path) -> dict[str, str] | None:
+    """The `__metadata__` of the safetensors file `path`, None when it has none."""
+    content = path.read_bytes()
+    (length,) = struct.unpack("<Q", content[:8])
+    metadata = json.loads(content[8 : 8 + length]).get("__metadata__")
+    assert metadata is None or isinstance(metadata, dict)
+    return metadata
+
+
+def bfloat16_bytes(*patterns: int) -> bytes:
+    """The data of a bfloat16 tensor from the 16-bit patterns `patterns` (0x3F80 is 1.0,
+    0x4000 is 2.0, 0x7FC0 a NaN)."""
+    return struct.pack(f"<{len(patterns)}H", *patterns)
+
+
 def make_step_dir(
     model_path: Path,
     step: int,
     *,
-    tensors: Mapping[str, NDArray[np.float32]] | None = None,
+    tensors: Mapping[str, NDArray[Any]] | None = None,
+    weights: bytes | None = None,
 ) -> Path:
     """Create `model_path/step_<step>` as a COMPLETE step directory and return it.
 
     The weights are `tensors` (default `default_tensors(step)`) written by
-    `safetensors.numpy.save_file`. `model_path` is created when missing.
+    `safetensors.numpy.save_file`, or, when `weights` is given, those bytes as the
+    weights file (`safetensors_bytes`). `model_path` is created when missing.
     """
     from safetensors.numpy import save_file
 
     step_dir = model_path / f"step_{step}"
     step_dir.mkdir(parents=True)
-    save_file(
-        dict(tensors if tensors is not None else default_tensors(step)),
-        str(step_dir / WEIGHTS_FILE),
-        metadata={"format": "np"},
-    )
+    if weights is not None:
+        (step_dir / WEIGHTS_FILE).write_bytes(weights)
+    else:
+        save_file(
+            dict(tensors if tensors is not None else default_tensors(step)),
+            str(step_dir / WEIGHTS_FILE),
+            metadata={"format": "np"},
+        )
     with zipfile.ZipFile(step_dir / OPTIMIZER_FILE, "w") as archive:
         archive.writestr("optimizer/data.pkl", b"not a pickle: torch cannot load this")
         archive.writestr("optimizer/byteorder", "little")
