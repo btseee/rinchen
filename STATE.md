@@ -464,9 +464,9 @@ binary against a loopback stand-in for a server (the interrupt, and `out[1]`, `o
 **D7 (multilingual ablations) is done on branch `d7-multilingual-ablations`; its STOP gate (a tiny
 ablation of 2 variants trains and evaluates through the real CLI) is met locally.** The branch is stacked
 on `d6-synthetic-data` (cut from it at `9973319` on 2026-11-08), is not merged and not pushed (the
-overnight run made no merge and no push), and no CI run covers it. It is 19 commits ahead of
-`d6-synthetic-data` and 44 ahead of `main` as of `f7d1bd0` (`D7: review fixes of tasks 6 to 8`, the
-last commit before the one that adds these records). It is machinery, not a result: the only data it
+overnight run made no merge and no push), and no CI run covers it. It is 21 commits ahead of
+`d6-synthetic-data` and 46 ahead of `main` as of `cbd2365` (`D7: final review fixes`, the
+last commit of code; the commit that records the fixes in the documents comes after it). It is machinery, not a result: the only data it
 ever ran on is a templated toy set that the model saturates (chrF 96.25 to 99.72 in every direction of
 both variants), no real corpus exists, no GPU was used, and `configs/eole/multilingual_proxy.yaml` and
 `ablation_priors.yaml` are unmeasured priors that Eole's schema accepts and nothing has trained. Built:
@@ -487,14 +487,27 @@ until you finish everything. Commit everything.", are condensed in DECISIONS.md 
 multilingual ablations - the rulings, made without a review round"). Every task was implemented with
 tests first and reviewed once (Task 1; Task 2; Tasks 3 to 5 together; Tasks 6 to 8 together with the
 `run_logged` fix), two interludes applied the reviews' pure moves and minors, and a spike on the real
-Eole preceded the design. No whole-branch review has run yet: a final review and a fix wave are planned
-after these records, so this paragraph is the state before them. Gates, run for real on Linux, CPython
-3.14.10 (`just` is not installed here, so the four gate commands were run as one chain), the last gate of
-the code, on `f7d1bd0` (2026-11-08): `ruff format --check .` clean, `ruff check .` clean, `mypy src` clean,
+Eole preceded the design. A whole-branch review (an independent reviewer, read-only, `9973319..87cabe2`)
+ran after the records and found 0 Critical, 1 Important and 7 Minor findings; it reproduced the gate and
+every number the records claim. The Important one: `run_logged` replaced an inherited ignore of SIGHUP, so a
+`nohup rinchen train ablate` was ended (exit 129, `eole train` killed) by the hangup that `nohup` absorbs;
+it is fixed (an ignored SIGTERM or SIGHUP now stays ignored; through the real binary a SIGHUP 4 s into
+`eole train` of a `nohup` run now lets it finish with exit 0, and without `nohup` it still exits 129 with
+no stray `eole`). The Minor ones: the `ablation_layout` docstring and runbook 07 (`train` imports `spm`)
+were wrong and are corrected, `bt_ratio` is capped at 1000, a non-finite score is an `UpstreamError`
+and `results.json` is written with `allow_nan=False`, and runbooks 05 and 07 and `D-LOGGED-TERM` now
+record the stale variant directories of an earlier matrix, the glob refusal in D5's `run_training` and
+`predict` (`export_ct2` is still unguarded), `nohup` and the SIGINT that a shell background job ignores.
+Corrections of earlier statements are in DECISIONS.md ("2026-11-08: D7 final review - corrections and
+fixes"). Gates, run for real on Linux, CPython
+3.14.10 (`just` is not installed here, so the four gate commands were run as one chain), the gate of the
+build, on `f7d1bd0` (2026-11-08): `ruff format --check .` clean, `ruff check .` clean, `mypy src` clean,
 `pytest -m "not network" -q` -- **5944 passed, 1 skipped, 10 deselected** in 6 min 33 s (4331 on D6's last
 commit, 4435 after Task 1, 4861 after Task 2, 5278 after Task 5, 5446 after Task 6, 5655 after Task 7,
 5769 after Task 8, 5776 after the `run_logged` fix); the D5 regression set (1,245 unit tests and 23
-integration tests with 1 skipped, as of the `run_logged` fix) stayed green after every move.
+integration tests with 1 skipped, as of the `run_logged` fix) stayed green after every move. After the
+final-review fixes, on `cbd2365`: `ruff format --check .`, `ruff check .` and `mypy src` clean, `pytest -m
+"not network" -q` -- **5966 passed, 1 skipped, 10 deselected** in 6 min 37 s; the D5 regression sets green.
 Evidence of the STOP gate, through the real `rinchen` binary and the real Eole on the CPU with the GPU
 hidden, on the toy set of `tests/support/tiny_parallel.py` (en-mn 1,200 and ru-mn 600 training pairs in
 both directions, 300 back-translated pairs per language pair, 100 dev lines per direction) with
@@ -520,7 +533,7 @@ of 4,758 MiB and build in 11.43 s (2.7 GB); extrapolated, 46 GiB would be reache
 Mutation checks done by hand during the build, one mutant at a time, as recorded per task: Task 1 30,
 Task 2 122 (one equivalent survivor), Tasks 3 and 4 every mutant killed except 3 equivalent ones, Task 5 about 135, Interlude A
 about 45, Task 6 34 and more, Task 7 about 190, Task 8 54 for the CLI (52 killed at once, 1 by a new test, 1
-dead code removed), the `run_logged` fix all but one equivalent, Interlude B about 95; the reviewers' own
+dead code removed), the `run_logged` fix all but one equivalent, Interlude B about 95, the final-review fixes 17 (all killed); the reviewers' own
 mutants: 19 of 20, 17 of 17, 29 of 29.
 Findings worth knowing: upstream facts about Eole 0.6.4 and the subprocess wait, recorded in
 `docs/VERIFY.md` ("D7 findings") and in DECISIONS.md. `D-EOLE-WEIGHT-SEMANTICS`: a corpus `weight` is the
@@ -560,7 +573,7 @@ branch, `d6-synthetic-data`, cut from `main` at `0d534a3`; D7 lives on `d7-multi
 on it (cut from `d6-synthetic-data` at `9973319`). Neither is merged into `main` and neither is pushed;
 merging D7 means merging D6 first. At the D5 merge `main` was 81 commits ahead of `origin/main` (`9e7b0ec`);
 it is unpushed, and no CI run covers D3, D4, D5, D6 or D7. The full local gate was last run on the D7
-branch: 5944 passed, 1 skipped, 10 deselected (D6 and D7 included), on `f7d1bd0`; on D6's last commit
+branch: 5966 passed, 1 skipped, 10 deselected (D6 and D7 included), on `cbd2365` (5944 on `f7d1bd0`); on D6's last commit
 (`D6: re-review minors`) it gave 4331 passed; on the merged D5 tree `main` gave 2833 passed.
 
 Next step: D8 (Teacher training). Nothing in D7 blocks it. Its inputs from D7: the validated config

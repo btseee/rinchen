@@ -69,8 +69,9 @@ invocations, a probe of the mixture build at 1,000,000 and 4,000,000 rows).
 | `rinchen/cli/train.py` | `rinchen train ablate`; the only module that writes the manifest |
 
 The layering: `config.ablation` imports no feature package; `train` imports `config`, `corpus`,
-`metrics`, `utils`, `manifest`, `errors`, `spm` (symbols only) and `synth.tags` (the origin-to-tag
-helper), never `script_conv`; `script_conv` imports `train.eole_cfg`, `train.eole_run` and
+`metrics`, `utils`, `manifest`, `errors` and `synth.tags` (the origin-to-tag helper) and, from
+outside the repository, `sentencepiece` (`validation_corpus` and `evaluate` only), never
+`script_conv`, `spm` or `cli`; `script_conv` imports `train.eole_cfg`, `train.eole_run` and
 `utils.logged_process` (D5's runner and validator wrap the shared ones); `cli` imports everything it
 needs and nothing imports `cli`. Inside `train` the order is `eole_cfg`, `eole_run`, `mixture`,
 `corpus_files` / `validation_corpus` / `eole_data`, `evaluate`, `ablation_layout`, `ablation_config`,
@@ -93,7 +94,7 @@ an expansion above `max_variants`. Relative paths (`base`) are anchored at the r
 | `name` | required | Labels the run in `results.md` and the dry run; not blank. Not part of any fingerprint |
 | `base` | required | The Eole config every variant starts from: an existing file, not blank |
 | `axes.temperature` | `[1.0]` | Each greater than 0 and finite. Mixing weight of a direction is `rows ** T`; below 1 lifts the small directions, 1 is proportional. See "Temperature and bt ratio" |
-| `axes.bt_ratio` | `[0.0]` | Each at least 0, finite, `-0.0` refused. Back-translated rows per authentic row of a direction; 0 uses none |
+| `axes.bt_ratio` | `[0.0]` | Each from 0 to 1000, finite, `-0.0` refused (a larger number is a `ConfigError` naming the bound: it is a typo, and the rows it asks for would print as a number of hundreds of digits). Back-translated rows per authentic row of a direction; 0 uses none |
 | `axes.tag_placement` | `[src]` | `src` or `tgt`. `suffix` is refused with a message naming the Eole bug (`D-EOLE-SUFFIX-KEYERROR`) |
 | `seeds` | `[1234]` | Non-negative integers, distinct. Each is the Eole `seed` of its variant and the seed of its bt subsample |
 | `weight_total` | 100 | Sum of the integer corpus weights of a variant, a positive integer, at least the number of corpora |
@@ -472,6 +473,13 @@ resumes: finished variants are reused, a trained variant is only evaluated. A ha
 **Concurrent runs into one output directory are not guarded.** Run one `rinchen train ablate` at a
 time per `--out-dir`.
 
+**Variant directories of an earlier matrix stay.** A second run into the same `--out-dir` with a
+different matrix (another temperature, say) leaves the directories of the earlier variants in
+`variants/` untouched, checkpoints included (hundreds of MB each at proxy size). They are not
+reported, not hashed and not in the manifest: `results.*` and `manifest.json` describe only the
+variants of the matrix of the last run. To clean up, delete such a directory by hand, or use a
+fresh `--out-dir`.
+
 ## Temperature and bt ratio
 
 **bt ratio.** For each direction `bt_used = min(available, round(r * authentic rows))`, with Python's
@@ -681,11 +689,37 @@ signal number). Measured through the real binary 4 s into `eole train`, without 
 left, no manifest and no `.part` file (`D-POLARS-SIGINT`, `D-LOGGED-TERM` in `docs/VERIFY.md`; before
 the fixes Ctrl-C without `--timeout` was raised only when `eole train` ended, 25.9 s after the signal,
 and SIGTERM left `eole train` running). `--timeout` bounds each Eole command and kills its group when
-it runs out (exit 4). A rerun after an interrupt resumes.
+it runs out (exit 4). A rerun after an interrupt resumes. A signal that was ignored when `rinchen`
+started stays ignored (see "Running a long training detached").
 
 **SIGKILL cannot be caught.** After `kill -9` of `rinchen` (or the out-of-memory killer) the child
 `eole train` may keep running with nobody to read its result; look for it with `pgrep -f "eole train"`
-before starting the next run, or two trainings will write into one directory.
+before starting the next run, or two trainings will write into one directory (`D-LOGGED-TERM`).
+
+### Running a long training detached
+
+A multi-hour run is usually left running over SSH with `nohup` or `setsid`:
+
+```
+setsid nohup .venv/bin/rinchen train ablate --matrix M.yaml --corpus C.parquet \
+    --spm-model S.model --out-dir OUT > OUT.stdout 2> OUT.stderr < /dev/null &
+```
+
+- `nohup` starts the command with SIGHUP ignored. `rinchen` leaves a signal that was ignored when it
+  started alone while it waits for Eole: an inherited ignore is a request not to die on that signal,
+  so a closed terminal does not end the run. Measured through the real binary, a SIGHUP 4 s into
+  `eole train` of a `nohup` run: the run went on and finished with exit 0, the manifest and the three
+  tables written, 9.55 s after the signal. (Before this was fixed, the handler that turns SIGHUP into
+  an exit replaced the ignore and the same hangup ended the run with 129 after 0.17 s and killed
+  `eole train`.)
+- Without `nohup` (SIGHUP at its default) SIGHUP and SIGTERM stop the run cleanly: exit 129 and 143,
+  Eole's whole process group killed, the variants that were finished kept, no manifest (a rerun
+  resumes). Measured: SIGHUP 129 after 0.18 s, no process of the run left.
+- SIGKILL leaves the `eole train` process running (known limit, `D-LOGGED-TERM`).
+- A shell background job (`command &` in a script or any shell without job control) starts with SIGINT
+  ignored (POSIX), and `rinchen` keeps it that way: Ctrl-C style SIGINT, `kill -INT`, does nothing to
+  such a run. Measured: a SIGINT 4 s into `eole train` of a run started with `&` from a script was
+  not noticed and the run finished (exit 0, 9.56 s later). Stop such a run with SIGTERM or SIGHUP.
 
 ## Adding an axis
 

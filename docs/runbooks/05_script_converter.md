@@ -531,6 +531,7 @@ above. The spec's "Evidence from the spikes" holds the original measurements.
 | CTranslate2 source tokens are `[tag, *sp.encode(text, out_type=str)]` | The dummy-prefix piece is a token of its own; `config.json` has `add_source_bos` and `add_source_eos` false | `ScriptConverter`, `parity` and `predict` build tokens this way |
 | `str.split()` with no argument splits at U+202F | A script word is cut from its separated suffix | Every word split in the package is `split(" ")` or `segment()` |
 | `-W error` on the command line crashes the SentencePiece SWIG import | A test run dies on import | Do not pass it |
+| Eole globs the checkpoint directory, so `[`, `]`, `*` and `?` in the run directory are pattern syntax (`D-EOLE-GLOB-CKPT` in `docs/VERIFY.md`) | The loader finds no shard (`No safetensors file found`) or the shards of sibling directories | Since D7 `run_training` and `predict` refuse such a run directory with a `ConfigError` at once (the guard is shared with D7's `rinchen train ablate`; before, such a path trained and then failed at prediction). `export_ct2` (the CTranslate2 conversion) is still unguarded and fails for such a directory |
 
 The decoders: CTranslate2 and Eole agree on 448/448 words in both directions on the
 tiny model, but on the 500-word spike model they differed on one word where both
@@ -652,9 +653,12 @@ Mongolian-reviewed sample.
 - **Interrupts.** Each Eole or CTranslate2 command runs in a session of its own,
   so that its data-loader workers can be killed with it. `Ctrl-C` (SIGINT) in the
   terminal kills the whole process group of the running command and then ends the
-  CLI. SIGTERM and SIGHUP to the CLI process are not handled: the CLI ends and
-  the Eole child, in its own session, keeps running. Find it with `pgrep -af
-  eole` and stop it by hand. These paths are tested on Linux only (the group kill
+  CLI. Since D7, SIGTERM and SIGHUP to the CLI process do the same while a command
+  runs (exit 143 and 129), unless the signal was ignored when the CLI started
+  (`nohup` ignores SIGHUP, and the run then survives a hangup; see
+  `docs/runbooks/07_ablations.md`, "Interrupts"). SIGKILL cannot be caught: the Eole
+  child, in its own session, then keeps running; find it with `pgrep -af eole` and
+  stop it by hand. These paths are tested on Linux only (the group kill
   and the tests that fork use POSIX facilities; off POSIX only the child is
   killed).
 - **Manifest last.** Each command removes its old manifest before it touches an

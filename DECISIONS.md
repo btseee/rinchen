@@ -1833,3 +1833,65 @@ prediction and the CTranslate2 export of a model trained with the tag on the tar
 assigned to D4, the D5 gates that need real text and the D6 gates stay open as recorded there. D8
 (Teacher training) takes the config renderer, the runner, the mixture and the weights, the
 evaluation harness and the resumable run from here.
+
+## 2026-11-08: D7 final review - corrections and fixes
+
+An independent review of the whole branch (`9973319..87cabe2`, 20 commits, read-only) found no
+Critical problem, one Important problem and seven Minor ones. It reproduced the gate (5944 passed, 1
+skipped, 10 deselected in 387 s), the STOP gate twice, the D5 regression sets and every number the
+earlier entries claim. This entry records what it found, how the findings were fixed (commits `D7:
+final review fixes` and `D7: final review fixes, docs`), and CORRECTS in words the statements of the
+entries above that the review showed false. The entries above are not rewritten.
+
+[EVIDENCE: Corrections of earlier statements.] (1) Controller ruling 6 above, `docs/VERIFY.md`
+`D-LOGGED-TERM` and the spec said that, while `run_logged` waits, SIGTERM and SIGHUP raise
+`SystemExit(128 + number)` and that this makes a signal to `rinchen` end the run cleanly. For a
+process that was started with SIGHUP ignored it was wrong, and worse than before ruling 6: the
+handlers REPLACED the ignore. `nohup` (the usual way to leave a multi-hour `rinchen train ablate`
+running over SSH) starts a command with SIGHUP ignored, and the disposition is inherited across
+`exec` and left alone by CPython; the handler of ruling 6 turned the hangup that `nohup` exists to
+absorb into exit 129 and a killed `eole train`. Before ruling 6 the same run survived the hangup.
+Measured through the real binary (`setsid nohup .venv/bin/rinchen train ablate`, one 150-step
+variant, SIGHUP sent to `rinchen` 4 s into `eole train`): the code of ruling 6 ended with exit 129 0.17
+s after the signal and no manifest; the fixed code finished the run, exit 0, with the manifest and the
+tables written 9.55 s after the signal. D5's `convert-script train` and `export_ct2` share `run_logged`
+and had the same regression. (2) The docstring of `train/ablation_layout.py` said `train.json` is kept
+"until it is scored". Controller ruling 2 and the code keep it after success (a missing or corrupt
+`result.json` only re-evaluates); the docstring was wrong, not the rule. (3) Runbook 07 said that
+`rinchen.train` imports `spm`. It imports nothing from `rinchen.spm`; the third-party `sentencepiece`
+package is imported by `validation_corpus.py` and `evaluate.py` only (the spec's layering sentence
+was right). (4) The runbook of D5 (05) said that SIGTERM and SIGHUP to the CLI are not handled and that
+the Eole child keeps running; that stopped being true with ruling 6 and is corrected there.
+
+[DESIGN: The fixes.] I-1: `_exit_on_termination_signals` reads the current handler of SIGTERM and of
+SIGHUP; one that is `signal.SIG_IGN` is left alone (no handler installed, nothing to restore for it),
+any other is replaced by the handler of ruling 6 and put back afterwards, as before. Reason: an
+inherited ignore is a request not to die on that signal. Cost if wrong: a process that ignores SIGTERM
+on purpose cannot be stopped by SIGTERM while `run_logged` waits (Ctrl-C and SIGKILL still can). M-5:
+`bt_ratio` is at most 1000 (`MAX_BT_RATIO`), a `ConfigError` above it; `1e308` had made `bt_requested`
+a 309-digit integer in the dry run and in `results.json`. Cost if wrong: a ratio above 1000 needs the
+constant raised. M-6: the evaluation of a variant whose score is NaN or infinite raises an
+`UpstreamError` that names the variant and the score, after the evaluation and before any result file
+is written (the `train.json` stays, so a rerun only evaluates again); `results.json` is also written
+with `allow_nan=False`. Unreachable with sacrebleu today (chrF and BLEU are never NaN). M-1 and M-2:
+the docstring and the runbook sentence above. M-3: the runbook says that variant directories of an
+earlier matrix stay in `variants/` of the same output directory, are not reported, not hashed and not
+in the manifest (delete them by hand or use a fresh output directory); no code change. M-4: runbook 05
+records that `run_training` and `predict` refuse `[`, `]`, `*` and `?` in the run directory since D7
+and that `export_ct2` is still unguarded. M-7: runbook 07 and `D-LOGGED-TERM` say that a shell
+background job (`&` without job control) starts with SIGINT ignored (POSIX), so Ctrl-C style SIGINT
+does nothing to it; measured: a SIGINT 4 s into `eole train` of such a run was not noticed (exit 0,
+9.56 s later). One existing test was edited for the bound: `test_an_exponent_with_a_point_and_a_sign_
+is_a_number_in_yaml` used `2.5e+3` for both axes and now uses `2.5e+2`, which keeps the point of the
+test (a signed exponent is read as a number) inside the bound.
+
+[EVIDENCE: Tests and measurements of the fix wave.] The new tests fail on the code before the fix (the
+signal tests by assertion, bounded by the 2 s command; the bound and the non-finite tests with `DID NOT
+RAISE`) and pass after it; each was mutation-checked (the signal guard 5 mutants, the bound 4, the
+non-finite score 8, all killed). The full gate: 5966 passed, 1 skipped, 10 deselected (baseline 5944) in 6 min 37 s (6 min 40 s with the checks before it).
+
+[EVIDENCE: Known and left open.] A handler of the caller's own for SIGTERM or SIGHUP is suspended while
+`run_logged` waits (the exit is raised instead); no caller has one. SIGKILL of `rinchen` leaves the
+child running (`D-LOGGED-TERM`). D5's `export_ct2` is still unguarded against glob characters in the
+checkpoint directory. Concurrent runs into one output directory are still not guarded. Every item of
+the section above that lists what is open or not verified stays so.
