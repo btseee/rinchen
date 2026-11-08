@@ -34,15 +34,7 @@ from tests.support.fake_launch import (
     launch_config,
     write_config,
 )
-
-# A holder process: takes the lock the way a launch does, says so, and waits.
-HOLDER = """
-import fcntl, os, sys, time
-descriptor = os.open(sys.argv[1], os.O_RDWR | os.O_CREAT, 0o644)
-fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-print("held", flush=True)
-time.sleep(120)
-"""
+from tests.support.launch_cli import LOCK_HOLDER
 
 
 @pytest.fixture
@@ -354,7 +346,7 @@ def test_a_real_second_process_holding_the_lock_refuses_a_launch_until_it_dies(
 ) -> None:
     lock_file(run_dir).parent.mkdir(parents=True)
     holder = subprocess.Popen(
-        [sys.executable, "-I", "-c", HOLDER, str(lock_file(run_dir))],
+        [sys.executable, "-I", "-c", LOCK_HOLDER, str(lock_file(run_dir))],
         stdout=subprocess.PIPE,
         text=True,
     )

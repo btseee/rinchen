@@ -32,7 +32,7 @@ from rinchen.train.checkpoints import (
     read_launch_record,
     step_directories,
 )
-from rinchen.train.launch import LaunchResult, launch
+from rinchen.train.launch import LaunchResult, latest_attempt_log, launch
 from tests.support import step_dirs
 from tests.support.fake_launch import (
     EOLE,
@@ -1817,3 +1817,116 @@ def test_bash_accepts_the_scripts_launch_writes(
             ["bash", "-n", str(script)], capture_output=True, text=True, check=False
         )
         assert (done.returncode, done.stderr) == (0, "")
+
+
+# ---- the hook before the first write, and the latest attempt -------------------------
+
+
+def test_the_hook_runs_once_before_the_first_file_and_before_eole_starts(
+    config_path: Path, run_dir: Path, fake: FakeEole
+) -> None:
+    seen: list[tuple[list[str], int]] = []
+
+    def hook() -> None:
+        seen.append((sorted(files_under(run_dir)), len(fake.calls)))
+
+    go(config_path, run_dir, before_writing=hook)
+
+    # Only the empty lock file exists then.
+    assert seen == [(["launch/lock"], 0)]
+
+
+def test_the_hook_runs_for_write_only_too(
+    config_path: Path, run_dir: Path, fake: FakeEole
+) -> None:
+    calls: list[int] = []
+
+    go(config_path, run_dir, write_only=True, before_writing=lambda: calls.append(1))
+
+    assert calls == [1]
+
+
+def test_the_hook_does_not_run_when_the_launch_is_refused_before_it_writes(
+    tmp_path: Path,
+    config_path: Path,
+    run_dir: Path,
+    base_cfg: dict[str, Any],
+    fake: FakeEole,
+) -> None:
+    start_and_crash(fake, config_path, run_dir)
+    other = write_config(
+        tmp_path / "other.yaml", config_with(base_cfg, learning_rate=0.3)
+    )
+    shorter = write_config(
+        tmp_path / "shorter.yaml", config_with(base_cfg, train_steps=50)
+    )
+    calls: list[int] = []
+
+    for refused in (other, shorter):
+        with pytest.raises(ConfigError):
+            go(refused, run_dir, before_writing=lambda: calls.append(1))
+    del base_cfg["training"]["train_steps"]
+    broken = write_config(tmp_path / "broken.yaml", base_cfg)
+    with pytest.raises(ConfigError):
+        go(broken, run_dir, before_writing=lambda: calls.append(1))
+
+    assert calls == []
+
+
+def test_the_hook_does_not_run_for_a_run_that_is_found_finished(
+    tmp_path: Path,
+    config_path: Path,
+    run_dir: Path,
+    base_cfg: dict[str, Any],
+    fake: FakeEole,
+) -> None:
+    calls: list[int] = []
+    go(config_path, run_dir)
+    early = write_config(tmp_path / "es.yaml", early_stopping_config(base_cfg))
+
+    go(config_path, run_dir, before_writing=lambda: calls.append(1))
+    other_run = tmp_path / "other_run"
+    fake.run_dir = other_run
+    stopped = write_config(
+        tmp_path / "es2.yaml", early_stopping_config(launch_config(other_run))
+    )
+    fake.queue(Script(early_stop_at=150))
+    go(stopped, other_run)
+    go(stopped, other_run, before_writing=lambda: calls.append(1))
+
+    assert calls == []
+    assert early.is_file()
+
+
+def test_a_failing_hook_stops_the_launch_before_anything_is_written(
+    config_path: Path, run_dir: Path, fake: FakeEole
+) -> None:
+    def hook() -> None:
+        raise OSError(13, "Permission denied")
+
+    with pytest.raises(OSError, match="Permission denied"):
+        go(config_path, run_dir, before_writing=hook)
+
+    assert sorted(files_under(run_dir)) == ["launch/lock"]
+    assert fake.calls == []
+
+
+def test_the_latest_attempt_is_the_highest_log_there_is(
+    config_path: Path, run_dir: Path, fake: FakeEole
+) -> None:
+    assert latest_attempt_log(run_dir) is None
+    for step in (70, 120):
+        fake.queue(crash(step))
+        with pytest.raises(UpstreamError):
+            go(config_path, run_dir)
+    (run_dir / "launch" / "attempt-notes.log").write_text("x", encoding="utf-8")
+
+    assert latest_attempt_log(run_dir) == (2, run_dir / "launch" / "attempt-2.log")
+
+
+def test_a_run_whose_launch_directory_has_no_log_has_no_latest_attempt(
+    config_path: Path, run_dir: Path, fake: FakeEole
+) -> None:
+    go(config_path, run_dir, write_only=True)
+
+    assert latest_attempt_log(run_dir) is None

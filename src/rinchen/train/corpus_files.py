@@ -247,6 +247,12 @@ def _corpus_paths(directory: Path, name: str) -> tuple[Path, Path, Path]:
     )
 
 
+def corpus_sidecar_path(corpus: CorpusFiles) -> Path:
+    """The record `corpus` was written with (`<name>.json` beside its two text files):
+    the row count and the SHA-256 of both files."""
+    return corpus.src_path.parent / f"{corpus.name}{_SIDECAR_SUFFIX}"
+
+
 def _rows_by_direction_and_group(rows: TrainingRows) -> dict[tuple[str, str], int]:
     counts = rows.frame.group_by("direction", "group").len().iter_rows()
     return {(direction, group): count for direction, group, count in counts}

@@ -31,6 +31,7 @@ from click.testing import Result
 from typer.testing import CliRunner
 
 from rinchen.cli import train as train_cli
+from rinchen.cli import train_common
 from rinchen.cli.main import app
 from rinchen.errors import ConfigError, DataError, RinchenError, UpstreamError
 from rinchen.manifest import store
@@ -370,7 +371,7 @@ def test_dry_run_hashes_nothing(
     def refuse_to_hash(*args: object) -> None:
         raise AssertionError("a dry run hashed an input")
 
-    monkeypatch.setattr(train_cli, "build_inputs", refuse_to_hash)
+    monkeypatch.setattr(train_common, "build_inputs", refuse_to_hash)
 
     _run_ok(workspace.args("--dry-run"))
 

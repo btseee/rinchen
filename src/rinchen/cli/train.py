@@ -1,28 +1,43 @@
 """`rinchen train ablate`: expand an ablation matrix into variants, train each one from
 random initialisation and score its development sets, and record the run in a
 manifest. Parsing, file I/O and the manifest only; the work happens in
-`rinchen.train`.
+`rinchen.train`. The group's other commands, `launch` and `average`, live in
+`rinchen.cli.train_runs` and are registered here; the checks both modules share are in
+`rinchen.cli.train_common`.
 
 The variants are resumable work under the output directory (`variants/<id>/`), not
 outputs of the run: the outputs are the three result tables, the rendered Eole config
 of each variant and its checkpoint, and the manifest that vouches for them comes last.
 (`train.json` is that work's record, not an output: the checkpoint it names is.)
+
+`--prepare-only` renders what `ablate` would train on and trains nothing: for each
+variant the corpora, the validation corpus and the Eole config, made by the same
+function `run_ablation` uses (`prepare_variant`), so a long run (the teacher) can start
+from the mixture the ablations chose. Its manifest has its own stage name,
+`train_prepare`: it vouches for configs and data files, not for results and
+checkpoints, so neither command may replace the other's manifest in an output
+directory (`refuse_foreign_manifest`).
 """
 
 from __future__ import annotations
 
-import math
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Any, NoReturn
+from typing import Annotated, Any
 
 import typer
 
-from rinchen.cli.errors import (
-    FAILURE_EXIT_CODE,
-    exit_with_error,
-    rinchen_errors_as_exit_codes,
+from rinchen.cli import train_runs
+from rinchen.cli.errors import rinchen_errors_as_exit_codes
+from rinchen.cli.train_common import (
+    create_out_dir,
+    exit_cannot_write,
+    hash_input,
+    require_file,
+    require_out_apart_from_inputs,
+    require_usable_timeout,
+    write_manifest,
 )
 from rinchen.config.ablation import AblationMatrix, load_ablation
 from rinchen.errors import ConfigError, DataError
@@ -30,7 +45,6 @@ from rinchen.manifest import store
 from rinchen.manifest.model import Manifest, ManifestFile
 from rinchen.manifest.stage import (
     begin_commit,
-    build_inputs,
     code_version,
     output_file,
     refuse_foreign_manifest,
@@ -39,15 +53,21 @@ from rinchen.manifest.stage import (
 from rinchen.train.ablation import run_ablation
 from rinchen.train.ablation_layout import variant_paths
 from rinchen.train.ablation_plan import AblationPlan, plan_ablation
+from rinchen.train.ablation_prepare import PreparedVariant, prepare_variant
 from rinchen.train.ablation_records import AblationResult, VariantProgress
 from rinchen.train.ablation_report import result_files
+from rinchen.train.corpus_files import corpus_sidecar_path
 from rinchen.train.eole_run import run_training
 from rinchen.train.evaluate import evaluate_variant
 
 app = typer.Typer(no_args_is_help=True)
+app.command("launch")(train_runs.launch_command)
+app.command("average")(train_runs.average_command)
 
 _STAGE_NAME = "train_ablate"
+_PREPARE_STAGE = "train_prepare"
 _DEFAULT_THREADS = 2
+_OUTPUTS = "ablation outputs"
 _TOOL_PACKAGES = ("eole", "torch", "sentencepiece", "sacrebleu", "polars")
 # How the messages name the inputs; the loaders of the corpus and the matrix say the
 # same, so a missing file reads alike whichever check finds it.
@@ -96,7 +116,8 @@ def ablate(
             min=1,
             help=(
                 "OpenMP and MKL threads of each Eole run. Part of what a finished "
-                "variant is reused for, so a rerun needs the same number."
+                "variant is reused for, so a rerun needs the same number. With "
+                "--prepare-only nothing runs, and it is only recorded in the manifest."
             ),
         ),
     ] = _DEFAULT_THREADS,
@@ -106,7 +127,8 @@ def ablate(
             "--timeout",
             help=(
                 "Seconds after which each Eole command (the vocabulary, the "
-                "training, the translation) is killed; no limit by default."
+                "training, the translation) is killed; no limit by default. Not "
+                "with --prepare-only, which runs none."
             ),
         ),
     ] = None,
@@ -116,7 +138,7 @@ def ablate(
             "--force",
             help=(
                 "Train every variant again, instead of reusing finished ones or "
-                "only scoring ones that already trained."
+                "only scoring ones that already trained. Not with --prepare-only."
             ),
         ),
     ] = False,
@@ -127,7 +149,19 @@ def ablate(
             help=(
                 "Print the corpus statistics and, for each variant, the corpora with "
                 "their probabilities, integer weights and upsampling; train and "
-                "write nothing, not even the output directory."
+                "write nothing, not even the output directory. Wins over "
+                "--prepare-only."
+            ),
+        ),
+    ] = False,
+    prepare_only: Annotated[
+        bool,
+        typer.Option(
+            "--prepare-only",
+            help=(
+                "Write each variant's corpora, validation files and Eole config.yaml, "
+                "exactly as a run would, and train and score nothing. The manifest is "
+                "of stage train_prepare."
             ),
         ),
     ] = False,
@@ -138,12 +172,21 @@ def ablate(
     scores. Variants run one after the other; a rerun reuses the ones already
     finished (variants/<id>/result.json), only scores a trained checkpoint whose
     evaluation failed (variants/<id>/train.json) and trains the rest. The tables are
-    results.tsv, results.json and results.md in the output directory."""
+    results.tsv, results.json and results.md in the output directory.
+
+    With --prepare-only it writes the corpora, validation files and config.yaml of
+    every variant and prints one line per variant: `prepared <id>: <config.yaml>`."""
     with rinchen_errors_as_exit_codes():
-        _require_usable_timeout(timeout)
+        require_usable_timeout(timeout)
         _reject_repeated_corpora(corpus)
+        if prepare_only:
+            # Refused for a dry run too: it must not be followed by a refusal for it.
+            _reject_options_that_prepare_ignores(force=force, timeout=timeout)
+        stage = _PREPARE_STAGE if prepare_only else _STAGE_NAME
         if dry_run:
-            _print_plan(matrix, corpus, spm_model, out_dir)
+            _print_plan(matrix, corpus, spm_model, out_dir, stage=stage)
+        elif prepare_only:
+            _prepare_variants(matrix, corpus, spm_model, out_dir, threads=threads)
         else:
             _train_variants(
                 matrix,
@@ -157,14 +200,15 @@ def ablate(
 
 
 def _print_plan(
-    matrix: Path, corpus: Sequence[Path], spm_model: Path, out_dir: Path
+    matrix: Path, corpus: Sequence[Path], spm_model: Path, out_dir: Path, *, stage: str
 ) -> None:
-    """The dry run: read the corpora, plan the variants and print the plan."""
-    ablation = _load_checked_matrix(matrix, corpus, spm_model, out_dir)
+    """The dry run: read the corpora, plan the variants and print the plan. `stage` is
+    the one whose manifest the real run would replace."""
+    ablation = _load_checked_matrix(matrix, corpus, spm_model, out_dir, stage=stage)
     # The corpora and the matrix are checked as they are read; this is the one input
     # nothing reads before the first variant, and a dry run that passes must not be
     # followed by a refusal for it.
-    _require_file(spm_model, what=_SPM_MODEL, missing=ConfigError)
+    require_file(spm_model, what=_SPM_MODEL, missing=ConfigError)
     plan = plan_ablation(ablation, corpus, spm_model, out_dir)
     for line in _plan_lines(plan):
         typer.echo(line)
@@ -184,17 +228,14 @@ def _train_variants(
     the tables, and record the run in the manifest, last."""
     # Each input is hashed before it is read, so that the manifest vouches for the
     # bytes the run started from.
-    matrix_file = _hash_input(matrix, what=_MATRIX, missing=ConfigError)
-    ablation = _load_checked_matrix(matrix, corpus, spm_model, out_dir)
-    input_files = [
-        matrix_file,
-        _hash_input(ablation.base, what=_BASE_CONFIG, missing=ConfigError),
-        *(_hash_input(path, what=_CORPUS, missing=DataError) for path in corpus),
-        _hash_input(spm_model, what=_SPM_MODEL, missing=ConfigError),
-    ]
+    matrix_file = hash_input(matrix, what=_MATRIX, missing=ConfigError)
+    ablation = _load_checked_matrix(
+        matrix, corpus, spm_model, out_dir, stage=_STAGE_NAME
+    )
+    input_files = _hash_inputs(matrix_file, ablation, corpus, spm_model)
     plan = plan_ablation(ablation, corpus, spm_model, out_dir)
     # Before any variant is built or trained.
-    _create_out_dir(out_dir)
+    create_out_dir(out_dir, what=_OUTPUTS)
     try:
         # Just before the first write, and after everything that can fail on bad
         # input: the old manifest goes first, so that a failure part-way leaves none.
@@ -212,7 +253,7 @@ def _train_variants(
             result, inputs=input_files, config_sha256=matrix_file.sha256
         )
     except OSError as exc:
-        _exit_cannot_write(out_dir, exc)
+        exit_cannot_write(out_dir, exc, what=_OUTPUTS)
     counts = _outcome_counts(result)
     typer.echo(
         f"variants: {len(result.variants)} (trained {counts['trained']}, "
@@ -225,11 +266,110 @@ def _train_variants(
     typer.echo(f"results.md: {tables.md}")
 
 
-def _require_usable_timeout(timeout: float | None) -> None:
-    if timeout is not None and not 0 < timeout < math.inf:
+def _reject_options_that_prepare_ignores(*, force: bool, timeout: float | None) -> None:
+    """`--prepare-only` trains nothing and runs no Eole command: a `--force` would force
+    nothing and a `--timeout` would bound nothing, so either is a mistake to report, not
+    to ignore. (`--threads` is part of what a variant's fingerprint is made from, and is
+    recorded.)"""
+    if force:
         raise ConfigError(
-            f"--timeout must be a positive, finite number of seconds, got {timeout}"
+            "--force has nothing to do with --prepare-only: it makes variants train "
+            "again, and none trains"
         )
+    if timeout is not None:
+        raise ConfigError(
+            "--timeout has nothing to do with --prepare-only: it bounds Eole "
+            "commands, and none runs"
+        )
+
+
+def _prepare_variants(
+    matrix: Path,
+    corpus: Sequence[Path],
+    spm_model: Path,
+    out_dir: Path,
+    *,
+    threads: int,
+) -> None:
+    """Prepare every variant, as the run does and through the function it uses, and
+    record the files in the manifest, last. Nothing is trained or scored."""
+    matrix_file = hash_input(matrix, what=_MATRIX, missing=ConfigError)
+    ablation = _load_checked_matrix(
+        matrix, corpus, spm_model, out_dir, stage=_PREPARE_STAGE
+    )
+    input_files = _hash_inputs(matrix_file, ablation, corpus, spm_model)
+    plan = plan_ablation(ablation, corpus, spm_model, out_dir)
+    create_out_dir(out_dir, what=_OUTPUTS)
+    try:
+        # Just before the first write: the old manifest goes first, so that a failure
+        # part-way leaves none.
+        begin_commit(plan.out_dir, _PREPARE_STAGE)
+        prepared: list[PreparedVariant] = []
+        for planned in plan.variants:
+            prepared.append(prepare_variant(plan, planned, threads=threads))
+            typer.echo(f"prepared {planned.variant.id}: {prepared[-1].config_path}")
+        manifest_path = write_manifest(
+            plan.out_dir,
+            stage=_PREPARE_STAGE,
+            config_sha256=matrix_file.sha256,
+            seed=plan.matrix.seeds[0],
+            inputs=input_files,
+            outputs=_prepared_files(prepared),
+            metrics=_prepare_metrics(plan, prepared, threads),
+            packages=_TOOL_PACKAGES,
+            status={"prepare": "ok"},
+        )
+    except OSError as exc:
+        exit_cannot_write(out_dir, exc, what=_OUTPUTS)
+    typer.echo(f"manifest: {manifest_path}")
+
+
+def _prepared_files(prepared: Sequence[PreparedVariant]) -> list[ManifestFile]:
+    """Each variant's config and validation files, then every corpus file with its
+    record, once (the variants share the files that are equal). The corpus files are
+    listed with the digests and row counts the build recorded or checked against the
+    files, not read again."""
+    listed: dict[Path, ManifestFile] = {}
+    for variant in prepared:
+        for path in (variant.config_path, variant.valid.src, variant.valid.tgt):
+            if path not in listed:
+                listed[path] = output_file(path, None)
+        for built in variant.corpora.corpora:
+            for path, digest in (
+                (built.src_path, built.src_sha256),
+                (built.tgt_path, built.tgt_sha256),
+            ):
+                listed.setdefault(
+                    path,
+                    ManifestFile(
+                        path=str(path),
+                        sha256=digest,
+                        bytes=path.stat().st_size,
+                        rows=built.rows,
+                    ),
+                )
+            sidecar = corpus_sidecar_path(built)
+            if sidecar not in listed:
+                listed[sidecar] = output_file(sidecar, None)
+    return list(listed.values())
+
+
+def _prepare_metrics(
+    plan: AblationPlan, prepared: Sequence[PreparedVariant], threads: int
+) -> dict[str, float]:
+    """What the corpora held (as `ablate` records it), how many variants and distinct
+    corpus files were prepared, the threads, and the seeds in matrix order."""
+    corpora = {
+        built.src_path for variant in prepared for built in variant.corpora.corpora
+    }
+    return {
+        **_numbers("count", plan.training.stats.to_dict()),
+        **_numbers("count.dev", plan.dev.stats.to_dict()),
+        "variants.total": float(len(prepared)),
+        "corpora.files": float(len(corpora)),
+        "threads": float(threads),
+        **{f"seed.{n}": float(seed) for n, seed in enumerate(plan.matrix.seeds)},
+    }
 
 
 def _reject_repeated_corpora(paths: Sequence[Path]) -> None:
@@ -247,60 +387,38 @@ def _reject_repeated_corpora(paths: Sequence[Path]) -> None:
 
 
 def _load_checked_matrix(
-    matrix: Path, corpus: Sequence[Path], spm_model: Path, out_dir: Path
+    matrix: Path,
+    corpus: Sequence[Path],
+    spm_model: Path,
+    out_dir: Path,
+    *,
+    stage: str,
 ) -> AblationMatrix:
     """The matrix, after the refusals that come before anything else is read or
-    written, for a dry run too, which must not be followed by a refusal for them."""
+    written, for a dry run too, which must not be followed by a refusal for them.
+    `stage` is the one whose manifest the run replaces; another stage's is refused."""
     ablation = load_ablation(matrix)
-    refuse_foreign_manifest(out_dir, _STAGE_NAME)
-    _require_out_apart_from_inputs(out_dir, [matrix, ablation.base, *corpus, spm_model])
+    refuse_foreign_manifest(out_dir, stage)
+    require_out_apart_from_inputs(
+        out_dir, [matrix, ablation.base, *corpus, spm_model], option="--out-dir"
+    )
     return ablation
 
 
-def _require_file(
-    path: Path, *, what: str, missing: type[ConfigError | DataError]
-) -> None:
-    if not path.is_file():
-        raise missing(f"{what} not found: {path}")
-
-
-def _hash_input(
-    path: Path, *, what: str, missing: type[ConfigError | DataError]
-) -> ManifestFile:
-    """The manifest entry of the input file `path`, taken before anything reads it.
-    A path that is not a file is `missing`, with the message of the loader that would
-    have refused it; a file that cannot be read is a DataError."""
-    _require_file(path, what=what, missing=missing)
-    try:
-        return build_inputs([path])[0]
-    except OSError as exc:
-        raise DataError(f"cannot read {what} {path}: {exc}") from exc
-
-
-def _require_out_apart_from_inputs(out_dir: Path, sources: Sequence[Path]) -> None:
-    """The run writes into `out_dir`, so an input file that lives there could be
-    replaced by an output. Compares resolved paths, so a symlink or a `..` does not
-    hide the clash, for each file as named and for the file it links to."""
-    resolved = out_dir.resolve()
-    for source in sources:
-        if resolved in (source.resolve().parent, source.parent.resolve()):
-            raise ConfigError(
-                f"--out-dir {out_dir} is the directory of the input file {source}; "
-                "pass a different --out-dir"
-            )
-
-
-def _create_out_dir(out_dir: Path) -> None:
-    try:
-        out_dir.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        _exit_cannot_write(out_dir, exc)
-
-
-def _exit_cannot_write(out_dir: Path, exc: OSError) -> NoReturn:
-    exit_with_error(
-        f"cannot write the ablation outputs under {out_dir}: {exc}", FAILURE_EXIT_CODE
-    )
+def _hash_inputs(
+    matrix_file: ManifestFile,
+    ablation: AblationMatrix,
+    corpus: Sequence[Path],
+    spm_model: Path,
+) -> list[ManifestFile]:
+    """The manifest entries of the matrix (already hashed), the base config, the
+    corpora and the SentencePiece model, each taken before anything reads it."""
+    return [
+        matrix_file,
+        hash_input(ablation.base, what=_BASE_CONFIG, missing=ConfigError),
+        *(hash_input(path, what=_CORPUS, missing=DataError) for path in corpus),
+        hash_input(spm_model, what=_SPM_MODEL, missing=ConfigError),
+    ]
 
 
 def _report_variant(progress: VariantProgress) -> None:

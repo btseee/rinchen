@@ -74,7 +74,7 @@ from __future__ import annotations
 
 import os
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -177,6 +177,7 @@ def launch(
     eole: str | None = None,
     cuda_visible_devices: str | None = None,
     extra_env: Mapping[str, str] | None = None,
+    before_writing: Callable[[], None] | None = None,
 ) -> LaunchResult:
     """Start, resume or finish the training of the config at `cfg_path` in `run_dir`.
 
@@ -190,6 +191,11 @@ def launch(
     `eole` is the command to run (default: the `eole` next to the interpreter, or the
     caller's choice in tests); `extra_env` is laid over the process environment of the
     commands, a hook for a test shim that is never read from the environment here.
+    `before_writing` is called once, right before the first file of the attempt is
+    written and after every refusal and the finished-run check: not for a launch that is
+    refused and not for a run found finished, which write nothing. A caller that keeps a
+    record of the run's final state uses it to drop the old record at the last moment
+    (`manifest.stage.begin_commit`). What it raises propagates, with nothing written.
 
     Raises:
         ConfigError: the config is unusable (see `eole_cfg.validate_train_config`), it
@@ -223,6 +229,7 @@ def launch(
         timeout=timeout,
         devices=devices,
         write_only=write_only,
+        before_writing=before_writing,
     )
     lock = run_dir / LAUNCH_DIR / LOCK_FILE
     if write_only:
@@ -244,6 +251,7 @@ class _Work:
     timeout: float | None
     devices: str | None
     write_only: bool
+    before_writing: Callable[[], None] | None
 
 
 def _launch_guarded(work: _Work) -> LaunchResult:
@@ -269,6 +277,8 @@ def _launch_guarded(work: _Work) -> LaunchResult:
             return _finished(newest, skipped, plan)
 
     resume_step = None if newest is None else newest.step
+    if work.before_writing is not None:
+        work.before_writing()
     attempt = _prepare_attempt(
         plan,
         run_dir,
@@ -541,6 +551,14 @@ def _finished(
         attempt=0,
         incomplete_skipped=skipped,
     )
+
+
+def latest_attempt_log(run_dir: Path) -> tuple[int, Path] | None:
+    """The number and the log (`launch/attempt-<k>.log`) of the latest attempt of the run
+    in `run_dir`, None when there is none."""
+    launch_dir = run_dir / LAUNCH_DIR
+    number = _last_attempt(launch_dir)
+    return (number, _attempt_log(launch_dir, number)) if number else None
 
 
 def _last_attempt(launch_dir: Path) -> int:
