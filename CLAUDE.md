@@ -131,7 +131,12 @@ the real `rinchen train launch` and `average` and the real Eole) is met on toy t
 machinery, not a teacher: no GPU was used (the one on this machine was not authorised), no real corpus
 exists, and `configs/eole/teacher.yaml` is a table of unmeasured priors; everything on a GPU (bf16,
 NCCL, multi-GPU, the 13 GB checkpoint write) and the quality of the teacher shape stay open. The
-whole-branch review of D8 had not run when this was written. Next up: D9 (Document-level). See
+whole-branch review of D8 ran: ready with fixes, no Critical finding, two Important ones (the process group of a
+crashed Eole leader was not killed, so the rank processes of a multi-GPU run could train on unlocked; the TensorBoard
+events landed outside the run directory) and seven Minor ones; the fix wave (two commits, gate 7187 passed, 1 skipped,
+10 deselected) fixed the two Important ones, a guard against a resumed checkpoint of another architecture and the
+wording of an unreadable-file message, and left four findings open on purpose (`DECISIONS.md`); a scoped re-review of
+the fix wave had not run when this was written. Next up: D9 (Document-level). See
 `STATE.md`, `docs/runbooks/07_ablations.md` and `docs/runbooks/08_teacher.md`.
 
 ## Evidence and full plan

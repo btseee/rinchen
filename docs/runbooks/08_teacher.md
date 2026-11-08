@@ -53,16 +53,16 @@ of the build (`.superpowers/sdd/2026-11-08-d8-teacher-training/progress.md`) or 
 this runbook on 2026-11-08 ("Measured numbers"); a number that was not obtained is not given.
 
 What was checked: the unit and property tests (every new test mutation-checked by hand during the
-build), `tests/integration/test_train_tiny_teacher.py` (the STOP gate: 28 tests through the real
-`rinchen` binary and the real Eole on the CPU), one review (of Tasks 1 to 6, whose findings an interlude
-fixed; the whole-branch review had not run when this was written), and the real binary for this
-runbook.
+build), `tests/integration/test_train_tiny_teacher.py` (the STOP gate: 30 tests collected from 27 test
+functions through the real `rinchen` binary and the real Eole on the CPU; 28 from 25 before the final
+review's fixes), two reviews (of Tasks 1 to 6, whose findings an interlude fixed; of the whole branch,
+whose findings one fix wave handled, "The final review" below), and the real binary for this runbook.
 
 ## Architecture
 
 | Module | Job |
 |---|---|
-| `rinchen/train/checkpoints.py` | `StepDirectory`, `ResumePoint`, `step_directories`, `latest_complete`, `step_of`; `is_complete` (completeness of one step directory); `identity_of`, `RunIdentity`, `write_launch_record`, `read_launch_record` (`launch.json`) |
+| `rinchen/train/checkpoints.py` | `StepDirectory`, `ResumePoint`, `step_directories`, `latest_complete`, `step_of`; `is_complete` (completeness of one step directory); `architecture_mismatch`, `ArchitectureMismatch` (the model-shape guard); `identity_of`, `RunIdentity`, `write_launch_record`, `read_launch_record` (`launch.json`) |
 | `rinchen/train/curves.py` | `parse_train_log` (an Eole log to a `TrainCurve` of `TrainReport` rows) and `loss_gate`; reads no file |
 | `rinchen/train/average.py` | `average_checkpoints` to an `AveragedModel`; `AVERAGED_FROM_FILE` |
 | `rinchen/train/launch.py` | `launch` to a `LaunchResult`; `latest_attempt_log`; `LAUNCH_DIR`, `COMMAND_FILE`, `LOCK_FILE` |
@@ -471,6 +471,13 @@ empty and is never removed.
   against 10.82). After the fix, with the real Eole: SIGKILL of the launcher at step 30, the orphan
   trained alone to `step_120`, a second launch exited 2, and a third, after the orphan ended, said
   `already_complete`.
+- **Which processes hold it.** The holder is Eole's LEADER, `eole train` itself, which inherited the
+  descriptor. The per-rank processes of a multi-GPU run are `torch.multiprocessing` "spawn" children
+  started with `close_fds=True` and do NOT hold it (the final review's real run: only the launcher and
+  `eole train` held `launch/lock`; the data-loader worker and the resource tracker did not). For a
+  multi-GPU run that means the lock lives as long as the leader, not as long as every rank: if the
+  leader dies while the launcher is gone too, ranks that outlive it train on without the lock (with the
+  launcher alive, `run_logged` kills the whole group when the leader exits non-zero: "Signals").
 - **`--write-only` takes no lock.** It only looks, without creating the file, and is refused while
   another launch (or a lingering Eole) holds it, because it would replace the config that launch runs.
   The look is not a hold: a launch that starts after it is not stopped.
@@ -486,15 +493,22 @@ empty and is never removed.
 ## Signals
 
 `launch` waits for Eole through `run_logged`: it wakes every 0.2 s, kills Eole's whole process group
-(Eole starts data-loader workers; the child runs in a session of its own) and exits. Evidence is the
-Task 6 gate (real Eole, tiny run) and its probes:
+(Eole starts data-loader workers; the child runs in a session of its own) and exits. The group is killed
+in four cases: Ctrl-C, SIGTERM and SIGHUP, a timeout, and **Eole's leader exiting with a non-zero code or
+by a signal on its own** (a Python error, the OOM killer, `kill -9` of `eole train` alone). The last case
+is the final review's finding I-1: the per-rank processes of a multi-GPU run do not hold the lock (above)
+and would otherwise train on, writing `step_N`, while the failed launch reported exit 4 and the next
+`launch` started a second training into the same `model_path`. A leader that exits 0 is not followed by
+a kill: it has no such survivors, and one that left a process running on purpose is not the launcher's
+to stop. Evidence is the Task 6 gate (real Eole, tiny run) and its probes:
 
 | Signal | Exit | What happens |
 |---|---|---|
 | Ctrl-C (SIGINT) | 130 | the group is killed; the run is resumable |
 | SIGTERM | 143 | measured 0.21 to 0.26 s to exit; none of the 2 to 4 descendants survives; the lock is free; no manifest; the next launch finished the run (8 s into a run: `resumed from: 100`; 0.5 s in, before any checkpoint: a fresh attempt 2) |
 | SIGHUP | 129 | as SIGTERM |
-| SIGKILL | none | cannot be caught: Eole's group keeps running and keeps the lock; the next launch is refused until it ends (above); no manifest is left, the next launch writes it |
+| Eole's leader exits non-zero or is killed (`kill -9` of `eole train` alone) | 4 | the rest of the group is killed before the launcher returns; the lock is free; the next launch resumes. Real Eole, 120-step tiny run, SIGKILL of the `eole train` leader at step 60 (group: leader, resource tracker, data-loader worker): launcher exit 4 in 0.26 s, "eole train failed: killed by signal 9", no member of the group left (none at once, none 3 s later), no manifest, `step_50` complete, and the next launch `resumed from: 50`, attempt 2, completed at step 120. Before the fix the resource tracker and the worker outlived the launcher (the review) |
+| SIGKILL of the launcher | none | cannot be caught: Eole's group keeps running and the lock stays held by Eole's leader; the next launch is refused until it ends (above); no manifest is left, the next launch writes it. Nothing is left to sweep the group if the leader dies afterwards: on a GPU node look for stray `eole` processes before relaunching |
 | `nohup` (SIGHUP inherited as ignored) | none | the ignore stays: `run_logged` leaves a signal that was ignored at start alone (D7's fix, measured there for `ablate`: the run finished with exit 0; not re-measured for `launch`) |
 | a shell background job (`&`) | none | starts with SIGINT ignored (POSIX) and stays so: stop such a run with SIGTERM or SIGHUP |
 
@@ -618,9 +632,9 @@ where several ranks are needed).
 | **`batch_size_multiple`.** Default 1; Eole's "fp16 gives 8" rule is dead code in 0.6.4, so `teacher.yaml` sets 8 | source-read |
 | **Precision.** `use_amp` defaults to true: with `compute_dtype` of 16 bits Eole keeps an fp32 copy of the parameters and autocasts (`config/training.py:69, 292-305`). The weights of a step directory are therefore expected to be fp32 on disk (the CPU fp32 run saves fp32); a bf16 file would be half the size. Never run | source-read, unmeasured |
 | **Multi-node.** No `n_nodes` or `node_rank`: each node runs its own `eole train` with the same `world_size` (the total), `master_ip` of node 0 and its own global `gpu_ranks` (node 1 of 2x4: `[4,5,6,7]`). The launcher's rules allow that shape; the lock and the checkpoint directory are node-local unless the storage is shared | source-read; untested |
-| **Orphans.** The workers are non-daemon: a SIGKILL of only the parent leaves them holding the GPUs. The launcher starts Eole in a session of its own and kills the group | CPU run (the group kill); GPU untested |
+| **Orphans.** The workers are non-daemon torch "spawn" processes started with `close_fds=True`, so they inherit neither the lock descriptor nor anything else: a SIGKILL or a crash of only the parent leaves them training and holding the GPUs. The launcher starts Eole in a session of its own and kills the group on Ctrl-C, SIGTERM, SIGHUP, a timeout and when the leader exits non-zero on its own (a clean exit 0 is not followed by a kill). A SIGKILL of the LAUNCHER still leaves Eole running; the lock is then held by Eole's leader only, so on a multi-GPU run it lasts as long as the leader, not as long as the ranks | CPU run (the group kill, including the leader's own crash); the rank processes: source-read and a fake that starts a `close_fds` child; GPU untested |
 | **Ctrl-C on 2 ranks.** All exit with rc 0, "Training interrupted by user" and "Connection reset by peer" noise, about 4.5 s, no final save | CPU run on the shim |
-| **TensorBoard.** `tensorboard_log_dir` is not set in `teacher.yaml`; Eole's default is the relative path `runs/eole` (`config/common.py:166`) plus a start-time subdirectory (`utils/report_manager.py:117-119`), so the events go to `<working directory of the process>/runs/eole/<Mon-DD_HH-MM-SS>`, outside the run directory, and each attempt writes a new directory. Set `tensorboard_log_dir` to a path in the run directory in the config before preparing (an allowed key) | source-read |
+| **TensorBoard.** `tensorboard_log_dir` is not set in `teacher.yaml`; Eole's default is the relative path `runs/eole` (`config/common.py:166`) plus a start-time subdirectory (`utils/report_manager.py:117-119`), so left alone the events would go to `<working directory of the process>/runs/eole/<Mon-DD_HH-MM-SS>`, outside the run directory (the final review reproduced that with the real binary). `launch` therefore adds `tensorboard_log_dir: <run directory>/tensorboard` (an absolute path) to the effective config when `tensorboard` is true and the config names no directory; a directory the config names is kept as it is. The default is part of every rendered `launch/train-<k>.yaml` and of the run's identity (below). Real run from a scratch working directory: the event files of the first attempt and of the resume were under `<run>/tensorboard/<Mon-DD_HH-MM-SS>/` and nothing was written under the working directory | source-read; CPU run for the effect of the default |
 
 Eole writes nothing to `model_path` besides the `step_N` directories and the links in it. The wheel ships
 no training recipes (no yaml under `site-packages/eole`), so the shape of the teacher is the project's
@@ -694,7 +708,7 @@ explained) and 5,053/5,498 in the first window (start-up). They say nothing abou
   checkpoint is written after the loop, on `train_steps` or an early stop, unless that step was just
   saved; none is written on SIGINT, SIGTERM or a crash). With early stopping after 6 validations without
   improvement the best checkpoint is 6 saves older than the last; `keep_checkpoint: 8` keeps it. The
-  launcher does not name the best step. Read it from TensorBoard (`valid/ppl`) or from the log:
+  launcher does not name the best step. Read it from TensorBoard (`valid/ppl`; the events are under `<run directory>/tensorboard/`) or from the log:
 
   ```bash
   uv run python -I -c "import sys; from pathlib import Path; from rinchen.train.curves import parse_train_log; c = parse_train_log(Path(sys.argv[1]).read_text(errors='replace')); assert len(c.validations) == len(c.saved_steps); p, s = min(zip(c.validations, c.saved_steps)); print(f'best validation perplexity {p} at step {s}')" $RUN/launch/attempt-1.log
@@ -726,7 +740,11 @@ be a regular file (not a link), non-empty; the two JSON files must parse as JSON
 `optimizer.pt` must be a zip archive whose central directory reads and lists an entry; the weights must
 open with `safetensors` (it checks the header against the file size) and hold a tensor. The
 SentencePiece artifact is not needed. No tensor is loaded, no archive member read, and the function never
-raises for a damaged directory (a file that cannot be read is a problem too).
+raises for a damaged directory (a file that cannot be read is a problem too, worded `<file>: cannot be
+read (<exception class>: <reason>)`, for example `model.00.safetensors: cannot be read (PermissionError:
+Permission denied)`; the first version said `FileNotFoundError('No such file or directory')` for a weights file
+without read permission, because `safetensors` words every failed open that way: the file is now opened
+first, so the error is the real one).
 
 What it catches and what it cannot (the review's measurements, on a real tiny checkpoint):
 
@@ -749,6 +767,34 @@ What it catches and what it cannot (the review's measurements, on a real tiny ch
 An incomplete directory above the resume point is reported (`incomplete step directories skipped:
 [200]`) and left alone; Eole overwrites it when the run reaches that step again. Incomplete directories
 are never deleted by D8.
+
+### A checkpoint of another model
+
+Eole IGNORES the `model` section of the config when it resumes: it builds the model that the
+checkpoint's own saved `config.json` describes. So a `step_N` directory copied by hand into a run's
+`model_path` from a run of another architecture would be trained on as if it were this run's, and nothing
+in Eole objects (the final review's finding M-1). Before `launch` chooses a resume point it therefore
+compares the `model` section of each candidate's `config.json` with the config's own, for the keys both
+name: `architecture`, `hidden_size`, `heads`, `transformer_ff`, `embeddings.word_vec_size` and
+`embeddings.position_encoding_type`, and the layers, width, heads, feed-forward size and position scheme of
+the encoder and of the decoder (`checkpoints.architecture_mismatch`; the layout is the one Eole 0.6.4 wrote
+into `step_20/config.json` of a real tiny run, copied into `tests/support/step_dirs.py`).
+
+- A complete directory that differs in any of those keys is not a resume point: it is skipped like an
+  incomplete one (listed in `incomplete step directories skipped:`, a wording that also covers it) and
+  Eole overwrites it if the run reaches its step.
+- When NO directory is left and some were skipped for their model, `launch` (and `--write-only`) exits 2
+  and says which: `no step directory in <model_path> is of the model this config trains ... step_100:
+  config.json: model.hidden_size is 64 in the checkpoint but 128 in the config. Remove it, or use a new run
+  directory`. It names the newest such directory. Nothing is written and Eole is not started. Real binary,
+  a real 64-wide `step_50` copied into the checkpoint directory of a 128-wide run (with its launch
+  record): exit 2 in 0.8 s with that message, Eole not started; the same checkpoint copied into a 64-wide
+  run was accepted (`resumed from: 50`).
+- A key that either side does not have is not compared, so a checkpoint whose `config.json` has no
+  `model` section is resumable. **This is a guard against a mistake, not proof of where a checkpoint came
+  from:** a copy of the SAME architecture from another run (another corpus, another seed, another
+  optimiser state) passes and would be resumed from. Operator rule: never copy checkpoints into a run's
+  `model_path`; start a new run directory.
 
 ## Averaging
 
@@ -862,7 +908,7 @@ measured; each is a prior.** Master plan = `docs/research/2026-10-29-rinchen-dev
 | `valid_steps`, `save_checkpoint_steps` | 5000, 5000 | master plan 515; the save equal to the validation by the design |
 | `keep_checkpoint` | 8 | the design: more than `early_stopping + 1` |
 | `early_stopping`, `early_stopping_criteria` | 6, `ppl` | master plan 515; one criterion (spike) |
-| `tensorboard` | true | the design; the log directory is not set (above) |
+| `tensorboard` | true | the design; the log directory is not set here: `launch` defaults it to `<run directory>/tensorboard` (above) |
 | `transforms_configs.filtertoolong` | 256, 256 | the proxy config |
 | `valid_metrics` | left out | spec S10 (master plan 516 has `[BLEU, CHRF]`) |
 | `seed` | 1234 | the project default |
@@ -913,11 +959,37 @@ if another stage's manifest is there.)
   cannot say which key differs.
 - The `bool` is not an `int` check still exists in `train/eole_data.py` and `corpus/schema.py` (left alone:
   D7 and D1 code); D8's own copies were replaced by `is_strict_int`.
-- `configs/eole/teacher.yaml` does not set `tensorboard_log_dir` (events go to a relative `runs/eole`), and
-  its comment cites master plan lines 511 to 514 where the teacher block is 511 to 516 (found while writing
-  this runbook; configs were not touched).
-- The whole-branch review of D8 had not run when this was written; its findings and fixes, if any, get an
-  addendum in `DECISIONS.md` and `STATE.md`.
+- The comment of `configs/eole/teacher.yaml` cites master plan lines 511 to 514 where the teacher block is
+  511 to 516 (and the dropout, validation and early-stopping values are on line 515); configs were not
+  touched by the fix wave. (The `tensorboard_log_dir` item that stood here is fixed: the launcher defaults
+  it.)
+- A skipped step directory of another model is listed in the same `incomplete step directories skipped:`
+  line as an incomplete one; its reason is in the exit-2 message only when no directory is left.
+
+### The final review (whole branch) and what its fix wave did
+
+An independent whole-branch review (`b1a8a47..90c3865`) found no Critical problem, two Important ones and
+seven Minor ones, and reproduced the gate and the STOP gate. Fixed in the commits `D8: final review fixes`
+and `D8: final review fixes, docs`: I-1 (the group is killed when Eole's leader exits non-zero, above), I-2
+(the TensorBoard default, above), M-1 (the model-shape guard, above) and M-4 (the real exception class in
+the `is_complete` message). Left open on purpose, each with its cost:
+
+- **An early-stopped run is finished (M-2).** Raising `train_steps` after an early stop does nothing: the
+  launch returns `early_stopped` at the old step (exit 0, `status: early_stopped`, `steps: 100`;
+  `test_a_later_train_steps_does_not_restart_an_early_stopped_run` pins it). To train past an early stop
+  start a NEW run directory. Cost: an operator who raised the number gets no note that it was ignored.
+- **Two hand runs in one attempt log (M-3).** `command.sh` fixes attempt `<k>` when it is written and
+  appends (`tee -a`) to `launch/attempt-<k>.log`, so running it twice appends two runs to one log, and the
+  NaN scan (`non_finite_*`) spans the whole log: a NaN of the first run keeps refusing the run even if the
+  second went on cleanly past it. Start a new attempt (`launch --write-only` again, or `launch`) or clear
+  the log deliberately. Cost: a false refusal in the safe direction. Not reproduced with the fake (it
+  cannot overwrite steps); read from `curves.py`.
+- **Design notes (M-6).** `eole_cfg.py` has 837 lines (an earlier record said "about 844") and carries key
+  lists, value rules, the resume rule, merge, render and file I/O; the value rules and the `train_from`
+  rule would sit well in a sibling module. `average` imports `manifest.stage` for `sha256_of`. Not changed:
+  cohesion, not behaviour.
+- **The look is not a hold (M-7).** Between `--write-only`'s look at the lock and its writes a real launch
+  can start (documented since Task 5).
 
 ## Measured numbers
 
@@ -936,7 +1008,7 @@ CPython 3.14.10, eole 0.6.4, torch 2.14.1+cu130, safetensors 0.8.0, numpy 2.5.4,
 | refusals and a held lock | 0.69 to 0.73 s each, exit 2 |
 | the whole measurement script | 75.5 s |
 | `du -sb` | run directory 19,296,131 B; a step directory 4,808,113 B; the averaged directory 3,322,115 B |
-| the STOP gate test module (ledger, Task 6) | 28 tests, 2 min 38 s (about 184 s of a loaded 11 min gate) |
+| the STOP gate test module (ledger, Task 6) | 28 tests collected from 25 functions, 2 min 38 s (about 184 s of a loaded 11 min gate); 30 from 27 after the final review's fixes |
 | the gate (the tree that holds this runbook; only documents differ from `3e357ae`) | `ruff format --check`, `ruff check`, `mypy src` clean; 7114 passed, 1 skipped, 10 deselected in 10 min 34 s of pytest (10 min 37 s in all) |
 
 The measurement scripts were read-only scratch files (`m1_tiny_teacher.py`, `m2_teacher_commands.py`,
@@ -955,5 +1027,5 @@ teacher_tiny}.yaml`; unit tests `tests/unit/test_train_checkpoints.py`, `test_tr
 `test_train_damaged_optimizer_cli.py`, `test_cli_train_launch.py`, `test_cli_train_average.py`,
 `test_cli_train_prepare.py`, `test_utils_integers.py`, `test_support_signal_handlers.py` and
 `test_eole_configs_shipped.py`; property tests `tests/property/test_train_{checkpoints,curves,
-average}_property.py`; `tests/integration/test_train_tiny_teacher.py` (the STOP gate, scenarios A to H);
+average}_property.py`; `tests/integration/test_train_tiny_teacher.py` (the STOP gate, scenarios A to I);
 and the helpers `tests/support/{step_dirs,fake_launch,fake_eole_process,launch_cli,signal_handlers}.py`.
