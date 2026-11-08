@@ -35,6 +35,7 @@ from dataclasses import dataclass
 from typing import Any, Final, NoReturn
 
 from rinchen.errors import ConfigError
+from rinchen.utils.integers import is_strict_int
 
 MIN_MULTI_PROCESS_TIMEOUT_S: Final = 3600
 MAX_TRAINING_CORPORA: Final = 80
@@ -86,14 +87,9 @@ def _refuse(path: str, problem: str) -> NoReturn:
     raise ConfigError(f"invalid Eole config: {path}: {problem}")
 
 
-def _is_int(value: object) -> bool:
-    # A boolean is an int to Python and neither a count nor a rank to Eole.
-    return isinstance(value, int) and not isinstance(value, bool)
-
-
 def _world_size(training: Mapping[str, Any]) -> int:
     value = training.get("world_size", _DEFAULT_WORLD_SIZE)
-    if not _is_int(value) or value < 1:
+    if not is_strict_int(value) or value < 1:
         _refuse("training.world_size", f"must be a positive integer, got {value!r}")
     return int(value)
 
@@ -101,7 +97,7 @@ def _world_size(training: Mapping[str, Any]) -> int:
 def _gpu_ranks(training: Mapping[str, Any]) -> tuple[int, ...]:
     value = training.get("gpu_ranks", [])
     if not isinstance(value, list | tuple) or not all(
-        _is_int(rank) and rank >= 0 for rank in value
+        is_strict_int(rank) and rank >= 0 for rank in value
     ):
         _refuse(
             "training.gpu_ranks",
@@ -139,7 +135,7 @@ def _check_ranks(settings: GpuSettings) -> None:
 
 def _check_collective_timeout(training: Mapping[str, Any]) -> None:
     timeout = training.get("timeout", _UNSET)
-    if not _is_int(timeout) or timeout < MIN_MULTI_PROCESS_TIMEOUT_S:
+    if not is_strict_int(timeout) or timeout < MIN_MULTI_PROCESS_TIMEOUT_S:
         got = "unset (Eole's default is 60)" if timeout is _UNSET else repr(timeout)
         _refuse(
             "training.timeout",
@@ -167,7 +163,7 @@ def _check_corpus_count(cfg: Mapping[str, Any]) -> None:
 
 def _check_early_stopping(training: Mapping[str, Any]) -> None:
     patience = training.get("early_stopping", 0)
-    if not _is_int(patience) or patience < 1:
+    if not is_strict_int(patience) or patience < 1:
         return
     criteria = training.get("early_stopping_criteria")
     if not isinstance(criteria, str) or not criteria:
@@ -183,7 +179,7 @@ def _check_early_stopping(training: Mapping[str, Any]) -> None:
     if valid_steps != save_steps:
         return
     keep = training.get("keep_checkpoint", _KEEP_ALL)
-    if keep != _KEEP_ALL and (not _is_int(keep) or keep < patience + 1):
+    if keep != _KEEP_ALL and (not is_strict_int(keep) or keep < patience + 1):
         _refuse(
             "training.keep_checkpoint",
             f"is {keep!r}: with early_stopping {patience} and a validation at every "

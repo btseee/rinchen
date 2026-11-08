@@ -572,6 +572,18 @@ def test_the_manifest_names_the_stage_the_config_and_the_seed(
     }
 
 
+def test_a_boolean_seed_is_recorded_as_no_seed(
+    workspace: LaunchWorkspace, fake: LinkingFakeEole
+) -> None:
+    cfg = yaml.safe_load(workspace.config.read_text(encoding="utf-8"))
+    cfg["seed"] = True  # 1 to Python, and no seed to Eole
+    workspace.config.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+
+    run_ok(workspace.args())
+
+    assert manifest_of(workspace).seed == -1
+
+
 def test_the_manifest_lists_the_four_files_of_the_final_step_and_the_run_records(
     workspace: LaunchWorkspace, fake: LinkingFakeEole
 ) -> None:

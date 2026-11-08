@@ -3,9 +3,11 @@
 # from random init) with the schedule of the gate: 200 steps, a report every 10 steps,
 # a validation and a save every 50 steps, and every one of the four checkpoints kept.
 # The spike measured the training loss falling by 60.4 to 62.4 percent over those 200
-# steps on the toy corpora; `rinchen train launch` gates on a fall of at least 30
-# percent. A gate that the launcher, the resume and the averaging work, not a quality
-# measure: those sentences are templated.
+# steps on the toy corpora. The gate test (tests/integration/test_train_tiny_teacher.py)
+# requires a fall of at least 30 percent (`curves.loss_gate`); `rinchen train launch`
+# itself checks only that no loss in the log is NaN or infinite. A gate that the
+# launcher, the resume and the averaging work, not a quality measure: those sentences
+# are templated.
 #
 # This file holds no per-run value. `rinchen train ablate --prepare-only` merges these
 # in, and the merged config is validated before Eole sees it:

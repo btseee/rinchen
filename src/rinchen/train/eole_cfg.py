@@ -22,6 +22,7 @@ from typing import Any, Final, NoReturn
 import yaml
 
 from rinchen.errors import ConfigError
+from rinchen.utils.integers import is_strict_int
 from rinchen.utils.part_file import unique_part_path
 
 # Eole's own default, spelled out in every config so none depends on it.
@@ -659,24 +660,16 @@ def _is_bool(value: object) -> bool:
     return isinstance(value, bool)
 
 
-def _count_of(value: object) -> int | None:
-    # A boolean is an int to Python, and neither a count nor a port to Eole.
-    return value if isinstance(value, int) and not isinstance(value, bool) else None
-
-
 def _is_non_negative_int(value: object) -> bool:
-    count = _count_of(value)
-    return count is not None and count >= 0
+    return is_strict_int(value) and value >= 0
 
 
 def _is_positive_int(value: object) -> bool:
-    count = _count_of(value)
-    return count is not None and count > 0
+    return is_strict_int(value) and value > 0
 
 
 def _is_port(value: object) -> bool:
-    count = _count_of(value)
-    return count is not None and 1 <= count <= _MAX_PORT
+    return is_strict_int(value) and 1 <= value <= _MAX_PORT
 
 
 def _is_text(value: object) -> bool:
@@ -814,7 +807,7 @@ def _check_training_corpus(corpus: Mapping[Any, Any], path: str) -> None:
     if "weight" in corpus:
         weight = corpus["weight"]
         # A boolean is an int to Python, and no weight to Eole's round robin.
-        if isinstance(weight, bool) or not isinstance(weight, int) or weight < 1:
+        if not is_strict_int(weight) or weight < 1:
             _fail(
                 f"{path}.weight",
                 "must be a positive integer (the number of consecutive examples "

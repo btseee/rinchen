@@ -14,11 +14,14 @@ encoding buffers), is taken from the last checkpoint unchanged. A NaN or an infi
 any floating-point tensor of any checkpoint is refused: it would poison the mean.
 
 The weights are read tensor by tensor from the files and written the same way, so the
-memory in use is a few copies of the largest tensor, not of the model. The safetensors
-file is written here, by its format (an 8-byte header length, the JSON header, the
-tensors' bytes in the order of their names), because that keeps the bytes a function of
-the inputs and the writing streaming; `safetensors` itself is imported where it checks
-the result, and `torch` is not imported at all.
+memory in use depends on the largest floating-point tensor, not on the size of the model.
+The peak is about 9 times that tensor in float32 (the float64 sum and the temporaries of
+the conversions; measured 2.6 GB for three float32 checkpoints with one 300 MB tensor), so
+a very large embedding matrix needs that much host RAM. The safetensors file is written
+here, by its format (an 8-byte header length, the JSON header, the tensors' bytes in the
+order of their names), because that keeps the bytes a function of the inputs and the
+writing streaming; `safetensors` itself is imported where it checks the result, and
+`torch` is not imported at all.
 
 The output directory holds the averaged `model.00.safetensors`, the files beside the
 weights in the LAST checkpoint (`config.json`, `vocab.json`, the SentencePiece artifact;

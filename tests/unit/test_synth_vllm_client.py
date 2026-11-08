@@ -937,6 +937,7 @@ def test_an_interrupt_while_waiting_cancels_the_requests_still_queued(monkeypatc
 
 
 @pytest.mark.timeout(30)
+@pytest.mark.usefixtures("default_signal_handlers")
 def test_a_real_sigint_cancels_the_requests_still_queued():
     # Once polars is imported (every `rinchen` command has it) a SIGINT sent to
     # the process does not wake a `concurrent.futures.wait` that has no timeout:

@@ -26,6 +26,11 @@
 #
 # The model is the same as everywhere else: SinusoidalInterleaved positions, full
 # multi-head attention, one shared vocabulary and shared embeddings.
+#
+# `valid_metrics: [BLEU, CHRF]` of the master plan is left out on purpose (spec S10): the
+# validation corpus is the pre-tokenised one of D7, so Eole would score piece strings and
+# not text. The validation perplexity and accuracy are logged; BLEU and chrF of the
+# teacher come from `evaluate_variant` after the training.
 seed: 1234
 share_vocab: true
 overwrite: true

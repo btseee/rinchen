@@ -114,6 +114,7 @@ from rinchen.train.eole_run import (
 from rinchen.train.gpu_rules import GpuSettings, check_gpu_rules
 from rinchen.train.launch_command import render_command_sh
 from rinchen.train.run_lock import holding_the_run, refuse_a_held_run
+from rinchen.utils.integers import is_strict_int
 from rinchen.utils.logged_process import run_logged
 from rinchen.utils.part_file import replace_file
 
@@ -419,7 +420,7 @@ def _plan(
 
 def _explicit_train_steps(cfg: Mapping[str, Any]) -> int:
     steps = cfg["training"].get("train_steps")
-    if isinstance(steps, bool) or not isinstance(steps, int) or steps < 1:
+    if not is_strict_int(steps) or steps < 1:
         got = "but it is missing" if steps is None else f"got {steps!r}"
         raise ConfigError(
             f"invalid {_WHAT}: training.train_steps: must be set to a positive integer, "

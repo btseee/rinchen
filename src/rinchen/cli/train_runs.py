@@ -108,6 +108,7 @@ from rinchen.train.launch import (
     latest_attempt_log,
 )
 from rinchen.train.launch import launch as launch_run
+from rinchen.utils.integers import is_strict_int
 
 _LAUNCH_STAGE = "train_launch"
 _AVERAGE_STAGE = "train_average"
@@ -333,7 +334,7 @@ def _config_seed(config: Path) -> int:
     """The config's `seed`, or what an unseeded Eole run records."""
     cfg = read_config(config, _CONFIG)
     seed = cfg.get("seed") if isinstance(cfg, Mapping) else None
-    return seed if isinstance(seed, int) and not isinstance(seed, bool) else _UNSEEDED
+    return seed if is_strict_int(seed) else _UNSEEDED
 
 
 def _drop_the_manifest(run_dir: Path) -> Callable[[], None]:

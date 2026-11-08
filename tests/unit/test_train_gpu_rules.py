@@ -333,6 +333,15 @@ def test_the_criteria_are_not_looked_at_when_early_stopping_is_off() -> None:
     )
 
 
+def test_a_boolean_is_not_a_patience() -> None:
+    # `true` is 1 to Python, and no number of validations to wait for: early stopping is
+    # not on, so the criteria list is not looked at (the Eole config check refuses the
+    # boolean itself).
+    assert check_gpu_rules(
+        early_stopping(early_stopping=True, early_stopping_criteria=["a", "b"])
+    )
+
+
 def test_early_stopping_left_out_is_off() -> None:
     cfg = config_with(early_stopping_criteria=["a", "b"], keep_checkpoint=0)
 

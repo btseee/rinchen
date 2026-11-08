@@ -377,6 +377,7 @@ def test_run_logged_kills_the_process_group_when_it_is_interrupted(
 
 @linux_only
 @pytest.mark.timeout(30)
+@pytest.mark.usefixtures("default_signal_handlers")
 def test_a_real_sigint_interrupts_the_wait_while_the_child_runs(tmp_path: Path) -> None:
     # Once polars is imported (every `rinchen` command has it) a SIGINT sent to the
     # process does not wake a blocking wait that has no timeout: the interrupt is
@@ -696,6 +697,7 @@ def test_the_handlers_of_the_caller_are_back_after_every_way_a_run_can_end(
     assert _handlers() == sentinel_handlers
 
 
+@pytest.mark.usefixtures("default_signal_handlers")
 def test_a_signal_handled_in_c_code_is_left_alone(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -722,6 +724,7 @@ def test_a_signal_handled_in_c_code_is_left_alone(
     assert [number for number, _ in touched] == [signal.SIGTERM, signal.SIGTERM]
 
 
+@pytest.mark.usefixtures("default_signal_handlers")
 def test_a_handler_installed_before_a_later_one_failed_is_restored(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
