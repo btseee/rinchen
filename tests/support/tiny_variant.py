@@ -1,10 +1,11 @@
 """A tiny multilingual variant trained for real, for the D7 integration tests.
 
 `build_toy_inputs` turns the toy parallel data into what an ablation reads: a corpus
-Parquet file, its training rows, the development sets of the four directions and a
-SentencePiece model. `train_tiny_variant` then takes one variant through the same
-chain the ablation run uses (corpora, mixing weights, the validation corpus, the
-Eole `data` section, the rendered config, `run_training`) and returns the checkpoint.
+Parquet file, the development sets of the four directions and a SentencePiece model.
+`train_tiny_variant` then takes one variant through the chain the ablation run uses:
+a one-variant plan, `prepare_variant` (corpora, mixing weights, the validation corpus,
+the Eole `data` section, the rendered config) and `run_training`, and returns the
+checkpoint.
 
 A run this short learns little (chrF between 1 and 35 on the toy dev sets), so what a
 test may check is plumbing, never a quality threshold; the quality gate is the
@@ -19,20 +20,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
-from rinchen.config.ablation import TagPlacement
+from rinchen.config.ablation import AblationMatrix, TagPlacement
 from rinchen.config.loader import REPO_ROOT
-from rinchen.train.corpus_files import build_corpora, corpus_sizes
-from rinchen.train.eole_cfg import read_config, render, validate_train_config
-from rinchen.train.eole_data import data_section
+from rinchen.train.ablation import plan_ablation, prepare_variant
+from rinchen.train.eole_cfg import validate_train_config
 from rinchen.train.eole_run import run_training
-from rinchen.train.mixture import (
-    DevSet,
-    TrainingRows,
-    load_dev_rows,
-    load_training_rows,
-)
-from rinchen.train.sampling import integer_weights, mixing_probabilities
-from rinchen.train.validation_corpus import write_validation
+from rinchen.train.mixture import DevSet, load_dev_rows, load_training_rows
 from tests.support.tiny_converter import COMMAND_TIMEOUT_SECONDS
 from tests.support.tiny_parallel import build_toy, train_toy_spm, write_corpus_parquet
 
@@ -51,12 +44,12 @@ DEV_LINES_PER_DIRECTION: Final = 100
 
 @dataclass(frozen=True)
 class ToyInputs:
-    """What every variant of a toy ablation reads: the training rows, the dev sets
-    and the SentencePiece model. The dev and test splits of the toy data are
-    separate; the Parquet file holds no test row."""
+    """What every variant of a toy ablation reads: the corpus Parquet file, the
+    SentencePiece model and the dev sets (as the plan reads them). The dev and test
+    splits of the toy data are separate; the Parquet file holds no test row."""
 
+    corpus: Path
     spm_model: Path
-    training: TrainingRows
     dev: dict[str, DevSet]
 
 
@@ -88,7 +81,7 @@ def build_toy_inputs(root: Path) -> ToyInputs:
         training=training,
     )
     return ToyInputs(
-        spm_model=train_toy_spm(root / "spm"), training=training, dev=dev.sets
+        corpus=parquet, spm_model=train_toy_spm(root / "spm"), dev=dev.sets
     )
 
 
@@ -102,57 +95,49 @@ def train_tiny_variant(
     temperature: float = DEFAULT_TEMPERATURE,
     bt_ratio: float = DEFAULT_BT_RATIO,
 ) -> TinyVariant:
-    """Train one variant for `steps` steps under `root` (`data/`, `valid/`,
-    `config.yaml` and `run/` are made there) and return it.
+    """Train one variant for `steps` steps with `root` as the output directory of its
+    plan (`data/` and `variants/<id>/` are made there) and return it.
 
-    The tiny base config is merged with the per-run values: the vocabulary, the
-    checkpoint, the SentencePiece model, the corpora with their weights and the
-    seed. The validation and the checkpoint come once, at the last step, so the run
-    is as short as a run can be. Training runs on two threads with the GPU hidden.
+    The tiny base config is merged with the per-run values by `prepare_variant`; the
+    validation and the checkpoint come once, at the last step (a matrix override), so
+    the run is as short as a run can be. Training runs on two threads with the GPU
+    hidden.
     """
-    run_dir = root / "run"
-    built = build_corpora(
-        inputs.training, bt_ratio=bt_ratio, seed=seed, data_dir=root / "data"
+    matrix = AblationMatrix.model_validate(
+        {
+            "name": "tiny",
+            "base": str(BASE_CONFIG),
+            "axes": {
+                "temperature": [temperature],
+                "bt_ratio": [bt_ratio],
+                "tag_placement": [placement],
+            },
+            "seeds": [seed],
+            "weight_total": WEIGHT_TOTAL,
+            "dev_max_lines": DEV_LINES_PER_DIRECTION,
+            "overrides": {
+                "training": {
+                    "train_steps": steps,
+                    "valid_steps": steps,
+                    "save_checkpoint_steps": steps,
+                }
+            },
+        }
     )
-    probabilities = mixing_probabilities(corpus_sizes(built.corpora), temperature)
-    weights = integer_weights(probabilities, total=WEIGHT_TOTAL)
-    valid = write_validation(inputs.dev, inputs.spm_model, placement, root / "valid")
-    base = read_config(BASE_CONFIG, "base Eole config")
-    data = data_section(
-        built.corpora,
-        weights,
-        placement,
-        valid_paths=valid,
-        filtertoolong="filtertoolong" in base["transforms_configs"],
-    )
-    spm = inputs.spm_model.as_posix()
-    overrides = {
-        "seed": seed,
-        "src_vocab": (run_dir / "vocab.src").as_posix(),
-        "data": data,
-        "transforms_configs": {
-            "sentencepiece": {"src_subword_model": spm, "tgt_subword_model": spm}
-        },
-        "training": {
-            "model_path": (run_dir / "ckpt").as_posix(),
-            "train_steps": steps,
-            "valid_steps": steps,
-            "save_checkpoint_steps": steps,
-        },
-    }
-    config = render(BASE_CONFIG, overrides, root / "config.yaml")
+    plan = plan_ablation(matrix, [inputs.corpus], inputs.spm_model, root)
+    prepared = prepare_variant(plan, plan.variants[0], threads=THREADS)
     started = time.perf_counter()
     ckpt_dir = run_training(
-        config,
-        run_dir,
+        prepared.config_path,
+        prepared.run_dir,
         validate=validate_train_config,
         threads=THREADS,
         timeout=COMMAND_TIMEOUT_SECONDS,
     )
     return TinyVariant(
         placement=placement,
-        run_dir=run_dir,
+        run_dir=prepared.run_dir,
         ckpt_dir=ckpt_dir,
         train_seconds=time.perf_counter() - started,
-        weights=weights,
+        weights=prepared.weights,
     )
