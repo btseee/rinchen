@@ -158,6 +158,7 @@ def predict_tokens(
     timeout: float | None = None,
     batch_size: int = 64,
     stem: str = "eole",
+    stale_files: Sequence[Path] = (),
 ) -> list[str]:
     """Translate the token lines `source_tokens` (pieces joined by U+0020, a direction
     tag among them if the model wants one) with the checkpoint in `ckpt_dir`, greedily
@@ -175,14 +176,19 @@ def predict_tokens(
     each returned line starts with its forced prefix.
 
     The files go in `out_dir` (`predict_files(out_dir, stem)`); an output of an
-    earlier run is removed first. `timeout` (seconds) bounds the command; one that
-    runs past it is killed with everything it started.
+    earlier run is removed first. `stale_files` are results of an earlier run that
+    this one replaces, in the caller's own places: each is removed if it exists, once
+    every check has passed and `out_dir` exists and before Eole runs, so a call
+    refused up to there leaves them alone and a run that fails leaves none.
+    `timeout` (seconds) bounds the command; one that runs past it is killed with
+    everything it started.
 
     Raises:
         ConfigError: `ckpt_dir`, `out_dir` or `stem` holds `$`, which Eole would
             expand as a variable in the prediction config.
-        ValueError: `threads` is less than 1, or `forced_prefix_tokens` has another
-            number of lines than `source_tokens`.
+        ValueError: `threads` is less than 1; `source_tokens` is empty; or
+            `forced_prefix_tokens` has another number of lines than `source_tokens`
+            or an empty line (Eole drops such an example without a word).
         UpstreamError: `eole predict` exits non-zero or runs past `timeout` (the
             message ends with the last lines of its log), the `eole` command is
             missing, or it exits zero without writing its output or with another
@@ -195,6 +201,14 @@ def predict_tokens(
             f"{len(forced_prefix_tokens)} forced prefixes for "
             f"{len(source_tokens)} source lines"
         )
+    if not source_tokens:
+        raise ValueError("no source lines to translate")
+    if forced_prefix_tokens is not None:
+        for number, prefix in enumerate(forced_prefix_tokens, start=1):
+            if not prefix:
+                # Eole drops an example whose forced prefix is empty, and the line
+                # count check below would then blame the output.
+                raise ValueError(f"forced prefix for source line {number} is empty")
     for name, value in (
         ("checkpoint directory", ckpt_dir),
         ("output directory", out_dir),
@@ -220,6 +234,8 @@ def predict_tokens(
         cfg["tgt_file_prefix"] = True
 
     out_dir.mkdir(parents=True, exist_ok=True)
+    for stale in stale_files:
+        stale.unlink(missing_ok=True)
     files.token_output.unlink(missing_ok=True)
     write_lines(files.token_source, source_tokens)
     if forced_prefix_tokens is not None:

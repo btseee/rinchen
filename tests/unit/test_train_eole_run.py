@@ -963,3 +963,190 @@ def test_predict_tokens_rejects_prefixes_of_a_different_length_than_the_source(
 
     assert fake_run.launches == []
     assert not (tmp_path / "out").exists()
+
+
+@pytest.mark.parametrize("forced", [None, []])
+def test_predict_tokens_rejects_an_empty_source_list_before_it_writes_anything(
+    fake_run: FakeRunLogged, tmp_path: Path, forced: list[str] | None
+) -> None:
+    # Eole would read no examples and exit zero, and the line count then agrees.
+    with pytest.raises(ValueError, match="no source lines"):
+        _predict(tmp_path, source=[], forced_prefix_tokens=forced)
+
+    assert fake_run.launches == []
+    assert not (tmp_path / "out").exists()
+
+
+@pytest.mark.parametrize("empty_at", [0, 1, 2])
+def test_predict_tokens_rejects_an_empty_forced_prefix_line_before_it_writes_anything(
+    fake_run: FakeRunLogged, tmp_path: Path, empty_at: int
+) -> None:
+    # Eole silently drops an example whose forced prefix is empty, so the output
+    # would be a line short and the line count check would blame the wrong thing.
+    forced = ["<2yy>"] * 3
+    forced[empty_at] = ""
+
+    with pytest.raises(
+        ValueError, match=rf"forced prefix for source line {empty_at + 1} is empty"
+    ):
+        _predict(tmp_path, forced_prefix_tokens=forced)
+
+    assert fake_run.launches == []
+    assert not (tmp_path / "out").exists()
+
+
+def test_predict_tokens_names_the_first_empty_forced_prefix_line(
+    fake_run: FakeRunLogged, tmp_path: Path
+) -> None:
+    with pytest.raises(ValueError, match="source line 2 is empty"):
+        _predict(tmp_path, forced_prefix_tokens=["<2yy>", "", ""])
+
+
+def test_predict_tokens_accepts_an_empty_source_line_with_a_forced_prefix_of_its_own(
+    fake_run: FakeRunLogged, tmp_path: Path
+) -> None:
+    # Only the source list and the forced prefixes are checked for emptiness: what
+    # Eole does with an empty source line is the caller's to know, the line count
+    # check reports it if Eole drops the line.
+    assert _predict(
+        tmp_path, source=["", "<2xx> a"], forced_prefix_tokens=["<2yy>", "<2yy>"]
+    ) == ["", "<2xx> a"]
+
+
+# ---- the order of the checks ----------------------------------------------------
+# A missing `eole` is reported before a bad thread count, as D5 always did: the
+# environment cannot run anything, whatever the thread count.
+
+
+def _hide_eole(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    bin_dir = tmp_path / "no_eole"
+    bin_dir.mkdir()
+    monkeypatch.setattr(sys, "executable", str(bin_dir / "python"))
+
+
+def test_run_training_reports_a_missing_eole_before_a_bad_thread_count(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_run: FakeRunLogged,
+    tmp_path: Path,
+    config: Path,
+    run_dir: Path,
+) -> None:
+    _hide_eole(monkeypatch, tmp_path)
+
+    with pytest.raises(UpstreamError, match="the `eole` command is not installed"):
+        run_training(config, run_dir, validate=_accept_anything, threads=0)
+
+    assert fake_run.launches == []
+    assert not run_dir.exists()
+
+
+def test_predict_tokens_reports_a_missing_eole_before_a_bad_thread_count(
+    monkeypatch: pytest.MonkeyPatch, fake_run: FakeRunLogged, tmp_path: Path
+) -> None:
+    _hide_eole(monkeypatch, tmp_path)
+
+    with pytest.raises(UpstreamError, match="the `eole` command is not installed"):
+        _predict(tmp_path, threads=0)
+
+    assert fake_run.launches == []
+    assert not (tmp_path / "out").exists()
+
+
+# ---- predict_tokens: stale files ------------------------------------------------
+
+
+@pytest.fixture
+def stale(tmp_path: Path) -> Path:
+    """A file an earlier run left, which the caller's run replaces."""
+    path = tmp_path / "earlier.result"
+    path.write_text("earlier run\n", encoding="utf-8")
+    return path
+
+
+def test_predict_tokens_removes_a_stale_file_before_it_launches_eole(
+    fake_run: FakeRunLogged, tmp_path: Path, stale: Path
+) -> None:
+    fake_run.failures = {"predict": UpstreamError("eole predict failed: exit code 1")}
+
+    with pytest.raises(UpstreamError, match="exit code 1"):
+        _predict(tmp_path, stale_files=[stale])
+
+    assert not stale.exists()
+
+
+def test_predict_tokens_removes_every_stale_file_and_accepts_one_that_is_missing(
+    fake_run: FakeRunLogged, tmp_path: Path, stale: Path
+) -> None:
+    other = tmp_path / "other.result"
+    other.write_text("earlier run\n", encoding="utf-8")
+
+    _predict(tmp_path, stale_files=[stale, tmp_path / "never_written", other])
+
+    assert not stale.exists()
+    assert not other.exists()
+
+
+def test_predict_tokens_leaves_a_file_nobody_named_alone(
+    fake_run: FakeRunLogged, tmp_path: Path, stale: Path
+) -> None:
+    _predict(tmp_path)
+
+    assert stale.read_text(encoding="utf-8") == "earlier run\n"
+
+
+@pytest.mark.parametrize(
+    ("problem", "message", "arguments"),
+    [
+        ("threads", "threads must be at least 1", {"threads": 0}),
+        ("source", "no source lines", {"source": []}),
+        (
+            "prefixes",
+            "forced prefixes for 3 source",
+            {"forced_prefix_tokens": ["<2yy>"]},
+        ),
+        (
+            "empty-prefix",
+            "forced prefix for source line 1 is empty",
+            {"forced_prefix_tokens": ["", "<2yy>", "<2yy>"]},
+        ),
+        ("dollar", "the file stem holds", {"stem": "pred$1"}),
+    ],
+)
+def test_predict_tokens_keeps_a_stale_file_when_a_check_refuses_the_call(
+    fake_run: FakeRunLogged,
+    tmp_path: Path,
+    stale: Path,
+    problem: str,
+    message: str,
+    arguments: dict[str, Any],
+) -> None:
+    with pytest.raises((ValueError, ConfigError), match=message):
+        _predict(tmp_path, stale_files=[stale], **arguments)
+
+    assert stale.read_text(encoding="utf-8") == "earlier run\n"
+
+
+def test_predict_tokens_keeps_a_stale_file_when_eole_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_run: FakeRunLogged,
+    tmp_path: Path,
+    stale: Path,
+) -> None:
+    _hide_eole(monkeypatch, tmp_path)
+
+    with pytest.raises(UpstreamError, match="not installed"):
+        _predict(tmp_path, stale_files=[stale])
+
+    assert stale.read_text(encoding="utf-8") == "earlier run\n"
+
+
+def test_predict_tokens_keeps_a_stale_file_when_the_output_directory_cannot_be_made(
+    fake_run: FakeRunLogged, tmp_path: Path, stale: Path
+) -> None:
+    blocker = tmp_path / "blocker"
+    blocker.write_text("a regular file", encoding="utf-8")
+
+    with pytest.raises(FileExistsError):
+        _predict(tmp_path, out_dir=blocker, stale_files=[stale])
+
+    assert stale.read_text(encoding="utf-8") == "earlier run\n"

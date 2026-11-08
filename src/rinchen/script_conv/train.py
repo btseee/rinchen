@@ -158,7 +158,6 @@ def predict(
         raise ConfigError(f"the tag {tag!r} is not a piece of the model {spm_model}")
     source_lines = _read_source_lines(src_file)
 
-    out_file.unlink(missing_ok=True)
     raw_lines = eole_run.predict_tokens(
         ckpt_dir,
         [
@@ -167,6 +166,7 @@ def predict(
         ],
         out_dir=out_file.parent,
         stem=out_file.name,
+        stale_files=[out_file],
         threads=threads,
         timeout=timeout,
     )
