@@ -1490,3 +1490,346 @@ pending futures: 0.19 ms at the default shard_size of 512, 8.3 ms at 20,000. A f
 it was cancelled is `done` to the wait and raises when asked for its exception: the poll skips cancelled futures
 (unreachable today, since only the finally block cancels, after the wait). Cost if wrong: none beyond the
 documentation.]
+
+## 2026-11-08: D7 multilingual ablations - the rulings, made without a review round
+
+D7 (`src/rinchen/train/`, `src/rinchen/config/ablation.py`, `src/rinchen/cli/train.py`,
+`src/rinchen/utils/logged_process.py`,
+`configs/eole/{multilingual_tiny,ablation_tiny,multilingual_proxy,ablation_priors}.yaml`) filled
+gaps in the master plan with the rulings below. **They were made by the builders and the controller
+without a review round of their own, because the user's instruction for this stretch was "Proceed.
+I'm going to sleep now. Don't stop until you finish everything. Commit everything."** None is an
+approved decision; each lists what it costs if wrong so that it can be undone. (Four reviews of the
+code did run during the build, over Task 1, Task 2, Tasks 3 to 5 and Tasks 6 to 8; they reviewed the
+work, not these rulings, and no whole-branch review had run when this entry was written.) The design
+with the full wording is `docs/superpowers/specs/2026-11-08-d7-multilingual-ablations-design.md`
+(rulings R1 to R12, amended to match the finished code, and its section 8, "Amendments made while
+building"; the numbers below are the same); procedures, measured numbers and the known limitations
+are in `docs/runbooks/07_ablations.md`; the upstream facts are in `docs/VERIFY.md`, section "D7
+findings". The work lives on branch `d7-multilingual-ablations`, stacked on `d6-synthetic-data` (cut
+from it at `9973319`); it is not merged and not pushed.
+
+[DESIGN: R1. Tag placements are `src` (the default) and `tgt`; a source suffix is out.] The master
+plan names "tag placement" as an axis without saying where a tag may go. A tag on the source is the
+primary placement (no forcing, no dedup loss, a validation loss that compares across variants); a
+tag on the target trains but needs the tag forced at prediction (the harness does it). A suffix
+needs Eole's separate `suffix` transform, which raises `KeyError: ''` at the start of training
+unless a workaround corpus is configured, so `tag_placement: [suffix]` is a `ConfigError` that names
+the bug. Cost if wrong: a suffix experiment needs a third value of `TagPlacement`, the `suffix`
+transform in `eole_data` and the workaround corpus (the spike found it works with that workaround).
+
+[DESIGN: R2. Corpora are `(direction, group)` pairs, `auth` and `bt`; other origins are counted, not
+used.] `bt` is origin `bt`; `auth` is human, web, mined and converted. Rows of origin `ft`,
+`synth_llm` and `synth_nmt` are left out and counted by origin, because forward-translated data
+enters training with D8 and D10. Only rows with `split == "train"` train; every other row is counted
+once under the first reason that applies, in the order `not_train`, `filtered`, `excluded_origin`,
+`empty`, `line_break`, so `rows_read = rows_kept + the exclusions` always holds. Duplicate ids are
+kept and counted. Cost if wrong: the origin-to-group table is one place (`mixture.py`,
+`EXCLUDED_ORIGINS`, `BT_ORIGIN`); D8 extends it.
+
+[DESIGN: R3. Temperature acts on directions.] The mixing probability of a direction is `rows ** T`
+over the directions (`rinchen.utils.sampling.temperature_weights`, D3), where `rows` counts its
+authentic and used bt rows; inside a direction the corpora share its probability in proportion to
+their rows. So `bt_ratio` fixes the bt share of a direction (`r / (1 + r)` when enough bt rows
+exist) and `temperature` the balance between directions. Cost if wrong: a per-corpus temperature
+would let the bt share move with the temperature; it is a different rule in
+`sampling.mixing_probabilities`.
+
+[DESIGN: R4. The bt subsample is `min(available, round(r * authentic rows))` rows by a seeded hash
+rank.] Python `round` (a half goes to the even integer); the rows with the smallest
+`sha256(f"{seed}\t{id}")`, ties by id, source, target, so the subsample does not depend on the order
+of the rows or files or on the polars version. A direction with bt rows and no authentic rows asks
+for none and trains nothing; a shortfall is recorded (`bt_available`, `bt_requested`, `bt_used`),
+never an error; no authentic row at all is a `DataError`. Cost if wrong: a reader who expects the
+ratio to be exact finds a shortfall in `results.json` (in the tiny run the ratio 0.5 asked for 600
+rows in two directions and 300 existed).
+
+[DESIGN: R5. Integer weights are at least 1 and sum to `weight_total`; the replacement of "effective
+epochs" by `upsampling`.] Eole's `weight` is the number of consecutive examples per round of a round
+robin, so the probabilities become integers by largest-remainder rounding (a minimum of 1; ties by
+corpus name, never by input order; a larger probability never gets a smaller weight), and
+`weight_total` must be at least the number of corpora (a `ConfigError` names the number needed). The
+first draft recorded "effective epochs" per corpus; an epoch count needs the batch composition,
+which Eole decides, so each variant records `upsampling = (w / sum w) / (rows / sum rows)` instead
+(1.0: drawn as if every row counted alike). Cost if wrong: with 32 corpora and `weight_total` 100
+the minimum weight floors the small corpora (computed in the runbook: at temperature 1.0 half of
+them sit at weight 1 and the smallest is drawn 5.5 times its proportion; at 200 the worst error
+falls from 4.55 to 1.78); it was never trained. The spike's 7/13/7/6/6 for its mix at T=0.3 was the
+smallest-sum vector within a cap; the ruling gives 18/34/18/15/15.
+
+[DESIGN: R6. The training corpora are plain text files without tags; the tags are Eole `prefix`
+configuration.] One sentence per line, LF only, rows sorted by id, source, target; a `<name>.json`
+sidecar holds the row count and the SHA-256 of both files and a corpus is reused only when it
+matches. Authentic corpora are written once and shared by every variant; the bt subsample once per
+ratio and seed. So placement is a config difference, not a data difference. Cost if wrong: disk for
+every distinct bt ratio and seed (634 MB for 902,400 rows at one ratio).
+
+[DESIGN: R7. The validation corpus is pre-tokenised by the harness and carries no prefix keys.] One
+concatenation of the dev sets of all directions, sorted by direction, `transforms: []`, the
+direction tag as one piece on the source (`src`) or the target (`tgt`). Eole 0.6.4 copies a `valid`
+prefix into the checkpoint, where it overrides the prediction (`D-EOLE-PREFIX-OVERRIDE`); this
+avoids it for both placements. Dev rows are the `dev` split with no `filter_reason`, at most
+`dev_max_lines` per direction by id, source, target. Cost if wrong: Eole's own validation loss and
+accuracy are not comparable across placements (the target tag adds an ambiguous token); selection
+uses the dev chrF the harness computes, not the validation numbers in the log.
+
+[DESIGN: R8. One `eole predict` call per variant; corpus chrF and BLEU per direction.] Greedy
+(`beam_size` 1) on the CPU over the concatenated dev sources, split back by direction; the macro
+mean and the minimum chrF over directions; `tag_leaks` counts hypotheses that hold the direction tag
+of any registry language or `<bt>`. Cost if wrong: greedy scores are lower than beam scores, which
+is fine for comparing variants and not for reporting a model; the evaluation runs on the CPU even
+for a GPU-trained model (slow for the proxy size, not timed).
+
+[DESIGN: R9. `source_collision_rate` is recorded, not gated.] The share of kept training rows whose
+source text also occurs with another target language, over all kept rows before any bt subsample:
+the exposure to Eole's same-source minibatch dedup with the tag on the target. Cost if wrong: it is
+a proxy; a real corpus with partial overlap may lose less than the toy numbers suggest, and a user
+can ignore a number they do not understand. It is 0.0 on the toy training set, so the gate does not
+exercise the hazard.
+
+[DESIGN: R10. Resume by fingerprint, checkpoint digest and `train.json`.] The fingerprint is the
+SHA-256 of the canonical JSON of the rendered config text, the digests of every corpus file and of
+the validation files, of the raw dev texts and of the SentencePiece model, the thread count, the
+versions of Eole, torch, SentencePiece and sacrebleu, and the placement. A variant is complete only
+if its `result.json` parses strictly, says `ok`, holds the fingerprint, scores the planned dev sets
+line for line AND its checkpoint file has the recorded SHA-256; it is then reused. `train.json`
+(fingerprint, checkpoint digest, seconds) is written right after a training so a failed or
+interrupted evaluation does not cost the training. Cost if wrong: the config text holds absolute
+paths, so moving the output directory, the checkout or the SentencePiece model retrains every
+variant, and so does a different `dev_max_lines`; a new torch or Eole version does too, on purpose
+(a model changes with them).
+
+[DESIGN: R11. Every Eole config passes `validate_train_config`.] Per-level allow-lists (15 top-level
+keys, 6 per corpus, 2 + 2 + 2 for the transforms, 9 for the model, 5 for each of encoder and
+decoder, 2 for the embeddings, 27 for training), each checked against the installed Eole's fields by
+a test; the 16 forbidden keys (relative, rotary, sliding-window and grouped-query attention) at any
+depth; `model.architecture: transformer`; `SinusoidalInterleaved`; `hidden_size` equal to
+`word_vec_size`; `overwrite` and `share_vocab` true; plain data only; no `$`; every corpus with
+`transforms` and both prefixes; `valid` without prefix, weight or transforms. Cost if wrong: a key
+an ablation legitimately needs is refused until it is added to the list (one line and a drift test);
+the validator does not check the types of values, so a wrong type fails in `eole train` after
+`build_vocab`.
+
+[DESIGN: R12. The shared Eole machinery moved out of `script_conv`; D5's behaviour did not change,
+with two exceptions that are rulings below.] `run_logged` is `rinchen.utils.logged_process`; the
+allow-lists, `validate_train_config`, `merge`, `render`, `read_config`, `dump_config` and
+`reject_dollar` are `rinchen.train.eole_cfg`; `run_training`, `predict_tokens` and the environment
+helpers are `rinchen.train.eole_run`; D5's wrappers keep their signatures and error wording. A
+differential probe of the old and new D5 runner and prediction over 84 scenarios was byte-identical
+except for two error paths, which the second task then restored. Cost if wrong: D5 imports from
+`train`; a D5-only change must now respect two other users.
+
+[DESIGN: Controller ruling 1. The matrix `overrides` may not set the keys the run sets itself.]
+`data`, `src_vocab`, `seed`, `training.model_path` and `transforms_configs.sentencepiece`, also by
+replacing or deleting a parent section, are a `ConfigError` naming the key at plan time (so also for
+a dry run); every other override merges last and a value of `null` deletes a key. Cost if wrong: an
+operator who wants to point a variant at another vocabulary cannot do it from the matrix; the matrix
+has no axis for an Eole key either, so comparing two learning rates takes two matrix files and two
+output directories.
+
+[DESIGN: Controller ruling 2. Completeness includes the checkpoint digest, and `train.json` stays
+after success.] A `result.json` alone does not make a variant complete: the checkpoint file must
+exist with the recorded SHA-256 (a truncated or replaced checkpoint retrains that variant only).
+`train.json` is kept beside `result.json` after a successful run, so a missing or corrupt
+`result.json` re-evaluates the trained checkpoint (the outcome `evaluated`), while a tampered
+`train.json` or checkpoint retrains. Four existing unit tests that asserted a retraining when
+`result.json` was not trusted now assert no training call and one evaluation call (`train.calls ==
+[]` and `evaluate.variant_ids == [id]`). Cost if wrong: a stale `train.json` beside a deleted
+checkpoint is ignored and removed at the next training; the extra file is 240 bytes.
+
+[DESIGN: Controller ruling 3. The plan decides the corpus sizes with one function and validates what
+would be rendered.] `planned_corpus_sizes` and `planned_corpus_files` are the functions
+`build_corpora` is built from, so a plan cannot disagree with a build, and the plan builds every
+variant's Eole config in memory, from the paths its corpora will have, and validates it, together
+with the SentencePiece model (it loads and has every direction tag as one piece). So a typo in an
+override fails the dry run with exit 2 instead of after the data directory has been written and the
+old manifest removed. Cost if wrong: the plan and the preparation share one config builder
+(`ablation_config`); a change to how the config is made must go through it.
+
+[DESIGN: Controller ruling 4 (Ruling X). `run_logged` waits in slices of 0.2 s; four D5 test
+assertions were edited.] Once polars is imported (every `rinchen` command has it) a blocking untimed
+wait on the main thread is not interrupted by Ctrl-C (`D-POLARS-SIGINT`): without `--timeout`,
+Ctrl-C during `eole train` was raised only when Eole ended (25.9 s after the signal through the real
+binary; 0.47 s with `--timeout 600`). The wait is now made in slices of `_INTERRUPT_POLL_S` = 0.2 s
+that never run past a monotonic deadline; the timeout, the kill of the process group and the
+messages are unchanged. Four D5 tests asserted the argument that reached `Popen.wait`, which was
+`None` for "no timeout" and is now the slice, so the constraint that allowed only import and patch
+edits to D5's tests could not hold. Edited, with the new assertion: in
+`tests/unit/test_script_conv_train.py`, `test_run_training_does_not_bound_the_commands_unless_asked`
+(`waits == [None, None]`, a line that literally asserted the defect, now `[LONG_POLL_S,
+LONG_POLL_S]`), `test_run_training_bounds_each_command_by_the_timeout` (`[7.5, 7.5]`, now
+`[pytest.approx(7.5, abs=0.5)] * 2`) and
+`test_predict_bounds_the_command_by_the_timeout_only_when_asked` (`[None, 3.5]`, now `[LONG_POLL_S,
+pytest.approx(3.5, abs=0.5)]`); in `tests/unit/test_script_conv_export.py`,
+`test_export_ct2_bounds_the_converter_by_the_timeout_only_when_asked` (`[None, 12.5]`, now
+`[LONG_POLL_S, pytest.approx(12.5, abs=0.5)]`). The two fixtures monkeypatch `_INTERRUPT_POLL_S` to
+`LONG_POLL_S`, defined in `tests/support/fake_process.py`. The new assertions still distinguish "no
+timeout" from "bounded by T": `LONG_POLL_S` is `math.inf` (the review found that a first value of
+1000.0 let a mutant with a limit of 3600 survive), so a recorded wait of infinity means no timeout
+was asked for and a finite value near T means one was, and a mutant that bounds the unbounded wait
+or drops the bound of the bounded one fails them; the reviewer confirmed that no other assertion of
+the D5 tests changed, and the real SIGINT test of `tests/unit/test_utils_logged_process.py` fails by
+assertion on the old code. Cost if wrong: a 5 Hz wake-up of the main thread while a command runs,
+and four D5 assertions that now describe the poll; the slice is one constant.
+
+[DESIGN: Controller ruling 5. Glob characters in the checkpoint directory are refused in the plan,
+in `run_training` and in `predict_tokens`, which makes D5 fail earlier.] Eole loads a checkpoint
+through `glob(<model_path>/model.*.safetensors)`, so `[`, `]`, `*` and `?` in that directory find no
+shard or a sibling's shards (`D-EOLE-GLOB-CKPT`). `reject_glob_characters` raises a `ConfigError`
+naming the path and the character; `plan_ablation` applies it to the absolute output directory (so a
+dry run refuses too), `run_training` to `training.model_path` and `predict_tokens` to the checkpoint
+directory. No D5 test pinned acceptance, so D5's converter training and prediction now refuse such a
+run directory at once where they used to train and then fail at the prediction. Not guarded: D5's
+`export_ct2`, handed a checkpoint directory, fails the same way; D5 was not changed. Cost if wrong:
+a user who put the output in a directory with brackets must rename it.
+
+[DESIGN: Controller ruling 6. SIGTERM and SIGHUP end the run like Ctrl-C.] `run_logged` starts its
+child in a session of its own (so a timeout or Ctrl-C can kill the whole group), which also keeps a
+SIGTERM or SIGHUP sent to `rinchen` from reaching it while the default action of both ended the
+parent at once: `eole train` of hours was left running. While `run_logged` waits on the main thread
+both signals now raise `SystemExit(128 + number)` (143 and 129), which takes the existing path that
+kills the child's group; the previous handlers are restored afterwards. SIGKILL cannot be caught and
+a child can be left running after it. Cost if wrong: handlers are set only on the main thread;
+`rinchen` run from another thread gets no handler.
+
+[DESIGN: Controller ruling 7. The module splits of the build are pure moves.] The first plan had one
+`mixture` module and one `ablation` module; they did five and four jobs. After the review of Tasks 3
+to 5, `mixture.py` was split into `mixture` (classification, statistics, the loaders),
+`corpus_files`, `eole_data` and `validation_corpus` (a pure move: 184 tests collected before and
+after; the public `direction_tag`, `replace_file` and `lines_as_bytes` made their way into
+`config/languages.py` and `utils/part_file.py`). After the review of Tasks 6 to 8, `ablation.py`
+(531 lines) was split into `ablation`, `ablation_prepare` and `ablation_records` (5,787 tests
+collected before and after) and the fixes added `ablation_layout` and `ablation_config`. Cost if
+wrong: more files than a first reading of the master plan suggests (it names `train/eole_cfg.py`
+only); the spec's module table lists all of them.
+
+[DESIGN: Other decisions made while building, one line each.] `render` takes the output path as a
+third argument (the master plan's sketch is `render(base, overrides)`), so a variant's config lands
+in its directory. The dry run prints one fact per line and ends with `nothing was trained and
+nothing was written`. Progress lines go to standard output (D6 uses standard error). `begin_commit`
+runs right before `run_ablation`, not before the first output, because the variants' files are
+outputs of the run. The result tables are written when every variant is done, not per variant, so
+after a failed rerun they may be older than the variants. `evaluate_variant` turns a line feed in a
+decoded hypothesis into a space and refuses a direction name with `/`, `\` or NUL. The fingerprint
+lists versions and the raw dev digests, not the code version, so a rerun after a commit does not
+retrain. The toy data is en-mn 1,200 and ru-mn 600 training pairs with 300 bt pairs per language
+pair and a SentencePiece vocabulary of 640 (the project's `train_spm` cannot go below about 458
+pieces on this text). The matrix defaults (`weight_total` 100, `dev_max_lines` 1000, `max_variants`
+64, seed 1234) and every value of the proxy base and of `ablation_priors.yaml` are priors. Cost if
+wrong: each is one constant or one YAML value.
+
+[EVIDENCE: Weight semantics, from the spike (`q3_weights.py`, `q3/q3_output.txt`, Eole 0.6.4, CPU,
+2026-11-08).] `Dataset.weight` is an integer and `WeightedMixer`
+(`eole/inputters/dynamic_iterator.py`) cycles over each corpus name repeated `weight` times; an
+exhausted corpus restarts. With Eole's own classes the first 1,000 examples of corpora of 300 and
+3,000 lines with weights 1:3 were 250/750, with 3:1 750/250 (the small corpus restarted twice), with
+1:1 500/500, with 2:6 the same as 1:3; 50 and 3,000 lines with 1:3 gave 250/750 (five passes over
+the small corpus); weights 0:1 gave 0/1,000; 100, 1,000 and 10,000 lines with 1:2:5 gave
+125/250/625. End to end, five corpora with weights 3/1/2/2/2 were passed 87/29/29/29/29 times. In
+the real 150-step run of the review of Tasks 3 to 5 the per-corpus sentence counts equalled the
+weights 22/6/22/6/15/7/15/7. Not run: the sum of the weights against `bucket_size` (read from the
+code), and `num_workers` above 1.]
+
+[EVIDENCE: Unknown keys (spike `q5_probe_part1.txt`).] `eole train` rejects an unknown key at every
+level (`ValidationError ... training.bogus_key ... Extra inputs are not permitted
+[type=extra_forbidden]`); `eole build_vocab` ignores an unknown top-level, `training` or `model` key
+(it fails later at `eole train`, after the vocabulary run, which counts the whole corpus) and
+rejects an unknown `data.<corpus>` or `transforms_configs` key. A missing `src_prefix` or
+`tgt_prefix` on a corpus that uses `prefix` is `TypeError: object of type 'NoneType' has no len()`
+already at `build_vocab`. Through the real binary a matrix with `overrides: {training: {train_stepz:
+5}}` and `--dry-run` printed `error: invalid Eole config: training.train_stepz: unknown key in
+training` and exited 2.]
+
+[EVIDENCE: The suffix transform (spike `q5_probe_part1.txt`, source read in
+`eole/transforms/misc.py`).] `SuffixTransform.get_specials` calls `src_specials.remove("")` and
+`tgt_specials.remove("")` without the `if "" in ...` guard the prefix transform has; `build_vocab`
+is ok and `eole train` fails with `KeyError: ''` unless some corpus that uses `suffix` has an empty
+suffix. With the workaround (the `valid` corpus on `[sentencepiece, suffix]` with empty suffixes)
+the three placements trained to dev chrF of 98.6 and more on the toy at 2048-token batches and 1,000
+steps (source tag 99.4/99.95/100/99.4, target tag 99.3/99.95/99.3/98.6, source suffix
+99.7/100/99.5/99.7; one seed, differences are noise).]
+
+[EVIDENCE: Same-source minibatch dedup (spike `q4_dedup_shared_source.py`, `q4_count_dedup.py`;
+source read in `eole/inputters/dynamic_iterator.py`, `_should_deduplicate`).] For the training task
+Eole skips an example whose tokenised source text equals one already in the same minibatch. Counted
+with Eole's own iterator on multi-parallel toy data (identical Mongolian sources in the mn-en and
+mn-ru corpora): tag on the source 0.00% dropped; tag on the target 1.94% at 1,024-token batches,
+35.6% at 4,096, 50.0% at 16,384. Two trainings of the spike saw 27,861 sentences with the tag on the
+source and 27,327 with the tag on the target (1.9% fewer). The toy training set of the gate has
+`source_collision_rate` 0.0, so the gate does not exercise this.]
+
+[EVIDENCE: The `valid` prefix leak (spike `q1_native_predict.py`, D5's `D-EOLE-PREFIX-OVERRIDE`).]
+With a prefix-free `valid` corpus Eole's own prediction equalled the pre-tokenised path on 100 of
+100 lines; with a D5-style `valid` prefix `<2eng_Latn>` its Mongolian to Russian prediction returned
+English (chrF 1.5) while the pre-tokenised path scored 99.4. A valid corpus written as text with the
+tag in it trains but gives an extra leading `▁` against training and, with the tag on the target, a
+bad validation (perplexity 15.7, accuracy 61%). The saved `config.json` of both checkpoints of the
+tiny ablation has `data.valid` without prefix keys and without transforms (asserted by the STOP-gate
+test).]
+
+[EVIDENCE: Thread determinism and the init plateau (spike `q6_output.txt`, `seed_table.txt`,
+`timing_table.txt`).] A rerun with the same seed and two threads gave the same safetensors SHA-256
+(prefix `09aaf28a`), also across different `train_steps` and `valid_steps` and under machine load; 4
+threads gave another hash and chrF of 64.8/63.3/53.4/38.9, 1 thread 47.2/61.4/45.5/38.9. In the
+build, the retrained checkpoint of the tiny ablation after a truncation had the SHA-256 of the first
+one (`e126d00d...a00c`) and the same scores. Eole's default initialisation (uniform in -0.1..0.1 on
+every parameter, layer norms included) trains from random init but with a plateau until about step
+600 to 1000 at 1,024-token batches and a seed-dependent breakout (first step with every direction at
+chrF 60 or more over four seeds: 1000, 800, 1000, 1200); `xavier_uniform` reached 97.9 in the worst
+direction by step 300 at 2,048-token batches. Not adopted; toy only.]
+
+[EVIDENCE: Glob of the checkpoint directory (review of Tasks 6 to 8; `docs/VERIFY.md`
+`D-EOLE-GLOB-CKPT`).] Through the real binary `--out-dir 'out[1]'` trained a variant for 18 s and
+then `eole predict failed ... No safetensors file found`; `--out-dir 'out*'` passed because the
+pattern matched four sibling checkpoint directories. At the Eole level a real 150-step checkpoint
+predicted 400 lines from a plain directory, failed with `ValueError: No safetensors file found` from
+`out[1]/ckpt`, and predicted 400 lines from `sib/out*/ckpt` beside three siblings (the glob returned
+4 files). The CTranslate2 conversion of a copy in `out[1]/ckpt` fails alike. After the guard the
+real binary exits 2 in 0.7 s and creates nothing for `out[1]`, `out*`, `out?` and `out]`.]
+
+[EVIDENCE: The SIGTERM orphan and the Ctrl-C delay (review of Tasks 6 to 8, the Task 8 implementer;
+`docs/VERIFY.md` `D-LOGGED-TERM`, `D-POLARS-SIGINT`).] Through the real binary, a SIGTERM 4 s into
+`eole train` ended `rinchen` with status -15 after 0.03 s and left `eole train`, its resource
+tracker and a spawned worker running (killed by hand); after the guard SIGTERM gave exit 143 in 0.26
+s and SIGHUP exit 129 in 0.16 s with no process of the run left, no manifest and no `.part` file.
+Without `--timeout` Ctrl-C was raised 25.91 s after the signal (26.8 s in the first measurement) and
+with `--timeout 600` after 0.47 s; after the polled wait it is 0.19 s and 0.17 s (0.26 to 0.36 s in
+the review, during training and during prediction); a real-SIGINT test fails by assertion on the old
+code (5.61 s after the signal).]
+
+[EVIDENCE: The STOP gate and the measurements, 2026-11-08 (Intel Core Ultra 7 265K, 20 cores, 46
+GiB, CPython 3.14.10, eole 0.6.4, torch 2.14.1+cu130, sentencepiece 0.2.1, sacrebleu 2.6.0, polars
+2.1.0; GPU hidden).] The tiny ablation through the real binary: 72.7 s wall, training 33.7 and 33.0
+s, evaluation 2.6 s each, peak resident memory 920 MiB; weights 22 6 22 6 15 7 15 7 = 100 over 1200,
+300, 1200, 300, 600, 300, 600, 300 rows; dev chrF (eng-khk, khk-eng, khk-rus, rus-khk) 98.89, 99.23,
+97.76, 96.25 for the source tag and 99.72, 98.24, 98.32, 98.33 for the target tag; BLEU 98.85,
+99.01, 98.60, 96.19 and 99.67, 98.01, 98.79, 98.43; no tag leak; the review re-ran it and got
+identical numbers. A rerun reuses both in 0.76 s, with one `result.json` deleted evaluates in 3.37
+s, with a checkpoint truncated retrains in 37.75 s to the same SHA-256. The dry run takes 0.71 s.
+Mixture cost on synthetic rows of about 175 characters a side, a fresh process each: 1,000,000 rows
+(902,400 kept) load in 0.32 s (peak 1,550 MiB), dev rows in 0.06 s, `build_corpora` 2.27 s (634 MB,
+peak 1,661 MiB), the same call on an unchanged directory 2.27 s, a 12-variant plan 0.61 s (1,610
+MiB); 4,000,000 rows load in 1.09 s (4,758 MiB) and build in 11.43 s (2.7 GB, 5,127 MiB). Weight
+tables for three illustrative mixes are in the runbook. Mutation checks by hand, one mutant at a
+time, per task as recorded during the build: Task 1 30, Task 2 122 (one equivalent survivor), Tasks
+3 and 4 all but 3 equivalent ones, Task 5 about 135, Interlude A about 45, Task 6 34 and more, Task
+7 about 190, Task 8 54 for the CLI, the `run_logged` fix all but one equivalent (a poll of 60 s),
+Interlude B about 95; the reviewers' own: 19 of 20, 17 of 17, 29 of 29.]
+
+[EVIDENCE: Not verified.] No real corpus and no GPU run exist; the proxy base and the priors matrix
+were only validated against the schema (Eole's `TrainConfig` accepts them); the weight resolution
+for many directions is computed, never trained; `num_workers` above 1 with weights, `xavier_uniform`
+at scale, Eole-native prediction and the CTranslate2 export of a tag-on-target model, Windows and
+macOS were not run; the mixture beyond 4,000,000 rows is an extrapolation (about 1.05 GiB for each
+further million rows, 46 GiB near 44M rows); concurrent runs into one output directory are not
+guarded; SIGKILL of `rinchen` leaves the child running; only one seed was run anywhere; the value
+types of known Eole keys are not validated; Eole's `filtertoolong` drops are not counted in the
+statistics.]
+
+[DESIGN: Gates.] Open, because they need real data, a GPU or a reader: any ablation on real corpora
+(which temperature, bt ratio and tag placement is better), a measured proxy config, the throughput
+and memory of a real training, a streaming loader for hundreds of millions of rows, Eole-native
+prediction and the CTranslate2 export of a model trained with the tag on the target. The D3 gates
+assigned to D4, the D5 gates that need real text and the D6 gates stay open as recorded there. D8
+(Teacher training) takes the config renderer, the runner, the mixture and the weights, the
+evaluation harness and the resumable run from here.

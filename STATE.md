@@ -292,10 +292,10 @@ words exactly, the tiny model memorises a 500-word fixture (and gets 17 of 52 he
 fixture words right), the full profile was never trained, and there is no real parallel
 script data or Mongolian reader behind any of it.
 Built: `rinchen.script_conv` (`alphabet`, `validate` with `is_script_word`, `segments`,
-`eval`, `fallback`, `rules`, `data`, `char_model`, `config`, `_subprocess`, `train`,
+`eval`, `fallback`, `rules`, `data`, `char_model`, `config`, `train`,
 `export`, `runtime`, plus the package data `lexicon.tsv` and `standardized_variants.tsv`),
 the `rinchen convert-script` commands `build-data`, `train`, `export`, `apply` and `eval`
-(`rinchen.cli.convert_script`), the rendered Eole configs `configs/eole/converter.yaml` and
+(`rinchen.cli.convert_script`; its `_subprocess` runner, `run_logged`, now lives in `rinchen.utils.logged_process`, moved by D7), the rendered Eole configs `configs/eole/converter.yaml` and
 `converter_tiny.yaml`, `configs/spm/converter_char.yaml`,
 `scripts/build_script_conv_fixtures.py`, the Wiktionary reference and the fixtures built from
 it (`tests/fixtures/script_conv/`), `tests/integration/` with its helpers in `tests/support/`,
@@ -461,25 +461,120 @@ interval of 5 s, because any timed wait is interrupted at once, and a wait witho
 binary against a loopback stand-in for a server (the interrupt, and `out[1]`, `out*`, `out?` and
 `out[a-z]`).]
 
-Branch status (updated 2026-11-08, after the D6 final review's fixes): `main` holds D3, the D3
-research follow-up, D4 and D5, and is at `0d534a3` (the commit that records the D5 merge;
-`862e176` is the D5 merge tip, `2346cea` was the D3 end, `b38eaae` the D4 merge tip and
-`4eac98f` the commit that recorded the D4 merge; no `d3-research-followup`,
-`d4-filtering-mining` or `d5-script-converter` ref remains). D6 lives on its own branch,
-`d6-synthetic-data`, cut from `main` at `0d534a3`; it is not merged into `main` and not
-pushed. At the D5 merge `main` was 81 commits ahead of `origin/main` (`9e7b0ec`); it is
-unpushed, and no CI run covers D3, D4, D5 or D6. The full local gate was last run on the D6
-branch: 4331 passed, 1 skipped, 10 deselected (D6 included), on `D6: re-review minors`; on the merged D5
-tree `main` gave 2833 passed.
+**D7 (multilingual ablations) is done on branch `d7-multilingual-ablations`; its STOP gate (a tiny
+ablation of 2 variants trains and evaluates through the real CLI) is met locally.** The branch is stacked
+on `d6-synthetic-data` (cut from it at `9973319` on 2026-11-08), is not merged and not pushed (the
+overnight run made no merge and no push), and no CI run covers it. It is 19 commits ahead of
+`d6-synthetic-data` and 44 ahead of `main` as of `f7d1bd0` (`D7: review fixes of tasks 6 to 8`, the
+last commit before the one that adds these records). It is machinery, not a result: the only data it
+ever ran on is a templated toy set that the model saturates (chrF 96.25 to 99.72 in every direction of
+both variants), no real corpus exists, no GPU was used, and `configs/eole/multilingual_proxy.yaml` and
+`ablation_priors.yaml` are unmeasured priors that Eole's schema accepts and nothing has trained. Built:
+`rinchen.train` (`eole_cfg` with the per-level allow-lists and `validate_train_config`, `merge`, `render`;
+`eole_run` with `run_training` and `predict_tokens`; `sampling` with `mixing_probabilities` and
+`integer_weights`; `variants`; `mixture`, `corpus_files`, `eole_data` and `validation_corpus`, the training
+mixture; `evaluate`; `ablation_layout`, `ablation_config`, `ablation_plan`, `ablation_prepare`,
+`ablation_records`, `ablation_report` and `ablation`, the run), `rinchen.config.ablation`,
+`rinchen.utils.logged_process` (D5's runner, moved), `corpus_scores` in `rinchen.metrics.bleu_chrf`,
+the command `rinchen train ablate` (`rinchen.cli.train`, a D0 stub until now), the four configs
+`configs/eole/{multilingual_tiny,ablation_tiny,multilingual_proxy,ablation_priors}.yaml`, the test
+helpers `tiny_parallel.py`, `tiny_variant.py`, `train_cli.py`, `fake_ablation.py`, `corpus_rows.py` and
+`eole_train_config.py` in `tests/support/`, and `docs/runbooks/07_ablations.md`. The design is
+`docs/superpowers/specs/2026-11-08-d7-multilingual-ablations-design.md` (amended to the finished code, with
+a section listing each ruling and decision made while building); its rulings R1 to R12 and the controller
+rulings, made without a review round because the user said "Proceed. I'm going to sleep now. Don't stop
+until you finish everything. Commit everything.", are condensed in DECISIONS.md ("2026-11-08: D7
+multilingual ablations - the rulings, made without a review round"). Every task was implemented with
+tests first and reviewed once (Task 1; Task 2; Tasks 3 to 5 together; Tasks 6 to 8 together with the
+`run_logged` fix), two interludes applied the reviews' pure moves and minors, and a spike on the real
+Eole preceded the design. No whole-branch review has run yet: a final review and a fix wave are planned
+after these records, so this paragraph is the state before them. Gates, run for real on Linux, CPython
+3.14.10 (`just` is not installed here, so the four gate commands were run as one chain), the last gate of
+the code, on `f7d1bd0` (2026-11-08): `ruff format --check .` clean, `ruff check .` clean, `mypy src` clean,
+`pytest -m "not network" -q` -- **5944 passed, 1 skipped, 10 deselected** in 6 min 33 s (4331 on D6's last
+commit, 4435 after Task 1, 4861 after Task 2, 5278 after Task 5, 5446 after Task 6, 5655 after Task 7,
+5769 after Task 8, 5776 after the `run_logged` fix); the D5 regression set (1,245 unit tests and 23
+integration tests with 1 skipped, as of the `run_logged` fix) stayed green after every move.
+Evidence of the STOP gate, through the real `rinchen` binary and the real Eole on the CPU with the GPU
+hidden, on the toy set of `tests/support/tiny_parallel.py` (en-mn 1,200 and ru-mn 600 training pairs in
+both directions, 300 back-translated pairs per language pair, 100 dev lines per direction) with
+`configs/eole/ablation_tiny.yaml` (temperature 0.5, bt ratio 0.5, tag on the source and on the target,
+1000 steps of 2048-token batches, 2 threads): the whole command takes 72.7 s (training 33.7 s and 33.0 s,
+evaluation 2.6 s each); the integer weights are 22 6 22 6 15 7 15 7 = 100 over 1200, 300, 1200, 300, 600,
+300, 600 and 300 rows; the dev chrF of eng-khk, khk-eng, khk-rus and rus-khk is 98.89, 99.23, 97.76 and
+96.25 for the source tag (mean 98.03, minimum 96.25) and 99.72, 98.24, 98.32 and 98.33 for the target tag
+(mean 98.65, minimum 98.24), BLEU 96.19 to 99.67, no direction tag in any hypothesis; the saved
+`config.json` of both checkpoints has a `valid` corpus without prefix keys; a rerun reuses both variants
+in 0.76 s; with one `result.json` deleted the rerun only evaluates (3.37 s); with one checkpoint cut in
+half the rerun trains that variant again (37.75 s), reuses the other, and the retrained checkpoint has the
+same SHA-256 as the first. Those scores rank nothing: the model memorises a templated grammar of 37
+nouns, one seed each. A dry run reads the same inputs in 0.71 s and creates nothing. The reviews
+re-ran the gate for real and got identical numbers, and checked: a differential probe of D5's runner
+and prediction against the old code over 84 scenarios (byte-identical but for two error paths), a 40,000
+configuration fuzz of the validator (only `ConfigError`), real Eole accepting what `render` wrote for both
+placements, a 240,000-row probe of the mixture (0.16 s load, 413 MiB), the real signals (Ctrl-C exit 130
+in 0.17 to 0.36 s, SIGTERM 143 in 0.26 s, SIGHUP 129 in 0.16 s, no stray `eole`). Mixture cost, measured
+for this record on synthetic rows of about 175 characters a side: 1,000,000 rows load in 0.32 s with a
+peak of 1,550 MiB and build the corpus files in 2.27 s (634 MB); 4,000,000 rows load in 1.09 s with a peak
+of 4,758 MiB and build in 11.43 s (2.7 GB); extrapolated, 46 GiB would be reached near 44M rows.
+Mutation checks done by hand during the build, one mutant at a time, as recorded per task: Task 1 30,
+Task 2 122 (one equivalent survivor), Tasks 3 and 4 every mutant killed except 3 equivalent ones, Task 5 about 135, Interlude A
+about 45, Task 6 34 and more, Task 7 about 190, Task 8 54 for the CLI (52 killed at once, 1 by a new test, 1
+dead code removed), the `run_logged` fix all but one equivalent, Interlude B about 95; the reviewers' own
+mutants: 19 of 20, 17 of 17, 29 of 29.
+Findings worth knowing: upstream facts about Eole 0.6.4 and the subprocess wait, recorded in
+`docs/VERIFY.md` ("D7 findings") and in DECISIONS.md. `D-EOLE-WEIGHT-SEMANTICS`: a corpus `weight` is the
+number of consecutive examples per round of a round robin, so the share is `w / sum(w)` whatever the size.
+`D-EOLE-UNKNOWN-KEYS`: `eole train` rejects unknown keys at every level and `build_vocab` ignores some, so
+the validator carries per-level allow-lists. `D-EOLE-SUFFIX-KEYERROR`: the `suffix` transform raises
+`KeyError: ''`, so a suffix tag is not supported. `D-EOLE-BATCH-DEDUP`: Eole silently drops a training
+example whose tokenised source equals one in the same minibatch, which loses 1.94%, 35.6% and 50.0% of the
+examples of multi-parallel toy data at 1024, 4096 and 16384 tokens when the tag is on the target (0.00%
+with the tag on the source); each variant records `source_collision_rate`. The `valid` prefix leak is
+`D-EOLE-PREFIX-OVERRIDE` again (a prefix-free, pre-tokenised `valid` corpus avoids it).
+`D-EOLE-GLOB-CKPT`: Eole globs the checkpoint directory, so `--out-dir 'out[1]'` trained a whole variant
+and then failed, and `out*` scored a sibling's weights (found in review, now refused in the plan).
+`D-LOGGED-TERM`: SIGTERM and SIGHUP left `eole train` running (now handled). `D-POLARS-SIGINT` again:
+Ctrl-C without `--timeout` was raised only when `eole train` ended, 25.9 s after the signal (now 0.2 s). Same
+seed and same thread count give byte-identical checkpoints, different thread counts do not; the default
+uniform initialisation shows a plateau until step 600 to 1000 that `xavier_uniform` removes on the toy.
+Open gates (none can be done without real data or a GPU): any ablation on real corpora; a measured proxy
+config (the priors are untested); the throughput and memory of a real training; Eole-native prediction
+and the CTranslate2 export of a tag-on-target model; the weight resolution for many directions (at
+`weight_total` 100, half of 32 corpora sit at the minimum weight 1 at temperature 1.0); a streaming
+loader for hundreds of millions of rows; the D3 gates assigned to D4, the D5 gates that need real text or
+a reader and the D6 gates above stay open. Known and open: concurrent runs into one out dir are not
+guarded; SIGKILL of `rinchen` leaves the child running; D5's `export_ct2` fails for an out dir with glob
+characters (D5 was not changed); the value types of known Eole keys are not validated; Eole's
+`filtertoolong` drops are not counted; the parked review minors are listed in the runbook. NOT verified: any
+run on a real corpus or a GPU, `num_workers` above 1 with weights, `xavier_uniform` at scale, Windows and
+macOS, the mixture beyond 4,000,000 rows. [EVIDENCE: the gate chain, the integration tests, the runs of the
+real binary and the measurement scripts of the runbook, the spike (`spike-findings.md`) and the review
+reports, 2026-11-08, commits `c2db16b` through `f7d1bd0`.]
 
-Next step: D7 (Multilingual ablations). Nothing in D6 blocks it. Its inputs from D6: `rinchen
-synth run` writes `corpus.parquet` (`CORPUS_SCHEMA` rows whose `origin` is `bt` for back-
-translation and `synth_llm` or `synth_nmt` for forward translation, `corpus` `<kind>:<generator>`),
-and `rinchen.synth.tags.data_origin_tag(origin)` gives the `<bt>` or `<ft>` tag a training row of
-that origin carries; inserting it into the source, and the bt ratio and tag placement ablations,
-are D7's and D8's. Nothing real exists to feed it: no generator ever ran and no real monolingual
-corpus exists, so D7 can only use planted or tiny data; the D3 gates assigned to D4, the D5 gates
-that need real text or a reader and the D6 gates above stay open.
+Branch status (updated 2026-11-08, after the D7 build): `main` holds D3, the D3 research follow-up, D4
+and D5, and is at `0d534a3` (the commit that records the D5 merge; `862e176` is the D5 merge tip,
+`2346cea` was the D3 end, `b38eaae` the D4 merge tip and `4eac98f` the commit that recorded the D4 merge;
+no `d3-research-followup`, `d4-filtering-mining` or `d5-script-converter` ref remains). D6 lives on its own
+branch, `d6-synthetic-data`, cut from `main` at `0d534a3`; D7 lives on `d7-multilingual-ablations`, stacked
+on it (cut from `d6-synthetic-data` at `9973319`). Neither is merged into `main` and neither is pushed;
+merging D7 means merging D6 first. At the D5 merge `main` was 81 commits ahead of `origin/main` (`9e7b0ec`);
+it is unpushed, and no CI run covers D3, D4, D5, D6 or D7. The full local gate was last run on the D7
+branch: 5944 passed, 1 skipped, 10 deselected (D6 and D7 included), on `f7d1bd0`; on D6's last commit
+(`D6: re-review minors`) it gave 4331 passed; on the merged D5 tree `main` gave 2833 passed.
+
+Next step: D8 (Teacher training). Nothing in D7 blocks it. Its inputs from D7: the validated config
+renderer (`rinchen.train.eole_cfg.render`, `merged_config` and `validate_train_config`, whose allow-lists a
+teacher config must stay inside), the Eole runner (`rinchen.train.eole_run.run_training`, which builds the
+vocabulary and trains in one process with the threads pinned and the GPU hidden when `gpu_ranks` is empty,
+and `predict_tokens`), the training mixture and the integer weights (`load_training_rows`,
+`build_corpora`, `mixing_probabilities`, `integer_weights`), the evaluation harness (`evaluate_variant`),
+and the resumable run with its fingerprint (`run_ablation`). What D7 does not give D8: a multi-GPU or
+`torchrun` launch (D7 starts a single `eole train`), a resume of one training from its latest checkpoint
+(D7 resumes whole variants only), averaging (Eole 0.6.4 has no averaging command, `D-EOLE-CLI`, so the
+averager is ours), and any measured model size, batch or learning rate: `multilingual_proxy.yaml` is a
+prior. Nothing real exists to feed it: no real corpus and no GPU run, so D8 can only train on planted or
+tiny data; the open gates above and the D3, D5 and D6 gates stay open.
 
 D0 (environment, skeleton, doctor): `pyproject.toml` restructured to the
 master plan's toolchain (see `docs/STACK.md` for resolved versions),

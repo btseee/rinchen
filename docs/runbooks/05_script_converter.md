@@ -67,7 +67,7 @@ from where.
 | `data.py` | Pair readers, `rule_pairs`, `align_words`, and `build_corpus`, which screens, deduplicates, splits and writes the eight Eole corpus files |
 | `char_model.py` | Trains, checks and loads the character SentencePiece model with the two direction tags as single pieces |
 | `config.py` | Renders the Eole configuration of a profile, validates it, writes it as YAML, reads the checkpoint and character model paths back |
-| `_subprocess.py` | `run_logged`: a command with its output in a log, a timeout, and a kill of its whole process group |
+| (moved by D7) | `run_logged` (a command with its output in a log, a timeout, and a kill of its whole process group) is `rinchen/utils/logged_process.py`; the generic Eole runner (`run_training`, `predict_tokens`, `eole_commands`) is `rinchen/train/eole_run.py`, which `train.py` wraps |
 | `train.py` | `run_training` (`eole build_vocab` then `eole train`), `eole_commands`, `predict` (`eole predict` on CPU) |
 | `export.py` | `export_ct2` (CTranslate2 export with CUDA hidden) and `parity` (CTranslate2 against Eole) |
 | `runtime.py` | `ScriptConverter`: CTranslate2 plus the character model, a word cache, validation of every output, rule fallback |
@@ -79,8 +79,8 @@ numpy); `fallback` on nothing of the package; `rules`
 on `fallback`, `segments` and `alphabet`; `data` on `rules`, `validate`, `alphabet`
 and `rinchen.text.normalize`; `config` on `char_model`'s tags (it hard-codes the
 file layout of `data` by convention, and a test pins it against
-`CORPUS_FILE_NAMES`); `train` on `config`, `char_model` and `_subprocess`; `export`
-on `char_model` and `_subprocess`; `runtime` on `segments`, `rules`, `validate`,
+`CORPUS_FILE_NAMES`); `train` on `config`, `char_model` and `rinchen.train.eole_run`; `export`
+on `char_model` and `rinchen.utils.logged_process`; `runtime` on `segments`, `rules`, `validate`,
 `alphabet`, `char_model` and `rinchen.text.normalize`.
 
 ## Commands
