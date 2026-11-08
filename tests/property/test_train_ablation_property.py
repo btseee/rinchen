@@ -175,7 +175,7 @@ def _results_for(
         results.append(
             VariantResult(
                 planned=planned,
-                reused=False,
+                outcome="trained",
                 fingerprint="f" * 64,
                 dev=dev_result(
                     dict(zip(DIRECTIONS, chrfs, strict=True)),

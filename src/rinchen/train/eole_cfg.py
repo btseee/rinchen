@@ -155,6 +155,7 @@ TRAINING_KEYS: Final = frozenset(
 # Eole 0.6.4 takes one validation corpus and reads it under this name; every other
 # name is a training corpus.
 _VALID: Final = "valid"
+_GLOB_CHARACTERS: Final = frozenset("[]*?")
 _ARCHITECTURE: Final = "transformer"
 # Exactly these types: YAML's safe dumper looks a value's type up by identity, so a
 # subclass (an enum member, a numpy float) is not dumped although `isinstance` says it
@@ -183,6 +184,22 @@ def reject_dollar(what: str, value: Path | str) -> None:
     if "$" in str(value):
         raise ConfigError(
             f"the {what} holds '$', which Eole would expand as a variable"
+        )
+
+
+def reject_glob_characters(what: str, value: Path | str) -> None:
+    """Raise ConfigError, naming `what`, the path and the character, when `value` holds
+    `[`, `]`, `*` or `?`."""
+    # Eole loads a checkpoint through `glob(<model_path>/model.*.safetensors)`
+    # (eole/models/model.py, `_load_safetensors_shards`), so these characters in the
+    # checkpoint directory make it match no shard, or the shards of its siblings
+    # (docs/VERIFY.md, D-EOLE-GLOB-CKPT).
+    text = str(value)
+    found = next((char for char in text if char in _GLOB_CHARACTERS), None)
+    if found is not None:
+        raise ConfigError(
+            f"the {what} {text} holds {found!r}, which Eole reads as a glob pattern "
+            "when it loads a checkpoint from it"
         )
 
 
@@ -315,23 +332,16 @@ def merge(base: Mapping[str, Any], overrides: Mapping[str, Any]) -> dict[str, An
     return merged
 
 
-def render(base: Path, overrides: Mapping[str, Any], out: Path) -> Path:
-    """Write the training config that is the YAML mapping in `base` with `overrides`
-    merged over it (`merge`) to `out`, and return `out`.
-
-    The base need not be complete: the merged config is what is validated
-    (`validate_train_config`), and a config that fails writes nothing, so a file at
-    `out` stays as it was. The directory of `out` is created; the file appears whole
-    (`dump_config`), keys in merge order.
+def merged_config(base: Path, overrides: Mapping[str, Any]) -> dict[str, Any]:
+    """The training config that is the YAML mapping in `base` with `overrides` merged
+    over it (`merge`), validated (`validate_train_config`); nothing is written. The
+    base need not be complete: the merged config is what is validated.
 
     Raises:
-        ConfigError: `out` is `base` (the same file once links and `..` are resolved),
-            a directory, or below something that is not a directory; `base` is
-            missing, cannot be read or parsed, is empty, is not a mapping, holds `$`
-            or a recursive anchor; `overrides` contains itself; or the merged config
-            is not valid.
+        ConfigError: `base` is missing, cannot be read or parsed, is empty, is not a
+            mapping, holds `$` or a recursive anchor; `overrides` contains itself; or
+            the merged config is not valid.
     """
-    _require_writable_output(base, out)
     raw = read_config(base, "base Eole config")
     if not isinstance(raw, Mapping):
         problem = (
@@ -343,6 +353,24 @@ def render(base: Path, overrides: Mapping[str, Any], out: Path) -> Path:
     _reject_self_reference(overrides, "Eole config overrides")
     cfg = merge(raw, overrides)
     validate_train_config(cfg)
+    return cfg
+
+
+def render(base: Path, overrides: Mapping[str, Any], out: Path) -> Path:
+    """Write the training config that is the YAML mapping in `base` with `overrides`
+    merged over it (`merged_config`) to `out`, and return `out`.
+
+    A config that fails writes nothing, so a file at `out` stays as it was. The
+    directory of `out` is created; the file appears whole (`dump_config`), keys in
+    merge order.
+
+    Raises:
+        ConfigError: `out` is `base` (the same file once links and `..` are resolved),
+            a directory, or below something that is not a directory; and what
+            `merged_config` raises.
+    """
+    _require_writable_output(base, out)
+    cfg = merged_config(base, overrides)
     out.parent.mkdir(parents=True, exist_ok=True)
     dump_config(cfg, out)
     return out

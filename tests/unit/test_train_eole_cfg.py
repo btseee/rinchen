@@ -29,6 +29,7 @@ from rinchen.errors import ConfigError
 from rinchen.train.eole_cfg import (
     FORBIDDEN_KEYS,
     merge,
+    merged_config,
     render,
     validate_train_config,
 )
@@ -859,6 +860,56 @@ def run_overrides() -> dict[str, Any]:
         "data": full["data"],
         "training": {"model_path": full["training"]["model_path"]},
     }
+
+
+def test_merged_config_is_the_validated_merge_and_what_render_writes(
+    tmp_path: Path,
+) -> None:
+    base = write_base(tmp_path)
+    overrides = {**run_overrides(), "training": {"model_path": "x/ckpt", "seed": None}}
+    before = sorted(tmp_path.iterdir())
+
+    cfg = merged_config(base, overrides)
+
+    assert cfg == merge(yaml.safe_load(base.read_text(encoding="utf-8")), overrides)
+    render(base, overrides, tmp_path / "config.yaml")
+    assert yaml.safe_load((tmp_path / "config.yaml").read_text(encoding="utf-8")) == cfg
+    assert before == [base]  # merged_config itself wrote nothing
+
+
+def test_merged_config_refuses_what_render_refuses_and_names_the_key(
+    tmp_path: Path,
+) -> None:
+    base = write_base(tmp_path)
+
+    with pytest.raises(ConfigError) as raised:
+        merged_config(base, {**run_overrides(), "training": {"train_stepz": 5}})
+
+    assert PREFIX in str(raised.value) and "train_stepz" in str(raised.value)
+    assert sorted(tmp_path.iterdir()) == [base]
+
+
+@pytest.mark.parametrize("problem", ["missing", "not a mapping", "recursive overrides"])
+def test_merged_config_refuses_a_bad_base_or_overrides_like_render(
+    tmp_path: Path, problem: str
+) -> None:
+    base = write_base(tmp_path)
+    overrides: dict[str, Any] = run_overrides()
+    if problem == "missing":
+        base = tmp_path / "missing.yaml"
+    elif problem == "not a mapping":
+        base.write_text("- a\n- b\n", encoding="utf-8")
+    else:
+        loop: dict[str, Any] = {}
+        loop["self"] = loop
+        overrides = {"training": loop}
+
+    with pytest.raises(ConfigError) as from_merged:
+        merged_config(base, overrides)
+    with pytest.raises(ConfigError) as from_render:
+        render(base, overrides, tmp_path / "config.yaml")
+
+    assert str(from_merged.value) == str(from_render.value)
 
 
 def test_render_merges_the_overrides_validates_and_writes_what_the_merge_is(

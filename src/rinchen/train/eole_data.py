@@ -5,16 +5,36 @@ paths, transforms, weight and the prefixes that carry the direction tag, and the
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Any
+from pathlib import Path
+from typing import Any, Protocol
 
 from rinchen.config.ablation import TagPlacement, require_placement
 from rinchen.config.languages import direction_tag
 from rinchen.errors import ConfigError
 from rinchen.synth.tags import data_origin_tag
-from rinchen.train.corpus_files import CorpusFiles
 from rinchen.train.eole_cfg import reject_dollar
 from rinchen.train.mixture import BT_GROUP, BT_ORIGIN
 from rinchen.train.validation_corpus import ValidPaths
+
+
+class CorpusEntry(Protocol):
+    """What the `data` section needs of a corpus: a corpus written (`CorpusFiles`) and
+    one a plan only lists (`PlannedFiles`) both have it."""
+
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def group(self) -> str: ...
+
+    @property
+    def tgt_lang(self) -> str: ...
+
+    @property
+    def src_path(self) -> Path: ...
+
+    @property
+    def tgt_path(self) -> Path: ...
 
 
 def bt_tag() -> str:
@@ -25,7 +45,7 @@ def bt_tag() -> str:
     return tag
 
 
-def _prefixes(corpus: CorpusFiles, placement: str) -> tuple[str, str]:
+def _prefixes(corpus: CorpusEntry, placement: str) -> tuple[str, str]:
     """(`src_prefix`, `tgt_prefix`) of a corpus: the tag of its target language and,
     for a back-translated corpus, the bt tag, on the side the placement names."""
     tag = direction_tag(corpus.tgt_lang)
@@ -47,7 +67,7 @@ def _weight(name: str, weights: Mapping[str, int]) -> int:
 
 
 def data_section(
-    corpora: Sequence[CorpusFiles],
+    corpora: Sequence[CorpusEntry],
     weights: Mapping[str, int],
     placement: TagPlacement,
     *,

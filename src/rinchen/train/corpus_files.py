@@ -16,11 +16,11 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from collections.abc import Iterable, Mapping
-from dataclasses import asdict, dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
-from typing import Final
+from typing import Final, NamedTuple
 
 import polars as pl
 
@@ -62,19 +62,26 @@ class CorpusFiles:
 
 
 @dataclass(frozen=True, slots=True)
+class PlannedFiles:
+    """One corpus a build would write: where its two files will be and how many rows
+    they will hold (the fields `data_section` needs of a corpus, before it exists)."""
+
+    name: str
+    direction: str
+    group: str
+    tgt_lang: str
+    src_path: Path
+    tgt_path: Path
+    rows: int
+
+
+@dataclass(frozen=True, slots=True)
 class BuiltCorpora:
     """The corpora of one variant, sorted by direction and then group, and the bt
     usage of every direction that has bt or authentic rows."""
 
     corpora: tuple[CorpusFiles, ...]
     bt_by_direction: dict[str, BtUsage]
-
-    def bt_to_dict(self) -> dict[str, dict[str, int]]:
-        """The bt usage by direction as a JSON-ready mapping, for a results record."""
-        return {
-            direction: asdict(usage)
-            for direction, usage in self.bt_by_direction.items()
-        }
 
 
 def build_corpora(
@@ -88,21 +95,23 @@ def build_corpora(
     by id, source, target), so the rows do not depend on the order of the input rows
     or files or on the polars version. A direction with bt rows and no authentic rows
     gets no corpus; `bt_by_direction` records what was available, asked for and used.
-    The corpora written are those `planned_corpus_sizes` lists, with those row counts.
+    The corpora written are those `planned_corpus_sizes` lists, with those row counts, at
+    the paths `planned_corpus_files` lists.
 
     Raises:
         ValueError: `bt_ratio` is not a finite number of at least 0.
     """
     usage = bt_usage_by_direction(rows, bt_ratio)
     parts = rows.frame.partition_by("direction", "group", as_dict=True)
-    bt_directory = data_dir / "bt" / f"r{id_number(bt_ratio)}_s{seed}"
+    auth_directory = _corpus_directory(data_dir, AUTH_GROUP, bt_ratio, seed)
+    bt_directory = _corpus_directory(data_dir, BT_GROUP, bt_ratio, seed)
     corpora: list[CorpusFiles] = []
     for direction, direction_usage in usage.items():
         authentic = parts.get((direction, AUTH_GROUP))
         back_translated = parts.get((direction, BT_GROUP))
         if authentic is not None:
             corpora.append(
-                _write_corpus(authentic, data_dir / AUTH_GROUP, direction, AUTH_GROUP)
+                _write_corpus(authentic, auth_directory, direction, AUTH_GROUP)
             )
         if back_translated is not None and direction_usage.bt_used:
             sample = _smallest_hashes(back_translated, direction_usage.bt_used, seed)
@@ -151,26 +160,91 @@ def planned_corpus_sizes(rows: TrainingRows, bt_ratio: float) -> list[CorpusSize
     Raises:
         ValueError: `bt_ratio` is not a finite number of at least 0.
     """
+    return [
+        CorpusSize(
+            _corpus_name(planned.direction, planned.group),
+            planned.direction,
+            planned.rows,
+        )
+        for planned in _planned_groups(rows, bt_ratio)
+    ]
+
+
+def planned_corpus_files(
+    rows: TrainingRows, bt_ratio: float, seed: int, data_dir: Path
+) -> list[PlannedFiles]:
+    """The corpora `build_corpora(rows, bt_ratio=bt_ratio, seed=seed,
+    data_dir=data_dir)` writes, in its order, with the paths of their files and their
+    row counts (those of `planned_corpus_sizes`). The paths come from the functions the
+    build writes through, so a config made from them names the files the build makes.
+    Nothing is written.
+
+    Raises:
+        ValueError: `bt_ratio` is not a finite number of at least 0.
+    """
+    planned = _planned_groups(rows, bt_ratio)
+    languages = dict(
+        rows.frame.group_by("direction").agg(pl.col("tgt_lang").first()).iter_rows()
+    )
+    files: list[PlannedFiles] = []
+    for direction, group, row_count in planned:
+        name = _corpus_name(direction, group)
+        directory = _corpus_directory(data_dir, group, bt_ratio, seed)
+        src_path, tgt_path, _ = _corpus_paths(directory, name)
+        files.append(
+            PlannedFiles(
+                name=name,
+                direction=direction,
+                group=group,
+                tgt_lang=languages[direction],
+                src_path=src_path,
+                tgt_path=tgt_path,
+                rows=row_count,
+            )
+        )
+    return files
+
+
+class _PlannedGroup(NamedTuple):
+    direction: str
+    group: str
+    rows: int
+
+
+def _planned_groups(rows: TrainingRows, bt_ratio: float) -> list[_PlannedGroup]:
+    """The one place that decides which corpora a build with `bt_ratio` writes and how
+    many rows each has: by direction, `auth` before `bt`."""
     counts = _rows_by_direction_and_group(rows)
-    sizes: list[CorpusSize] = []
+    planned: list[_PlannedGroup] = []
     for direction, usage in bt_usage_by_direction(rows, bt_ratio).items():
         authentic_rows = counts.get((direction, AUTH_GROUP), 0)
         if authentic_rows:
-            sizes.append(
-                CorpusSize(
-                    _corpus_name(direction, AUTH_GROUP), direction, authentic_rows
-                )
-            )
+            planned.append(_PlannedGroup(direction, AUTH_GROUP, authentic_rows))
         if usage.bt_used:
-            sizes.append(
-                CorpusSize(_corpus_name(direction, BT_GROUP), direction, usage.bt_used)
-            )
-    return sizes
+            planned.append(_PlannedGroup(direction, BT_GROUP, usage.bt_used))
+    return planned
 
 
 def _corpus_name(direction: str, group: str) -> str:
     """The name of the corpus of `group` rows in `direction`: `<direction>.<group>`."""
     return f"{direction}.{group}"
+
+
+def _corpus_directory(data_dir: Path, group: str, bt_ratio: float, seed: int) -> Path:
+    """Where the files of `group` corpora go: the authentic ones are shared by every
+    variant, the back-translated subsample is per ratio and seed."""
+    if group == AUTH_GROUP:
+        return data_dir / AUTH_GROUP
+    return data_dir / BT_GROUP / f"r{id_number(bt_ratio)}_s{seed}"
+
+
+def _corpus_paths(directory: Path, name: str) -> tuple[Path, Path, Path]:
+    """The source file, the target file and the sidecar record of the corpus `name`."""
+    return (
+        directory / f"{name}.src",
+        directory / f"{name}.tgt",
+        directory / f"{name}{_SIDECAR_SUFFIX}",
+    )
 
 
 def _rows_by_direction_and_group(rows: TrainingRows) -> dict[tuple[str, str], int]:
@@ -184,13 +258,6 @@ def _rows_asked(bt_ratio: float, authentic_rows: int, product: float) -> int:
     if math.isfinite(product):
         return round(product)
     return round(Fraction(bt_ratio) * authentic_rows)
-
-
-def corpus_sizes(corpora: Iterable[CorpusFiles]) -> list[CorpusSize]:
-    """The corpora as the sampler takes them."""
-    return [
-        CorpusSize(corpus.name, corpus.direction, corpus.rows) for corpus in corpora
-    ]
 
 
 def _smallest_hashes(frame: pl.DataFrame, count: int, seed: int) -> pl.DataFrame:
@@ -219,9 +286,7 @@ def _write_corpus(
         "src_sha256": src_sha256,
         "tgt_sha256": tgt_sha256,
     }
-    src_path = directory / f"{name}.src"
-    tgt_path = directory / f"{name}.tgt"
-    sidecar = directory / f"{name}{_SIDECAR_SUFFIX}"
+    src_path, tgt_path, sidecar = _corpus_paths(directory, name)
     reused = _is_current(record, src_path, tgt_path, sidecar)
     if not reused:
         directory.mkdir(parents=True, exist_ok=True)

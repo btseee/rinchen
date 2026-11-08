@@ -15,18 +15,18 @@ plan are worked out by hand from the toy data (D7 spec R3 to R5, section 5.8):
 """
 
 import dataclasses
-import json
 import re
 import shutil
 from pathlib import Path
 from typing import Any
 
 import pytest
+import sentencepiece
 
 from rinchen.errors import ConfigError, DataError
 from rinchen.train import ablation_plan
 from rinchen.train.ablation_plan import AblationPlan, plan_ablation
-from rinchen.train.corpus_files import build_corpora
+from rinchen.train.corpus_files import BtUsage, build_corpora
 from rinchen.train.mixture import TrainingRows, load_training_rows
 from rinchen.train.variants import expand_variants
 from tests.support.corpus_rows import EN_MN, MN_EN, MN_RU, RU_MN
@@ -34,7 +34,6 @@ from tests.support.fake_ablation import (
     DEV_LINES,
     DIRECTIONS,
     ID_SRC,
-    ID_TGT,
     make_matrix,
     one_variant_axes,
     write_toy_corpus,
@@ -194,6 +193,14 @@ def test_the_planned_corpora_of_a_variant_are_the_hand_counted_ones(
         RU_MN,
         RU_MN,
     ]
+    # 0.5 * 1,200 authentic rows asks for 600 bt rows, of which 300 exist.
+    assert planned.bt_by_direction[EN_MN] == BtUsage(
+        bt_available=300, bt_requested=600, bt_used=300
+    )
+    assert planned.bt_by_direction[RU_MN] == BtUsage(
+        bt_available=300, bt_requested=300, bt_used=300
+    )
+    assert planned.source_collision_rate == 0.0
 
 
 def test_the_two_tag_placements_plan_the_same_mixture(
@@ -305,48 +312,6 @@ def test_planning_creates_no_file_and_no_directory(
     assert sorted(path for path in tmp_path.rglob("*")) == before
 
 
-def test_the_plan_prints_the_weight_total_of_the_matrix(
-    corpus: Path, toy_spm: Path, tmp_path: Path
-) -> None:
-    plan = plan_ablation(
-        make_matrix(weight_total=50), [corpus], toy_spm, tmp_path / "out"
-    )
-
-    assert plan.to_dict()["weight_total"] == 50
-
-
-def test_the_plan_is_json_ready_and_prints_what_a_dry_run_shows(
-    default_plan: AblationPlan,
-) -> None:
-    document = json.loads(json.dumps(default_plan.to_dict()))
-
-    assert document["name"] == "toy"
-    assert document["weight_total"] == 100
-    assert document["statistics"]["rows_kept"] == 4800
-    assert document["dev_statistics"]["dev_in_train"] == 0
-    assert [v["id"] for v in document["variants"]] == [ID_SRC, ID_TGT]
-    first = document["variants"][0]
-    assert (first["temperature"], first["bt_ratio"], first["tag_placement"]) == (
-        0.5,
-        0.5,
-        "src",
-    )
-    assert first["seed"] == 1234
-    assert first["corpora"][0] == {
-        "name": f"{EN_MN}.auth",
-        "direction": EN_MN,
-        "rows": 1200,
-        "probability": pytest.approx(0.225403, abs=1e-6),
-        "weight": 22,
-        "upsampling": pytest.approx(0.88),
-    }
-    assert first["bt"][EN_MN] == {
-        "bt_available": 300,
-        "bt_requested": 600,
-        "bt_used": 300,
-    }
-
-
 # --- plan_ablation: what is refused --------------------------------------------------
 
 
@@ -414,6 +379,161 @@ def test_overrides_of_the_other_keys_are_accepted_at_plan_time(
     )
 
     assert len(plan.variants) == 2
+
+
+# --- plan_ablation: the config every variant will render ------------------------------
+#
+# A dry run that passes must not be followed by a refusal for the same input, and a
+# real run must fail before it deletes the manifest of an earlier run: so the plan
+# checks what the preparation of each variant would render.
+
+
+@pytest.mark.parametrize(
+    ("overrides", "named"),
+    [
+        ({"training": {"train_stepz": 100}}, "training.train_stepz"),
+        ({"trainning": {"train_steps": 100}}, "trainning"),
+        ({"model": {"encoder": {"layerz": 3}}}, "model.encoder.layerz"),
+        ({"model": {"encoder": {"rotary_theta": 1}}}, "rotary_theta"),
+        ({"model": {"embeddings": {"position_encoding_type": "Rotary"}}}, "position"),
+        ({"overwrite": False}, "overwrite"),
+        ({"training": {"dropout": "$HOME"}}, "$"),
+    ],
+    ids=[
+        "typo in a key",
+        "typo in a section",
+        "typo deep down",
+        "forbidden key",
+        "other position encoding",
+        "overwrite off",
+        "a variable",
+    ],
+)
+def test_an_override_that_makes_the_config_invalid_is_a_config_error_at_plan_time(
+    corpus: Path,
+    toy_spm: Path,
+    tmp_path: Path,
+    overrides: dict[str, Any],
+    named: str,
+) -> None:
+    out_dir = tmp_path / "out"
+
+    with pytest.raises(ConfigError, match="invalid Eole config") as info:
+        plan_ablation(make_matrix(overrides=overrides), [corpus], toy_spm, out_dir)
+
+    assert named in str(info.value)
+    assert not out_dir.exists()
+
+
+def test_the_config_of_every_variant_is_checked_with_its_own_corpora_and_weights(
+    corpus: Path, toy_spm: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[dict[str, Any]] = []
+    real = ablation_plan.variant_config
+
+    def recording(matrix: Any, variant: Any, **kwargs: Any) -> dict[str, Any]:
+        calls.append({"variant": variant, **kwargs})
+        return real(matrix, variant, **kwargs)  # type: ignore[no-any-return]
+
+    monkeypatch.setattr(ablation_plan, "variant_config", recording)
+    axes = {"temperature": [0.5, 1.0], "bt_ratio": [0.0, 0.5], "tag_placement": ["tgt"]}
+    out_dir = tmp_path / "out"
+
+    plan = plan_ablation(make_matrix(axes=axes), [corpus], toy_spm, out_dir)
+
+    assert [call["variant"] for call in calls] == [p.variant for p in plan.variants]
+    for call, planned in zip(calls, plan.variants, strict=True):
+        assert call["weights"] == planned.weights
+        assert call["spm_model"] == toy_spm.resolve()
+        assert call["paths"].directory == (
+            out_dir.resolve() / "variants" / planned.variant.id
+        )
+        assert [c.name for c in call["corpora"]] == [c.name for c in planned.corpora]
+        assert all(
+            file.src_path.is_relative_to(out_dir.resolve() / "data")
+            and file.tgt_path.is_relative_to(out_dir.resolve() / "data")
+            for file in call["corpora"]
+        )
+    # Without bt rows the mixture has fewer corpora: the check sees that variant's.
+    assert len(calls[0]["corpora"]) == 4 and len(calls[1]["corpora"]) == 8
+
+
+def test_an_invalid_config_of_a_later_variant_is_found_too(
+    corpus: Path, toy_spm: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real = ablation_plan.variant_config
+
+    def refuse_the_last(matrix: Any, variant: Any, **kwargs: Any) -> dict[str, Any]:
+        if variant.seed == 2:
+            raise ConfigError(f"invalid Eole config: seed {variant.seed}")
+        return real(matrix, variant, **kwargs)  # type: ignore[no-any-return]
+
+    monkeypatch.setattr(ablation_plan, "variant_config", refuse_the_last)
+
+    with pytest.raises(ConfigError, match="seed 2"):
+        plan_ablation(make_matrix(seeds=[1, 2]), [corpus], toy_spm, tmp_path / "out")
+
+
+def test_the_config_is_checked_with_the_planned_paths_not_the_ones_given(
+    corpus: Path, toy_spm: Path, tmp_path: Path
+) -> None:
+    # The checkpoint of this plan is under `out`, resolved: a relative `..` in the
+    # argument must not hide a path the config would hold.
+    out_dir = tmp_path / "x" / ".." / "out"
+
+    plan = plan_ablation(make_matrix(), [corpus], toy_spm, out_dir)
+
+    assert plan.out_dir == (tmp_path / "out").resolve()
+
+
+@pytest.mark.parametrize("what", ["missing", "directory", "not a model"])
+def test_a_sentencepiece_model_that_cannot_be_loaded_is_a_config_error_at_plan_time(
+    corpus: Path, tmp_path: Path, what: str
+) -> None:
+    model = tmp_path / "bad.model"
+    if what == "directory":
+        model.mkdir()
+    elif what == "not a model":
+        model.write_bytes(b"this is not a SentencePiece model")
+    out_dir = tmp_path / "out"
+
+    with pytest.raises(ConfigError, match="SentencePiece model"):
+        plan_ablation(make_matrix(), [corpus], model, out_dir)
+
+    assert not out_dir.exists()
+
+
+def test_a_sentencepiece_model_without_a_direction_tag_is_a_config_error_at_plan_time(
+    corpus: Path, tmp_path: Path
+) -> None:
+    text = tmp_path / "plain.txt"
+    text.write_text(
+        "".join(f"line {i} of some text\n" for i in range(200)), encoding="utf-8"
+    )
+    sentencepiece.SentencePieceTrainer.train(
+        input=str(text),
+        model_prefix=str(tmp_path / "plain"),
+        vocab_size=40,
+        minloglevel=2,
+    )
+
+    with pytest.raises(ConfigError, match=r"direction tag <2[a-z]+_[A-Za-z]+>"):
+        plan_ablation(make_matrix(), [corpus], tmp_path / "plain.model", tmp_path / "o")
+
+
+def test_planning_the_config_creates_no_file_and_no_directory(
+    corpus: Path, toy_spm: Path, tmp_path: Path
+) -> None:
+    before = sorted(tmp_path.rglob("*"))
+
+    plan_ablation(
+        make_matrix(overrides={"training": {"dropout": [0.1]}}),
+        [corpus],
+        toy_spm,
+        tmp_path / "deep" / "out",
+    )
+
+    assert sorted(tmp_path.rglob("*")) == before
 
 
 def test_a_temperature_whose_powers_overflow_is_a_config_error_naming_the_variant(
@@ -496,3 +616,64 @@ def test_a_dollar_in_the_out_dir_or_the_model_path_is_a_config_error_at_plan_tim
         info.value
     )
     assert not (tmp_path / "$HOME").exists() and not (tmp_path / "fine").exists()
+
+
+@pytest.mark.parametrize("char", ["[", "]", "*", "?"])
+def test_a_glob_character_in_the_out_dir_is_a_config_error_at_plan_time(
+    corpus: Path, toy_spm: Path, tmp_path: Path, char: str
+) -> None:
+    # Eole globs `<checkpoint dir>/model.*.safetensors` when it loads the checkpoint, so
+    # this directory would train for minutes and then fail to predict (or load the
+    # checkpoints of its siblings).
+    out_dir = tmp_path / f"out{char}1" / "run"
+
+    with pytest.raises(ConfigError) as info:
+        plan_ablation(make_matrix(), [corpus], toy_spm, out_dir)
+
+    assert str(info.value) == (
+        f"the output directory {out_dir} holds {char!r}, which Eole reads as a glob "
+        "pattern when it loads a checkpoint from it"
+    )
+    assert not (tmp_path / f"out{char}1").exists()
+
+
+def test_a_glob_character_in_the_directory_a_relative_out_dir_resolves_to_is_refused(
+    corpus: Path, toy_spm: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The Eole config names absolute paths, so the checkpoint directory carries the
+    # working directory's `[` although the argument does not.
+    working = tmp_path / "work[1]"
+    working.mkdir()
+    monkeypatch.chdir(working)
+
+    with pytest.raises(ConfigError, match=r"holds '\['") as info:
+        plan_ablation(make_matrix(), [corpus], toy_spm, Path("out"))
+
+    assert str(working.resolve() / "out") in str(info.value)
+
+
+@pytest.mark.parametrize(
+    "name", ["out dir", "ünï-хураангуй"], ids=["space", "non-ASCII"]
+)
+def test_an_out_dir_without_glob_characters_is_planned(
+    corpus: Path, toy_spm: Path, tmp_path: Path, name: str
+) -> None:
+    plan = plan_ablation(make_matrix(), [corpus], toy_spm, tmp_path / name / "out")
+
+    assert plan.out_dir == (tmp_path / name / "out").resolve()
+    assert not (tmp_path / name).exists()
+
+
+def test_a_glob_character_in_the_model_path_is_not_a_problem_for_eole(
+    corpus: Path, toy_spm: Path, tmp_path: Path
+) -> None:
+    # Only the checkpoint directory is globbed; the SentencePiece model is read as a
+    # file (and the corpora are read by the repository with `glob=False`).
+    odd = tmp_path / "models[1]"
+    odd.mkdir()
+    spm_model = odd / toy_spm.name
+    shutil.copy(toy_spm, spm_model)
+
+    plan = plan_ablation(make_matrix(), [corpus], spm_model, tmp_path / "out")
+
+    assert plan.spm_model == spm_model.resolve()

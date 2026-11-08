@@ -19,6 +19,8 @@ from rinchen.train.validation_corpus import (
     ValidPaths,
     dev_line_ranges,
     dev_token_lines,
+    require_direction_tags,
+    validation_paths,
     write_validation,
 )
 from tests.support.corpus_rows import EN_MN, MN_EN, MN_RU, RU_MN, file_lines
@@ -249,6 +251,89 @@ def test_an_unknown_placement_or_no_dev_set_is_a_value_error(
 
 def test_the_line_ranges_of_no_dev_sets_are_empty() -> None:
     assert dev_line_ranges({}) == {}
+
+
+# --- require_direction_tags ----------------------------------------------------------
+
+
+def test_the_toy_model_has_every_direction_tag_as_one_piece(toy_spm: Path) -> None:
+    assert require_direction_tags(toy_spm, _toy_dev()) is None
+
+
+def _model_without_tags(tmp_path: Path) -> Path:
+    text = tmp_path / "plain.txt"
+    text.write_text(
+        "".join(f"line {i} of some text\n" for i in range(200)), encoding="utf-8"
+    )
+    sentencepiece.SentencePieceTrainer.train(
+        input=str(text),
+        model_prefix=str(tmp_path / "plain"),
+        vocab_size=40,
+        minloglevel=2,
+    )
+    return tmp_path / "plain.model"
+
+
+def test_a_tag_that_is_not_one_piece_is_a_config_error_naming_it(
+    tmp_path: Path,
+) -> None:
+    model = _model_without_tags(tmp_path)
+
+    with pytest.raises(ConfigError, match=r"<2khk_Cyrl>.*not one piece"):
+        require_direction_tags(model, {EN_MN: _dev_set(EN_MN, [("a", "b")])})
+
+
+@pytest.mark.parametrize("what", ["missing", "directory", "not a model"])
+def test_a_model_that_cannot_be_loaded_is_a_config_error_here_too(
+    tmp_path: Path, what: str
+) -> None:
+    model = tmp_path / "model"
+    if what == "directory":
+        model.mkdir()
+    elif what == "not a model":
+        model.write_bytes(b"not a model")
+
+    with pytest.raises(ConfigError, match="SentencePiece model"):
+        require_direction_tags(model, {EN_MN: _dev_set(EN_MN, [("a", "b")])})
+
+
+def test_every_target_language_of_the_dev_sets_is_checked(tmp_path: Path) -> None:
+    # A model that has the Mongolian tag only: the Russian one is the second to fail.
+    text = tmp_path / "some.txt"
+    text.write_text(
+        "".join(f"line {i} of some text\n" for i in range(200)), encoding="utf-8"
+    )
+    sentencepiece.SentencePieceTrainer.train(
+        input=str(text),
+        model_prefix=str(tmp_path / "some"),
+        vocab_size=40,
+        minloglevel=2,
+        user_defined_symbols=["<2khk_Cyrl>"],
+    )
+    dev = {
+        EN_MN: _dev_set(EN_MN, [("a", "b")]),
+        MN_RU: _dev_set(MN_RU, [("a", "b")]),
+    }
+
+    with pytest.raises(ConfigError, match=r"<2rus_Cyrl>"):
+        require_direction_tags(tmp_path / "some.model", dev)
+
+
+# --- validation_paths ----------------------------------------------------------------
+
+
+def test_the_validation_files_are_where_validation_paths_says(
+    tmp_path: Path, toy_spm: Path
+) -> None:
+    where = tmp_path / "variant"
+
+    written = write_validation(_toy_dev(), toy_spm, "src", where)
+
+    assert validation_paths(where) == written
+    assert validation_paths(where) == ValidPaths(
+        src=where / "valid.src", tgt=where / "valid.tgt"
+    )
+    assert not (tmp_path / "other").exists()
 
 
 # --- dev_token_lines ---------------------------------------------------------------

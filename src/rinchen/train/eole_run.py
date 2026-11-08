@@ -17,7 +17,12 @@ from pathlib import Path
 from typing import Any, NamedTuple
 
 from rinchen.errors import ConfigError, UpstreamError
-from rinchen.train.eole_cfg import dump_config, read_config, reject_dollar
+from rinchen.train.eole_cfg import (
+    dump_config,
+    read_config,
+    reject_dollar,
+    reject_glob_characters,
+)
 from rinchen.utils.logged_process import run_logged
 
 # Eole keeps its newest checkpoint under this name in `model_path` (a link to the file
@@ -68,7 +73,8 @@ def run_training(
         ConfigError: the config file is missing or unparseable, or `validate` refuses
             it; its `training.model_path` is missing or not inside `run_dir`; or its
             path, its text or `run_dir` holds `$`, which Eole would expand as a
-            variable.
+            variable; or its `training.model_path` holds `[`, `]`, `*` or `?`, which
+            Eole reads as a glob pattern when it loads a checkpoint from it.
         ValueError: `threads` is less than 1.
         UpstreamError: a command exits non-zero or runs past `timeout` (the message
             ends with the last lines of its log), the `eole` command is missing, or
@@ -80,6 +86,7 @@ def run_training(
     cfg = read_config(cfg_path, "Eole config")
     validate(cfg)
     model_path = _model_path_inside(cfg, run_dir, what)
+    reject_glob_characters("checkpoint directory", model_path)
     build_vocab_command, train_command = eole_commands(cfg_path)
     training = cfg["training"]
     trains_on_gpu = isinstance(training, Mapping) and bool(training.get("gpu_ranks"))
@@ -185,7 +192,9 @@ def predict_tokens(
 
     Raises:
         ConfigError: `ckpt_dir`, `out_dir` or `stem` holds `$`, which Eole would
-            expand as a variable in the prediction config.
+            expand as a variable in the prediction config; `ckpt_dir` holds `[`, `]`,
+            `*` or `?`, which Eole reads as a glob pattern when it loads the
+            checkpoint (an output directory with them is fine).
         ValueError: `threads` is less than 1; `source_tokens` is empty;
             `forced_prefix_tokens` has another number of lines than `source_tokens`;
             or a forced prefix, or a source line when prefixes are forced, is empty or
@@ -214,6 +223,7 @@ def predict_tokens(
         ("file stem", stem),
     ):
         reject_dollar(name, value)
+    reject_glob_characters("checkpoint directory", ckpt_dir)
     eole = eole_command()
     env = training_environment(threads, hide_gpu=True)
     files = predict_files(out_dir, stem)

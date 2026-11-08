@@ -12,7 +12,9 @@ import polars as pl
 
 from rinchen.corpus.schema import corpus_frame
 from rinchen.corpus.writers import write_corpus
+from rinchen.train.corpus_files import CorpusFiles
 from rinchen.train.mixture import TrainingRows, load_training_rows
+from rinchen.train.sampling import CorpusSize
 from tests.support.tiny_parallel import build_toy, write_corpus_parquet
 
 EN_MN = "eng_Latn-khk_Cyrl"
@@ -39,6 +41,14 @@ def corpus_row(
         "corpus": "test",
         "split": split,
     }
+
+
+def sizes_of(corpora: Sequence[CorpusFiles]) -> list[CorpusSize]:
+    """The corpora of a build as the sampler takes them, for a test to compare with
+    the sizes a plan lists."""
+    return [
+        CorpusSize(corpus.name, corpus.direction, corpus.rows) for corpus in corpora
+    ]
 
 
 def numbered_rows(count: int, **kwargs: str) -> list[dict[str, str]]:

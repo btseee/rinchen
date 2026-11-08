@@ -484,6 +484,42 @@ def test_run_training_rejects_a_dollar_sign_anywhere_in_the_config_text(
     assert fake_run.launches == []
 
 
+@pytest.mark.parametrize("char", ["[", "]", "*", "?"])
+def test_run_training_rejects_a_glob_character_in_the_checkpoint_directory(
+    fake_run: FakeRunLogged, tmp_path: Path, run_dir: Path, char: str
+) -> None:
+    # Eole loads a checkpoint through `glob(<model_path>/model.*.safetensors)`, so a
+    # training here would end in a checkpoint it cannot read back.
+    model_path = (run_dir / f"ckpt{char}1").as_posix()
+    cfg_path = tmp_path / "train.yaml"
+    cfg_path.write_text(
+        yaml.safe_dump({"seed": 1, "training": {"model_path": model_path}}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError) as raised:
+        run_training(cfg_path, run_dir, validate=_accept_anything)
+
+    assert str(raised.value) == (
+        f"the checkpoint directory {model_path} holds {char!r}, which Eole reads as "
+        "a glob pattern when it loads a checkpoint from it"
+    )
+    assert fake_run.launches == []
+    assert not run_dir.exists()
+
+
+def test_run_training_accepts_glob_characters_outside_the_checkpoint_directory(
+    fake_run: FakeRunLogged, tmp_path: Path
+) -> None:
+    # Eole reads the config file by its path; only `model_path` is globbed.
+    run_dir = tmp_path / "run"
+    cfg_path, _ = _write_config(tmp_path, run_dir)
+    odd = cfg_path.with_name("train[1]*.yaml")
+    cfg_path.rename(odd)
+
+    assert run_training(odd, run_dir, validate=_accept_anything) == run_dir / "ckpt"
+
+
 def test_run_training_checks_for_a_dollar_sign_before_it_validates(
     fake_run: FakeRunLogged, tmp_path: Path, run_dir: Path
 ) -> None:
@@ -939,6 +975,33 @@ def test_predict_tokens_rejects_a_dollar_sign_in_the_checkpoint_directory(
 
     assert fake_run.launches == []
     assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("char", ["[", "]", "*", "?"])
+def test_predict_tokens_rejects_a_glob_character_in_the_checkpoint_directory(
+    fake_run: FakeRunLogged, tmp_path: Path, char: str
+) -> None:
+    ckpt_dir = tmp_path / f"ckpt{char}1"
+
+    with pytest.raises(ConfigError) as raised:
+        predict_tokens(ckpt_dir, SOURCE, out_dir=tmp_path / "out")
+
+    assert str(raised.value) == (
+        f"the checkpoint directory {ckpt_dir} holds {char!r}, which Eole reads as a "
+        "glob pattern when it loads a checkpoint from it"
+    )
+    assert fake_run.launches == []
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_predict_tokens_accepts_glob_characters_outside_the_checkpoint_directory(
+    fake_run: FakeRunLogged, tmp_path: Path
+) -> None:
+    out_dir = tmp_path / "out[1]*?"
+
+    _predict(tmp_path, out_dir=out_dir, stem="dev[1]")
+
+    assert predict_files(out_dir, "dev[1]").config.is_file()
 
 
 @pytest.mark.parametrize("threads", [0, -1])

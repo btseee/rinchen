@@ -15,6 +15,8 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -313,6 +315,129 @@ def test_a_real_sigint_interrupts_the_wait_while_the_child_runs(tmp_path: Path) 
         f"the interrupt was raised {interrupted_after:.2f} s after the signal"
     )
     assert survivors == [], f"processes still running after the interrupt: {survivors}"
+
+
+# ---- SIGTERM and SIGHUP -----------------------------------------------------------
+#
+# The child has a session of its own, so a signal sent to `rinchen` (a `kill`, a closed
+# terminal, a service stop) never reaches it: without a handler the parent dies and
+# leaves an `eole train` running for hours with nobody to read its result.
+
+_TERMINATION_SIGNALS = (signal.SIGTERM, signal.SIGHUP)
+
+
+def _sentinel_handler(signum: int, frame: object) -> None:
+    raise AssertionError(f"signal {signum} reached a handler that was not replaced")
+
+
+def _handlers() -> dict[int, Any]:
+    return {number: signal.getsignal(number) for number in _TERMINATION_SIGNALS}
+
+
+@pytest.fixture
+def sentinel_handlers() -> Iterator[dict[int, Any]]:
+    """Handlers of the test's own for SIGTERM and SIGHUP, so that a `run_logged` that
+    installs none of its own fails the test (the sentinel raises) instead of killing
+    the pytest process; restored afterwards."""
+    previous = {
+        number: signal.signal(number, _sentinel_handler)
+        for number in _TERMINATION_SIGNALS
+    }
+    try:
+        yield _handlers()
+    finally:
+        for number, handler in previous.items():
+            signal.signal(number, handler)
+
+
+@linux_only
+@pytest.mark.timeout(30)
+@pytest.mark.parametrize("signum", _TERMINATION_SIGNALS, ids=["SIGTERM", "SIGHUP"])
+def test_a_real_termination_signal_ends_the_run_and_kills_the_process_group(
+    tmp_path: Path, sentinel_handlers: dict[int, Any], signum: signal.Signals
+) -> None:
+    importlib.import_module("polars")  # as in every `rinchen` command
+    pid_file = tmp_path / "pids"
+    signalled_at: list[float] = []
+    stop = threading.Event()
+
+    def send_the_signal_once_the_child_runs() -> None:
+        while not pid_file.exists():  # a loaded machine may start the child late
+            if stop.wait(0.02):
+                return
+        signalled_at.append(time.monotonic())
+        os.kill(os.getpid(), signum)
+
+    sender = threading.Timer(0.4, send_the_signal_once_the_child_runs)
+    sender.start()
+
+    try:
+        with pytest.raises(SystemExit) as raised:
+            _run(
+                _python(_CHILD_WITH_GRANDCHILD, str(pid_file), "6"),
+                tmp_path / "child.log",
+            )
+        ended_after = time.monotonic() - signalled_at[0]
+        pids = _read_pids(pid_file)
+        survivors = [pid for pid in pids if not _wait_until_gone(pid)]
+    finally:
+        stop.set()
+        sender.cancel()
+        sender.join()
+        if pid_file.exists():
+            _kill_quietly(_read_pids(pid_file))
+
+    # The shell's convention for a process ended by a signal: 128 + its number.
+    assert raised.value.code == 128 + signum
+    assert ended_after < 1.5, f"the run ended {ended_after:.2f} s after the signal"
+    assert survivors == [], f"processes still running after the signal: {survivors}"
+    assert _handlers() == sentinel_handlers
+
+
+@pytest.mark.parametrize("scenario", ["success", "failure", "timeout", "no command"])
+def test_the_handlers_of_the_caller_are_back_after_every_way_a_run_can_end(
+    tmp_path: Path, sentinel_handlers: dict[int, Any], scenario: str
+) -> None:
+    code = {
+        "success": "print('fine')",
+        "failure": "import sys; sys.exit(3)",
+        "timeout": "import time; time.sleep(5)",
+        "no command": "",
+    }[scenario]
+    command = _python(code)
+    if scenario == "no command":
+        command = [str(tmp_path / "no-such-command")]
+    expected = {
+        "success": None,
+        "failure": UpstreamError,
+        "timeout": UpstreamError,
+        "no command": FileNotFoundError,
+    }[scenario]
+
+    if expected is None:
+        _run(command, tmp_path / "child.log")
+    else:
+        with pytest.raises(expected):
+            _run(
+                command,
+                tmp_path / "child.log",
+                timeout=0.3 if scenario == "timeout" else None,
+            )
+
+    assert _handlers() == sentinel_handlers
+
+
+def test_run_logged_does_not_touch_the_handlers_off_the_main_thread(
+    tmp_path: Path, sentinel_handlers: dict[int, Any]
+) -> None:
+    # Handlers can only be set from the main thread; a run in a worker thread (a test,
+    # a future caller) must neither fail on that nor change them.
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        worker = pool.submit(_run, _python("print('fine')"), tmp_path / "child.log")
+        worker.result(timeout=30)  # raises what the worker raised
+
+    assert (tmp_path / "child.log").read_text(encoding="utf-8") == "fine\n"
+    assert _handlers() == sentinel_handlers
 
 
 @pytest.mark.parametrize("timeout", [None, 30.0])

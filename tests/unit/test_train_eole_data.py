@@ -14,12 +14,23 @@ import pytest
 
 from rinchen.config.loader import REPO_ROOT
 from rinchen.errors import ConfigError
-from rinchen.train.corpus_files import CorpusFiles, build_corpora, corpus_sizes
+from rinchen.train.corpus_files import (
+    CorpusFiles,
+    build_corpora,
+    planned_corpus_files,
+)
 from rinchen.train.eole_cfg import merge, read_config, validate_train_config
 from rinchen.train.eole_data import data_section
 from rinchen.train.sampling import integer_weights, mixing_probabilities
 from rinchen.train.validation_corpus import ValidPaths
-from tests.support.corpus_rows import EN_MN, MN_EN, MN_RU, RU_MN, toy_training_rows
+from tests.support.corpus_rows import (
+    EN_MN,
+    MN_EN,
+    MN_RU,
+    RU_MN,
+    sizes_of,
+    toy_training_rows,
+)
 
 TINY_BASE = REPO_ROOT / "configs" / "eole" / "multilingual_tiny.yaml"
 
@@ -318,12 +329,30 @@ def test_the_section_merged_into_the_tiny_base_passes_the_config_validator(
     }
 
 
+@pytest.mark.parametrize("placement", ["src", "tgt"])
+def test_the_files_a_build_would_write_give_the_section_the_written_files_give(
+    tmp_path: Path, placement: Any
+) -> None:
+    training = toy_training_rows(tmp_path)
+    data_dir = tmp_path / "data"
+    planned = planned_corpus_files(training, 0.2, 1, data_dir)
+    weights = {file.name: index + 1 for index, file in enumerate(planned)}
+
+    built = build_corpora(training, bt_ratio=0.2, seed=1, data_dir=data_dir)
+
+    assert data_section(
+        planned, weights, placement, valid_paths=_VALID, filtertoolong=True
+    ) == data_section(
+        built.corpora, weights, placement, valid_paths=_VALID, filtertoolong=True
+    )
+
+
 def test_the_toy_corpora_weighted_by_temperature_make_a_valid_config(
     tmp_path: Path,
 ) -> None:
     training = toy_training_rows(tmp_path)
     built = build_corpora(training, bt_ratio=0.2, seed=1, data_dir=tmp_path / "data")
-    probabilities = mixing_probabilities(corpus_sizes(built.corpora), 0.5)
+    probabilities = mixing_probabilities(sizes_of(built.corpora), 0.5)
     weights = integer_weights(probabilities, total=100)
 
     section = data_section(

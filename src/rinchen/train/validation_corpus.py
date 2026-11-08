@@ -78,6 +78,18 @@ def _require_one_piece(
         )
 
 
+def require_direction_tags(spm_model: Path, dev: Mapping[str, DevSet]) -> None:
+    """Check that `spm_model` loads and has the tag of every target language of the dev
+    sets as one piece, which is what `dev_token_lines` needs of it.
+
+    Raises:
+        ConfigError: the model cannot be loaded, or a tag is not one of its pieces.
+    """
+    processor = load_processor(spm_model)
+    for direction in sorted(dev):
+        _require_one_piece(processor, direction_tag(dev[direction].tgt_lang), spm_model)
+
+
 def dev_token_lines(
     dev: Mapping[str, DevSet], spm_model: Path, placement: TagPlacement
 ) -> DevTokens:
@@ -119,6 +131,11 @@ def dev_token_lines(
     )
 
 
+def validation_paths(out_dir: Path) -> ValidPaths:
+    """The files `write_validation` writes into `out_dir` (nothing is created)."""
+    return ValidPaths(src=out_dir / "valid.src", tgt=out_dir / "valid.tgt")
+
+
 def write_validation(
     dev: Mapping[str, DevSet],
     spm_model: Path,
@@ -137,7 +154,7 @@ def write_validation(
     """
     tokens = dev_token_lines(dev, spm_model, placement)
     out_dir.mkdir(parents=True, exist_ok=True)
-    paths = ValidPaths(src=out_dir / "valid.src", tgt=out_dir / "valid.tgt")
+    paths = validation_paths(out_dir)
     replace_file(paths.src, lines_as_bytes(tokens.source))
     replace_file(paths.tgt, lines_as_bytes(tokens.target))
     return paths

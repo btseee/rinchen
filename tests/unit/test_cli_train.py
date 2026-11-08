@@ -20,7 +20,6 @@ import importlib.metadata
 import json
 import re
 import shutil
-import sys
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -337,6 +336,22 @@ def test_dry_run_reports_the_back_translated_rows_there_are_asked_for_and_used(
     ]
 
 
+def test_dry_run_prints_the_weight_total_of_the_matrix_and_weights_that_add_up_to_it(
+    tmp_path: Path, seams: Seams
+) -> None:
+    workspace = make_workspace(tmp_path, weight_total=50)
+
+    lines = _dry_run_lines(workspace)
+
+    assert "weight total: 50" in lines
+    weights = [
+        int(line.split("weight ")[1].split(",")[0])
+        for line in lines
+        if line.startswith(f"variant {ID_SRC} corpus ")
+    ]
+    assert len(weights) == 8 and sum(weights) == 50
+
+
 def test_dry_run_creates_nothing_and_starts_no_training(
     workspace: Workspace, seams: Seams, tmp_path: Path
 ) -> None:
@@ -457,7 +472,7 @@ def test_a_run_reports_one_line_per_variant_and_names_the_result_files(
     assert result.stdout.splitlines() == [
         f"variant 1/2 {ID_SRC} trained train 55.3 s eval 2.6 s",
         f"variant 2/2 {ID_TGT} trained train 40.1 s eval 1.5 s",
-        "variants: 2 (trained 2, reused 0)",
+        "variants: 2 (trained 2, evaluated 0, reused 0)",
         f"manifest: {workspace.manifest}",
         f"results.tsv: {workspace.out_dir / 'results.tsv'}",
         f"results.json: {workspace.out_dir / 'results.json'}",
@@ -577,6 +592,7 @@ def test_the_manifest_counts_the_rows_the_variants_and_the_run_parameters(
         "count.dev.dev_in_train": 0.0,
         "variants.total": 2.0,
         "variants.trained": 2.0,
+        "variants.evaluated": 0.0,
         "variants.reused": 0.0,
         "threads": 3.0,
         "seed.0": 1234.0,
@@ -780,6 +796,56 @@ def test_a_failure_of_the_plan_creates_nothing_and_keeps_an_earlier_manifest(
     assert not fresh_out.exists()
 
 
+@pytest.mark.parametrize("extra", [[], ["--dry-run"]])
+def test_a_typo_in_an_override_is_a_config_error_before_anything_is_written_or_deleted(
+    workspace: Workspace, seams: Seams, tmp_path: Path, extra: list[str]
+) -> None:
+    # The dry run passes for a run that would fail, and the real run used to delete
+    # the manifest of the earlier run and write the data before it noticed.
+    _run_ok(workspace.args())
+    committed = _snapshot(workspace.out_dir)
+    for seam in (seams.train, seams.evaluate):
+        seam.calls.clear()
+    write_matrix_file(
+        workspace.matrix,
+        workspace.base_config,
+        overrides={"training": {"train_stepz": 100}},
+    )
+    fresh_out = tmp_path / "fresh"
+
+    again = runner.invoke(app, workspace.args(*extra))
+    elsewhere = runner.invoke(app, workspace.args(*extra, out_dir=fresh_out))
+
+    for result in (again, elsewhere):
+        _assert_one_error(result, 2, "invalid Eole config: training.train_stepz")
+    assert _snapshot(workspace.out_dir) == committed
+    assert workspace.manifest.is_file()
+    assert not fresh_out.exists()
+    assert _no_seam_was_called(seams)
+
+
+@pytest.mark.parametrize("extra", [[], ["--dry-run"]])
+@pytest.mark.parametrize("what", ["garbage", "directory"])
+def test_a_sentencepiece_model_that_does_not_load_is_a_config_error_before_any_write(
+    workspace: Workspace, seams: Seams, tmp_path: Path, what: str, extra: list[str]
+) -> None:
+    _run_ok(workspace.args())
+    committed = _snapshot(workspace.out_dir)
+    for seam in (seams.train, seams.evaluate):
+        seam.calls.clear()
+    bad = tmp_path / "bad.model"
+    if what == "garbage":
+        bad.write_bytes(b"not a SentencePiece model")
+    else:
+        bad.mkdir()
+
+    result = runner.invoke(app, workspace.args(*extra, spm_model=bad))
+
+    _assert_one_error(result, 2, "SentencePiece model")
+    assert _snapshot(workspace.out_dir) == committed
+    assert _no_seam_was_called(seams)
+
+
 # --- resuming ----------------------------------------------------------------------
 
 
@@ -802,7 +868,7 @@ def test_a_rerun_reuses_every_variant_says_so_and_trains_nothing(
     assert second.stdout.splitlines()[:3] == [
         f"variant 1/2 {ID_SRC} reused train 0.0 s eval 0.0 s",
         f"variant 2/2 {ID_TGT} reused train 0.0 s eval 0.0 s",
-        "variants: 2 (trained 0, reused 2)",
+        "variants: 2 (trained 0, evaluated 0, reused 2)",
     ]
     assert len(seams.train.calls) == len(seams.evaluate.calls) == 2
     assert {
@@ -928,6 +994,43 @@ def test_the_rerun_after_a_failure_reuses_the_finished_variant_and_trains_the_re
     assert seams.train.variant_ids == [ID_TGT]
     assert _manifest(workspace).metrics["variants.reused"] == 1.0
     assert all(path.is_file() for path in workspace.result_files())
+
+
+def test_the_rerun_after_a_failing_evaluation_scores_the_trained_checkpoint_only(
+    workspace: Workspace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first = install_seams(
+        monkeypatch, evaluate=FakeEvaluate(fail={ID_SRC: UpstreamError("predict died")})
+    )
+    failed = runner.invoke(app, workspace.args())
+    _assert_one_error(failed, 4, "predict died")
+    assert first.train.variant_ids == [ID_SRC]
+    assert workspace.train_record(ID_SRC).is_file()
+    assert not workspace.manifest.exists()
+    seams = install_seams(monkeypatch)
+
+    result = _run_ok(workspace.args())
+
+    lines = result.stdout.splitlines()
+    assert [line.split()[:4] for line in lines[:2]] == [
+        ["variant", "1/2", ID_SRC, "evaluated"],
+        ["variant", "2/2", ID_TGT, "trained"],
+    ]
+    # Nothing trained in this run for the first variant, whatever its training took.
+    assert lines[0].split()[4:7] == ["train", "0.0", "s"]
+    assert lines[2] == "variants: 2 (trained 1, evaluated 1, reused 0)"
+    assert seams.train.variant_ids == [ID_TGT]
+    assert seams.evaluate.variant_ids == [ID_SRC, ID_TGT]
+    manifest = _manifest(workspace)
+    assert manifest.metrics["variants.trained"] == 1.0
+    assert manifest.metrics["variants.evaluated"] == 1.0
+    assert manifest.metrics["variants.reused"] == 0.0
+    outputs = {item.path: item.sha256 for item in manifest.outputs}
+    for variant_id in (ID_SRC, ID_TGT):
+        checkpoint = workspace.checkpoint(variant_id)
+        assert outputs[str(checkpoint)] == _sha256(checkpoint)
+    assert all(path.is_file() for path in workspace.result_files())
+    assert str(workspace.train_record(ID_SRC)) not in outputs
 
 
 def test_an_interrupt_exits_130_and_leaves_the_finished_variant_and_no_manifest(
@@ -1312,13 +1415,11 @@ def test_an_out_dir_below_the_directory_of_a_corpus_is_allowed(
 
 
 @pytest.mark.parametrize(
-    "name", ["out[1]", "out*?", "out[a-z]"], ids=["[1]", "wildcards", "[a-z]"]
+    "name", ["out dir", "ünï-хураангуй"], ids=["space", "non-ASCII"]
 )
-def test_an_out_dir_that_looks_like_a_glob_gets_every_output(
+def test_an_out_dir_with_a_space_or_non_ascii_letters_gets_every_output(
     workspace: Workspace, seams: Seams, tmp_path: Path, name: str
 ) -> None:
-    if "*" in name and sys.platform == "win32":
-        pytest.skip("Windows file names cannot hold * or ?")
     out_dir = tmp_path / name
 
     _run_ok(workspace.args(out_dir=out_dir))
@@ -1337,6 +1438,25 @@ def test_an_out_dir_that_looks_like_a_glob_gets_every_output(
     assert all(str(item.path).startswith(str(out_dir)) for item in manifest.outputs)
     assert manifest.metrics["variants.total"] == 2.0
     assert _part_files(out_dir) == []
+
+
+@pytest.mark.parametrize("extra", [[], ["--dry-run"]])
+@pytest.mark.parametrize("char", ["[", "]", "*", "?"])
+def test_an_out_dir_with_a_glob_character_is_a_config_error_before_any_work(
+    workspace: Workspace, seams: Seams, tmp_path: Path, char: str, extra: list[str]
+) -> None:
+    # Eole globs the checkpoint directory (`model.*.safetensors`): `out[1]` trained a
+    # variant for 18 s and then failed to predict, `out*` loaded the checkpoints of
+    # its siblings. Both the dry run and a real run refuse it, naming the character.
+    out_dir = tmp_path / f"out{char}1"
+
+    result = runner.invoke(app, workspace.args(*extra, out_dir=out_dir))
+
+    _assert_one_error(
+        result, 2, f"the output directory {out_dir} holds {char!r}, which Eole reads"
+    )
+    assert not out_dir.exists()
+    assert _no_seam_was_called(seams)
 
 
 def test_paths_with_spaces_work_for_every_input_and_the_out_dir(

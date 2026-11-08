@@ -4,7 +4,10 @@ its corpora with their sizes, mixing probabilities, integer weights and upsampli
 
 Planning reads and decides; it writes nothing (a dry run prints it). The sizes of the
 corpora come from `corpus_files.planned_corpus_sizes`, the same function the build of
-a variant uses, so a plan cannot disagree with what is built.
+a variant uses, so a plan cannot disagree with what is built. It also checks what the
+preparation of each variant would render: the SentencePiece model and the Eole config
+(`ablation_config`, from the planned corpora and the paths they will have), so that an
+input that cannot be run is refused before anything is written or deleted.
 """
 
 from __future__ import annotations
@@ -16,12 +19,15 @@ from typing import Any, Final
 
 from rinchen.config.ablation import AblationMatrix
 from rinchen.errors import ConfigError, DataError
+from rinchen.train.ablation_config import variant_config
+from rinchen.train.ablation_layout import data_dir, variant_paths
 from rinchen.train.corpus_files import (
     BtUsage,
     bt_usage_by_direction,
+    planned_corpus_files,
     planned_corpus_sizes,
 )
-from rinchen.train.eole_cfg import reject_dollar
+from rinchen.train.eole_cfg import reject_dollar, reject_glob_characters
 from rinchen.train.mixture import (
     DevRows,
     TrainingRows,
@@ -29,6 +35,7 @@ from rinchen.train.mixture import (
     load_training_rows,
 )
 from rinchen.train.sampling import integer_weights, mixing_probabilities
+from rinchen.train.validation_corpus import require_direction_tags
 from rinchen.train.variants import Variant, expand_variants
 
 # The keys of a variant's Eole config that the run sets itself, by dotted path: a
@@ -102,19 +109,6 @@ class AblationPlan:
     dev: DevRows
     variants: tuple[PlannedVariant, ...]
 
-    def to_dict(self) -> dict[str, Any]:
-        """JSON-ready, for the dry run to print."""
-        return {
-            "name": self.matrix.name,
-            "out_dir": self.out_dir.as_posix(),
-            "spm_model": self.spm_model.as_posix(),
-            "corpus_paths": [path.as_posix() for path in self.corpus_paths],
-            "weight_total": self.matrix.weight_total,
-            "statistics": self.training.stats.to_dict(),
-            "dev_statistics": self.dev.stats.to_dict(),
-            "variants": [planned.to_dict() for planned in self.variants],
-        }
-
 
 def plan_ablation(
     matrix: AblationMatrix,
@@ -130,14 +124,20 @@ def plan_ablation(
     Raises:
         ConfigError: the overrides set a key the run sets itself
             (`RESERVED_OVERRIDE_KEYS`); `out_dir` or `spm_model` holds `$`, which Eole
-            would expand as a variable; a language outside the registry; a variant's
+            would expand as a variable; `out_dir` (as an absolute path) holds `[`, `]`,
+            `*` or `?`, which Eole would read as a glob pattern when it loads a
+            checkpoint from it; a language outside the registry; a variant's
             temperature is so large that the sizes raised to it overflow; more corpora
-            than `weight_total`.
+            than `weight_total`; the SentencePiece model cannot be loaded or lacks a
+            direction tag as one piece; the Eole config of a variant is not valid (the
+            base with the overrides and the per-run values).
         DataError: a corpus file cannot be read; no training row, no authentic one, no
             corpus; no dev row for a direction that trains.
     """
     _reject_reserved_overrides(matrix.overrides)
     reject_dollar("output directory", out_dir)
+    # The Eole config names absolute paths, so the working directory counts too.
+    reject_glob_characters("output directory", out_dir.resolve())
     reject_dollar("SentencePiece model path", spm_model)
     training = load_training_rows(corpus_paths)
     dev = load_dev_rows(
@@ -146,7 +146,7 @@ def plan_ablation(
         directions=training.directions,
         training=training,
     )
-    return AblationPlan(
+    plan = AblationPlan(
         matrix=matrix,
         corpus_paths=tuple(corpus_paths),
         spm_model=spm_model.resolve(),
@@ -158,6 +158,28 @@ def plan_ablation(
             for variant in expand_variants(matrix)
         ),
     )
+    _check_what_would_be_rendered(plan)
+    return plan
+
+
+def _check_what_would_be_rendered(plan: AblationPlan) -> None:
+    """Load the SentencePiece model and check that it has every direction tag as one
+    piece, then build the Eole config of each variant in memory, from the corpora its
+    build would write, and validate it: what `prepare_variant` renders, without
+    writing it."""
+    require_direction_tags(plan.spm_model, plan.dev.sets)
+    for planned in plan.variants:
+        variant = planned.variant
+        variant_config(
+            plan.matrix,
+            variant,
+            spm_model=plan.spm_model,
+            paths=variant_paths(plan.out_dir, variant.id),
+            corpora=planned_corpus_files(
+                plan.training, variant.bt_ratio, variant.seed, data_dir(plan.out_dir)
+            ),
+            weights=planned.weights,
+        )
 
 
 def _reject_reserved_overrides(overrides: Mapping[str, Any]) -> None:

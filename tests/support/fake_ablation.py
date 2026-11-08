@@ -174,7 +174,9 @@ class FakeTrain:
     config as the real one does, writes `run/ckpt/model.00.safetensors` and returns
     its directory. `fail` maps a variant id to the exception it raises; `seconds` maps
     a variant id to the time it advances the clock (1.0 otherwise). The variant is
-    named by the directory of the config."""
+    named by the directory of the config. The checkpoint's bytes name the variant and
+    the call, and `salt`, so a second `FakeTrain` can write other bytes for the same
+    variant."""
 
     def __init__(
         self,
@@ -183,8 +185,10 @@ class FakeTrain:
         seconds: Mapping[str, float] | None = None,
         fail: Mapping[str, BaseException] | None = None,
         write_checkpoint: bool = True,
+        salt: str = "",
     ) -> None:
         self.clock = clock
+        self.salt = salt
         self.seconds = dict(seconds or {})
         self.fail = dict(fail or {})
         self.write_checkpoint = write_checkpoint
@@ -225,7 +229,7 @@ class FakeTrain:
         if self.write_checkpoint:
             ckpt_dir.mkdir(parents=True, exist_ok=True)
             (ckpt_dir / CHECKPOINT_FILE).write_bytes(
-                f"checkpoint of {variant_id}, training call {len(self.calls)}".encode()
+                f"checkpoint of {variant_id}, training call {len(self.calls)}{self.salt}".encode()
             )
         return ckpt_dir
 
@@ -241,11 +245,12 @@ class EvaluateCall:
     threads: int
     timeout: float | None
     result_existed: bool
+    train_record_existed: bool
 
 
 class FakeEvaluate:
     """Stands in for `evaluate_variant`: records the call (and whether the variant's
-    `result.json` existed at that moment) and returns the scripted `DevResult` of the
+    `result.json` and `train.json` existed at that moment) and returns the scripted `DevResult` of the
     variant (`dev_result(80.0)` for one not scripted). `fail` maps a variant id to the
     exception it raises; `seconds` the time it advances the clock (0.5 otherwise).
     The variant is named by the parent of `out_dir`."""
@@ -291,6 +296,7 @@ class FakeEvaluate:
                 threads=threads,
                 timeout=timeout,
                 result_existed=(out_dir.parent / "result.json").exists(),
+                train_record_existed=(out_dir.parent / "train.json").exists(),
             )
         )
         if variant_id in self.fail:

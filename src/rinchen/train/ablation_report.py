@@ -2,9 +2,10 @@
 `results.json` (everything) and `results.md` (the main columns and a summary over the
 seeds), written from an `AblationResult`.
 
-Numbers are fixed in the tables: scores, averages and the source collision rate to two
-decimals, seconds to one. The axes (temperature, bt ratio) print as they do in a
-variant id, so `0.125` is not cut to `0.12`. The raw floats are in `results.json`.
+Numbers are fixed in the tables: scores and averages to two decimals, the source
+collision rate (a share, mostly below 0.1) to four, seconds to one. The axes
+(temperature, bt ratio) print as they do in a variant id, so `0.125` is not cut to
+`0.12`. The raw floats are in `results.json`.
 """
 
 from __future__ import annotations
@@ -94,6 +95,10 @@ def _seconds(value: float) -> str:
     return f"{value:.1f}"
 
 
+def _rate(value: float) -> str:
+    return f"{value:.4f}"
+
+
 def _axis_cells(variant: VariantResult) -> list[str]:
     axes = variant.planned.variant
     return [
@@ -111,7 +116,7 @@ def _summary_cells(variant: VariantResult) -> list[str]:
         _score(variant.dev.chrf_min),
         str(variant.dev.tag_leaks),
         _seconds(variant.train_seconds),
-        _score(variant.planned.source_collision_rate),
+        _rate(variant.planned.source_collision_rate),
     ]
 
 

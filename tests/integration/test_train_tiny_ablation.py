@@ -195,7 +195,7 @@ def test_the_first_run_trains_both_variants_and_names_the_result_files(
         (SRC_VARIANT, "trained"),
         (TGT_VARIANT, "trained"),
     ]
-    assert "variants: 2 (trained 2, reused 0)" in lines
+    assert "variants: 2 (trained 2, evaluated 0, reused 0)" in lines
     assert [line.split(": ")[0] for line in lines[-3:]] == [
         "results.tsv",
         "results.json",
@@ -333,7 +333,7 @@ def test_the_second_run_reuses_both_variants_within_seconds(
     record_property("rerun_seconds", round(rerun.seconds, 1))
 
     assert _outcomes(rerun) == [(SRC_VARIANT, "reused"), (TGT_VARIANT, "reused")]
-    assert "variants: 2 (trained 0, reused 2)" in rerun.stdout
+    assert "variants: 2 (trained 0, evaluated 0, reused 2)" in rerun.stdout
     assert rerun.seconds < MAX_RERUN_SECONDS
     for variant in VARIANTS:
         log = first_run.out_dir / "variants" / variant / "run" / "train.log"

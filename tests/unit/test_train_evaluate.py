@@ -417,7 +417,7 @@ def test_a_piece_with_a_suffix_gap_is_not_split_when_decoding(
 
     result, _ = _run(dev, nnbsp_spm, placement, {RU_MN: [target]}, tmp_path)
 
-    # str.split() would cut the pieces `▁ном<U+202F>ын` and `▁гэр<U+202F>ийн` apart.
+    # str.split() would cut the pieces for `ном<U+202F>ын` and `гэр<U+202F>ийн` apart.
     assert _hyp_lines(tmp_path, RU_MN) == [target]
     assert result.directions[RU_MN].chrf == 100.0
 

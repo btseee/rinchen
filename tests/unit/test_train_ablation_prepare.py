@@ -11,6 +11,7 @@ import hashlib
 import importlib.metadata
 import json
 import shutil
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -366,6 +367,16 @@ def test_the_config_text_is_what_the_file_holds(
     assert prepared.config_text.endswith("\n")
 
 
+def _sha256_of_lines(lines: tuple[str, ...]) -> str:
+    return hashlib.sha256(("\n".join(lines) + "\n").encode("utf-8")).hexdigest()
+
+
+def _versions_with(**changed: str) -> Callable[[Sequence[str]], dict[str, str]]:
+    """A stand-in for `tool_versions`: the version `1.0` of every package asked for,
+    except those in `changed`."""
+    return lambda packages: {name: changed.get(name, "1.0") for name in packages}
+
+
 def test_the_fingerprint_inputs_name_every_input_by_its_digest(
     default_plan: AblationPlan, tmp_path: Path
 ) -> None:
@@ -382,7 +393,17 @@ def test_the_fingerprint_inputs_name_every_input_by_its_digest(
         "validation": [_sha256(prepared.valid.src), _sha256(prepared.valid.tgt)],
         "spm_sha256": _sha256(default_plan.spm_model),
         "threads": 3,
-        "eole": importlib.metadata.version("eole"),
+        "versions": {
+            name: importlib.metadata.version(name)
+            for name in ("eole", "torch", "sentencepiece", "sacrebleu")
+        },
+        "dev_raw": {
+            direction: [
+                _sha256_of_lines(dev_set.src),
+                _sha256_of_lines(dev_set.tgt),
+            ]
+            for direction, dev_set in default_plan.dev.sets.items()
+        },
         "placement": "tgt",
     }
     canonical = json.dumps(
@@ -412,9 +433,7 @@ def test_the_fingerprint_changes_with_each_of_its_inputs(
     distinct(_prepared(default_plan, tmp_path, 1).fingerprint)
     # The installed Eole.
     with monkeypatch.context() as patch:
-        patch.setattr(
-            ablation_prepare, "tool_versions", lambda packages: {"eole": "9.9.9"}
-        )
+        patch.setattr(ablation_prepare, "tool_versions", _versions_with(eole="9.9.9"))
         distinct(_prepared(default_plan, tmp_path).fingerprint)
     # The SentencePiece model, at another path and with other bytes at the same path.
     elsewhere = _plan_in(default_plan, tmp_path)
@@ -444,6 +463,150 @@ def test_the_fingerprint_changes_with_each_of_its_inputs(
             other.variants[0],
             threads=2,
         ).fingerprint
+    )
+
+
+@pytest.mark.parametrize("package", ["eole", "torch", "sentencepiece", "sacrebleu"])
+def test_the_version_of_each_package_that_shapes_a_model_or_a_score_is_a_fingerprint_input(
+    default_plan: AblationPlan,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    package: str,
+) -> None:
+    # Eole trains and loads the model, torch runs it, SentencePiece cuts the text and
+    # sacrebleu scores it: another version of any of them is another model or score.
+    with monkeypatch.context() as patch:
+        patch.setattr(ablation_prepare, "tool_versions", _versions_with())
+        before = _prepared(default_plan, tmp_path)
+        patch.setattr(
+            ablation_prepare, "tool_versions", _versions_with(**{package: "2.0"})
+        )
+        after = _prepared(default_plan, tmp_path)
+
+    assert before.fingerprint_inputs["versions"] == dict.fromkeys(
+        ["eole", "torch", "sentencepiece", "sacrebleu"], "1.0"
+    )
+    assert after.fingerprint_inputs["versions"][package] == "2.0"
+    assert after.fingerprint != before.fingerprint
+
+
+def test_a_package_that_is_not_installed_is_recorded_as_such_not_an_error(
+    default_plan: AblationPlan, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real_version = importlib.metadata.version
+
+    def version(name: str) -> str:
+        if name == "sacrebleu":
+            raise importlib.metadata.PackageNotFoundError(name)
+        return real_version(name)
+
+    monkeypatch.setattr(importlib.metadata, "version", version)
+
+    prepared = _prepared(default_plan, tmp_path)
+
+    assert prepared.fingerprint_inputs["versions"]["sacrebleu"] == "not installed"
+    assert prepared.fingerprint_inputs["versions"]["eole"] == real_version("eole")
+
+
+@pytest.mark.parametrize("side", ["src", "tgt"])
+def test_a_change_in_the_raw_dev_text_is_a_change_of_fingerprint_though_the_tokens_stay(
+    default_plan: AblationPlan, tmp_path: Path, side: str
+) -> None:
+    # SentencePiece drops a trailing space, so the validation file is the same bytes,
+    # but the references the chrF is computed against (and the source text the model
+    # is asked to translate) are not.
+    direction = EN_MN
+    original = default_plan.dev.sets[direction]
+    changed_set = dataclasses.replace(
+        original,
+        **{side: tuple(f"{line} " for line in getattr(original, side))},
+    )
+    changed = dataclasses.replace(
+        default_plan,
+        dev=dataclasses.replace(
+            default_plan.dev, sets={**default_plan.dev.sets, direction: changed_set}
+        ),
+    )
+
+    before = _prepared(default_plan, tmp_path / "before")
+    after = _prepared(changed, tmp_path / "after")
+
+    assert after.valid.src.read_bytes() == before.valid.src.read_bytes()
+    assert after.valid.tgt.read_bytes() == before.valid.tgt.read_bytes()
+    assert (
+        after.fingerprint_inputs["validation"]
+        == before.fingerprint_inputs["validation"]
+    )
+    assert (
+        after.fingerprint_inputs["dev_raw"][direction]
+        != before.fingerprint_inputs["dev_raw"][direction]
+    )
+    assert after.fingerprint != before.fingerprint
+
+
+def test_a_dev_text_that_moves_to_another_line_is_another_fingerprint(
+    default_plan: AblationPlan, tmp_path: Path
+) -> None:
+    # The hash is of the lines in order, each ended by an LF: swapping two lines of a
+    # direction (same set of texts) must not give the same digest.
+    direction = EN_MN
+    original = default_plan.dev.sets[direction]
+    swapped = dataclasses.replace(
+        original,
+        tgt=(original.tgt[1], original.tgt[0], *original.tgt[2:]),
+    )
+    changed = dataclasses.replace(
+        default_plan,
+        dev=dataclasses.replace(
+            default_plan.dev, sets={**default_plan.dev.sets, direction: swapped}
+        ),
+    )
+
+    before = _prepared(default_plan, tmp_path / "before")
+    after = _prepared(changed, tmp_path / "after")
+
+    assert (
+        after.fingerprint_inputs["dev_raw"][direction][1]
+        != before.fingerprint_inputs["dev_raw"][direction][1]
+    )
+
+
+def test_a_line_boundary_moved_inside_the_raw_dev_text_is_another_fingerprint(
+    default_plan: AblationPlan, tmp_path: Path
+) -> None:
+    # The same characters in the same order, cut into lines elsewhere.
+    direction = EN_MN
+    original = default_plan.dev.sets[direction]
+    first, second, *rest = original.tgt
+    moved = dataclasses.replace(original, tgt=(first + second[:1], second[1:], *rest))
+    changed = dataclasses.replace(
+        default_plan,
+        dev=dataclasses.replace(
+            default_plan.dev, sets={**default_plan.dev.sets, direction: moved}
+        ),
+    )
+
+    before = _prepared(default_plan, tmp_path / "before")
+    after = _prepared(changed, tmp_path / "after")
+
+    assert (
+        after.fingerprint_inputs["dev_raw"][direction][1]
+        != before.fingerprint_inputs["dev_raw"][direction][1]
+    )
+
+
+def test_moving_the_output_directory_changes_the_fingerprint_through_the_config_paths(
+    default_plan: AblationPlan, tmp_path: Path
+) -> None:
+    # The rendered config names absolute paths, so a relocated run is another run (it
+    # trains again); the checkpoint the manifest hashes is the artefact of record.
+    first = _prepared(default_plan, tmp_path / "one")
+    second = _prepared(default_plan, tmp_path / "two")
+
+    assert first.fingerprint != second.fingerprint
+    assert (
+        first.fingerprint_inputs["config_sha256"]
+        != second.fingerprint_inputs["config_sha256"]
     )
 
 

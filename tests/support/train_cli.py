@@ -80,6 +80,9 @@ class Workspace:
     def result_file(self, variant_id: str) -> Path:
         return self.variant_dir(variant_id) / "result.json"
 
+    def train_record(self, variant_id: str) -> Path:
+        return self.variant_dir(variant_id) / "train.json"
+
     def checkpoint(self, variant_id: str) -> Path:
         return self.variant_dir(variant_id) / "run" / "ckpt" / "model.00.safetensors"
 

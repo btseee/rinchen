@@ -6,6 +6,7 @@ manifest. Parsing, file I/O and the manifest only; the work happens in
 The variants are resumable work under the output directory (`variants/<id>/`), not
 outputs of the run: the outputs are the three result tables, the rendered Eole config
 of each variant and its checkpoint, and the manifest that vouches for them comes last.
+(`train.json` is that work's record, not an output: the checkpoint it names is.)
 """
 
 from __future__ import annotations
@@ -36,8 +37,8 @@ from rinchen.manifest.stage import (
     tool_versions,
 )
 from rinchen.train.ablation import run_ablation
+from rinchen.train.ablation_layout import variant_paths
 from rinchen.train.ablation_plan import AblationPlan, plan_ablation
-from rinchen.train.ablation_prepare import CONFIG_FILE, VARIANTS_DIR
 from rinchen.train.ablation_records import AblationResult, VariantProgress
 from rinchen.train.ablation_report import result_files
 from rinchen.train.eole_run import run_training
@@ -113,7 +114,10 @@ def ablate(
         bool,
         typer.Option(
             "--force",
-            help="Train every variant again instead of reusing finished ones.",
+            help=(
+                "Train every variant again, instead of reusing finished ones or "
+                "only scoring ones that already trained."
+            ),
         ),
     ] = False,
     dry_run: Annotated[
@@ -132,7 +136,8 @@ def ablate(
 
     Each variant gets its own mixture of the corpora, Eole config, checkpoint and dev
     scores. Variants run one after the other; a rerun reuses the ones already
-    finished (variants/<id>/result.json) and trains the rest. The tables are
+    finished (variants/<id>/result.json), only scores a trained checkpoint whose
+    evaluation failed (variants/<id>/train.json) and trains the rest. The tables are
     results.tsv, results.json and results.md in the output directory."""
     with rinchen_errors_as_exit_codes():
         _require_usable_timeout(timeout)
@@ -208,10 +213,10 @@ def _train_variants(
         )
     except OSError as exc:
         _exit_cannot_write(out_dir, exc)
-    trained = sum(not variant.reused for variant in result.variants)
+    counts = _outcome_counts(result)
     typer.echo(
-        f"variants: {len(result.variants)} (trained {trained}, "
-        f"reused {len(result.variants) - trained})"
+        f"variants: {len(result.variants)} (trained {counts['trained']}, "
+        f"evaluated {counts['evaluated']}, reused {counts['reused']})"
     )
     typer.echo(f"manifest: {manifest_path}")
     tables = result_files(result.plan.out_dir)
@@ -386,12 +391,7 @@ def _output_files(result: AblationResult) -> list[ManifestFile]:
         output_file(tables.md, None),
     ]
     for variant in result.variants:
-        config = (
-            result.plan.out_dir
-            / VARIANTS_DIR
-            / variant.planned.variant.id
-            / CONFIG_FILE
-        )
+        config = variant_paths(result.plan.out_dir, variant.planned.variant.id).config
         checkpoint = variant.checkpoint_path
         outputs += [
             output_file(config, None),
@@ -404,18 +404,29 @@ def _output_files(result: AblationResult) -> list[ManifestFile]:
     return outputs
 
 
+def _outcome_counts(result: AblationResult) -> dict[str, int]:
+    """How many variants this run trained, evaluated from a checkpoint an earlier run
+    trained, and reused whole."""
+    return {
+        outcome: sum(variant.outcome == outcome for variant in result.variants)
+        for outcome in ("trained", "evaluated", "reused")
+    }
+
+
 def _metrics(result: AblationResult) -> dict[str, float]:
     """What the corpora held (`count.*` for the training rows, `count.dev.*` for the
-    dev rows, named as the statistics name them), how many variants trained or were
-    reused, and the run parameters: the threads and the seeds in matrix order."""
+    dev rows, named as the statistics name them), how many variants trained, were
+    evaluated from an earlier training or were reused, and the run parameters: the
+    threads and the seeds in matrix order."""
     plan = result.plan
-    trained = sum(not variant.reused for variant in result.variants)
+    counts = _outcome_counts(result)
     return {
         **_numbers("count", plan.training.stats.to_dict()),
         **_numbers("count.dev", plan.dev.stats.to_dict()),
         "variants.total": float(len(result.variants)),
-        "variants.trained": float(trained),
-        "variants.reused": float(len(result.variants) - trained),
+        "variants.trained": float(counts["trained"]),
+        "variants.evaluated": float(counts["evaluated"]),
+        "variants.reused": float(counts["reused"]),
         "threads": float(result.threads),
         **{f"seed.{n}": float(seed) for n, seed in enumerate(plan.matrix.seeds)},
     }

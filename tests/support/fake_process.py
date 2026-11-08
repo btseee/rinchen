@@ -8,11 +8,14 @@ process group.
 
 from __future__ import annotations
 
+import math
+
 # `run_logged` waits in slices of at most `_INTERRUPT_POLL_S` and never past the
-# timeout. A test that sets the poll to this long makes each wait it records the poll
-# itself (no timeout) or what is left of the timeout, so `waits` still shows whether
-# a timeout was asked for.
-LONG_POLL_S = 1000.0
+# timeout. A test that sets the poll to infinity makes every wait the fake records
+# infinity when no timeout was asked for, and what is left of the timeout when one
+# was: no finite limit can pass for "no timeout". (The real poll is 0.2 s, so the
+# real `Popen.wait` is never given infinity.)
+LONG_POLL_S = math.inf
 
 
 class FakeProcess:

@@ -21,9 +21,10 @@ import pytest
 from rinchen.train.corpus_files import (
     BuiltCorpora,
     CorpusFiles,
+    PlannedFiles,
     bt_usage_by_direction,
     build_corpora,
-    corpus_sizes,
+    planned_corpus_files,
     planned_corpus_sizes,
 )
 from rinchen.train.mixture import load_training_rows
@@ -36,6 +37,7 @@ from tests.support.corpus_rows import (
     corpus_row,
     file_lines,
     numbered_rows,
+    sizes_of,
     toy_training_rows,
     training_from_rows,
 )
@@ -133,7 +135,7 @@ def test_the_corpora_carry_the_sizes_the_sampler_takes(tmp_path: Path) -> None:
 
     built = build_corpora(training, bt_ratio=1.0, seed=1, data_dir=tmp_path / "data")
 
-    assert corpus_sizes(built.corpora) == [
+    assert sizes_of(built.corpora) == [
         CorpusSize("eng_Latn-khk_Cyrl.auth", EN_MN, 3),
         CorpusSize("eng_Latn-khk_Cyrl.bt", EN_MN, 2),
     ]
@@ -251,7 +253,6 @@ def test_a_ratio_whose_product_overflows_asks_for_more_than_there_is_and_gets_al
     assert (usage.bt_available, usage.bt_used) == (300, 300)
     assert usage.bt_requested == int(ratio) * 1200
     assert _corpus(built, f"{EN_MN}.bt").rows == 300
-    assert json.loads(json.dumps(built.bt_to_dict()))[EN_MN]["bt_used"] == 300
 
 
 @pytest.mark.parametrize(
@@ -452,15 +453,6 @@ def test_a_ratio_that_is_not_a_finite_non_negative_number_is_refused(
 
     with pytest.raises(ValueError, match="bt_ratio"):
         build_corpora(training, bt_ratio=ratio, seed=1, data_dir=tmp_path / "data")
-
-
-def test_the_bt_usage_is_json_ready(tmp_path: Path) -> None:
-    training = toy_training_rows(tmp_path)
-    built = build_corpora(training, bt_ratio=0.1, seed=1, data_dir=tmp_path / "data")
-
-    document = json.loads(json.dumps(built.bt_to_dict()))
-
-    assert document[EN_MN] == {"bt_available": 300, "bt_requested": 120, "bt_used": 120}
 
 
 # --- build_corpora: reuse of the written files -------------------------------------
@@ -687,7 +679,7 @@ def test_the_planned_sizes_are_the_sizes_of_the_corpora_a_build_writes(
     planned = planned_corpus_sizes(training, ratio)
     built = build_corpora(training, bt_ratio=ratio, seed=1, data_dir=tmp_path / "data")
 
-    assert planned == corpus_sizes(built.corpora)
+    assert planned == sizes_of(built.corpora)
     assert bt_usage_by_direction(training, ratio) == built.bt_by_direction
 
 
@@ -706,7 +698,7 @@ def test_the_plan_equals_the_build_for_a_direction_with_few_or_no_bt_rows(
 
     built = build_corpora(training, bt_ratio=ratio, seed=7, data_dir=tmp_path / "data")
 
-    assert planned_corpus_sizes(training, ratio) == corpus_sizes(built.corpora)
+    assert planned_corpus_sizes(training, ratio) == sizes_of(built.corpora)
     assert bt_usage_by_direction(training, ratio) == built.bt_by_direction
 
 
@@ -732,6 +724,98 @@ def test_the_planned_sizes_of_the_toy_rows_are_the_hand_counted_ones(
         CorpusSize(f"{RU_MN}.auth", RU_MN, 600),
         CorpusSize(f"{RU_MN}.bt", RU_MN, 120),
     ]
+
+
+# --- planned_corpus_files: where a build would write them ---------------------------
+
+
+def _as_built(corpora: tuple[CorpusFiles, ...]) -> list[tuple[Any, ...]]:
+    return [
+        (c.name, c.direction, c.group, c.tgt_lang, c.src_path, c.tgt_path, c.rows)
+        for c in corpora
+    ]
+
+
+def _as_planned(files: list[PlannedFiles]) -> list[tuple[Any, ...]]:
+    return [
+        (f.name, f.direction, f.group, f.tgt_lang, f.src_path, f.tgt_path, f.rows)
+        for f in files
+    ]
+
+
+@pytest.mark.parametrize("ratio", _RATIOS)
+def test_the_planned_files_are_the_files_a_build_writes(
+    tmp_path: Path, ratio: float
+) -> None:
+    training = toy_training_rows(tmp_path)
+    data_dir = tmp_path / "data"
+
+    planned = planned_corpus_files(training, ratio, 7, data_dir)
+    built = build_corpora(training, bt_ratio=ratio, seed=7, data_dir=data_dir)
+
+    assert _as_planned(planned) == _as_built(built.corpora)
+
+
+def test_the_planned_files_of_the_toy_rows_are_the_hand_laid_out_ones(
+    tmp_path: Path,
+) -> None:
+    training = toy_training_rows(tmp_path)
+    data = Path("/runs/ab/data")
+
+    planned = planned_corpus_files(training, 0.5, 7, data)
+
+    assert _as_planned(planned)[:2] == [
+        (
+            f"{EN_MN}.auth",
+            EN_MN,
+            "auth",
+            "khk_Cyrl",
+            data / "auth" / f"{EN_MN}.auth.src",
+            data / "auth" / f"{EN_MN}.auth.tgt",
+            1200,
+        ),
+        (
+            f"{EN_MN}.bt",
+            EN_MN,
+            "bt",
+            "khk_Cyrl",
+            data / "bt" / "r0.5_s7" / f"{EN_MN}.bt.src",
+            data / "bt" / "r0.5_s7" / f"{EN_MN}.bt.tgt",
+            300,
+        ),
+    ]
+    assert [(f.name, f.tgt_lang) for f in planned][4:6] == [
+        (f"{MN_RU}.auth", "rus_Cyrl"),
+        (f"{MN_RU}.bt", "rus_Cyrl"),
+    ]
+
+
+def test_planning_the_files_writes_nothing(tmp_path: Path) -> None:
+    training = toy_training_rows(tmp_path)
+    before = sorted(tmp_path.rglob("*"))
+
+    planned_corpus_files(training, 0.5, 7, tmp_path / "data")
+
+    assert sorted(tmp_path.rglob("*")) == before
+
+
+def test_the_planned_files_follow_the_planned_sizes(tmp_path: Path) -> None:
+    training = toy_training_rows(tmp_path)
+
+    files = planned_corpus_files(training, 0.2, 1, tmp_path / "data")
+
+    assert [(f.name, f.direction, f.rows) for f in files] == [
+        (size.name, size.direction, size.rows)
+        for size in planned_corpus_sizes(training, 0.2)
+    ]
+
+
+@pytest.mark.parametrize("ratio", [-1.0, float("nan"), float("inf")])
+def test_files_cannot_be_planned_for_an_unusable_ratio(
+    tmp_path: Path, ratio: float
+) -> None:
+    with pytest.raises(ValueError, match="bt_ratio"):
+        planned_corpus_files(toy_training_rows(tmp_path), ratio, 1, tmp_path / "data")
 
 
 def test_a_direction_with_bt_rows_only_has_no_planned_corpus_but_a_usage_entry(
@@ -785,4 +869,4 @@ def test_a_direction_with_one_authentic_row_is_planned_and_built(
         CorpusSize(f"{EN_MN}.auth", EN_MN, 1),
         CorpusSize(f"{EN_MN}.bt", EN_MN, 1),
     ]
-    assert corpus_sizes(built.corpora) == planned_corpus_sizes(training, 1.0)
+    assert sizes_of(built.corpora) == planned_corpus_sizes(training, 1.0)

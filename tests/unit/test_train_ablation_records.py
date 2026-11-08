@@ -15,13 +15,17 @@ from typing import Any
 
 import pytest
 
+from rinchen.errors import DataError
 from rinchen.train import ablation_prepare
+from rinchen.train.ablation_layout import variant_paths
 from rinchen.train.ablation_plan import AblationPlan, plan_ablation
 from tests.support.corpus_rows import EN_MN
 from tests.support.fake_ablation import (
     ID_SRC,
     ID_TGT,
     AblationRun,
+    FakeEvaluate,
+    FakeTrain,
     flip_a_byte,
     make_matrix,
     toy_plan,
@@ -134,8 +138,11 @@ def test_another_eole_version_reruns_every_variant(
 ) -> None:
     plan = _plan_in(default_plan, tmp_path)
     Run(plan)
+    real = ablation_prepare.tool_versions
     monkeypatch.setattr(
-        ablation_prepare, "tool_versions", lambda packages: {"eole": "9.9.9"}
+        ablation_prepare,
+        "tool_versions",
+        lambda packages: {**real(packages), "eole": "9.9.9"},
     )
 
     run = Run(plan)
@@ -186,16 +193,18 @@ def test_a_missing_checkpoint_reruns_exactly_its_variant(
     assert run.train.variant_ids == [ID_TGT]
 
 
-def test_a_missing_result_file_reruns_exactly_its_variant(
+def test_a_missing_result_file_evaluates_exactly_its_variant_again(
     default_plan: AblationPlan, tmp_path: Path
 ) -> None:
+    # Its train record vouches for the checkpoint, so nothing trains.
     plan = _plan_in(default_plan, tmp_path)
     first = Run(plan)
     first.result_path(ID_SRC).unlink()
 
     run = Run(plan)
 
-    assert run.train.variant_ids == [ID_SRC]
+    assert run.train.calls == []
+    assert run.evaluate.variant_ids == [ID_SRC]
 
 
 def _tamper(path: Path, change: Callable[[dict[str, Any]], Any]) -> None:
@@ -294,7 +303,10 @@ def test_a_result_file_that_does_not_vouch_for_the_variant_is_never_trusted(
 
     run = Run(plan)
 
-    assert run.train.variant_ids == [ID_TGT]
+    # The checkpoint is vouched for by the train record, the scores are not: only the
+    # evaluation runs again.
+    assert run.train.calls == []
+    assert run.evaluate.variant_ids == [ID_TGT]
     assert (
         json.loads(run.result_path(ID_TGT).read_text(encoding="utf-8"))["status"]
         == "ok"
@@ -334,7 +346,8 @@ def test_a_result_file_that_is_not_json_is_never_trusted_and_never_a_crash(
 
     run = Run(plan)
 
-    assert run.train.variant_ids == [ID_SRC]
+    assert run.train.calls == []
+    assert run.evaluate.variant_ids == [ID_SRC]
 
 
 def test_a_truncated_result_file_is_never_trusted(
@@ -345,7 +358,10 @@ def test_a_truncated_result_file_is_never_trusted(
     text = first.result_path(ID_SRC).read_bytes()
     first.result_path(ID_SRC).write_bytes(text[: len(text) // 2])
 
-    assert Run(plan).train.variant_ids == [ID_SRC]
+    run = Run(plan)
+
+    assert run.train.calls == []
+    assert run.evaluate.variant_ids == [ID_SRC]
 
 
 def test_a_directory_in_place_of_the_result_file_is_an_os_error_not_a_reuse(
@@ -356,6 +372,314 @@ def test_a_directory_in_place_of_the_result_file_is_an_os_error_not_a_reuse(
     path = first.result_path(ID_SRC)
     path.unlink()
     path.mkdir()
+
+    with pytest.raises(OSError):
+        Run(plan)
+
+
+# --- run_ablation: what makes a train record vouch for a checkpoint --------------------
+#
+# `train.json` is written when a training has finished and before the evaluation starts.
+# A variant whose `result.json` is not complete resumes at the evaluation only if the
+# record vouches for the checkpoint as it is now; else it trains again.
+
+
+def _record_path(plan: AblationPlan, variant_id: str = ID_SRC) -> Path:
+    return variant_paths(plan.out_dir, variant_id).train_record
+
+
+def _checkpoint(plan: AblationPlan, variant_id: str = ID_SRC) -> Path:
+    return variant_paths(plan.out_dir, variant_id).checkpoint
+
+
+def _failed_after_training(plan: AblationPlan) -> None:
+    with pytest.raises(DataError):
+        Run(plan, evaluate=FakeEvaluate(fail={ID_SRC: DataError("no dev lines")}))
+    assert _record_path(plan).is_file()
+
+
+def test_a_record_that_vouches_for_the_checkpoint_skips_the_training(
+    default_plan: AblationPlan, tmp_path: Path
+) -> None:
+    plan = _plan_in(default_plan, tmp_path)
+    _failed_after_training(plan)
+
+    run = Run(plan)
+
+    assert run.train.variant_ids == [ID_TGT]
+    assert run.evaluate.variant_ids == [ID_SRC, ID_TGT]
+
+
+def test_a_changed_bt_row_trains_a_recorded_variant_again(
+    corpus: Path, toy_spm: Path, tmp_path: Path
+) -> None:
+    axes = {"temperature": [0.5], "bt_ratio": [3.0], "tag_placement": ["src"]}
+    first = toy_plan(tmp_path, toy_spm, corpus=corpus, axes=axes)
+    variant = "t0.5_bt3_src_s1234"
+    with pytest.raises(DataError):
+        Run(first, evaluate=FakeEvaluate(fail={variant: DataError("no dev lines")}))
+    changed = write_toy_corpus(tmp_path / "changed", changed_bt_row=True)
+    second = plan_ablation(make_matrix(axes=axes), [changed], toy_spm, first.out_dir)
+
+    run = Run(second)
+
+    assert run.train.variant_ids == [variant]
+
+
+def test_a_changed_override_trains_a_recorded_variant_again(
+    corpus: Path, toy_spm: Path, tmp_path: Path
+) -> None:
+    first = toy_plan(tmp_path, toy_spm, corpus=corpus)
+    _failed_after_training(first)
+    second = plan_ablation(
+        make_matrix(overrides={"training": {"dropout": [0.1]}}),
+        [corpus],
+        toy_spm,
+        first.out_dir,
+    )
+
+    run = Run(second)
+
+    assert run.train.variant_ids == [ID_SRC, ID_TGT]
+
+
+def test_another_thread_count_trains_a_recorded_variant_again(
+    default_plan: AblationPlan, tmp_path: Path
+) -> None:
+    plan = _plan_in(default_plan, tmp_path)
+    with pytest.raises(DataError):
+        Run(
+            plan,
+            threads=2,
+            evaluate=FakeEvaluate(fail={ID_SRC: DataError("no dev lines")}),
+        )
+
+    run = Run(plan, threads=3)
+
+    assert run.train.variant_ids == [ID_SRC, ID_TGT]
+
+
+def test_another_sentencepiece_model_trains_a_recorded_variant_again(
+    default_plan: AblationPlan, corpus: Path, other_spm: Path, tmp_path: Path
+) -> None:
+    plan = _plan_in(default_plan, tmp_path)
+    _failed_after_training(plan)
+    changed = plan_ablation(make_matrix(), [corpus], other_spm, plan.out_dir)
+
+    run = Run(changed)
+
+    assert run.train.variant_ids == [ID_SRC, ID_TGT]
+
+
+def test_another_package_version_trains_a_recorded_variant_again(
+    default_plan: AblationPlan, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    plan = _plan_in(default_plan, tmp_path)
+    _failed_after_training(plan)
+    real = ablation_prepare.tool_versions
+    monkeypatch.setattr(
+        ablation_prepare,
+        "tool_versions",
+        lambda packages: {**real(packages), "torch": "0.0.1"},
+    )
+
+    run = Run(plan)
+
+    assert run.train.variant_ids == [ID_SRC, ID_TGT]
+
+
+def test_a_changed_raw_dev_text_trains_a_recorded_variant_again(
+    default_plan: AblationPlan, tmp_path: Path
+) -> None:
+    plan = _plan_in(default_plan, tmp_path)
+    _failed_after_training(plan)
+    original = plan.dev.sets[EN_MN]
+    changed_set = dataclasses.replace(
+        original, tgt=tuple(f"{line} " for line in original.tgt)
+    )
+    changed = dataclasses.replace(
+        plan,
+        dev=dataclasses.replace(plan.dev, sets={**plan.dev.sets, EN_MN: changed_set}),
+    )
+
+    run = Run(changed)
+
+    assert run.train.variant_ids == [ID_SRC, ID_TGT]
+
+
+def test_a_modified_checkpoint_trains_a_recorded_variant_again(
+    default_plan: AblationPlan, tmp_path: Path
+) -> None:
+    plan = _plan_in(default_plan, tmp_path)
+    _failed_after_training(plan)
+    flip_a_byte(_checkpoint(plan))
+
+    run = Run(plan)
+
+    assert run.train.variant_ids == [ID_SRC, ID_TGT]
+
+
+@pytest.mark.parametrize("how", ["file", "directory", "empty"])
+def test_a_missing_checkpoint_trains_a_recorded_variant_again(
+    default_plan: AblationPlan, tmp_path: Path, how: str
+) -> None:
+    plan = _plan_in(default_plan, tmp_path)
+    _failed_after_training(plan)
+    checkpoint = _checkpoint(plan)
+    if how == "file":
+        checkpoint.unlink()
+    elif how == "directory":
+        shutil.rmtree(checkpoint.parent)
+    else:
+        checkpoint.write_bytes(b"")
+
+    run = Run(plan)
+
+    assert run.train.variant_ids == [ID_SRC, ID_TGT]
+
+
+def test_a_truncated_checkpoint_trains_a_recorded_variant_again(
+    default_plan: AblationPlan, tmp_path: Path
+) -> None:
+    plan = _plan_in(default_plan, tmp_path)
+    _failed_after_training(plan)
+    checkpoint = _checkpoint(plan)
+    checkpoint.write_bytes(checkpoint.read_bytes()[:-5])
+
+    run = Run(plan)
+
+    assert run.train.variant_ids == [ID_SRC, ID_TGT]
+
+
+def test_a_record_of_another_variant_is_never_trusted(
+    default_plan: AblationPlan, tmp_path: Path
+) -> None:
+    plan = _plan_in(default_plan, tmp_path)
+    first = Run(plan)
+    shutil.copy(_record_path(plan, ID_SRC), _record_path(plan, ID_TGT))
+    first.result_path(ID_TGT).unlink()
+
+    run = Run(plan)
+
+    assert run.train.variant_ids == [ID_TGT]
+
+
+def test_a_record_of_an_older_training_is_replaced_by_the_new_one(
+    default_plan: AblationPlan, tmp_path: Path
+) -> None:
+    plan = _plan_in(default_plan, tmp_path)
+    _failed_after_training(plan)
+    old = json.loads(_record_path(plan).read_text(encoding="utf-8"))
+    flip_a_byte(_checkpoint(plan))
+
+    run = Run(plan, train=FakeTrain(salt=" again"))
+
+    new = json.loads(_record_path(plan).read_text(encoding="utf-8"))
+    assert new["checkpoint_sha256"] == run.result.variants[0].checkpoint_sha256
+    assert new["checkpoint_sha256"] != old["checkpoint_sha256"]
+
+
+TRAIN_UNTRUSTED_CHANGES: list[tuple[str, Callable[[dict[str, Any]], Any]]] = [
+    ("another fingerprint", _set(fingerprint="0" * 64)),
+    ("fingerprint of the wrong type", _set(fingerprint=5)),
+    ("no fingerprint", _without("fingerprint")),
+    ("status ok", _set(status="ok")),
+    ("status failed", _set(status="failed")),
+    ("status true", _set(status=True)),
+    ("no status", _without("status")),
+    ("another checkpoint hash", _set(checkpoint_sha256="f" * 64)),
+    ("checkpoint hash of the wrong type", _set(checkpoint_sha256=7)),
+    ("no checkpoint hash", _without("checkpoint_sha256")),
+    ("train seconds as text", _set(train_seconds="1.5")),
+    ("negative train seconds", _set(train_seconds=-1.0)),
+    ("train seconds a boolean", _set(train_seconds=True)),
+    ("train seconds infinite", _set(train_seconds=float("inf"))),
+    ("train seconds not a number", _set(train_seconds=float("nan"))),
+    ("no train seconds", _without("train_seconds")),
+    ("a list", lambda record: [record]),
+    ("null", lambda record: None),
+    ("text", lambda record: "trained"),
+    ("a number", lambda record: 5),
+    ("an empty object", lambda record: {}),
+]
+
+
+@pytest.mark.parametrize(
+    "change",
+    [item[1] for item in TRAIN_UNTRUSTED_CHANGES],
+    ids=[i[0] for i in TRAIN_UNTRUSTED_CHANGES],
+)
+def test_a_record_that_does_not_vouch_for_the_checkpoint_is_never_trusted(
+    default_plan: AblationPlan, tmp_path: Path, change: Callable[[dict[str, Any]], Any]
+) -> None:
+    plan = _plan_in(default_plan, tmp_path)
+    _failed_after_training(plan)
+    _tamper(_record_path(plan), change)
+
+    run = Run(plan)
+
+    assert run.train.variant_ids == [ID_SRC, ID_TGT]
+    assert (
+        json.loads(_record_path(plan).read_text(encoding="utf-8"))["status"]
+        == "trained"
+    )
+
+
+def test_a_record_with_unknown_extra_keys_is_still_trusted(
+    default_plan: AblationPlan, tmp_path: Path
+) -> None:
+    plan = _plan_in(default_plan, tmp_path)
+    _failed_after_training(plan)
+    _tamper(_record_path(plan), _set(note="added by hand"))
+
+    run = Run(plan)
+
+    assert run.train.variant_ids == [ID_TGT]
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        b"",
+        b"{",
+        b"not json",
+        b"\xff\xfe\x00\x01",
+        b"[" * 100_000,
+        b'{"status": "trained", "train_seconds": NaN}',
+        b"\x00" * 64,
+    ],
+    ids=["empty", "open brace", "text", "not utf-8", "deeply nested", "nan", "nul"],
+)
+def test_a_record_that_is_not_json_is_never_trusted_and_never_a_crash(
+    default_plan: AblationPlan, tmp_path: Path, content: bytes
+) -> None:
+    plan = _plan_in(default_plan, tmp_path)
+    _failed_after_training(plan)
+    _record_path(plan).write_bytes(content)
+
+    run = Run(plan)
+
+    assert run.train.variant_ids == [ID_SRC, ID_TGT]
+
+
+def test_a_truncated_record_is_never_trusted(
+    default_plan: AblationPlan, tmp_path: Path
+) -> None:
+    plan = _plan_in(default_plan, tmp_path)
+    _failed_after_training(plan)
+    text = _record_path(plan).read_bytes()
+    _record_path(plan).write_bytes(text[: len(text) // 2])
+
+    assert Run(plan).train.variant_ids == [ID_SRC, ID_TGT]
+
+
+def test_a_directory_in_place_of_the_record_is_an_os_error_not_a_reuse(
+    default_plan: AblationPlan, tmp_path: Path
+) -> None:
+    plan = _plan_in(default_plan, tmp_path)
+    _failed_after_training(plan)
+    _record_path(plan).unlink()
+    _record_path(plan).mkdir()
 
     with pytest.raises(OSError):
         Run(plan)

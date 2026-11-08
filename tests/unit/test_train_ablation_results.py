@@ -146,22 +146,22 @@ def test_the_rows_hold_the_axes_the_scores_to_two_decimals_and_the_seconds_to_on
         "\t".join(
             ["t0.5_bt0.5_src_s1", "0.5", "0.5", "src", "1"]
             + ["90.13", "45.00", "80.00", "40.00", "70.00", "35.00", "60.00", "30.00"]
-            + ["75.03", "60.00", "0", "12.5", "0.04"]
+            + ["75.03", "60.00", "0", "12.5", "0.0400"]
         ),
         "\t".join(
             ["t0.5_bt0.5_src_s2", "0.5", "0.5", "src", "2"]
             + ["92.00", "46.00", "84.00", "42.00", "72.00", "36.00", "64.00", "32.00"]
-            + ["78.00", "64.00", "1", "13.8", "0.04"]
+            + ["78.00", "64.00", "1", "13.8", "0.0400"]
         ),
         "\t".join(
             ["t0.5_bt0.5_tgt_s1", "0.5", "0.5", "tgt", "1"]
             + ["80.00", "40.00", "70.00", "35.00", "60.00", "30.00", "50.00", "25.00"]
-            + ["65.00", "50.00", "2", "20.3", "0.04"]
+            + ["65.00", "50.00", "2", "20.3", "0.0400"]
         ),
         "\t".join(
             ["t0.5_bt0.5_tgt_s2", "0.5", "0.5", "tgt", "2"]
             + ["82.00", "41.00", "74.00", "37.00", "64.00", "32.00", "52.00", "26.00"]
-            + ["68.00", "52.00", "0", "21.0", "0.04"]
+            + ["68.00", "52.00", "0", "21.0", "0.0400"]
         ),
     ]
 
@@ -217,7 +217,24 @@ def test_scores_at_the_ends_of_the_range_keep_two_decimals(
 
     row = _read(run, "results.tsv").split("\n")[1].split("\t")
     assert row[5:13] == ["100.00", "0.00"] * 4
-    assert row[13:] == ["100.00", "100.00", "12", "1.0", "0.00"]
+    assert row[13:] == ["100.00", "100.00", "12", "1.0", "0.0000"]
+
+
+def test_the_source_collision_rate_is_printed_to_four_decimals_in_both_tables(
+    toy_spm: Path, tmp_path: Path
+) -> None:
+    # 90 sources, each in two training rows with different target languages: 180 of
+    # 4,980 training rows, 180 / 4980 = 0.0361446 (two decimals would say 0.04).
+    corpus = write_toy_corpus(tmp_path / "in", extra_rows=colliding_rows(90))
+    plan = plan_ablation(
+        make_matrix(axes=one_variant_axes()), [corpus], toy_spm, tmp_path / "out"
+    )
+
+    run = AblationRun(plan)
+
+    assert _read(run, "results.tsv").split("\n")[1].split("\t")[-1] == "0.0361"
+    markdown_row = _read(run, "results.md").split("\n")[4]
+    assert markdown_row.endswith("| 0.0361 |")
 
 
 # --- results.md ----------------------------------------------------------------------
@@ -228,10 +245,10 @@ EXPECTED_MARKDOWN = """\
 
 | variant | temperature | bt_ratio | tag_placement | seed | chrf_mean | chrf_min | tag_leaks | train_seconds | source_collision_rate |
 | --- | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| t0.5_bt0.5_src_s1 | 0.5 | 0.5 | src | 1 | 75.03 | 60.00 | 0 | 12.5 | 0.04 |
-| t0.5_bt0.5_src_s2 | 0.5 | 0.5 | src | 2 | 78.00 | 64.00 | 1 | 13.8 | 0.04 |
-| t0.5_bt0.5_tgt_s1 | 0.5 | 0.5 | tgt | 1 | 65.00 | 50.00 | 2 | 20.3 | 0.04 |
-| t0.5_bt0.5_tgt_s2 | 0.5 | 0.5 | tgt | 2 | 68.00 | 52.00 | 0 | 21.0 | 0.04 |
+| t0.5_bt0.5_src_s1 | 0.5 | 0.5 | src | 1 | 75.03 | 60.00 | 0 | 12.5 | 0.0400 |
+| t0.5_bt0.5_src_s2 | 0.5 | 0.5 | src | 2 | 78.00 | 64.00 | 1 | 13.8 | 0.0400 |
+| t0.5_bt0.5_tgt_s1 | 0.5 | 0.5 | tgt | 1 | 65.00 | 50.00 | 2 | 20.3 | 0.0400 |
+| t0.5_bt0.5_tgt_s2 | 0.5 | 0.5 | tgt | 2 | 68.00 | 52.00 | 0 | 21.0 | 0.0400 |
 
 ## Summary over the seeds
 

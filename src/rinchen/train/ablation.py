@@ -15,7 +15,7 @@ import json
 import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, NamedTuple, Protocol
 
 from rinchen.config.ablation import TagPlacement
 from rinchen.errors import UpstreamError
@@ -24,10 +24,13 @@ from rinchen.train.ablation_plan import AblationPlan
 from rinchen.train.ablation_prepare import PreparedVariant, prepare_variant
 from rinchen.train.ablation_records import (
     AblationResult,
+    Outcome,
     VariantProgress,
     VariantResult,
     complete_result,
     scores_the_dev_sets,
+    trained_checkpoint,
+    write_train_record,
 )
 from rinchen.train.ablation_report import write_results
 from rinchen.train.eole_cfg import validate_train_config
@@ -83,13 +86,18 @@ def run_ablation(
     """Prepare, train and evaluate every variant of `plan` in order, then write the
     result tables (also when every variant was reused).
 
-    A complete variant (`ablation_records.complete_result`) is reused, unless `force`; neither
-    seam is called for it. Otherwise its stale `result.json` is removed, `train` is
-    called as `eole_run.run_training` is (`validate_train_config` as the validator),
-    then `evaluate` as `evaluate.evaluate_variant`, and `result.json` is written
-    last, so a crash leaves the variant incomplete. `progress` gets a `VariantProgress`
-    after each variant. `threads` goes to both seams and into the fingerprint;
-    `timeout` (seconds, per Eole command) goes to both. `clock` times them.
+    A complete variant (`ablation_records.complete_result`) is reused, unless `force`;
+    neither seam is called for it. Otherwise its stale `result.json` is removed. A
+    variant whose training an earlier run finished and recorded in its `train.json`
+    (`ablation_records.trained_checkpoint`; not with `force`) skips `train`. Any other
+    gets its stale `train.json` removed and `train` called as
+    `eole_run.run_training` is (`validate_train_config` as the validator), and its
+    `train.json` written when it has finished. Then `evaluate` is called as
+    `evaluate.evaluate_variant` is, and `result.json` is written last, so a crash
+    leaves the variant incomplete, and, once it has trained, resumable at the
+    evaluation. `progress` gets a `VariantProgress` after each variant. `threads` goes
+    to both seams and into the fingerprint; `timeout` (seconds, per Eole command) goes
+    to both. `clock` times them.
 
     A failure of a seam, `KeyboardInterrupt` included, stops the run as it is, leaving
     the variants before it complete and the failed one without a `result.json`.
@@ -111,6 +119,7 @@ def run_ablation(
             result = _train_and_evaluate(
                 plan,
                 prepared,
+                force=force,
                 threads=threads,
                 timeout=timeout,
                 train=train,
@@ -124,8 +133,10 @@ def run_ablation(
                     variant_id=planned.variant.id,
                     index=index,
                     total=total,
-                    outcome="reused" if result.reused else "trained",
-                    train_seconds=0.0 if result.reused else result.train_seconds,
+                    outcome=result.outcome,
+                    train_seconds=result.train_seconds
+                    if result.outcome == "trained"
+                    else 0.0,
                     eval_seconds=0.0 if result.reused else result.eval_seconds,
                 )
             )
@@ -138,6 +149,7 @@ def _train_and_evaluate(
     plan: AblationPlan,
     prepared: PreparedVariant,
     *,
+    force: bool,
     threads: int,
     timeout: float | None,
     train: TrainRunner,
@@ -147,24 +159,22 @@ def _train_and_evaluate(
     variant = prepared.variant
     # First: the file vouches for a finished run, and this one is about to replace it.
     prepared.result_path.unlink(missing_ok=True)
-    started = clock()
-    ckpt_dir = train(
-        prepared.config_path,
-        prepared.run_dir,
-        validate=validate_train_config,
-        threads=threads,
-        timeout=timeout,
-    )
-    train_seconds = clock() - started
-    checkpoint = ckpt_dir / CHECKPOINT_FILE
-    if not checkpoint.is_file():
-        raise UpstreamError(
-            f"training variant {variant.id} left no {CHECKPOINT_FILE} in {ckpt_dir}"
+    recorded = None if force else trained_checkpoint(prepared)
+    if recorded is None:
+        # Whatever it said, it does not describe the training that is about to run.
+        prepared.train_record_path.unlink(missing_ok=True)
+        outcome: Outcome = "trained"
+        trained = _train(
+            prepared, threads=threads, timeout=timeout, train=train, clock=clock
         )
-    checkpoint_sha256 = sha256_of(checkpoint)
+    else:
+        outcome = "evaluated"
+        trained = _Trained(
+            prepared.ckpt_dir, recorded.train_seconds, recorded.checkpoint_sha256
+        )
     started = clock()
     dev = evaluate(
-        ckpt_dir,
+        trained.ckpt_dir,
         plan.dev.sets,
         spm_model=plan.spm_model,
         placement=variant.tag_placement,
@@ -181,15 +191,53 @@ def _train_and_evaluate(
         )
     result = VariantResult(
         planned=prepared.planned,
-        reused=False,
+        outcome=outcome,
         fingerprint=prepared.fingerprint,
         dev=dev,
-        train_seconds=train_seconds,
+        train_seconds=trained.train_seconds,
         eval_seconds=eval_seconds,
-        checkpoint_path=checkpoint,
-        checkpoint_sha256=checkpoint_sha256,
+        checkpoint_path=trained.ckpt_dir / CHECKPOINT_FILE,
+        checkpoint_sha256=trained.checkpoint_sha256,
     )
     # Last of all: a crash before this leaves the variant incomplete.
     document = json.dumps(result.to_dict(), indent=2) + "\n"
     replace_file(prepared.result_path, document.encode("utf-8"))
     return result
+
+
+class _Trained(NamedTuple):
+    ckpt_dir: Path
+    train_seconds: float
+    checkpoint_sha256: str
+
+
+def _train(
+    prepared: PreparedVariant,
+    *,
+    threads: int,
+    timeout: float | None,
+    train: TrainRunner,
+    clock: Callable[[], float],
+) -> _Trained:
+    """Train the variant and record it in its `train.json`, before anything is made of
+    the checkpoint: a failure of the evaluation must not cost the training."""
+    started = clock()
+    ckpt_dir = train(
+        prepared.config_path,
+        prepared.run_dir,
+        validate=validate_train_config,
+        threads=threads,
+        timeout=timeout,
+    )
+    train_seconds = clock() - started
+    checkpoint = ckpt_dir / CHECKPOINT_FILE
+    if not checkpoint.is_file():
+        raise UpstreamError(
+            f"training variant {prepared.variant.id} left no {CHECKPOINT_FILE} in "
+            f"{ckpt_dir}"
+        )
+    checkpoint_sha256 = sha256_of(checkpoint)
+    write_train_record(
+        prepared, checkpoint_sha256=checkpoint_sha256, train_seconds=train_seconds
+    )
+    return _Trained(ckpt_dir, train_seconds, checkpoint_sha256)

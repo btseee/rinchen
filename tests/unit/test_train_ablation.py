@@ -13,6 +13,7 @@ import hashlib
 import inspect
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -297,7 +298,7 @@ def test_a_second_run_reuses_every_complete_variant_and_calls_neither_seam(
     assert [e.index for e in log.events] == [1, 2]
     assert [r.reused for r in second.result.variants] == [True, True]
     for old, new in zip(first.result.variants, second.result.variants, strict=True):
-        assert dataclasses.replace(new, reused=False) == old
+        assert dataclasses.replace(new, outcome="trained") == old
 
 
 def test_force_reruns_every_variant(default_plan: AblationPlan, tmp_path: Path) -> None:
@@ -336,22 +337,185 @@ def test_a_failing_training_stops_the_run_and_leaves_the_earlier_variants_comple
     assert again.outcomes == [(ID_SRC, "reused"), (ID_TGT, "trained")]
 
 
-def test_a_failing_evaluation_leaves_no_result_and_the_variant_trains_again(
+def _train_record(plan: AblationPlan, variant_id: str) -> dict[str, Any]:
+    path = plan.out_dir / "variants" / variant_id / "train.json"
+    loaded = json.loads(path.read_text(encoding="utf-8"))
+    assert isinstance(loaded, dict)
+    return loaded
+
+
+def test_a_failing_evaluation_leaves_the_checkpoint_and_a_record_of_the_training(
     default_plan: AblationPlan, tmp_path: Path
 ) -> None:
     plan = _plan_in(default_plan, tmp_path)
     failure = DataError("no dev lines")
+    clock = FakeClock()
+    train = FakeTrain(clock=clock, seconds={ID_SRC: 12.5})
 
     with pytest.raises(DataError) as info:
-        Run(plan, evaluate=FakeEvaluate(fail={ID_SRC: failure}))
+        Run(
+            plan,
+            train=train,
+            evaluate=FakeEvaluate(fail={ID_SRC: failure}, clock=clock),
+            clock=clock,
+        )
 
     assert info.value is failure
-    assert not (plan.out_dir / "variants" / ID_SRC / "result.json").exists()
+    variant = plan.out_dir / "variants" / ID_SRC
+    assert not (variant / "result.json").exists()
     assert not (plan.out_dir / "variants" / ID_TGT).exists()
+    checkpoint = variant / "run" / "ckpt" / CHECKPOINT_FILE
+    assert checkpoint.is_file()
+    assert _train_record(plan, ID_SRC) == {
+        "status": "trained",
+        "fingerprint": prepare_variant(plan, plan.variants[0], threads=2).fingerprint,
+        "checkpoint_sha256": _sha256(checkpoint),
+        "train_seconds": 12.5,
+    }
+
+
+def test_the_train_record_is_written_before_the_evaluation_starts(
+    default_plan: AblationPlan, tmp_path: Path
+) -> None:
+    plan = _plan_in(default_plan, tmp_path)
+
+    run = Run(plan)
+
+    assert [call.train_record_existed for call in run.evaluate.calls] == [True, True]
+
+
+def test_the_rerun_after_a_failing_evaluation_evaluates_the_trained_checkpoint_only(
+    default_plan: AblationPlan, tmp_path: Path
+) -> None:
+    plan = _plan_in(default_plan, tmp_path)
+    clock = FakeClock()
+    with pytest.raises(DataError):
+        Run(
+            plan,
+            train=FakeTrain(clock=clock, seconds={ID_SRC: 12.5}),
+            evaluate=FakeEvaluate(
+                fail={ID_SRC: DataError("no dev lines")}, clock=clock
+            ),
+            clock=clock,
+        )
+    checkpoint = plan.out_dir / "variants" / ID_SRC / "run" / "ckpt" / CHECKPOINT_FILE
+    trained_bytes = checkpoint.read_bytes()
+    log = ProgressLog()
+
+    resumed = Run(
+        plan,
+        train=FakeTrain(clock=clock, seconds={ID_TGT: 20.0}),
+        evaluate=FakeEvaluate(clock=clock, seconds={ID_SRC: 3.0, ID_TGT: 4.0}),
+        clock=clock,
+        progress=log,
+    )
+
+    assert resumed.train.variant_ids == [ID_TGT]
+    assert resumed.evaluate.variant_ids == [ID_SRC, ID_TGT]
+    assert log.outcomes == [(ID_SRC, "evaluated"), (ID_TGT, "trained")]
+    # This call trained nothing for the first variant; the result keeps the time the
+    # training took when it ran.
+    assert [(e.train_seconds, e.eval_seconds) for e in log.events] == [
+        (0.0, 3.0),
+        (20.0, 4.0),
+    ]
+    first = resumed.result.variants[0]
+    assert (first.train_seconds, first.eval_seconds) == (12.5, 3.0)
+    assert first.outcome == "evaluated" and not first.reused
+    assert first.checkpoint_sha256 == _sha256(checkpoint)
+    assert checkpoint.read_bytes() == trained_bytes
+    assert (plan.out_dir / "variants" / ID_SRC / "result.json").is_file()
+
+
+def test_an_interrupt_during_the_evaluation_keeps_the_trained_checkpoint_as_well(
+    default_plan: AblationPlan, tmp_path: Path
+) -> None:
+    plan = _plan_in(default_plan, tmp_path)
+    with pytest.raises(KeyboardInterrupt):
+        Run(plan, evaluate=FakeEvaluate(fail={ID_SRC: KeyboardInterrupt()}))
+    assert (plan.out_dir / "variants" / ID_SRC / "train.json").is_file()
+
+    resumed = Run(plan, progress=(log := ProgressLog()))
+
+    assert resumed.train.variant_ids == [ID_TGT]
+    assert log.outcomes == [(ID_SRC, "evaluated"), (ID_TGT, "trained")]
+
+
+def test_an_evaluation_that_scores_other_dev_sets_also_leaves_the_record(
+    default_plan: AblationPlan, tmp_path: Path
+) -> None:
+    plan = _plan_in(default_plan, tmp_path)
+    with pytest.raises(UpstreamError, match=ID_SRC):
+        Run(plan, evaluate=FakeEvaluate({ID_SRC: dev_result({EN_MN: 80.0})}))
 
     resumed = Run(plan)
 
-    assert resumed.train.variant_ids == [ID_SRC, ID_TGT]
+    assert resumed.train.variant_ids == [ID_TGT]
+    assert resumed.evaluate.variant_ids == [ID_SRC, ID_TGT]
+
+
+def test_a_training_that_fails_leaves_no_record_and_removes_an_older_one(
+    default_plan: AblationPlan, tmp_path: Path
+) -> None:
+    plan = _plan_in(default_plan, tmp_path)
+    with pytest.raises(DataError):
+        Run(plan, evaluate=FakeEvaluate(fail={ID_SRC: DataError("no dev lines")}))
+    record = plan.out_dir / "variants" / ID_SRC / "train.json"
+    assert record.is_file()
+
+    with pytest.raises(UpstreamError):
+        Run(plan, force=True, train=FakeTrain(fail={ID_SRC: UpstreamError("x")}))
+
+    assert not record.exists()
+    assert not (record.parent / "result.json").exists()
+
+
+def test_a_training_that_leaves_no_checkpoint_leaves_no_record(
+    default_plan: AblationPlan, tmp_path: Path
+) -> None:
+    plan = _plan_in(default_plan, tmp_path)
+
+    with pytest.raises(UpstreamError, match=CHECKPOINT_FILE):
+        Run(plan, train=FakeTrain(write_checkpoint=False))
+
+    assert not (plan.out_dir / "variants" / ID_SRC / "train.json").exists()
+
+
+def test_force_trains_again_whatever_the_record_says_and_replaces_it(
+    default_plan: AblationPlan, tmp_path: Path
+) -> None:
+    plan = _plan_in(default_plan, tmp_path)
+    with pytest.raises(DataError):
+        Run(plan, evaluate=FakeEvaluate(fail={ID_SRC: DataError("no dev lines")}))
+    old = _train_record(plan, ID_SRC)
+
+    forced = Run(
+        plan,
+        force=True,
+        train=FakeTrain(salt=" again"),
+        progress=(log := ProgressLog()),
+    )
+
+    assert forced.train.variant_ids == [ID_SRC, ID_TGT]
+    assert log.outcomes == [(ID_SRC, "trained"), (ID_TGT, "trained")]
+    new = _train_record(plan, ID_SRC)
+    assert new["checkpoint_sha256"] != old["checkpoint_sha256"]
+    assert new["fingerprint"] == old["fingerprint"]
+
+
+def test_a_complete_variant_keeps_its_train_record_and_is_still_reused(
+    default_plan: AblationPlan, tmp_path: Path
+) -> None:
+    plan = _plan_in(default_plan, tmp_path)
+    first = Run(plan)
+    record = _train_record(plan, ID_SRC)
+
+    second = Run(plan, progress=(log := ProgressLog()))
+
+    assert not second.train.calls and not second.evaluate.calls
+    assert log.outcomes == [(ID_SRC, "reused"), (ID_TGT, "reused")]
+    assert _train_record(plan, ID_SRC) == record
+    assert record["checkpoint_sha256"] == first.result.variants[0].checkpoint_sha256
 
 
 @pytest.mark.parametrize(

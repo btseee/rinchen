@@ -12,9 +12,11 @@ import math
 import os
 import signal
 import subprocess
+import threading
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
+from types import FrameType
 
 from rinchen.errors import UpstreamError
 
@@ -31,6 +33,9 @@ _POSIX = os.name == "posix"
 # while a wait with a timeout is interrupted at once. So the wait is made in slices
 # of this length (docs/VERIFY.md, D-POLARS-SIGINT).
 _INTERRUPT_POLL_S = 0.2
+# The signals that end a process without Ctrl-C: `kill`, a service stop (SIGTERM) and
+# a closed terminal or SSH session (SIGHUP, absent on Windows).
+_TERMINATION_SIGNALS = (signal.SIGTERM, signal.SIGHUP) if _POSIX else ()
 
 
 def run_logged(
@@ -50,14 +55,23 @@ def run_logged(
     would keep running and keep the log open. `timeout` is in seconds; None waits
     for as long as the command runs.
 
+    The child's own session also keeps it out of reach of a SIGTERM or SIGHUP sent
+    to this process, which would then die and leave the command running. So while
+    this call runs on the main thread, both signals raise `SystemExit(128 + signal
+    number)` (the shell's status for a process ended by a signal) and the usual path
+    kills the command's group; the caller's handlers are put back afterwards. SIGKILL
+    cannot be caught: a child left running after `kill -9` of this process is a known
+    limit.
+
     Raises:
         UpstreamError: the command exits with a non-zero code, or runs past
             `timeout` (it is then killed and reaped); `failure_with_log_tail` builds
             the message, which names `what`. Any other exception that interrupts the
-            wait, such as KeyboardInterrupt, kills the command first and propagates.
+            wait, such as KeyboardInterrupt or the SystemExit of a termination
+            signal, kills the command first and propagates.
     """
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    with log_path.open("wb") as log:
+    with log_path.open("wb") as log, _exit_on_termination_signals():
         process = subprocess.Popen(
             list(command),
             env=dict(env),
@@ -78,6 +92,30 @@ def run_logged(
             raise
     if returncode != 0:
         raise failure_with_log_tail(f"{what} failed: {_describe(returncode)}", log_path)
+
+
+@contextlib.contextmanager
+def _exit_on_termination_signals() -> Iterator[None]:
+    """While the block runs, SIGTERM and SIGHUP raise `SystemExit(128 + signal number)`
+    in the main thread; the handlers that were there are restored afterwards, whatever
+    the block does. Handlers can only be set from the main thread, so elsewhere the
+    block just runs."""
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+
+    def exit_with_status(signum: int, frame: FrameType | None) -> None:
+        raise SystemExit(128 + signum)
+
+    previous = {
+        number: signal.signal(number, exit_with_status)
+        for number in _TERMINATION_SIGNALS
+    }
+    try:
+        yield
+    finally:
+        for number, handler in previous.items():
+            signal.signal(number, handler)
 
 
 def _wait_for_exit(process: subprocess.Popen[bytes], timeout: float | None) -> int:

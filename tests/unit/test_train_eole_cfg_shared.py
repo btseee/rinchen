@@ -77,6 +77,42 @@ def test_reject_dollar_accepts_a_value_without_the_sign(value: str | Path) -> No
     assert eole_cfg.reject_dollar("run directory", value) is None
 
 
+# ---- reject_glob_characters --------------------------------------------------------
+
+
+@pytest.mark.parametrize("char", ["[", "]", "*", "?"])
+def test_reject_glob_characters_names_the_path_and_the_character(char: str) -> None:
+    path = Path("runs") / f"a{char}b" / "ckpt"
+
+    with pytest.raises(ConfigError) as raised:
+        eole_cfg.reject_glob_characters("checkpoint directory", path)
+
+    assert str(raised.value) == (
+        f"the checkpoint directory {path} holds {char!r}, which Eole reads as a glob "
+        "pattern when it loads a checkpoint from it"
+    )
+
+
+def test_reject_glob_characters_names_the_first_one_in_the_text() -> None:
+    with pytest.raises(ConfigError, match=r"holds '\]'"):
+        eole_cfg.reject_glob_characters("output directory", "runs/a]b[c*d?e/ckpt")
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "runs/ckpt",
+        "",
+        Path("runs") / "my run" / "ckpt",
+        Path("runs") / "ünï" / "хураангуй",
+        "runs/{1}/a!b-c.d,e",
+    ],
+    ids=["plain", "empty", "a space", "non-ASCII", "other punctuation"],
+)
+def test_reject_glob_characters_accepts_every_other_value(value: str | Path) -> None:
+    assert eole_cfg.reject_glob_characters("run directory", value) is None
+
+
 # ---- read_config -----------------------------------------------------------------
 
 
