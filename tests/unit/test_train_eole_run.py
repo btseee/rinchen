@@ -10,6 +10,7 @@ runner's own process handling is tested with real children in
 
 from __future__ import annotations
 
+import math
 import os
 import re
 import sys
@@ -22,7 +23,7 @@ from typing import Any
 import pytest
 import yaml
 
-from rinchen.errors import ConfigError, UpstreamError
+from rinchen.errors import ConfigError, DataError, UpstreamError
 from rinchen.train import eole_run
 from rinchen.train.eole_run import (
     CHECKPOINT_FILE,
@@ -55,6 +56,7 @@ class Launch:
     config: dict[str, Any]
     source_lines: list[str]  # the `src` file of a `predict`, else empty
     prefix_lines: list[str]  # the `tgt` file of a forced `predict`, else empty
+    vocabulary: bytes | None  # the config's `src_vocab` file when the command started
 
     @property
     def subcommand(self) -> str:
@@ -67,7 +69,8 @@ class FakeRunLogged:
     leaves what the finished tool would. A finished `train` leaves a checkpoint file
     `checkpoint_age` seconds old; a finished `predict` its output file with
     `hypotheses` (one token line each) or, when that is None, the source lines.
-    `writes_results` false leaves nothing."""
+    `writes_results` false leaves nothing. A finished `build_vocab` writes the
+    config's `src_vocab` file with `vocabulary` as its bytes (none when that is None)."""
 
     def __init__(self) -> None:
         self.launches: list[Launch] = []
@@ -76,6 +79,7 @@ class FakeRunLogged:
         self.writes_results = True
         self.checkpoint_age = 0.0
         self.hypotheses: list[str] | None = None
+        self.vocabulary: bytes | None = None
 
     def __call__(
         self,
@@ -96,6 +100,7 @@ class FakeRunLogged:
             config=config,
             source_lines=self._lines_of(config, "src"),
             prefix_lines=self._lines_of(config, "tgt"),
+            vocabulary=self._vocabulary_of(config),
         )
         self.launches.append(launch)
         log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -115,7 +120,16 @@ class FakeRunLogged:
             Path(config[key]).read_text(encoding="utf-8").removesuffix("\n").split("\n")
         )
 
+    @staticmethod
+    def _vocabulary_of(config: dict[str, Any]) -> bytes | None:
+        vocabulary = Path(config["src_vocab"]) if "src_vocab" in config else None
+        return vocabulary.read_bytes() if vocabulary and vocabulary.is_file() else None
+
     def _leave_results(self, launch: Launch) -> None:
+        if launch.subcommand == "build_vocab" and self.vocabulary is not None:
+            vocabulary = Path(launch.config["src_vocab"])
+            vocabulary.parent.mkdir(parents=True, exist_ok=True)
+            vocabulary.write_bytes(self.vocabulary)
         if launch.subcommand == "train":
             model_path = Path(launch.config["training"]["model_path"])
             model_path.mkdir(parents=True, exist_ok=True)
@@ -699,6 +713,123 @@ def test_split_lines_breaks_at_lf_only_and_write_lines_ends_each_line_with_one(
     assert path.read_bytes() == "".join(f"{line}\n" for line in lines).encode("utf-8")
 
 
+# ---- run_training: the vocabulary invariant ---------------------------------------
+
+VOCABULARY = b"a\t5\nb\t3\n"
+
+
+@pytest.fixture
+def vocabulary_config(tmp_path: Path, run_dir: Path) -> Path:
+    """A config that names its vocabulary file, in the run directory."""
+    cfg = {
+        "seed": 1,
+        "src_vocab": (run_dir / "vocab.src").as_posix(),
+        "training": {"model_path": (run_dir / "ckpt").as_posix()},
+    }
+    path = tmp_path / "vocabulary.yaml"
+    path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    return path
+
+
+def test_run_training_adds_the_reserved_symbols_after_build_vocab_and_before_train(
+    fake_run: FakeRunLogged, vocabulary_config: Path, run_dir: Path
+) -> None:
+    fake_run.vocabulary = VOCABULARY
+
+    run_training(
+        vocabulary_config,
+        run_dir,
+        validate=_accept_anything,
+        reserved_symbols=["<x>", "a", "<y>"],
+    )
+
+    build_vocab, train = fake_run.launches
+    assert (build_vocab.subcommand, train.subcommand) == ("build_vocab", "train")
+    assert build_vocab.vocabulary is None
+    assert train.vocabulary == VOCABULARY + b"<x>\t1\n<y>\t1\n"
+
+
+def test_run_training_without_reserved_symbols_leaves_the_vocabulary_as_eole_wrote_it(
+    fake_run: FakeRunLogged, vocabulary_config: Path, run_dir: Path
+) -> None:
+    fake_run.vocabulary = VOCABULARY
+
+    run_training(vocabulary_config, run_dir, validate=_accept_anything)
+
+    assert fake_run.launches[1].vocabulary == VOCABULARY
+
+
+def test_run_training_without_reserved_symbols_needs_no_vocabulary_file(
+    fake_run: FakeRunLogged, config: Path, run_dir: Path
+) -> None:
+    # The converter's config (D5) names a vocabulary of its own kind; nothing is
+    # looked for in it unless symbols are asked for.
+    run_training(config, run_dir, validate=_accept_anything)
+
+    assert fake_run.subcommands == ["build_vocab", "train"]
+
+
+def test_run_training_does_not_add_symbols_after_a_failed_build_vocab(
+    fake_run: FakeRunLogged, vocabulary_config: Path, run_dir: Path
+) -> None:
+    fake_run.failures["build_vocab"] = UpstreamError("eole build_vocab failed")
+    (run_dir).mkdir()
+    (run_dir / "vocab.src").write_bytes(VOCABULARY)
+
+    with pytest.raises(UpstreamError, match="build_vocab failed"):
+        run_training(
+            vocabulary_config,
+            run_dir,
+            validate=_accept_anything,
+            reserved_symbols=["<x>"],
+        )
+
+    assert (run_dir / "vocab.src").read_bytes() == VOCABULARY
+    assert fake_run.subcommands == ["build_vocab"]
+
+
+def test_run_training_stops_when_build_vocab_leaves_no_vocabulary_file(
+    fake_run: FakeRunLogged, vocabulary_config: Path, run_dir: Path
+) -> None:
+    with pytest.raises(DataError, match="vocabulary file"):
+        run_training(
+            vocabulary_config,
+            run_dir,
+            validate=_accept_anything,
+            reserved_symbols=["<x>"],
+        )
+
+    assert fake_run.subcommands == ["build_vocab"]
+
+
+def test_run_training_asks_a_config_without_a_vocabulary_file_name_for_one(
+    fake_run: FakeRunLogged, config: Path, run_dir: Path
+) -> None:
+    with pytest.raises(ConfigError, match="src_vocab"):
+        run_training(
+            config, run_dir, validate=_accept_anything, reserved_symbols=["<x>"]
+        )
+
+    assert fake_run.launches == []
+    assert not run_dir.exists()
+
+
+@pytest.mark.parametrize("bad", ["", "a\tb", "a\nb"], ids=["empty", "tab", "lf"])
+def test_run_training_refuses_a_symbol_that_breaks_the_format_before_it_runs_anything(
+    fake_run: FakeRunLogged, vocabulary_config: Path, run_dir: Path, bad: str
+) -> None:
+    with pytest.raises(ValueError, match="symbol"):
+        run_training(
+            vocabulary_config,
+            run_dir,
+            validate=_accept_anything,
+            reserved_symbols=["<x>", bad],
+        )
+
+    assert fake_run.launches == []
+    assert not run_dir.exists()
+
+
 # ---- predict_tokens: the config -------------------------------------------------
 
 SOURCE = ["<2xx> a b", "<2xx> c a", "<2xx> b c"]
@@ -765,6 +896,87 @@ def test_predict_tokens_passes_the_batch_size_on(
     _predict(tmp_path, batch_size=7)
 
     assert fake_run.launches[0].config["batch_size"] == 7
+
+
+def test_predict_tokens_writes_the_length_limits_when_they_are_given(
+    fake_run: FakeRunLogged, tmp_path: Path
+) -> None:
+    _predict(tmp_path, max_length=400, max_length_ratio=3.5)
+
+    config = fake_run.launches[0].config
+    assert (config["max_length"], config["max_length_ratio"]) == (400, 3.5)
+    assert isinstance(config["max_length"], int)
+
+
+def test_predict_tokens_writes_each_length_limit_alone(
+    fake_run: FakeRunLogged, tmp_path: Path
+) -> None:
+    _predict(tmp_path, max_length=9)
+    _predict(tmp_path, max_length_ratio=2)
+
+    first, second = (launch.config for launch in fake_run.launches)
+    assert ("max_length" in first, "max_length_ratio" in first) == (True, False)
+    assert ("max_length" in second, "max_length_ratio" in second) == (False, True)
+    assert (first["max_length"], second["max_length_ratio"]) == (9, 2)
+
+
+def test_predict_tokens_writes_neither_length_limit_by_default(
+    fake_run: FakeRunLogged, tmp_path: Path
+) -> None:
+    _predict(tmp_path)
+
+    config = fake_run.launches[0].config
+    assert "max_length" not in config
+    assert "max_length_ratio" not in config
+
+
+@pytest.mark.parametrize("ratio", [0, 0.0])
+def test_a_length_ratio_of_zero_is_written_because_it_turns_the_cap_off(
+    fake_run: FakeRunLogged, tmp_path: Path, ratio: float
+) -> None:
+    _predict(tmp_path, max_length_ratio=ratio)
+
+    assert fake_run.launches[0].config["max_length_ratio"] == 0
+
+
+@pytest.mark.parametrize(
+    "length",
+    [0, -1, True, False, 2.5, 250.0, "250"],
+    ids=["zero", "negative", "true", "false", "float", "whole float", "text"],
+)
+def test_predict_tokens_refuses_a_max_length_that_is_not_a_positive_integer(
+    fake_run: FakeRunLogged, tmp_path: Path, length: object
+) -> None:
+    with pytest.raises(ValueError, match="max_length"):
+        _predict(tmp_path, max_length=length)
+
+    assert fake_run.launches == []
+    assert not (tmp_path / "out").exists()
+
+
+@pytest.mark.parametrize(
+    "ratio",
+    [-0.1, -1, True, False, math.nan, math.inf, -math.inf, "2", [2]],
+    ids=[
+        "negative float",
+        "negative",
+        "true",
+        "false",
+        "nan",
+        "inf",
+        "minus inf",
+        "text",
+        "list",
+    ],
+)
+def test_predict_tokens_refuses_a_length_ratio_that_is_not_a_finite_non_negative_number(
+    fake_run: FakeRunLogged, tmp_path: Path, ratio: object
+) -> None:
+    with pytest.raises(ValueError, match="max_length_ratio"):
+        _predict(tmp_path, max_length_ratio=ratio)
+
+    assert fake_run.launches == []
+    assert not (tmp_path / "out").exists()
 
 
 def test_predict_tokens_writes_the_source_token_lines_one_per_line(

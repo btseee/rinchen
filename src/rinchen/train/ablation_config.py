@@ -5,6 +5,13 @@ the base config.
 The plan builds it in memory to check it before anything is written; the preparation of
 a variant builds it from the corpora it wrote and renders it to a file. Both go through
 `variant_overrides`, so the config that was checked is the config that is written.
+
+The config also states the size of the vocabulary. Eole keeps the first `src_vocab_size`
+tokens of the vocabulary file, special tokens included, and its default is 32,768: a
+SentencePiece model of 128,000 pieces would lose the rarest of them to `<unk>`, and the
+reserved symbols that `eole_run.add_reserved_symbols` appends at the END of the file would
+be cut first. So the size is the model's pieces plus Eole's own pad token (`<blank>`, which
+is no piece), and a smaller one that the base or the overrides ask for is refused.
 """
 
 from __future__ import annotations
@@ -14,10 +21,19 @@ from pathlib import Path
 from typing import Any
 
 from rinchen.config.ablation import AblationMatrix
+from rinchen.errors import ConfigError
 from rinchen.train.ablation_layout import VariantPaths
 from rinchen.train.eole_cfg import merged_config, read_config
 from rinchen.train.eole_data import CorpusEntry, data_section
+from rinchen.train.validation_corpus import load_processor
 from rinchen.train.variants import Variant
+from rinchen.utils.integers import is_strict_int
+
+# Eole adds `<blank>`, its pad token, to the vocabulary of every model, and a SentencePiece
+# model has no such piece (it has no pad piece), so a vocabulary of all the pieces holds
+# one token more than the model has pieces.
+_EOLE_EXTRA_TOKENS = 1
+_VOCABULARY_SIZE_KEYS = ("src_vocab_size", "tgt_vocab_size")
 
 
 def variant_overrides(
@@ -33,10 +49,16 @@ def variant_overrides(
     matrix overrides over them. The per-run values are the variant's seed, the
     `vocab.src` and `ckpt` of its run directory, `spm_model` for both sides, and the
     `data` section of `corpora` with `weights` (running `filtertoolong` when the
-    finished config configures it), every path as absolute POSIX text.
+    finished config configures it), every path as absolute POSIX text. The finished
+    config also has `src_vocab_size`: the one the base or the overrides give when it
+    holds every token of the SentencePiece model, else (when none is given) the number
+    of its pieces plus one for Eole's pad token.
 
     Raises:
-        ConfigError: the base config cannot be read, or a path holds `$`.
+        ConfigError: the base config cannot be read, a path holds `$`, the SentencePiece
+            model cannot be loaded, or a `src_vocab_size` or `tgt_vocab_size` the base
+            or the overrides give is not a positive integer or is below what the
+            model's vocabulary needs.
         ValueError: `data_section` refuses the corpora or the weights.
     """
     base = read_config(matrix.base, "base Eole config")
@@ -57,7 +79,9 @@ def variant_overrides(
         },
         "training": {"model_path": paths.ckpt_dir.as_posix()},
     }
-    return _layered(per_run, matrix.overrides)
+    layered = _layered(per_run, matrix.overrides)
+    layered.update(_vocabulary_size(base, matrix.overrides, spm_model))
+    return layered
 
 
 def variant_config(
@@ -86,6 +110,45 @@ def variant_config(
         weights=weights,
     )
     return merged_config(matrix.base, overrides)
+
+
+def _vocabulary_size(
+    base: object, overrides: Mapping[str, Any], spm_model: Path
+) -> dict[str, int]:
+    """`src_vocab_size` for the finished config when the base and the overrides leave
+    it out (an override of `None` deletes the base's), as an override over the layered
+    ones; nothing when a size is given. Either size that is given is checked against the
+    model's vocabulary."""
+    needed = load_processor(spm_model).GetPieceSize() + _EOLE_EXTRA_TOKENS
+    given = {
+        key: overrides[key] if key in overrides else _lookup(base, key)
+        for key in _VOCABULARY_SIZE_KEYS
+    }
+    for key, size in given.items():
+        if size is not None:
+            _require_vocabulary_size(key, size, needed, spm_model)
+    return {} if given["src_vocab_size"] is not None else {"src_vocab_size": needed}
+
+
+def _lookup(config: object, key: str) -> Any:
+    return config.get(key) if isinstance(config, Mapping) else None
+
+
+def _require_vocabulary_size(
+    key: str, size: object, needed: int, spm_model: Path
+) -> None:
+    if not is_strict_int(size) or size < 1:
+        raise ConfigError(
+            f"invalid Eole config: {key}: must be a positive integer, got {size!r}"
+        )
+    if size < needed:
+        pieces = needed - _EOLE_EXTRA_TOKENS
+        raise ConfigError(
+            f"invalid Eole config: {key}: {size} is below {needed}, what the "
+            f"vocabulary of the SentencePiece model {spm_model} needs ({pieces} pieces "
+            "and Eole's pad token): Eole would cut the reserved symbols that are added "
+            "at the end of its vocabulary file"
+        )
 
 
 def _layered(

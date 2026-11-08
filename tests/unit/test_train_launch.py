@@ -25,6 +25,7 @@ import pytest
 import yaml
 
 from rinchen.errors import ConfigError, DataError, UpstreamError
+from rinchen.spm.symbols import user_defined_symbols
 from rinchen.train import launch as launch_module
 from rinchen.train.checkpoints import (
     LAUNCH_FILE,
@@ -35,6 +36,7 @@ from rinchen.train.checkpoints import (
 from rinchen.train.launch import LaunchResult, latest_attempt_log, launch
 from tests.support import step_dirs
 from tests.support.fake_launch import (
+    BUILT_VOCABULARY,
     EOLE,
     FakeEole,
     Script,
@@ -168,6 +170,154 @@ def test_the_vocabulary_is_built_only_when_the_vocabulary_file_is_missing(
     go(config_path, run_dir)
 
     assert [call.subcommand for call in fake.calls] == ["train"]
+
+
+# ---- the vocabulary invariant ------------------------------------------------------
+
+
+def _complete(vocabulary: bytes) -> bytes:
+    """`vocabulary` with every reserved symbol of the project added as Eole's
+    `build_vocab` counts them, the way the invariant leaves a vocabulary file."""
+    present = {line.split(b"\t")[0] for line in vocabulary.splitlines()}
+    return vocabulary + b"".join(
+        f"{symbol}\t1\n".encode()
+        for symbol in user_defined_symbols()
+        if symbol.encode() not in present
+    )
+
+
+def test_a_fresh_launch_adds_every_reserved_symbol_between_build_vocab_and_train(
+    config_path: Path, run_dir: Path, fake: FakeEole
+) -> None:
+    go(config_path, run_dir)
+
+    build_vocab, train = fake.calls
+    assert build_vocab.vocabulary is None
+    assert train.vocabulary == _complete(BUILT_VOCABULARY.encode())
+    assert (run_dir / "vocab.src").read_bytes() == train.vocabulary
+
+
+def test_every_reserved_symbol_is_in_the_vocabulary_once(
+    config_path: Path, run_dir: Path, fake: FakeEole
+) -> None:
+    go(config_path, run_dir)
+
+    tokens = [
+        line.split("\t")[0]
+        for line in (run_dir / "vocab.src").read_text("utf-8").splitlines()
+    ]
+    assert len(tokens) == len(set(tokens))
+    assert set(user_defined_symbols()) <= set(tokens)
+
+
+def test_an_existing_vocabulary_that_lacks_symbols_is_topped_up_before_training(
+    config_path: Path, run_dir: Path, fake: FakeEole
+) -> None:
+    run_dir.mkdir()
+    (run_dir / "vocab.src").write_bytes(b"a\t2\n<sep>\t7\n")
+
+    go(config_path, run_dir)
+
+    assert fake.vocabularies == []
+    assert fake.trains[0].vocabulary == _complete(b"a\t2\n<sep>\t7\n")
+
+
+def test_a_complete_existing_vocabulary_is_not_rewritten(
+    config_path: Path, run_dir: Path, fake: FakeEole
+) -> None:
+    complete = _complete(b"a\t2\n")
+    run_dir.mkdir()
+    vocabulary = run_dir / "vocab.src"
+    vocabulary.write_bytes(complete)
+    before = vocabulary.stat()
+
+    go(config_path, run_dir)
+
+    assert fake.trains[0].vocabulary == complete
+    after = vocabulary.stat()
+    assert (after.st_ino, after.st_mtime_ns) == (before.st_ino, before.st_mtime_ns)
+
+
+def test_a_resume_leaves_the_completed_vocabulary_as_the_first_attempt_made_it(
+    config_path: Path, run_dir: Path, fake: FakeEole
+) -> None:
+    start_and_crash(fake, config_path, run_dir)
+    first = (run_dir / "vocab.src").read_bytes()
+
+    go(config_path, run_dir)
+
+    assert fake.trains[1].vocabulary == first
+    assert (run_dir / "vocab.src").read_bytes() == first
+
+
+def test_a_write_only_launch_does_not_touch_the_vocabulary(
+    config_path: Path, run_dir: Path, fake: FakeEole
+) -> None:
+    run_dir.mkdir()
+    (run_dir / "vocab.src").write_bytes(b"a\t2\n")
+
+    go(config_path, run_dir, write_only=True)
+
+    assert (run_dir / "vocab.src").read_bytes() == b"a\t2\n"
+    assert fake.calls == []
+
+
+def test_a_write_only_launch_without_a_vocabulary_does_not_make_one(
+    config_path: Path, run_dir: Path, fake: FakeEole
+) -> None:
+    go(config_path, run_dir, write_only=True)
+
+    assert not (run_dir / "vocab.src").exists()
+
+
+def test_a_run_found_finished_does_not_touch_the_vocabulary(
+    config_path: Path, run_dir: Path, fake: FakeEole
+) -> None:
+    go(config_path, run_dir)
+    (run_dir / "vocab.src").write_bytes(b"a\t2\n")
+
+    result = go(config_path, run_dir)
+
+    assert result.status == "already_complete"
+    assert (run_dir / "vocab.src").read_bytes() == b"a\t2\n"
+
+
+def test_a_launch_that_is_refused_does_not_touch_the_vocabulary(
+    config_path: Path, run_dir: Path, base_cfg: dict[str, Any], fake: FakeEole
+) -> None:
+    go(config_path, run_dir)
+    (run_dir / "vocab.src").write_bytes(b"a\t2\n")
+    lowered = write_config(
+        config_path.parent / "lowered.yaml", config_with(base_cfg, train_steps=50)
+    )
+
+    with pytest.raises(ConfigError, match="below step 200"):
+        go(lowered, run_dir)
+
+    assert (run_dir / "vocab.src").read_bytes() == b"a\t2\n"
+
+
+def test_a_failed_build_vocab_adds_nothing_and_trains_nothing(
+    config_path: Path, run_dir: Path, fake: FakeEole
+) -> None:
+    fake.vocabulary_error = UpstreamError("eole build_vocab failed: exit code 1")
+
+    with pytest.raises(UpstreamError, match="build_vocab"):
+        go(config_path, run_dir)
+
+    assert not (run_dir / "vocab.src").exists()
+    assert fake.trains == []
+
+
+def test_a_build_vocab_that_leaves_no_file_stops_the_launch_before_training(
+    config_path: Path, run_dir: Path, fake: FakeEole
+) -> None:
+    fake.writes_vocabulary = False
+
+    with pytest.raises(DataError, match="vocabulary file"):
+        go(config_path, run_dir)
+
+    assert fake.trains == []
 
 
 def test_the_attempt_config_is_the_base_config_with_nothing_added(

@@ -28,8 +28,12 @@ ran is on disk, and an earlier attempt's log is never read as a later one's.
 The order of the work: read and validate the config, apply the GPU rules (`gpu_rules`),
 take the identity of the run, take the lock of the run, look at the checkpoints
 (`checkpoints.latest_complete`), write the attempt's files and `launch.json`, then
-(unless `write_only`) build the vocabulary when its file is missing, run `eole train` and
-decide from its log and the step directories how it ended. A resume names the newest
+(unless `write_only`) build the vocabulary when its file is missing, add the reserved symbols
+it lacks (`eole_run.add_reserved_symbols`: the file `eole build_vocab` writes holds only the
+tokens the data showed, and a symbol it lacks would be `<unk>` to the model, see there; an
+existing file is topped up the same way, and a complete one is left alone), run `eole train`
+and decide from its log and the step directories how it ended. A run found finished, a
+`write_only` and a refused launch leave the vocabulary file as it is. A resume names the newest
 COMPLETE step directory of the run, never `model_path` (Eole's saver is not atomic), and
 only the run's own: the config files never hold `train_from`. Eole ignores the config's
 `model` section when it resumes and takes the checkpoint's own, so a complete step
@@ -78,7 +82,10 @@ that checkpoint holds the damage, so it is refused instead of resumed or called 
 
 Not done: a live abort on NaN. The vocabulary is built on the attempt's own config, a
 resume config included (only needed when the vocabulary file is missing at a resume; that
-`eole build_vocab` accepts `training.train_from` in it is not measured).
+`eole build_vocab` accepts `training.train_from` in it is not measured). `command.sh` builds
+the vocabulary but does not add the reserved symbols: a run started by hand from it trains
+on the vocabulary as Eole wrote it, and the next `launch` of that run adds them to the file
+(a checkpoint keeps the vocabulary it was trained with, so that is too late for it).
 
 Eole is reached only through `run_logged`, which runs it in a process group of its own
 and kills the group on Ctrl-C, SIGTERM, SIGHUP, a timeout, and when Eole's leader exits
@@ -97,6 +104,7 @@ from pathlib import Path
 from typing import Any, Final, Literal
 
 from rinchen.errors import ConfigError, UpstreamError
+from rinchen.spm.symbols import user_defined_symbols
 from rinchen.train.checkpoints import (
     LAUNCH_FILE,
     ResumePoint,
@@ -117,6 +125,7 @@ from rinchen.train.eole_cfg import (
     validate_train_config,
 )
 from rinchen.train.eole_run import (
+    add_reserved_symbols,
     eole_command,
     model_path_inside,
     training_environment,
@@ -227,7 +236,8 @@ def launch(
             some are of another one (see above), or another launch holds the run (its
             lock file is named; also for `write_only`).
         DataError: `launch.json` is not a launch record, or the checkpoint directory
-            cannot be listed.
+            cannot be listed, or the vocabulary file cannot be read (`eole build_vocab`
+            left none).
         ValueError: `threads` is less than 1.
         UpstreamError: `eole` is not installed, a command exits non-zero (unless the run
             early-stopped) or runs past `timeout`, `eole train` exits 0 without
@@ -331,6 +341,7 @@ def _launch_guarded(work: _Work, lock_fds: tuple[int, ...]) -> LaunchResult:
             timeout=timeout,
             inherit_fds=lock_fds,
         )
+    add_reserved_symbols(plan.src_vocab, user_defined_symbols())
     failure: UpstreamError | None = None
     try:
         run_logged(

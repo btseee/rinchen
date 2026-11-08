@@ -67,6 +67,11 @@ for name in os.listdir("/proc/self/fd"):
 )
 with (fake_dir / "invocations").open("a") as invocations:
     invocations.write(str(os.getpid()) + " " + subcommand + "\\n")
+if subcommand == "build_vocab":
+    # The launcher adds the reserved symbols to the vocabulary file `build_vocab` leaves.
+    import yaml
+    config = yaml.safe_load(Path(sys.argv[sys.argv.index("-config") + 1]).read_text())
+    Path(config["src_vocab"]).write_text("a\\t2\\nb\\t1\\n")
 if subcommand == "train" and os.environ.get("FAKE_WAIT") == "1":
     (fake_dir / "running.tmp").write_text(str(os.getpid()))
     os.replace(fake_dir / "running.tmp", fake_dir / "running")

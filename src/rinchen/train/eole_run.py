@@ -4,10 +4,19 @@ config, and prediction on token lines from a trained checkpoint.
 Each command runs as a subprocess with its output in a log file. Training stays on
 the CPU when the config asks for no GPU, even on a machine that has one, and the
 thread count is set explicitly: both make a small run repeatable.
+
+The vocabulary of an Eole model is the file `eole build_vocab` writes (the tokens the
+training data showed, plus the prefix tokens it was given), not the SentencePiece
+vocabulary. A reserved symbol that the data never showed, `<sep>` before the document
+data of D9 for one, is then not in the vocabulary of the model, and a model that is
+later trained on data that has it reads it as `<unk>`, without a word. So every
+Rinchen vocabulary holds every reserved symbol: `add_reserved_symbols` appends the
+missing ones to the file after `eole build_vocab`.
 """
 
 from __future__ import annotations
 
+import math
 import os
 import shutil
 import sys
@@ -16,14 +25,16 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, NamedTuple
 
-from rinchen.errors import ConfigError, UpstreamError
+from rinchen.errors import ConfigError, DataError, UpstreamError
 from rinchen.train.eole_cfg import (
     dump_config,
     read_config,
     reject_dollar,
     reject_glob_characters,
 )
+from rinchen.utils.integers import is_strict_int
 from rinchen.utils.logged_process import run_logged
+from rinchen.utils.part_file import replace_file
 
 # Eole keeps its newest checkpoint under this name in `model_path` (a link to the file
 # in a step directory), so a run that trained leaves it there with a fresh
@@ -55,10 +66,16 @@ def run_training(
     threads: int = 2,
     timeout: float | None = None,
     what: str = "Eole config",
+    reserved_symbols: Sequence[str] = (),
 ) -> Path:
     """Build the vocabulary, then train, as `eole build_vocab` and `eole train` on the
     config at `cfg_path`; return the checkpoint directory, the config's
     `training.model_path`.
+
+    With `reserved_symbols` the symbols the vocabulary file (the config's `src_vocab`)
+    lacks after `eole build_vocab` are appended to it (`add_reserved_symbols`) before
+    `eole train` reads it. A model that takes no such symbols, the script converter's,
+    leaves them out, and its vocabulary is as Eole wrote it.
 
     `run_dir` is created and takes `build_vocab.log` and `train.log` (standard output
     and error of each command). The GPU is hidden from both commands when the config
@@ -74,8 +91,12 @@ def run_training(
             it; its `training.model_path` is missing or not inside `run_dir`; or its
             path, its text or `run_dir` holds `$`, which Eole would expand as a
             variable; or its `training.model_path` holds `[`, `]`, `*` or `?`, which
-            Eole reads as a glob pattern when it loads a checkpoint from it.
-        ValueError: `threads` is less than 1.
+            Eole reads as a glob pattern when it loads a checkpoint from it; or
+            `reserved_symbols` is given and the config names no `src_vocab`.
+        ValueError: `threads` is less than 1; a reserved symbol is empty or holds a
+            tab or a line break.
+        DataError: `reserved_symbols` is given and `eole build_vocab` left no
+            vocabulary file.
         UpstreamError: a command exits non-zero or runs past `timeout` (the message
             ends with the last lines of its log), the `eole` command is missing, or
             training exits zero without writing a checkpoint after it was launched.
@@ -87,6 +108,8 @@ def run_training(
     validate(cfg)
     model_path = model_path_inside(cfg, run_dir, what)
     reject_glob_characters("checkpoint directory", model_path)
+    symbols = _distinct_symbols(reserved_symbols)
+    vocabulary = _vocabulary_file(cfg, what) if symbols else None
     build_vocab_command, train_command = eole_commands(cfg_path)
     training = cfg["training"]
     trains_on_gpu = isinstance(training, Mapping) and bool(training.get("gpu_ranks"))
@@ -105,6 +128,8 @@ def run_training(
         )
 
     run_eole(build_vocab_command)
+    if vocabulary is not None:
+        add_reserved_symbols(vocabulary, symbols)
     launched = time.time()
     run_eole(train_command)
     if not written_since(model_path / CHECKPOINT_FILE, launched - _MTIME_SLACK_SECONDS):
@@ -114,6 +139,99 @@ def run_training(
             f"{run_dir / 'train.log'}"
         )
     return model_path
+
+
+def add_reserved_symbols(vocab_file: Path, symbols: Sequence[str]) -> tuple[str, ...]:
+    """Append to the vocabulary file `vocab_file` (as `eole build_vocab` writes it, one
+    `token<TAB>count` line each) every one of `symbols` that is not a token of it, in
+    the order of `symbols`, as `symbol<TAB>1`; return the symbols appended. A symbol
+    given twice is appended once. A symbol is present when it is the whole token of a
+    line, the line as Eole reads it: the text before the last tab, and for a file
+    without counts (its first line has no tab and no number after a space) the whole
+    line; a symbol that is only part of a token or in a count column is missing. A file
+    that lacks counts gets the bare symbols, as Eole would take `<TAB>1` for part of
+    the token there.
+
+    The bytes of the file stay as they are: no line is changed, reordered or
+    re-terminated (a CRLF file keeps its CRLF, and the lines appended end in LF, which
+    Eole reads beside them), and an LF is added before the first symbol only when the
+    file does not end with one. Nothing is rewritten when no symbol is missing. The
+    file is written whole through a temporary file and a rename, so a failure leaves
+    the original. The symbols go at the END of the file, where a `src_vocab_size` below
+    the number of tokens would cut them (`ablation_config` sets it so it does not).
+
+    Two calls at once on one file with different symbols can lose one's symbols to the
+    other's rename; a run is one process.
+
+    Raises:
+        ValueError: a symbol is empty or holds a tab, an LF or a CR (it would break the
+            line format); nothing is written.
+        DataError: `vocab_file` cannot be read.
+    """
+    wanted = _distinct_symbols(symbols)
+    try:
+        content = vocab_file.read_bytes()
+    except OSError as exc:
+        raise DataError(f"cannot read the vocabulary file {vocab_file}: {exc}") from exc
+    lines = _vocabulary_lines(content)
+    counted = _has_counts(lines[0]) if lines else True
+    present = {_token_of(line, counted) for line in lines}
+    missing = tuple(symbol for symbol in wanted if symbol.encode() not in present)
+    if not missing:
+        return ()
+    ending = b"" if not content or content.endswith(b"\n") else b"\n"
+    suffix = b"\t1" if counted else b""
+    added = b"".join(symbol.encode() + suffix + b"\n" for symbol in missing)
+    replace_file(vocab_file, content + ending + added)
+    return missing
+
+
+def _distinct_symbols(symbols: Sequence[str]) -> tuple[str, ...]:
+    """`symbols` without repeats, in order; ValueError for one that cannot be a line."""
+    for symbol in symbols:
+        if not symbol or any(char in symbol for char in "\t\r\n"):
+            raise ValueError(
+                f"reserved symbol {symbol!r} is empty or holds a tab or a line break: "
+                "it cannot be a line of a vocabulary file"
+            )
+    return tuple(dict.fromkeys(symbols))
+
+
+def _vocabulary_lines(content: bytes) -> list[bytes]:
+    """The lines of a vocabulary file as Eole reads them: split at LF, the CR before
+    it dropped, no line for the text after the last LF when there is none."""
+    if not content:
+        return []
+    lines = content.split(b"\n")
+    if content.endswith(b"\n"):
+        lines.pop()
+    return [line.removesuffix(b"\r") for line in lines]
+
+
+def _has_counts(first_line: bytes) -> bool:
+    """Whether Eole reads the file as `token count` lines: its first line has a tab, or
+    two fields the second of which is a number."""
+    fields = first_line.split(None, 1)
+    return b"\t" in first_line or (len(fields) == 2 and fields[1].strip().isdigit())
+
+
+def _token_of(line: bytes, counted: bool) -> bytes:
+    if not counted:
+        return line
+    if b"\t" in line:
+        return line.rsplit(b"\t", 1)[0]
+    fields = line.split(None, 1)
+    return fields[0] if fields else b""
+
+
+def _vocabulary_file(cfg: Any, what: str) -> Path:
+    vocabulary = cfg.get("src_vocab") if isinstance(cfg, Mapping) else None
+    if not isinstance(vocabulary, str) or not vocabulary:
+        raise ConfigError(
+            f"invalid {what}: src_vocab: must name the vocabulary file that "
+            "`eole build_vocab` writes, which the reserved symbols are added to"
+        )
+    return Path(vocabulary)
 
 
 def eole_commands(cfg_path: Path) -> tuple[tuple[str, ...], tuple[str, ...]]:
@@ -166,6 +284,8 @@ def predict_tokens(
     batch_size: int = 64,
     stem: str = "eole",
     stale_files: Sequence[Path] = (),
+    max_length: int | None = None,
+    max_length_ratio: float | None = None,
 ) -> list[str]:
     """Translate the token lines `source_tokens` (pieces joined by U+0020, a direction
     tag among them if the model wants one) with the checkpoint in `ckpt_dir`, greedily
@@ -190,6 +310,12 @@ def predict_tokens(
     `timeout` (seconds) bounds the command; one that runs past it is killed with
     everything it started.
 
+    Eole stops a hypothesis at `max_length` pieces (default 250) and at `max_length_ratio`
+    times the longest source line of a batch plus 5 (default 2), a cut that is silent:
+    the rest of a long output is simply missing. Both go into the prediction config when
+    given, and Eole's defaults apply when they are left out. A `max_length_ratio` of 0
+    turns the ratio cap off.
+
     Raises:
         ConfigError: `ckpt_dir`, `out_dir` or `stem` holds `$`, which Eole would
             expand as a variable in the prediction config; `ckpt_dir` holds `[`, `]`,
@@ -200,7 +326,9 @@ def predict_tokens(
             or a forced prefix, or a source line when prefixes are forced, is empty or
             only whitespace (Eole drops such an example without a word; the message
             names the first such line, counted from 1, forced prefix before source).
-            An empty source line is fine when no prefix is forced.
+            An empty source line is fine when no prefix is forced. `max_length` is
+            not a positive integer or `max_length_ratio` not a finite number of at
+            least 0 (a bool is neither).
         UpstreamError: `eole predict` exits non-zero or runs past `timeout` (the
             message ends with the last lines of its log), the `eole` command is
             missing, or it exits zero without writing its output or with another
@@ -217,6 +345,7 @@ def predict_tokens(
         raise ValueError("no source lines to translate")
     if forced_prefix_tokens is not None:
         _require_lines_eole_keeps(source_tokens, forced_prefix_tokens)
+    _require_length_limits(max_length, max_length_ratio)
     for name, value in (
         ("checkpoint directory", ckpt_dir),
         ("output directory", out_dir),
@@ -241,6 +370,10 @@ def predict_tokens(
     if forced_prefix_tokens is not None:
         cfg["tgt"] = files.token_target.as_posix()
         cfg["tgt_file_prefix"] = True
+    if max_length is not None:
+        cfg["max_length"] = max_length
+    if max_length_ratio is not None:
+        cfg["max_length_ratio"] = max_length_ratio
 
     out_dir.mkdir(parents=True, exist_ok=True)
     for stale in stale_files:
@@ -271,6 +404,23 @@ def predict_tokens(
             f"source lines: {files.token_output}"
         )
     return output_lines
+
+
+def _require_length_limits(max_length: object, max_length_ratio: object) -> None:
+    if max_length is not None and (not is_strict_int(max_length) or max_length < 1):
+        raise ValueError(f"max_length must be a positive integer, got {max_length!r}")
+    if max_length_ratio is None:
+        return
+    if (
+        isinstance(max_length_ratio, bool)
+        or not isinstance(max_length_ratio, int | float)
+        or not math.isfinite(max_length_ratio)
+        or max_length_ratio < 0
+    ):
+        raise ValueError(
+            "max_length_ratio must be a finite number of at least 0, "
+            f"got {max_length_ratio!r}"
+        )
 
 
 def _require_lines_eole_keeps(

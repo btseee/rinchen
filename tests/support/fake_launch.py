@@ -29,6 +29,7 @@ from tests.support import step_dirs
 from tests.support.eole_train_config import make_config
 
 EOLE = "/fake/venv/bin/eole"
+BUILT_VOCABULARY = "a\t2\nb\t1\n"
 REPORT_EVERY = 10
 SAVE_EVERY = 50
 _STEP_DIRECTORY = re.compile(r"step_([0-9]+)")
@@ -107,6 +108,7 @@ class Call:
     # (st_dev, st_ino) of the file behind each of them when the command started: the
     # numbers alone do not say what they were
     inherited_files: tuple[tuple[int, int], ...]
+    vocabulary: bytes | None  # the config's `src_vocab` file when the command started
 
     @property
     def subcommand(self) -> str:
@@ -121,6 +123,7 @@ class FakeEole:
     calls: list[Call] = field(default_factory=list)
     scripts: list[Script] = field(default_factory=list)
     vocabulary_error: BaseException | None = None
+    writes_vocabulary: bool = True  # false: `build_vocab` exits 0 and leaves no file
 
     def queue(self, *scripts: Script) -> None:
         """The scripts of the next `eole train` calls, in order."""
@@ -145,19 +148,24 @@ class FakeEole:
         inherit_fds: Sequence[int] = (),
     ) -> None:
         launch_json = self.run_dir / "launch.json"
+        config = yaml.safe_load(Path(command[3]).read_text(encoding="utf-8"))
+        vocabulary_file = Path(config["src_vocab"])
         call = Call(
             command=tuple(command),
             env=dict(env),
             log_path=log_path,
             what=what,
             timeout=timeout,
-            config=yaml.safe_load(Path(command[3]).read_text(encoding="utf-8")),
+            config=config,
             launch_json=launch_json.read_bytes() if launch_json.exists() else None,
             inherit_fds=tuple(inherit_fds),
             inherited_files=tuple(
                 (status.st_dev, status.st_ino)
                 for status in (os.fstat(number) for number in inherit_fds)
             ),
+            vocabulary=vocabulary_file.read_bytes()
+            if vocabulary_file.is_file()
+            else None,
         )
         self.calls.append(call)
         log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -170,9 +178,12 @@ class FakeEole:
         call.log_path.write_text("vocabulary counted\n", encoding="utf-8")
         if self.vocabulary_error is not None:
             raise self.vocabulary_error
+        if not self.writes_vocabulary:
+            return
         vocabulary = Path(call.config["src_vocab"])
         vocabulary.parent.mkdir(parents=True, exist_ok=True)
-        vocabulary.write_text("a\nb\n", encoding="utf-8")
+        # The format of `eole build_vocab`: one token and its count per line.
+        vocabulary.write_text(BUILT_VOCABULARY, encoding="utf-8")
 
     def _train(self, call: Call) -> None:
         script = self.scripts.pop(0) if self.scripts else Script()

@@ -4,8 +4,8 @@
 Parquet file, the development sets of the four directions and a SentencePiece model.
 `train_tiny_variant` then takes one variant through the chain the ablation run uses:
 a one-variant plan, `prepare_variant` (corpora, mixing weights, the validation corpus,
-the Eole `data` section, the rendered config) and `run_training`, and returns the
-checkpoint.
+the Eole `data` section, the rendered config) and `run_training` with the reserved
+symbols, as `run_ablation` calls it, and returns the checkpoint.
 
 A run this short learns little (chrF between 1 and 35 on the toy dev sets), so what a
 test may check is plumbing, never a quality threshold; the quality gate is the
@@ -22,6 +22,7 @@ from typing import Final
 
 from rinchen.config.ablation import AblationMatrix, TagPlacement
 from rinchen.config.loader import REPO_ROOT
+from rinchen.spm.symbols import user_defined_symbols
 from rinchen.train.ablation_plan import plan_ablation
 from rinchen.train.ablation_prepare import prepare_variant
 from rinchen.train.eole_cfg import validate_train_config
@@ -134,6 +135,7 @@ def train_tiny_variant(
         validate=validate_train_config,
         threads=THREADS,
         timeout=COMMAND_TIMEOUT_SECONDS,
+        reserved_symbols=user_defined_symbols(),
     )
     return TinyVariant(
         placement=placement,

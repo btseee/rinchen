@@ -13,13 +13,14 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, NamedTuple, Protocol
 
 from rinchen.config.ablation import TagPlacement
 from rinchen.errors import UpstreamError
 from rinchen.manifest.stage import sha256_of
+from rinchen.spm.symbols import user_defined_symbols
 from rinchen.train.ablation_plan import AblationPlan
 from rinchen.train.ablation_prepare import PreparedVariant, prepare_variant
 from rinchen.train.ablation_records import (
@@ -43,7 +44,9 @@ from rinchen.utils.part_file import replace_file
 
 class TrainRunner(Protocol):
     """What `run_ablation` needs of a training: the shape of `eole_run.run_training`,
-    the seam a unit test replaces. It returns the checkpoint directory."""
+    the seam a unit test replaces. It returns the checkpoint directory. The reserved
+    symbols are those every vocabulary of ours holds (`spm.symbols`), which it adds
+    to the vocabulary file before it trains."""
 
     def __call__(
         self,
@@ -53,6 +56,7 @@ class TrainRunner(Protocol):
         validate: Callable[[Any], None],
         threads: int,
         timeout: float | None,
+        reserved_symbols: Sequence[str],
     ) -> Path: ...
 
 
@@ -92,7 +96,8 @@ def run_ablation(
     variant whose training an earlier run finished and recorded in its `train.json`
     (`ablation_records.trained_checkpoint`; not with `force`) skips `train`. Any other
     gets its stale `train.json` removed and `train` called as
-    `eole_run.run_training` is (`validate_train_config` as the validator), and its
+    `eole_run.run_training` is (`validate_train_config` as the validator, and the
+    reserved symbols of `spm.symbols` for its vocabulary), and its
     `train.json` written when it has finished. Then `evaluate` is called as
     `evaluate.evaluate_variant` is, and `result.json` is written last, so a crash
     leaves the variant incomplete, and, once it has trained, resumable at the
@@ -236,6 +241,7 @@ def _train(
         validate=validate_train_config,
         threads=threads,
         timeout=timeout,
+        reserved_symbols=user_defined_symbols(),
     )
     train_seconds = clock() - started
     checkpoint = ckpt_dir / CHECKPOINT_FILE

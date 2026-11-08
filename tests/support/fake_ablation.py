@@ -167,6 +167,7 @@ class TrainCall:
     timeout: float | None
     config_text: str
     checkpoint_dir: Path | None
+    reserved_symbols: tuple[str, ...] = ()
 
 
 class FakeTrain:
@@ -206,6 +207,7 @@ class FakeTrain:
         validate: Callable[[Any], None],
         threads: int,
         timeout: float | None,
+        reserved_symbols: Sequence[str] = (),
     ) -> Path:
         variant_id = cfg_path.parent.name
         validate(read_config(cfg_path, "Eole config"))
@@ -220,6 +222,7 @@ class FakeTrain:
                 timeout=timeout,
                 config_text=cfg_path.read_text(encoding="utf-8"),
                 checkpoint_dir=ckpt_dir,
+                reserved_symbols=tuple(reserved_symbols),
             )
         )
         if variant_id in self.fail:

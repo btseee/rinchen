@@ -19,6 +19,7 @@ from typing import Any
 import pytest
 
 from rinchen.errors import ConfigError, DataError, UpstreamError
+from rinchen.spm.symbols import user_defined_symbols
 from rinchen.train.ablation import run_ablation
 from rinchen.train.ablation_plan import AblationPlan, plan_ablation
 from rinchen.train.ablation_prepare import prepare_variant
@@ -141,6 +142,18 @@ def test_training_is_given_the_config_the_run_directory_the_validator_and_the_li
         assert call.config_text == (directory / "config.yaml").read_text(
             encoding="utf-8"
         )
+
+
+def test_training_is_asked_to_add_the_reserved_symbols_to_every_vocabulary(
+    completed: Run,
+) -> None:
+    symbols = user_defined_symbols()
+
+    assert [call.reserved_symbols for call in completed.train.calls] == [
+        tuple(symbols),
+        tuple(symbols),
+    ]
+    assert "<sep>" in symbols and "<2khk_Cyrl>" in symbols
 
 
 def test_the_evaluation_is_given_the_checkpoint_the_dev_sets_and_the_placement(
