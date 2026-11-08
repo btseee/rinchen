@@ -1002,15 +1002,81 @@ def test_predict_tokens_names_the_first_empty_forced_prefix_line(
         _predict(tmp_path, forced_prefix_tokens=["<2yy>", "", ""])
 
 
-def test_predict_tokens_accepts_an_empty_source_line_with_a_forced_prefix_of_its_own(
+BLANKS = ["", " ", "\t", " \t ", chr(0x3000), NNBSP]
+
+
+@pytest.mark.parametrize("blank", BLANKS[1:], ids=repr)
+def test_predict_tokens_rejects_a_forced_prefix_line_of_only_whitespace(
+    fake_run: FakeRunLogged, tmp_path: Path, blank: str
+) -> None:
+    # Eole splits the prefix into tokens, finds none, and drops the example.
+    with pytest.raises(ValueError) as raised:
+        _predict(tmp_path, forced_prefix_tokens=["<2yy>", blank, "<2yy>"])
+
+    assert (
+        str(raised.value)
+        == "forced prefix for source line 2 is empty or only whitespace"
+    )
+    assert fake_run.launches == []
+    assert not (tmp_path / "out").exists()
+
+
+@pytest.mark.parametrize("blank_at", [0, 1, 2])
+@pytest.mark.parametrize("blank", BLANKS, ids=repr)
+def test_predict_tokens_rejects_an_empty_or_blank_source_line_when_prefixes_are_forced(
+    fake_run: FakeRunLogged, tmp_path: Path, blank: str, blank_at: int
+) -> None:
+    # Eole silently drops such an example too, and the line count check would then
+    # fail after the run.
+    source = list(SOURCE)
+    source[blank_at] = blank
+
+    with pytest.raises(ValueError) as raised:
+        _predict(tmp_path, source=source, forced_prefix_tokens=["<2yy>"] * 3)
+
+    assert str(raised.value) == (
+        f"source line {blank_at + 1} is empty or only whitespace, which Eole drops "
+        "when prefixes are forced"
+    )
+    assert fake_run.launches == []
+    assert not (tmp_path / "out").exists()
+
+
+def test_predict_tokens_reports_the_lowest_numbered_line_that_cannot_be_forced(
     fake_run: FakeRunLogged, tmp_path: Path
 ) -> None:
-    # Only the source list and the forced prefixes are checked for emptiness: what
-    # Eole does with an empty source line is the caller's to know, the line count
-    # check reports it if Eole drops the line.
-    assert _predict(
-        tmp_path, source=["", "<2xx> a"], forced_prefix_tokens=["<2yy>", "<2yy>"]
-    ) == ["", "<2xx> a"]
+    with pytest.raises(ValueError, match="^source line 1 is empty"):
+        _predict(
+            tmp_path,
+            source=["", "<2xx> a", "<2xx> b"],
+            forced_prefix_tokens=["<2yy>", "", "<2yy>"],
+        )
+
+    with pytest.raises(ValueError, match="^forced prefix for source line 1 is empty"):
+        _predict(
+            tmp_path,
+            source=["", "<2xx> a", "<2xx> b"],
+            forced_prefix_tokens=[" ", "<2yy>", "<2yy>"],
+        )
+
+    with pytest.raises(ValueError, match="^source line 2 is empty"):
+        _predict(
+            tmp_path,
+            source=["<2xx> a", " ", "<2xx> b"],
+            forced_prefix_tokens=["<2yy>", "<2yy>", ""],
+        )
+
+
+@pytest.mark.parametrize("blank", BLANKS, ids=repr)
+def test_predict_tokens_accepts_an_empty_source_line_when_no_prefix_is_forced(
+    fake_run: FakeRunLogged, tmp_path: Path, blank: str
+) -> None:
+    # Without forced prefixes Eole keeps the line, and an empty source needs no
+    # special care from this function; the line count check reports a dropped line.
+    assert _predict(tmp_path, source=[blank, "<2xx> a"]) == [blank, "<2xx> a"]
+
+    (launch,) = fake_run.launches
+    assert launch.source_lines == [blank, "<2xx> a"]
 
 
 # ---- the order of the checks ----------------------------------------------------
@@ -1086,6 +1152,33 @@ def test_predict_tokens_removes_every_stale_file_and_accepts_one_that_is_missing
     assert not other.exists()
 
 
+@pytest.mark.parametrize("forced", [False, True])
+def test_predict_tokens_does_not_delete_a_token_file_it_was_told_is_stale_after_writing_it(
+    fake_run: FakeRunLogged, tmp_path: Path, forced: bool
+) -> None:
+    # The stale files go first: a caller that lists the source or the target token
+    # file (reused names across runs) must still find them written for Eole.
+    files = predict_files(tmp_path / "out", "eole")
+    files.token_source.parent.mkdir(parents=True)
+    files.token_source.write_text("old source\n", encoding="utf-8")
+    files.token_target.write_text("old target\n", encoding="utf-8")
+    prefixes = ["<2yy>"] * 3 if forced else None
+
+    _predict(
+        tmp_path,
+        stale_files=[files.token_source, files.token_target],
+        forced_prefix_tokens=prefixes,
+    )
+
+    (launch,) = fake_run.launches
+    assert launch.source_lines == SOURCE
+    assert files.token_source.read_text(encoding="utf-8") == "".join(
+        f"{line}\n" for line in SOURCE
+    )
+    assert launch.prefix_lines == (prefixes or [])
+    assert files.token_target.exists() is forced
+
+
 def test_predict_tokens_leaves_a_file_nobody_named_alone(
     fake_run: FakeRunLogged, tmp_path: Path, stale: Path
 ) -> None:
@@ -1108,6 +1201,19 @@ def test_predict_tokens_leaves_a_file_nobody_named_alone(
             "empty-prefix",
             "forced prefix for source line 1 is empty",
             {"forced_prefix_tokens": ["", "<2yy>", "<2yy>"]},
+        ),
+        (
+            "blank-prefix",
+            "forced prefix for source line 2 is empty or only whitespace",
+            {"forced_prefix_tokens": ["<2yy>", "  ", "<2yy>"]},
+        ),
+        (
+            "empty-source",
+            "source line 2 is empty or only whitespace, which Eole drops",
+            {
+                "source": ["<2xx> a", "", "<2xx> b"],
+                "forced_prefix_tokens": ["<2yy>"] * 3,
+            },
         ),
         ("dollar", "the file stem holds", {"stem": "pred$1"}),
     ],

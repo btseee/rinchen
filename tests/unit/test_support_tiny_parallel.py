@@ -19,6 +19,7 @@ import polars as pl
 import pytest
 import sentencepiece
 
+from rinchen.config.loader import REPO_ROOT
 from rinchen.corpus.readers import scan_corpus
 from rinchen.corpus.schema import CORPUS_SCHEMA, ORIGINS, SPLITS, make_row_id
 from rinchen.errors import UpstreamError
@@ -408,3 +409,18 @@ def test_a_vocabulary_below_the_feasible_range_is_refused(tmp_path: Path) -> Non
 def test_a_vocabulary_above_the_feasible_range_is_refused(tmp_path: Path) -> None:
     with pytest.raises(UpstreamError, match=r"too high \(675\).*<= 674"):
         train_toy_spm(tmp_path, vocab_size=675)
+
+
+def test_a_relative_model_directory_is_the_one_under_the_working_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # `SpmConfig` anchors a relative path at the repository root, so the corpus
+    # written under the working directory would never be found.
+    monkeypatch.chdir(tmp_path)
+
+    model = train_toy_spm(Path("relative_spm"), vocab_size=TOY_SPM_VOCAB_SIZE)
+
+    assert model == (tmp_path / "relative_spm" / "toy.model").resolve()
+    assert model.is_file()
+    assert (tmp_path / "relative_spm" / "corpus" / "khk_Cyrl.txt").is_file()
+    assert not (REPO_ROOT / "relative_spm").exists()

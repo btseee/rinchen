@@ -1,5 +1,5 @@
 """The unique temporary name a writer uses before it renames its file into place,
-and `replace_file`, which writes a file whole."""
+`replace_file`, which writes a file whole, and the bytes of a file of lines."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from rinchen.utils.part_file import replace_file, unique_part_path
+from rinchen.utils.part_file import lines_as_bytes, replace_file, unique_part_path
 
 
 def test_the_part_path_is_a_part_file_beside_the_target(tmp_path: Path) -> None:
@@ -101,3 +101,18 @@ def test_a_failed_write_leaves_no_part_file_and_no_target(
         replace_file(target, b"later\n")
 
     assert list(tmp_path.iterdir()) == []
+
+
+def test_lines_are_each_ended_by_one_lf_and_encoded_as_utf_8() -> None:
+    assert lines_as_bytes(["one", "два", ""]) == "one\nдва\n\n".encode()
+
+
+def test_lines_as_bytes_leaves_other_line_separators_inside_their_line() -> None:
+    line = "a" + chr(0x2028) + "b\r" + chr(0x85) + "c"
+
+    assert lines_as_bytes([line, "d"]) == (line + "\nd\n").encode("utf-8")
+
+
+def test_lines_as_bytes_takes_any_iterable_of_text() -> None:
+    assert lines_as_bytes(str(number) for number in range(3)) == b"0\n1\n2\n"
+    assert lines_as_bytes(("x",)) == b"x\n"

@@ -334,9 +334,13 @@ def train_toy_spm(directory: Path, *, vocab_size: int = TOY_SPM_VOCAB_SIZE) -> P
     direction tag and `<bt>` is a user-defined symbol of the project's model, so one
     piece each.
 
+    `directory` may be relative to the working directory: it is made absolute here,
+    because `SpmConfig` would anchor a relative path at the repository root.
+
     Raises:
         UpstreamError: `vocab_size` is outside what the text supports.
     """
+    directory = directory.resolve()
     toy = build_toy()
     texts: dict[str, dict[str, None]] = {language: {} for language in LANGUAGES}
     for row in (*toy.train, *toy.bt):

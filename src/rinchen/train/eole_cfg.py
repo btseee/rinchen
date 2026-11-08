@@ -12,7 +12,8 @@ keeps its own validator.
 from __future__ import annotations
 
 import copy
-from collections.abc import Iterator, Mapping
+import os
+from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 from typing import Any, Final, NoReturn
 
@@ -155,6 +156,10 @@ TRAINING_KEYS: Final = frozenset(
 # name is a training corpus.
 _VALID: Final = "valid"
 _ARCHITECTURE: Final = "transformer"
+# Exactly these types: YAML's safe dumper looks a value's type up by identity, so a
+# subclass (an enum member, a numpy float) is not dumped although `isinstance` says it
+# is plain.
+_PLAIN_TYPES: Final = (str, int, float, bool, type(None), dict, list, tuple)
 _MISSING: Final = object()
 
 # Where each section's own keys are checked, parent before child; a corpus's keys are
@@ -186,26 +191,48 @@ def read_config(path: Path, what: str) -> Any:
     is a mapping of the right shape; `what` names the kind of config in messages.
 
     Raises:
-        ConfigError: the file is missing, cannot be read or parsed, or its text holds
-            `$`, which Eole would expand as a variable.
+        ConfigError: the file is missing, cannot be read or parsed, its text holds
+            `$`, which Eole would expand as a variable, or a mapping or list in it
+            contains itself (a recursive YAML anchor).
     """
     if not path.is_file():
         raise ConfigError(f"{what} file not found: {path}")
     try:
         text = path.read_text(encoding="utf-8")
         reject_dollar(f"text of the config {path}", text)
-        return yaml.safe_load(text)
+        loaded = yaml.safe_load(text)
     except (yaml.YAMLError, UnicodeDecodeError, OSError) as exc:
         raise ConfigError(
             f"invalid {what} {path}: cannot read or parse: {exc}"
         ) from exc
+    _reject_self_reference(loaded, f"{what} {path}")
+    return loaded
+
+
+def _reject_self_reference(node: object, subject: str) -> None:
+    # A recursive anchor (`a: &x {self: *x}`) loads as a mapping that holds itself,
+    # which `merge` would follow until it ran out of stack.
+    def refuse(where: str, problem: str) -> NoReturn:
+        raise ConfigError(f"invalid {subject}: {where}: {problem}")
+
+    for _ in _entries(node, "", fail=refuse):
+        pass
 
 
 def dump_config(cfg: dict[str, Any], path: Path) -> None:
     """Write `cfg` as YAML (UTF-8, LF, keys in their dict order) so the file appears
     whole: a failure leaves the old file, if any, and no temporary file. The
-    directory of `path` must exist."""
-    text = yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True)
+    directory of `path` must exist.
+
+    Raises:
+        ConfigError: YAML cannot dump a value of `cfg`; nothing is written.
+    """
+    try:
+        text = yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True)
+    except yaml.YAMLError as exc:
+        raise ConfigError(
+            f"cannot write the config {path}: YAML cannot dump a value: {exc}"
+        ) from exc
     part_path = unique_part_path(path)
     try:
         with part_path.open("w", encoding="utf-8", newline="\n") as handle:
@@ -227,7 +254,8 @@ def validate_train_config(cfg: object) -> None:
     3. No `$` in any key or string: Eole expands it as an environment variable in the
        whole YAML text.
     4. Every value is plain YAML data (text, a number, a boolean, null, a list or a
-       mapping), so a render can write it.
+       mapping), and of exactly that type, so a render can write it: an enum member
+       or another subclass is refused, though `isinstance` would let it through.
     5. Each section is a mapping (Eole evaluates a string given for one as Python)
        and holds only the keys its allow-list names: the top level, each corpus of
        `data`, `transforms_configs` and the two transforms, `model`, its `encoder`,
@@ -297,9 +325,13 @@ def render(base: Path, overrides: Mapping[str, Any], out: Path) -> Path:
     (`dump_config`), keys in merge order.
 
     Raises:
-        ConfigError: `base` is missing, cannot be read or parsed, is empty, is not a
-            mapping or holds `$`; or the merged config is not valid.
+        ConfigError: `out` is `base` (the same file once links and `..` are resolved),
+            a directory, or below something that is not a directory; `base` is
+            missing, cannot be read or parsed, is empty, is not a mapping, holds `$`
+            or a recursive anchor; `overrides` contains itself; or the merged config
+            is not valid.
     """
+    _require_writable_output(base, out)
     raw = read_config(base, "base Eole config")
     if not isinstance(raw, Mapping):
         problem = (
@@ -308,11 +340,25 @@ def render(base: Path, overrides: Mapping[str, Any], out: Path) -> Path:
             else f"must be a mapping, got {type(raw).__name__}"
         )
         raise ConfigError(f"invalid base Eole config {base}: {problem}")
+    _reject_self_reference(overrides, "Eole config overrides")
     cfg = merge(raw, overrides)
     validate_train_config(cfg)
     out.parent.mkdir(parents=True, exist_ok=True)
     dump_config(cfg, out)
     return out
+
+
+def _require_writable_output(base: Path, out: Path) -> None:
+    # Checked before anything is created, so a refused render leaves no directory.
+    if out.resolve() == base.resolve():
+        raise ConfigError(
+            f"cannot write {out}: it is the base config, which it would overwrite"
+        )
+    if out.is_dir():
+        raise ConfigError(f"cannot write {out}: it is a directory")
+    nearest = next((path for path in out.parents if os.path.lexists(path)), None)
+    if nearest is not None and not nearest.is_dir():
+        raise ConfigError(f"cannot write {out}: {nearest} is not a directory")
 
 
 def _copied(value: Any) -> Any:
@@ -332,13 +378,17 @@ def _got(value: object) -> str:
 
 
 def _entries(
-    node: object, path: str, ancestors: tuple[int, ...] = ()
+    node: object,
+    path: str,
+    ancestors: tuple[int, ...] = (),
+    *,
+    fail: Callable[[str, str], NoReturn] = _fail,
 ) -> Iterator[tuple[str, object, object]]:
     """Every entry below `node` as (key path, key, value), through nested mappings,
     lists and tuples; a list item's key is its index and its path ends `[index]`.
 
-    Raises:
-        ConfigError: a mapping or list contains itself.
+    A mapping or list that contains itself is reported by calling `fail` with the
+    key path and the problem; it must raise.
     """
     if isinstance(node, Mapping):
         entries: list[tuple[object, object]] = list(node.items())
@@ -350,9 +400,9 @@ def _entries(
     for key, value in entries:
         child = _join(path, key) if isinstance(node, Mapping) else f"{path}[{key}]"
         if id(value) in inside:
-            _fail(child, "refers back to a mapping or list that contains it")
+            fail(child, "refers back to a mapping or list that contains it")
         yield child, key, value
-        yield from _entries(value, child, inside)
+        yield from _entries(value, child, inside, fail=fail)
 
 
 def _check_no_forbidden_keys(cfg: Mapping[Any, Any]) -> None:
@@ -377,9 +427,8 @@ def _check_no_variable_references(cfg: Mapping[Any, Any]) -> None:
 
 
 def _check_plain_data(cfg: Mapping[Any, Any]) -> None:
-    plain = (str, int, float, bool, type(None), Mapping, list, tuple)
     for path, _, value in _entries(cfg, ""):
-        if not isinstance(value, plain):
+        if type(value) not in _PLAIN_TYPES:
             _fail(
                 path,
                 "must be plain YAML data (text, a number, true or false, null, a "

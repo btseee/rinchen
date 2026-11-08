@@ -1,9 +1,10 @@
-"""Writing a file so that it appears whole: a temporary name beside it, then a rename
-over it."""
+"""Writing a text file so that it appears whole: its bytes (one LF-ended line per
+item), a temporary name beside it, then a rename over it."""
 
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterable
 from pathlib import Path
 
 
@@ -24,3 +25,10 @@ def replace_file(path: Path, content: bytes) -> None:
         part_path.replace(path)
     finally:
         part_path.unlink(missing_ok=True)
+
+
+def lines_as_bytes(lines: Iterable[str]) -> bytes:
+    """`lines` as the bytes of a UTF-8 text file with one line each, every line ended
+    by an LF (other line separators stay inside their line). The lines are expected
+    not to be empty in number: no line gives a single empty one."""
+    return ("\n".join(lines) + "\n").encode("utf-8")

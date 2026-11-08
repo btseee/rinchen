@@ -4,17 +4,19 @@ that moved there or to `eole_run`: `script_conv` re-exports them, and nothing un
 `rinchen.train` or `rinchen.utils` may import `script_conv`.
 
 `dump_config` keeps its tests in `test_script_conv_config.py`, which reach it through
-the re-export.
+the re-export; what it does with a value YAML cannot dump is tested here.
 """
 
 from __future__ import annotations
 
 import ast
+import enum
 import re
 from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 from rinchen.config.loader import REPO_ROOT
 from rinchen.errors import ConfigError
@@ -144,6 +146,87 @@ def test_read_config_rejects_a_dollar_sign_anywhere_in_the_text(tmp_path: Path) 
     assert str(raised.value) == (
         f"the text of the config {path} holds '$', which Eole would expand as a variable"
     )
+
+
+def test_read_config_rejects_a_mapping_that_contains_itself(tmp_path: Path) -> None:
+    # A YAML anchor can make a value hold itself; `merge` would recurse forever.
+    path = tmp_path / "config.yaml"
+    path.write_text("a: &x\n  self: *x\n", encoding="utf-8")
+
+    with pytest.raises(ConfigError) as raised:
+        eole_cfg.read_config(path, "base Eole config")
+
+    assert str(raised.value) == (
+        f"invalid base Eole config {path}: a.self: refers back to a mapping or list "
+        "that contains it"
+    )
+
+
+@pytest.mark.parametrize(
+    ("text", "where"),
+    [
+        ("&x [*x]\n", "[0]"),
+        ("a: &x\n  - b: *x\n", "a[0].b"),
+        ("a: &x\n  b:\n    c: [1, *x]\n", "a.b.c[1]"),
+    ],
+    ids=["a list in a list", "through a list", "deep"],
+)
+def test_read_config_names_where_a_recursive_anchor_is_used(
+    tmp_path: Path, text: str, where: str
+) -> None:
+    path = tmp_path / "config.yaml"
+    path.write_text(text, encoding="utf-8")
+
+    with pytest.raises(ConfigError) as raised:
+        eole_cfg.read_config(path, "Eole config")
+
+    assert str(raised.value) == (
+        f"invalid Eole config {path}: {where}: refers back to a mapping or list that "
+        "contains it"
+    )
+
+
+def test_read_config_keeps_an_anchor_that_is_only_shared_not_recursive(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "config.yaml"
+    path.write_text("a: &x [1, 2]\nb: *x\nc: [*x, *x]\n", encoding="utf-8")
+
+    assert eole_cfg.read_config(path, "Eole config") == {
+        "a": [1, 2],
+        "b": [1, 2],
+        "c": [[1, 2], [1, 2]],
+    }
+
+
+class _Mode(enum.StrEnum):
+    FAST = "fast"
+
+
+def test_dump_config_turns_a_value_yaml_cannot_dump_into_a_config_error(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "config.yaml"
+
+    with pytest.raises(ConfigError) as raised:
+        eole_cfg.dump_config({"training": {"mode": _Mode.FAST}}, target)
+
+    assert str(raised.value).startswith(f"cannot write the config {target}: ")
+    assert isinstance(raised.value.__cause__, yaml.YAMLError)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_dump_config_keeps_the_old_file_when_a_value_cannot_be_dumped(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "config.yaml"
+    eole_cfg.dump_config({"seed": 1}, target)
+
+    with pytest.raises(ConfigError):
+        eole_cfg.dump_config({"seed": Path("x")}, target)
+
+    assert yaml.safe_load(target.read_text(encoding="utf-8")) == {"seed": 1}
+    assert [path.name for path in tmp_path.iterdir()] == ["config.yaml"]
 
 
 # ---- the moves -------------------------------------------------------------------

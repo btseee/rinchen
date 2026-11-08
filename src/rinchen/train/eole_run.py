@@ -186,9 +186,12 @@ def predict_tokens(
     Raises:
         ConfigError: `ckpt_dir`, `out_dir` or `stem` holds `$`, which Eole would
             expand as a variable in the prediction config.
-        ValueError: `threads` is less than 1; `source_tokens` is empty; or
-            `forced_prefix_tokens` has another number of lines than `source_tokens`
-            or an empty line (Eole drops such an example without a word).
+        ValueError: `threads` is less than 1; `source_tokens` is empty;
+            `forced_prefix_tokens` has another number of lines than `source_tokens`;
+            or a forced prefix, or a source line when prefixes are forced, is empty or
+            only whitespace (Eole drops such an example without a word; the message
+            names the first such line, counted from 1, forced prefix before source).
+            An empty source line is fine when no prefix is forced.
         UpstreamError: `eole predict` exits non-zero or runs past `timeout` (the
             message ends with the last lines of its log), the `eole` command is
             missing, or it exits zero without writing its output or with another
@@ -204,11 +207,7 @@ def predict_tokens(
     if not source_tokens:
         raise ValueError("no source lines to translate")
     if forced_prefix_tokens is not None:
-        for number, prefix in enumerate(forced_prefix_tokens, start=1):
-            if not prefix:
-                # Eole drops an example whose forced prefix is empty, and the line
-                # count check below would then blame the output.
-                raise ValueError(f"forced prefix for source line {number} is empty")
+        _require_lines_eole_keeps(source_tokens, forced_prefix_tokens)
     for name, value in (
         ("checkpoint directory", ckpt_dir),
         ("output directory", out_dir),
@@ -262,6 +261,24 @@ def predict_tokens(
             f"source lines: {files.token_output}"
         )
     return output_lines
+
+
+def _require_lines_eole_keeps(
+    source_tokens: Sequence[str], forced_prefix_tokens: Sequence[str]
+) -> None:
+    # Eole drops, without a word, an example whose source or forced prefix has no
+    # token, and the line count check after the run would then blame the output.
+    pairs = zip(source_tokens, forced_prefix_tokens, strict=True)
+    for number, (source, prefix) in enumerate(pairs, start=1):
+        if not prefix.strip():
+            raise ValueError(
+                f"forced prefix for source line {number} is empty or only whitespace"
+            )
+        if not source.strip():
+            raise ValueError(
+                f"source line {number} is empty or only whitespace, which Eole drops "
+                "when prefixes are forced"
+            )
 
 
 def split_lines(text: str) -> list[str]:

@@ -33,6 +33,12 @@ def corpus_scores(hypotheses: Sequence[str], references: Sequence[str]) -> Corpu
     corpus before a score is taken, which is not the mean of the sentence scores. A
     hypothesis may be an empty string.
 
+    Both scores are at most 100.0: sacrebleu reports 100.00000000000004 for BLEU of
+    identical text, which is float rounding, and the scores are documented in [0, 100].
+    A corpus whose references are all empty scores 0.0 on both metrics, whatever the
+    hypotheses, since sacrebleu has no n-gram to count (even empty hypotheses do not
+    count as a match).
+
     Raises:
         ValueError: no sentences, or a different number of hypotheses and references.
     """
@@ -50,8 +56,8 @@ def corpus_scores(hypotheses: Sequence[str], references: Sequence[str]) -> Corpu
     chrf_score = chrf_metric.corpus_score(list(hypotheses), [list(references)])
     bleu_score = bleu_metric.corpus_score(list(hypotheses), [list(references)])
     return CorpusScores(
-        chrf=float(chrf_score.score),
-        bleu=float(bleu_score.score),
+        chrf=min(100.0, float(chrf_score.score)),
+        bleu=min(100.0, float(bleu_score.score)),
         chrf_signature=str(chrf_metric.get_signature()),
         bleu_signature=str(bleu_metric.get_signature()),
     )

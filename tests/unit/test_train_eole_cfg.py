@@ -13,9 +13,12 @@ reading the message: `invalid Eole config: <path>: ...`.
 
 from __future__ import annotations
 
+import collections
 import copy
 import datetime
+import enum
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -407,6 +410,67 @@ def test_a_value_that_is_not_plain_yaml_data_is_refused_so_that_it_cannot_be_dum
         f"{PREFIX}training.model_path: must be plain YAML data (text, a number, "
         f"true or false, null, a list or a mapping), got {type_name}"
     )
+
+
+class _Color(enum.StrEnum):
+    RED = "red"
+
+
+class _Count(enum.IntEnum):
+    ONE = 1
+
+
+class _Rate(float):
+    pass
+
+
+class _Names(list[str]):
+    pass
+
+
+class _Section(collections.OrderedDict[str, Any]):
+    pass
+
+
+@pytest.mark.parametrize(
+    ("value", "type_name"),
+    [
+        (_Color.RED, "_Color"),
+        (_Count.ONE, "_Count"),
+        (_Rate(0.5), "_Rate"),
+        (_Names(["a"]), "_Names"),
+        (_Section(a=1), "_Section"),
+    ],
+    ids=["StrEnum", "IntEnum", "float subclass", "list subclass", "dict subclass"],
+)
+def test_a_subclass_of_a_plain_type_is_refused_because_yaml_cannot_dump_it(
+    value: object, type_name: str
+) -> None:
+    # `isinstance` would let these through, and `render` would then raise yaml's own
+    # RepresenterError.
+    cfg = broken("training", "model_path", value)
+
+    assert message_of(cfg) == (
+        f"{PREFIX}training.model_path: must be plain YAML data (text, a number, "
+        f"true or false, null, a list or a mapping), got {type_name}"
+    )
+
+
+def test_a_subclass_in_a_list_is_refused_with_the_index_in_the_path() -> None:
+    cfg = broken("training", "gpu_ranks", [0, _Count.ONE])
+
+    assert message_of(cfg).startswith(
+        f"{PREFIX}training.gpu_ranks[1]: must be plain YAML data"
+    )
+
+
+def test_the_plain_types_themselves_are_not_refused_as_subclasses() -> None:
+    cfg = broken("training", "learning_rate", 0.5)
+    cfg["training"]["dropout"] = True
+    cfg["training"]["gpu_ranks"] = (0, 1)
+    cfg["seed"] = None
+
+    assert validate_train_config(cfg) is None
 
 
 def test_numbers_booleans_null_lists_tuples_and_floats_are_plain_data() -> None:
@@ -987,6 +1051,144 @@ def test_render_refuses_an_override_that_yaml_cannot_dump_and_writes_nothing(
         render(write_base(tmp_path), overrides, out)
 
     assert not out.parent.exists()
+
+
+@pytest.mark.parametrize(
+    "value", [_Color.RED, _Count.ONE, _Rate(0.5), _Names(["a"])], ids=repr
+)
+def test_render_refuses_an_override_that_is_a_subclass_of_a_plain_type_as_a_config_error(
+    tmp_path: Path, value: object
+) -> None:
+    out = tmp_path / "new_dir" / "config.yaml"
+    overrides = {**run_overrides(), "training": {"model_path": value}}
+
+    with pytest.raises(ConfigError, match="must be plain YAML data"):
+        render(write_base(tmp_path), overrides, out)
+
+    assert not out.parent.exists()
+
+
+def test_render_refuses_a_recursive_anchor_in_the_base_before_it_merges(
+    tmp_path: Path,
+) -> None:
+    base = tmp_path / "base.yaml"
+    base.write_text("training: &x\n  self: *x\n", encoding="utf-8")
+    out = tmp_path / "new_dir" / "config.yaml"
+
+    with pytest.raises(ConfigError) as raised:
+        render(base, run_overrides(), out)
+
+    assert str(raised.value) == (
+        f"invalid base Eole config {base}: training.self: refers back to a mapping "
+        "or list that contains it"
+    )
+    assert not out.parent.exists()
+
+
+def test_render_refuses_overrides_that_contain_themselves_before_it_merges(
+    tmp_path: Path,
+) -> None:
+    # `AblationMatrix.overrides` comes from YAML, where an anchor can do this.
+    section: dict[str, Any] = {}
+    section["self"] = section
+    out = tmp_path / "new_dir" / "config.yaml"
+
+    with pytest.raises(ConfigError) as raised:
+        render(write_base(tmp_path), {"training": section}, out)
+
+    assert str(raised.value) == (
+        "invalid Eole config overrides: training.self: refers back to a mapping or "
+        "list that contains it"
+    )
+    assert not out.parent.exists()
+
+
+def test_render_refuses_an_output_that_is_a_directory_and_writes_nothing(
+    tmp_path: Path,
+) -> None:
+    out = tmp_path / "config.yaml"
+    out.mkdir()
+
+    with pytest.raises(ConfigError, match=rf"cannot write {out}: it is a directory"):
+        render(write_base(tmp_path), run_overrides(), out)
+
+    assert sorted(path.name for path in tmp_path.iterdir()) == [
+        "base.yaml",
+        "config.yaml",
+    ]
+    assert list(out.iterdir()) == []
+
+
+def test_render_refuses_an_output_whose_directory_is_a_regular_file(
+    tmp_path: Path,
+) -> None:
+    parent = tmp_path / "variants"
+    parent.write_text("not a directory\n", encoding="utf-8")
+    out = parent / "config.yaml"
+
+    with pytest.raises(
+        ConfigError, match=rf"cannot write {out}: {parent} is not a directory"
+    ):
+        render(write_base(tmp_path), run_overrides(), out)
+
+    assert parent.read_text(encoding="utf-8") == "not a directory\n"
+    assert sorted(path.name for path in tmp_path.iterdir()) == [
+        "base.yaml",
+        "variants",
+    ]
+
+
+def test_render_refuses_an_output_below_a_regular_file_further_up(
+    tmp_path: Path,
+) -> None:
+    ancestor = tmp_path / "variants"
+    ancestor.write_text("not a directory\n", encoding="utf-8")
+    out = ancestor / "v1" / "run" / "config.yaml"
+
+    with pytest.raises(
+        ConfigError, match=rf"cannot write {out}: {ancestor} is not a directory"
+    ):
+        render(write_base(tmp_path), run_overrides(), out)
+
+    assert ancestor.read_text(encoding="utf-8") == "not a directory\n"
+
+
+@pytest.mark.parametrize("spelling", ["same", "dotted", "link"])
+def test_render_refuses_an_output_that_is_the_base_and_leaves_the_base_alone(
+    tmp_path: Path, spelling: str
+) -> None:
+    base = write_base(tmp_path)
+    before = base.read_bytes()
+    out = {
+        "same": base,
+        "dotted": tmp_path / "sub" / ".." / "base.yaml",
+        "link": tmp_path / "link.yaml",
+    }[spelling]
+    if spelling == "dotted":
+        (tmp_path / "sub").mkdir()
+    if spelling == "link":
+        out.symlink_to(base)
+
+    with pytest.raises(
+        ConfigError, match=rf"cannot write {re.escape(str(out))}: it is the base"
+    ):
+        render(base, run_overrides(), out)
+
+    assert base.read_bytes() == before
+    assert not list(tmp_path.glob("*.part"))
+
+
+def test_render_checks_the_output_before_it_creates_anything(tmp_path: Path) -> None:
+    ancestor = tmp_path / "variants"
+    ancestor.write_text("x", encoding="utf-8")
+
+    with pytest.raises(ConfigError, match="is not a directory"):
+        render(write_base(tmp_path), {}, ancestor / "a" / "config.yaml")
+
+    assert sorted(path.name for path in tmp_path.iterdir()) == [
+        "base.yaml",
+        "variants",
+    ]
 
 
 def test_render_refuses_a_missing_base(tmp_path: Path) -> None:

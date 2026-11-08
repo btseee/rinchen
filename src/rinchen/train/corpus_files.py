@@ -18,15 +18,17 @@ import json
 import math
 from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass
+from fractions import Fraction
 from pathlib import Path
 from typing import Final
 
 import polars as pl
 
 from rinchen.config.ablation import id_number
+from rinchen.manifest.stage import sha256_of
 from rinchen.train.mixture import AUTH_GROUP, BT_GROUP, TrainingRows
 from rinchen.train.sampling import CorpusSize
-from rinchen.utils.part_file import replace_file
+from rinchen.utils.part_file import lines_as_bytes, replace_file
 
 _SIDECAR_SUFFIX: Final = ".json"
 
@@ -68,6 +70,7 @@ class BuiltCorpora:
     bt_by_direction: dict[str, BtUsage]
 
     def bt_to_dict(self) -> dict[str, dict[str, int]]:
+        """The bt usage by direction as a JSON-ready mapping, for a results record."""
         return {
             direction: asdict(usage)
             for direction, usage in self.bt_by_direction.items()
@@ -80,7 +83,8 @@ def build_corpora(
     """Write the corpus files of one variant and describe them.
 
     Every direction with authentic rows gets an `auth` corpus. It also gets a `bt`
-    corpus of `min(available, round(bt_ratio * authentic rows))` back-translated rows,
+    corpus of `min(available, round(bt_ratio * authentic rows))` back-translated rows
+    (a ratio so large that the product overflows a float asks for more than there are),
     when that is more than 0: those with the smallest `sha256(f"{seed}\\t{id}")` (hex
     digest; ties by id, source, target), so the rows do not depend on the order of the
     input rows or files or on the polars version. `round` is Python's: a half goes to
@@ -104,8 +108,11 @@ def build_corpora(
         back_translated = parts.get((direction, BT_GROUP))
         authentic_rows = 0 if authentic is None else authentic.height
         available = 0 if back_translated is None else back_translated.height
-        requested = round(bt_ratio * authentic_rows)
-        used = min(available, requested)
+        asked = bt_ratio * authentic_rows
+        # `min` before `round`: a product that overflowed a float is `inf`, which
+        # `round` cannot turn into an integer.
+        used = round(min(available, asked))
+        requested = _rows_asked(bt_ratio, authentic_rows, asked)
         if authentic is not None:
             corpora.append(
                 _write_corpus(authentic, data_dir / AUTH_GROUP, direction, AUTH_GROUP)
@@ -117,6 +124,14 @@ def build_corpora(
             bt_available=available, bt_requested=requested, bt_used=used
         )
     return BuiltCorpora(corpora=tuple(corpora), bt_by_direction=usage)
+
+
+def _rows_asked(bt_ratio: float, authentic_rows: int, product: float) -> int:
+    """The rows `bt_ratio` asks for, `round(product)`; when the product overflowed
+    a float, the same rounding of the exact product."""
+    if math.isfinite(product):
+        return round(product)
+    return round(Fraction(bt_ratio) * authentic_rows)
 
 
 def corpus_sizes(corpora: Iterable[CorpusFiles]) -> list[CorpusSize]:
@@ -138,16 +153,13 @@ def _smallest_hashes(frame: pl.DataFrame, count: int, seed: int) -> pl.DataFrame
     )
 
 
-def _text_bytes(lines: pl.Series) -> bytes:
-    return ("\n".join(lines) + "\n").encode("utf-8")
-
-
 def _write_corpus(
     frame: pl.DataFrame, directory: Path, direction: str, group: str
 ) -> CorpusFiles:
     name = f"{direction}.{group}"
     ordered = frame.sort("id", "src", "tgt")
-    src_bytes, tgt_bytes = _text_bytes(ordered["src"]), _text_bytes(ordered["tgt"])
+    src_bytes = lines_as_bytes(ordered["src"])
+    tgt_bytes = lines_as_bytes(ordered["tgt"])
     src_sha256 = hashlib.sha256(src_bytes).hexdigest()
     tgt_sha256 = hashlib.sha256(tgt_bytes).hexdigest()
     record = {
@@ -186,18 +198,10 @@ def _is_current(
     """Whether the sidecar holds exactly `record` and both files have its digests."""
     try:
         recorded = json.loads(sidecar.read_text(encoding="utf-8"))
+        return (
+            recorded == record
+            and sha256_of(src_path) == record["src_sha256"]
+            and sha256_of(tgt_path) == record["tgt_sha256"]
+        )
     except OSError, ValueError:
         return False
-    return (
-        recorded == record
-        and _file_digest(src_path) == record["src_sha256"]
-        and _file_digest(tgt_path) == record["tgt_sha256"]
-    )
-
-
-def _file_digest(path: Path) -> str | None:
-    try:
-        with path.open("rb") as handle:
-            return hashlib.file_digest(handle, "sha256").hexdigest()
-    except OSError:
-        return None

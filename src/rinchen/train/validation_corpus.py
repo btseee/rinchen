@@ -13,7 +13,7 @@ from rinchen.config.ablation import TagPlacement, require_placement
 from rinchen.config.languages import direction_tag
 from rinchen.errors import ConfigError
 from rinchen.train.mixture import DevSet
-from rinchen.utils.part_file import replace_file
+from rinchen.utils.part_file import lines_as_bytes, replace_file
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,6 +97,6 @@ def write_validation(
             tgt_lines.append(" ".join(target))
     out_dir.mkdir(parents=True, exist_ok=True)
     paths = ValidPaths(src=out_dir / "valid.src", tgt=out_dir / "valid.tgt")
-    replace_file(paths.src, ("\n".join(src_lines) + "\n").encode("utf-8"))
-    replace_file(paths.tgt, ("\n".join(tgt_lines) + "\n").encode("utf-8"))
+    replace_file(paths.src, lines_as_bytes(src_lines))
+    replace_file(paths.tgt, lines_as_bytes(tgt_lines))
     return paths

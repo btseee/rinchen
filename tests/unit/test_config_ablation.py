@@ -264,6 +264,76 @@ def test_a_bt_ratio_of_zero_is_allowed(tmp_path: Path) -> None:
     assert load_ablation(_write(tmp_path, document)).axes.bt_ratio == [0.0]
 
 
+def test_a_bt_ratio_of_negative_zero_is_an_error_that_says_to_write_zero(
+    tmp_path: Path,
+) -> None:
+    # It equals 0.0 but prints as `-0` in a variant id, so `0.0` and `-0.0` would
+    # name two variants that train alike.
+    message = _message(tmp_path, **_axes(bt_ratio=[-0.0]))
+
+    assert "axes.bt_ratio.0" in message
+    assert "negative zero" in message
+    assert "0.0" in message
+
+
+def test_a_bt_ratio_of_negative_zero_next_to_zero_is_still_an_error(
+    tmp_path: Path,
+) -> None:
+    assert "negative zero" in _message(tmp_path, **_axes(bt_ratio=[0.0, -0.0]))
+
+
+def test_the_axes_model_refuses_a_negative_zero_ratio_too() -> None:
+    with pytest.raises(ValidationError, match="negative zero"):
+        Axes(bt_ratio=[-0.0])
+
+
+def test_a_temperature_of_negative_zero_is_not_positive(tmp_path: Path) -> None:
+    assert "greater than 0" in _message(tmp_path, **_axes(temperature=[-0.0]))
+
+
+@pytest.mark.parametrize("axis", ["temperature", "bt_ratio"])
+def test_an_exponent_yaml_reads_as_text_is_reported_with_the_spelling_that_works(
+    tmp_path: Path, axis: str
+) -> None:
+    (tmp_path / "base.yaml").write_text("seed: 1\n", encoding="utf-8")
+    path = _write(
+        tmp_path,
+        f"name: t\nbase: {tmp_path / 'base.yaml'}\naxes:\n  {axis}: [1e-5]\n",
+    )
+
+    with pytest.raises(ConfigError) as raised:
+        load_ablation(path)
+
+    message = str(raised.value)
+    assert f"axes.{axis}.0" in message
+    assert "valid number" in message
+    assert "'1e-5'" in message
+    assert "1.0e-5" in message
+
+
+@pytest.mark.parametrize("axis", ["temperature", "bt_ratio"])
+def test_an_exponent_with_a_point_and_a_sign_is_a_number_in_yaml(
+    tmp_path: Path, axis: str
+) -> None:
+    (tmp_path / "base.yaml").write_text("seed: 1\n", encoding="utf-8")
+    path = _write(
+        tmp_path,
+        f"name: t\nbase: {tmp_path / 'base.yaml'}\naxes:\n  {axis}: [1.0e-5, 2.5e+3]\n",
+    )
+
+    assert getattr(load_ablation(path).axes, axis) == [1e-05, 2500.0]
+
+
+@pytest.mark.parametrize("text", ["abc", "", "nan-ish"])
+def test_a_text_that_is_not_a_number_keeps_the_plain_type_error(
+    tmp_path: Path, text: str
+) -> None:
+    message = _message(tmp_path, **_axes(temperature=[text]))
+
+    assert "valid number" in message
+    assert "1.0e-5" not in message
+
+
 @pytest.mark.parametrize("placement", ["both", "middle", "SRC", "", 1])
 def test_a_placement_other_than_src_or_tgt_is_an_error(
     tmp_path: Path, placement: Any

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import random
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,7 @@ from rinchen.corpus.schema import CORPUS_SCHEMA, corpus_frame
 from rinchen.errors import ConfigError, DataError
 from rinchen.train.mixture import (
     LINE_BREAK_CHARACTERS,
+    TrainingRows,
     load_dev_rows,
     load_training_rows,
     source_collision_rate,
@@ -752,6 +754,221 @@ def test_a_dev_row_without_an_id_is_a_data_error(tmp_path: Path) -> None:
 
     with pytest.raises(DataError, match="null id"):
         _dev(path)
+
+
+def test_a_null_split_is_a_row_that_is_not_dev(tmp_path: Path) -> None:
+    frame = corpus_frame([corpus_row("a", "1", split="dev")] * 2).with_columns(
+        pl.Series("split", [None, "dev"], dtype=CORPUS_SCHEMA["split"])
+    )
+    path = write_frame(tmp_path, "rows", frame)
+
+    stats = _dev(path).stats
+
+    assert stats.rows_read == 2
+    assert stats.excluded["not_dev"] == 1
+    assert stats.rows_usable == 1
+
+
+def _collected_heights(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    """The number of rows of every lazy frame polars collects from now on."""
+    heights: list[int] = []
+    original = pl.LazyFrame.collect
+
+    def recording(self: pl.LazyFrame, *args: Any, **kwargs: Any) -> Any:
+        collected = original(self, *args, **kwargs)
+        heights.append(getattr(collected, "height", 0))
+        return collected
+
+    monkeypatch.setattr(pl.LazyFrame, "collect", recording)
+    return heights
+
+
+def test_a_file_with_no_dev_rows_never_holds_its_other_rows_in_memory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rows = [*numbered_rows(500), corpus_row("test", "t", split="test")]
+    path = write_rows(tmp_path, "rows", rows)
+    heights = _collected_heights(monkeypatch)
+
+    dev = load_dev_rows([path], max_lines=10, directions=[])
+
+    assert dev.stats.rows_read == 501
+    assert dev.stats.excluded["not_dev"] == 501
+    assert dev.stats.rows_usable == 0
+    assert max(heights) <= 1
+
+
+def test_only_the_dev_rows_of_a_mixed_file_are_held_in_memory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rows = [
+        *numbered_rows(500),
+        corpus_row("d1", "t", split="dev"),
+        corpus_row("d2", "t", split="dev"),
+    ]
+    path = write_rows(tmp_path, "rows", rows)
+    heights = _collected_heights(monkeypatch)
+
+    dev = _dev(path)
+
+    assert dev.stats.rows_read == 502
+    assert dev.stats.excluded["not_dev"] == 500
+    assert dev.stats.rows_usable == 2
+    assert max(heights) <= 2
+
+
+def test_only_the_training_rows_of_a_mixed_file_are_held_in_memory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rows = [
+        *numbered_rows(3),
+        *(corpus_row(f"dev {i}", "t", split="dev") for i in range(400)),
+        *(corpus_row(f"test {i}", "t", split="test") for i in range(400)),
+    ]
+    path = write_rows(tmp_path, "rows", rows)
+    heights = _collected_heights(monkeypatch)
+
+    stats = load_training_rows([path]).stats
+
+    assert stats.rows_read == 803
+    assert stats.excluded["not_train"] == 800
+    assert stats.rows_kept == 3
+    assert max(heights) <= 3
+
+
+# --- the dev rows that are also training rows --------------------------------------
+
+
+def _write_train_and_dev(
+    tmp_path: Path, train: Sequence[dict[str, str]], dev: Sequence[dict[str, str]]
+) -> tuple[TrainingRows, Path]:
+    training = training_from_rows(tmp_path / "train", train)
+    return training, write_rows(tmp_path, "dev", dev)
+
+
+def test_a_dev_line_whose_id_is_a_kept_training_row_is_counted(tmp_path: Path) -> None:
+    # The id is derived from the languages and both texts, so the same sentence pair
+    # in a training row and a dev row has one id.
+    training, dev_path = _write_train_and_dev(
+        tmp_path,
+        [corpus_row("s0", "t0"), corpus_row("s1", "t1"), corpus_row("s2", "t2")],
+        [
+            corpus_row("s1", "t1", split="dev"),
+            corpus_row("s2", "t2", split="dev"),
+            corpus_row("only dev", "t", split="dev"),
+        ],
+    )
+
+    dev = _dev(dev_path, training=training)
+
+    assert dev.stats.dev_in_train == 2
+    assert dev.stats.lines_by_direction == {EN_MN: 3}
+
+
+def test_no_dev_line_in_the_training_rows_is_a_count_of_zero(tmp_path: Path) -> None:
+    training, dev_path = _write_train_and_dev(
+        tmp_path, [corpus_row("s0", "t0")], [corpus_row("d0", "t", split="dev")]
+    )
+
+    assert _dev(dev_path, training=training).stats.dev_in_train == 0
+
+
+def test_a_dev_row_that_is_a_training_row_of_the_same_file_is_counted(
+    tmp_path: Path,
+) -> None:
+    rows = [corpus_row("s0", "t0"), corpus_row("s0", "t0", split="dev")]
+    path = write_rows(tmp_path, "rows", rows)
+
+    dev = load_dev_rows(
+        [path],
+        max_lines=10,
+        directions=[EN_MN],
+        training=load_training_rows([path]),
+    )
+
+    assert dev.stats.dev_in_train == 1
+
+
+def test_a_back_translated_training_row_counts_like_any_other_kept_row(
+    tmp_path: Path,
+) -> None:
+    training, dev_path = _write_train_and_dev(
+        tmp_path,
+        [corpus_row("auth", "t"), corpus_row("bt0", "t0", origin="bt")],
+        [corpus_row("bt0", "t0", split="dev")],
+    )
+
+    assert _dev(dev_path, training=training).stats.dev_in_train == 1
+
+
+def test_a_training_row_that_was_left_out_does_not_count(tmp_path: Path) -> None:
+    training, dev_path = _write_train_and_dev(
+        tmp_path,
+        [
+            corpus_row("auth", "t"),
+            corpus_row("ft row", "t1", origin="ft"),
+            corpus_row("", "t2"),
+        ],
+        [
+            corpus_row("ft row", "t1", split="dev"),
+            corpus_row("", "t2", split="dev"),
+        ],
+    )
+
+    dev = _dev(dev_path, training=training)
+
+    # The first dev line shares its id with the forward-translated row, which does not
+    # train; the second is blank and not a dev line at all.
+    assert dev.stats.lines_by_direction == {EN_MN: 1}
+    assert dev.stats.dev_in_train == 0
+
+
+def test_only_the_dev_lines_that_are_returned_are_counted(tmp_path: Path) -> None:
+    dev_rows = [corpus_row(f"d{i}", "t", split="dev") for i in range(3)]
+    dev_path = write_rows(tmp_path, "dev", dev_rows, ids=["a", "b", "c"])
+    training = training_from_rows(
+        tmp_path / "train",
+        [corpus_row("s0", "t0"), corpus_row("s1", "t1")],
+        ids=["a", "c"],
+    )
+
+    dev = _dev(dev_path, max_lines=2, training=training)
+
+    # The first two by id are "a" and "b"; "c" is a training id but is not returned.
+    assert dev.sets[EN_MN].ids == ("a", "b")
+    assert dev.stats.dev_in_train == 1
+
+
+def test_a_dev_id_repeated_in_the_dev_lines_counts_each_line(tmp_path: Path) -> None:
+    training = training_from_rows(tmp_path / "train", [corpus_row("s0", "t0")])
+    dev_path = write_rows(
+        tmp_path,
+        "dev",
+        [corpus_row("s0", "t0", split="dev"), corpus_row("s0", "t0", split="dev")],
+    )
+
+    assert _dev(dev_path, training=training).stats.dev_in_train == 2
+
+
+def test_without_training_rows_to_compare_the_count_is_not_known(
+    tmp_path: Path,
+) -> None:
+    path = write_rows(tmp_path, "dev", [corpus_row("a", "b", split="dev")])
+
+    assert _dev(path).stats.dev_in_train is None
+
+
+def test_the_dev_in_train_count_is_in_the_json_document(tmp_path: Path) -> None:
+    training, dev_path = _write_train_and_dev(
+        tmp_path, [corpus_row("s0", "t0")], [corpus_row("s0", "t0", split="dev")]
+    )
+
+    document = json.loads(json.dumps(_dev(dev_path, training=training).stats.to_dict()))
+
+    assert document["dev_in_train"] == 1
+    assert (
+        json.loads(json.dumps(_dev(dev_path).stats.to_dict()))["dev_in_train"] is None
+    )
 
 
 def test_the_dev_statistics_are_json_ready(tmp_path: Path) -> None:

@@ -24,7 +24,7 @@ are an error only among the rows that would train.
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Collection, Iterable, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Final
@@ -106,7 +106,12 @@ class DevStats:
     `rows_read` is `rows_usable` plus the `excluded` counts (`not_dev`, `filtered`,
     `empty`, `line_break`). The usable rows of a direction without training rows are
     counted in `ignored_by_direction`; those of a training direction in
-    `available_by_direction`, of which `lines_by_direction` are returned."""
+    `available_by_direction`, of which `lines_by_direction` are returned.
+
+    `dev_in_train` is the number of returned dev lines whose id is also the id of a
+    kept training row (the id is derived from the languages and both texts): such a
+    line inflates the dev score, as the model has seen it. It is None when no
+    training rows were given to compare with."""
 
     rows_read: int
     rows_usable: int
@@ -114,6 +119,7 @@ class DevStats:
     ignored_by_direction: dict[str, int]
     available_by_direction: dict[str, int]
     lines_by_direction: dict[str, int]
+    dev_in_train: int | None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -150,9 +156,7 @@ def _has_line_break(column: str) -> pl.Expr:
 
 def _training_reason() -> pl.Expr:
     return (
-        pl.when(pl.col("split").ne_missing("train"))
-        .then(pl.lit("not_train"))
-        .when(pl.col("filter_reason").is_not_null())
+        pl.when(pl.col("filter_reason").is_not_null())
         .then(pl.lit("filtered"))
         .when(pl.col("origin").is_in(EXCLUDED_ORIGINS))
         .then(pl.lit("excluded_origin"))
@@ -167,9 +171,7 @@ def _training_reason() -> pl.Expr:
 
 def _dev_reason() -> pl.Expr:
     return (
-        pl.when(pl.col("split").ne_missing("dev"))
-        .then(pl.lit("not_dev"))
-        .when(pl.col("filter_reason").is_not_null())
+        pl.when(pl.col("filter_reason").is_not_null())
         .then(pl.lit("filtered"))
         .when(_blank("src") | _blank("tgt"))
         .then(pl.lit("empty"))
@@ -183,7 +185,8 @@ def _dev_reason() -> pl.Expr:
 @dataclass(frozen=True, slots=True, eq=False)
 class _FileRows:
     """One corpus file sorted by `reason`: how many rows, how many per reason (and per
-    origin for the excluded ones) and the rows with no reason."""
+    origin for the excluded ones) and the rows with no reason. The rows of another
+    split than the one asked for are counted under `not_<split>` and never loaded."""
 
     rows_read: int
     reasons: Counter[str]
@@ -192,9 +195,16 @@ class _FileRows:
 
 
 def _read_file(
-    path: Path, reason: pl.Expr, identity_columns: Sequence[str], what: str
+    path: Path,
+    split: str,
+    reason: pl.Expr,
+    identity_columns: Sequence[str],
+    what: str,
 ) -> _FileRows:
-    """Read a corpus file and sort its rows by `reason`.
+    """Read the rows of `split` of a corpus file and sort them by `reason`.
+
+    The split filter is part of the lazy plan, so the text of the other rows is not
+    decoded: a file with none of `split` loads next to nothing.
 
     Raises:
         DataError: the file is missing, cannot be read or is not a corpus table; a
@@ -203,13 +213,14 @@ def _read_file(
             (docs/VERIFY.md, D-POLARS-PANIC): it is a bad file too.
     """
     try:
+        lazy = scan_corpus(path)
+        rows_read = lazy.select(pl.len()).collect().item()
         frame = (
-            scan_corpus(path)
+            lazy.filter(pl.col("split") == split)
             .select(
                 *_KEPT_COLUMNS[:5],
                 "filter_reason",
                 pl.col("origin").cast(pl.String),
-                pl.col("split").cast(pl.String),
             )
             .with_columns(reason)
             .collect()
@@ -223,9 +234,12 @@ def _read_file(
         missing = usable[column].null_count()
         if missing:
             raise DataError(f"{path}: {missing} rows {what} have a null {column}")
+    reasons = _counts(frame, _REASON)
+    if rows_read > frame.height:
+        reasons[f"not_{split}"] = rows_read - frame.height
     return _FileRows(
-        rows_read=frame.height,
-        reasons=_counts(frame, _REASON),
+        rows_read=rows_read,
+        reasons=reasons,
         excluded_origins=_counts(
             frame.filter(pl.col(_REASON) == "excluded_origin"), "origin"
         ),
@@ -280,6 +294,7 @@ def load_training_rows(paths: Sequence[Path]) -> TrainingRows:
     files = [
         _read_file(
             path,
+            "train",
             _training_reason(),
             ("id", "src_lang", "tgt_lang", "origin"),
             "that would train",
@@ -344,12 +359,19 @@ def _rows_by_corpus(kept: pl.DataFrame) -> dict[str, int]:
 
 
 def load_dev_rows(
-    paths: Sequence[Path], *, max_lines: int, directions: Collection[str]
+    paths: Sequence[Path],
+    *,
+    max_lines: int,
+    directions: Collection[str],
+    training: TrainingRows | None = None,
 ) -> DevRows:
     """Read the development rows of the corpus files: for each of `directions` (those
     with training rows, `TrainingRows.directions`) the first `max_lines` usable rows
     by id, then source, then target. Usable rows of any other direction are counted and
-    ignored.
+    ignored. Only the dev rows are loaded; the text of the other rows is not decoded.
+
+    With `training`, `DevStats.dev_in_train` counts the returned lines whose id is that
+    of a kept training row; without it the count is None.
 
     Raises:
         ValueError: `max_lines` is below 1.
@@ -360,7 +382,11 @@ def load_dev_rows(
         raise ValueError(f"max_lines must be at least 1, got {max_lines}")
     files = [
         _read_file(
-            path, _dev_reason(), ("id", "src_lang", "tgt_lang"), "that are usable"
+            path,
+            "dev",
+            _dev_reason(),
+            ("id", "src_lang", "tgt_lang"),
+            "that are usable",
         )
         for path in paths
     ]
@@ -403,5 +429,15 @@ def load_dev_rows(
         },
         available_by_direction={direction: available[direction] for direction in sets},
         lines_by_direction={direction: len(sets[direction].ids) for direction in sets},
+        dev_in_train=None if training is None else _lines_in_training(sets, training),
     )
     return DevRows(sets=sets, stats=stats)
+
+
+def _lines_in_training(sets: Mapping[str, DevSet], training: TrainingRows) -> int:
+    dev_ids = pl.DataFrame(
+        {"id": [dev_id for dev_set in sets.values() for dev_id in dev_set.ids]},
+        schema={"id": pl.String},
+    )
+    training_ids = training.frame.select("id").unique()
+    return dev_ids.join(training_ids, on="id", how="semi").height

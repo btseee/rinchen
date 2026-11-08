@@ -136,5 +136,5 @@ overrides: {}                 # merged into every variant's Eole config
 
 - The proxy config for real ablations (`configs/eole/multilingual_proxy.yaml`, `ablation_priors.yaml`) is a set of unmeasured priors, validated by schema tests only; no GPU run exists.
 - Whether the weight resolution of 100 is enough for 16 directions with a bt corpus each (32 corpora) is unmeasured; the guard fails loudly if `weight_total` is below the number of corpora.
-- Writing the training text files for hundreds of millions of rows loads one direction at a time; the memory and time at that scale are unmeasured.
+- Writing the training text files for hundreds of millions of rows: the training loader holds the kept rows of all directions in one frame; the dev loader reads only the dev rows. The memory and time at that scale are unmeasured.
 - `xavier_uniform` initialisation converged much faster on the toy; it is NOT adopted (an unmeasured effect at scale); `param_init_method` is an allowed key so an ablation can try it.

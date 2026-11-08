@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import random
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -233,6 +234,22 @@ def test_a_shortfall_is_recorded_not_an_error(tmp_path: Path) -> None:
 
     usage = built.bt_by_direction[EN_MN]
     assert (usage.bt_available, usage.bt_requested, usage.bt_used) == (300, 1200, 300)
+
+
+@pytest.mark.parametrize("ratio", [1e308, sys.float_info.max])
+def test_a_ratio_whose_product_overflows_asks_for_more_than_there_is_and_gets_all(
+    tmp_path: Path, ratio: float
+) -> None:
+    # 1200 authentic rows times 1e308 is beyond what a float holds.
+    training = toy_training_rows(tmp_path)
+
+    built = build_corpora(training, bt_ratio=ratio, seed=1, data_dir=tmp_path / "data")
+
+    usage = built.bt_by_direction[EN_MN]
+    assert (usage.bt_available, usage.bt_used) == (300, 300)
+    assert usage.bt_requested == int(ratio) * 1200
+    assert _corpus(built, f"{EN_MN}.bt").rows == 300
+    assert json.loads(json.dumps(built.bt_to_dict()))[EN_MN]["bt_used"] == 300
 
 
 @pytest.mark.parametrize(

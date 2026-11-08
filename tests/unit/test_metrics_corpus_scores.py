@@ -8,10 +8,12 @@ The sentence-level `chrf` has its own tests in `test_metrics_bleu_chrf.py`.
 from __future__ import annotations
 
 import dataclasses
+from types import SimpleNamespace
 
 import pytest
 import sacrebleu
 
+from rinchen.metrics import bleu_chrf
 from rinchen.metrics.bleu_chrf import CorpusScores, corpus_scores
 
 # Four words or more, so that BLEU has a 4-gram to count.
@@ -34,6 +36,57 @@ def test_identical_text_scores_100_on_both_metrics() -> None:
 
     assert scores.chrf == pytest.approx(100.0)
     assert scores.bleu == pytest.approx(100.0)
+
+
+def test_identical_text_never_scores_above_100() -> None:
+    # sacrebleu's BLEU of identical text is 100.00000000000004 (float rounding).
+    text = ["the cat sat on the mat today", "a dog barked at the moon last night"]
+
+    scores = corpus_scores(text, text)
+
+    assert scores.bleu == 100.0
+    assert scores.chrf == 100.0
+
+
+class _FixedScore:
+    """A sacrebleu metric that scores every corpus `score`."""
+
+    def __init__(self, score: float) -> None:
+        self._score = score
+
+    def corpus_score(self, hypotheses: object, references: object) -> SimpleNamespace:
+        return SimpleNamespace(score=self._score)
+
+    def get_signature(self) -> str:
+        return "fixed"
+
+
+@pytest.mark.parametrize(
+    ("reported", "returned"),
+    [(100.00000000000004, 100.0), (100.0, 100.0), (73.5, 73.5), (0.0, 0.0)],
+)
+def test_each_metric_is_clamped_to_100_and_otherwise_returned_as_sacrebleu_has_it(
+    monkeypatch: pytest.MonkeyPatch, reported: float, returned: float
+) -> None:
+    # sacrebleu can report a hair above 100; no real input is known to do it for
+    # chrF, so the clamp of each metric is pinned with a stand-in for sacrebleu's.
+    monkeypatch.setattr(bleu_chrf, "CHRF", lambda: _FixedScore(reported))
+    monkeypatch.setattr(bleu_chrf, "BLEU", lambda: _FixedScore(reported))
+
+    scores = corpus_scores(["a"], ["a"])
+
+    assert scores.chrf == returned
+    assert scores.bleu == returned
+
+
+def test_a_corpus_whose_references_are_all_empty_scores_zero() -> None:
+    # sacrebleu has no n-gram to count, so the score is 0.0 even for empty
+    # hypotheses, which a reader might expect to match.
+    for hypotheses in (["a b c d"], [""]):
+        scores = corpus_scores(hypotheses, [""])
+
+        assert scores.chrf == 0.0
+        assert scores.bleu == 0.0
 
 
 def test_identical_cyrillic_text_scores_100_on_both_metrics() -> None:

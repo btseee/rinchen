@@ -11,6 +11,7 @@ no feature package."""
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Annotated, Any, Final, Literal, get_args
 
@@ -38,8 +39,6 @@ _PLACEMENTS: Final = get_args(TagPlacement)
 # coerce.
 _PositiveInt = Annotated[int, Field(strict=True, gt=0)]
 _NonNegativeInt = Annotated[int, Field(strict=True, ge=0)]
-_Temperature = Annotated[float, Field(strict=True, gt=0, allow_inf_nan=False)]
-_BtRatio = Annotated[float, Field(strict=True, ge=0, allow_inf_nan=False)]
 
 
 def require_placement(placement: object) -> None:
@@ -89,12 +88,46 @@ def _reject_duplicates[T](values: list[T]) -> list[T]:
     return values
 
 
+def _explain_number_text(value: object) -> object:
+    # PyYAML reads `1e-5` (no decimal point, no sign on the exponent) as text, and the
+    # strict float type then reports only that text is not a number.
+    if isinstance(value, str):
+        try:
+            float(value)
+        except ValueError:
+            return value
+        raise ValueError(
+            f"must be a valid number, got the text {value!r}: write it without quotes, "
+            "and with an exponent as YAML reads it, a decimal point and a signed "
+            "exponent (1.0e-5, not 1e-5)"
+        )
+    return value
+
+
+def _reject_negative_zero(value: float) -> float:
+    # It equals 0.0 but prints as `-0`, so it would name a variant of its own.
+    if value == 0 and math.copysign(1.0, value) < 0:
+        raise ValueError("negative zero is not allowed: write 0.0")
+    return value
+
+
 def _must_be_a_file(path: Path) -> Path:
     if not path.is_file():
         raise ValueError(f"base config file not found: {path}")
     return path
 
 
+_Temperature = Annotated[
+    float,
+    BeforeValidator(_explain_number_text),
+    Field(strict=True, gt=0, allow_inf_nan=False),
+]
+_BtRatio = Annotated[
+    float,
+    BeforeValidator(_explain_number_text),
+    Field(strict=True, ge=0, allow_inf_nan=False),
+    AfterValidator(_reject_negative_zero),
+]
 _NonBlankString = Annotated[str, AfterValidator(_reject_blank)]
 # Relative paths mean the same thing from any working directory.
 _BaseFile = Annotated[
