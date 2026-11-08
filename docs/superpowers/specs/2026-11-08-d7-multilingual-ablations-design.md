@@ -51,7 +51,7 @@ R12. The shared Eole machinery D5 built moves out of `script_conv` into neutral 
 | `rinchen.config.ablation` | `AblationMatrix`, `load_ablation` | errors (never imports train) |
 | `rinchen.train.variants` | `Variant`, `expand_variants` | config.ablation |
 | `rinchen.train.mixture` | training/dev rows, corpora files, statistics, the Eole `data` section | corpus, config.languages, synth.tags, sampling |
-| `rinchen.train.evaluate` | dev translation and scoring | eole_run, metrics, sentencepiece |
+| `rinchen.train.evaluate` | dev translation and scoring | eole_run, validation_corpus, eole_data (`bt_tag`), metrics, sentencepiece |
 | `rinchen.train.ablation` | the orchestrator and the results table | all of the above, manifest |
 | `rinchen.cli.train` | `rinchen train ablate` | train, config |
 
@@ -111,7 +111,7 @@ overrides: {}                 # merged into every variant's Eole config
 
 ### 5.7 `rinchen.train.evaluate`
 
-`evaluate_variant(ckpt_dir, dev, *, spm_model, placement, out_dir, threads, timeout) -> DevResult` per R8. It strips the forced first token for `tgt` (a first token that is not the forced tag is an `UpstreamError`), decodes with SentencePiece (`piece.split(" ")`, never `str.split()`), writes `hyp.<direction>.txt`, and never reads anything but dev rows.
+`evaluate_variant(ckpt_dir, dev, *, spm_model, placement, out_dir, threads=2, timeout=None, predict=predict_tokens) -> DevResult` per R8 (`predict` is the test seam, with the signature of `predict_tokens`). The token lines, the per-direction line ranges and, for `tgt`, the forced prefixes come from `validation_corpus.dev_token_lines`, the one function that also writes the validation corpus. It strips the forced first token for `tgt` (a first token that is not the forced tag is an `UpstreamError` naming the direction and the line, never the text), decodes with SentencePiece (`line.split(" ")`, never `str.split()`; a line feed in a hypothesis becomes a space), writes `hyp.<direction>.txt` beside Eole's own `dev.*` files in `out_dir`, and never reads anything but dev rows. `DevResult(directions, chrf_mean, chrf_min, tag_leaks, chrf_signature, bleu_signature)` holds per direction the line count, chrF and BLEU; `to_dict()` gives the raw, unrounded values.
 
 ### 5.8 `rinchen.train.ablation`
 

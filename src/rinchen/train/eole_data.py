@@ -17,7 +17,8 @@ from rinchen.train.mixture import BT_GROUP, BT_ORIGIN
 from rinchen.train.validation_corpus import ValidPaths
 
 
-def _bt_tag() -> str:
+def bt_tag() -> str:
+    """The tag that marks a back-translated corpus (`<bt>`)."""
     tag = data_origin_tag(BT_ORIGIN)
     if tag is None:
         raise ConfigError(f"the origin {BT_ORIGIN!r} has no data tag")
@@ -30,8 +31,8 @@ def _prefixes(corpus: CorpusFiles, placement: str) -> tuple[str, str]:
     tag = direction_tag(corpus.tgt_lang)
     back_translated = corpus.group == BT_GROUP
     if placement == "src":
-        return (f"{tag} {_bt_tag()}" if back_translated else tag), ""
-    return (_bt_tag() if back_translated else ""), tag
+        return (f"{tag} {bt_tag()}" if back_translated else tag), ""
+    return (bt_tag() if back_translated else ""), tag
 
 
 def _weight(name: str, weights: Mapping[str, int]) -> int:

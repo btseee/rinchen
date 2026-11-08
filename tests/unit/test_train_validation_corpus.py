@@ -1,5 +1,6 @@
-"""Tests for `rinchen.train.validation_corpus`: the pre-tokenised validation corpus
-and the lines each direction occupies in it (D7 spec R7).
+"""Tests for `rinchen.train.validation_corpus`: the pre-tokenised development lines,
+the validation corpus written from them and the lines each direction occupies in it
+(D7 spec R7).
 """
 
 from __future__ import annotations
@@ -14,8 +15,10 @@ import sentencepiece
 from rinchen.errors import ConfigError
 from rinchen.train.mixture import DevSet
 from rinchen.train.validation_corpus import (
+    DevTokens,
     ValidPaths,
     dev_line_ranges,
+    dev_token_lines,
     write_validation,
 )
 from tests.support.corpus_rows import EN_MN, MN_EN, MN_RU, RU_MN, file_lines
@@ -246,3 +249,108 @@ def test_an_unknown_placement_or_no_dev_set_is_a_value_error(
 
 def test_the_line_ranges_of_no_dev_sets_are_empty() -> None:
     assert dev_line_ranges({}) == {}
+
+
+# --- dev_token_lines ---------------------------------------------------------------
+
+TAGS = {
+    "khk_Cyrl": "<2khk_Cyrl>",
+    "eng_Latn": "<2eng_Latn>",
+    "rus_Cyrl": "<2rus_Cyrl>",
+}
+
+
+def _expected_tokens(
+    dev: dict[str, DevSet], spm_model: Path, placement: str
+) -> tuple[list[str], list[str], list[str]]:
+    """The source lines, the target lines and the tags of the lines, built by hand
+    from SentencePiece's own pieces."""
+    source_lines: list[str] = []
+    target_lines: list[str] = []
+    tags: list[str] = []
+    for direction in sorted(dev):
+        tag = TAGS[dev[direction].tgt_lang]
+        for source, target in zip(dev[direction].src, dev[direction].tgt, strict=True):
+            source_pieces, target_pieces = (
+                _pieces(spm_model, source),
+                _pieces(spm_model, target),
+            )
+            tags.append(tag)
+            if placement == "src":
+                source_lines.append(" ".join([tag, *source_pieces]))
+                target_lines.append(" ".join(target_pieces))
+            else:
+                source_lines.append(" ".join(source_pieces))
+                target_lines.append(" ".join([tag, *target_pieces]))
+    return source_lines, target_lines, tags
+
+
+def test_the_source_placement_puts_the_target_tag_first_on_the_source_line(
+    toy_spm: Path,
+) -> None:
+    dev = _toy_dev()
+
+    tokens = dev_token_lines(dev, toy_spm, "src")
+
+    source_lines, target_lines, _ = _expected_tokens(dev, toy_spm, "src")
+    assert isinstance(tokens, DevTokens)
+    assert list(tokens.source) == source_lines
+    assert list(tokens.target) == target_lines
+    assert tokens.forced_prefix is None
+    assert len(tokens.source) == 8
+
+
+def test_the_target_placement_leaves_the_source_untagged_and_forces_the_tag_per_line(
+    toy_spm: Path,
+) -> None:
+    dev = _toy_dev()
+
+    tokens = dev_token_lines(dev, toy_spm, "tgt")
+
+    source_lines, target_lines, tags = _expected_tokens(dev, toy_spm, "tgt")
+    assert list(tokens.source) == source_lines
+    assert list(tokens.target) == target_lines
+    assert tokens.forced_prefix is not None
+    assert list(tokens.forced_prefix) == tags
+    assert tokens.forced_prefix[0] == "<2khk_Cyrl>"
+    assert len(tokens.forced_prefix) == len(tokens.source)
+
+
+def test_the_token_lines_carry_the_line_ranges_of_the_sorted_directions(
+    toy_spm: Path,
+) -> None:
+    dev = {
+        MN_RU: _dev_set(MN_RU, [("Энэ бол ном.", "Это книга.")] * 3),
+        EN_MN: _dev_set(EN_MN, [("This is the book.", "Энэ бол ном.")] * 2),
+        RU_MN: _dev_set(RU_MN, [("Это книга.", "Энэ бол ном.")]),
+    }
+
+    tokens = dev_token_lines(dev, toy_spm, "tgt")
+
+    assert tokens.ranges == {EN_MN: range(2), MN_RU: range(2, 5), RU_MN: range(5, 6)}
+    assert tokens.ranges == dev_line_ranges(dev)
+
+
+@pytest.mark.parametrize("placement", ["src", "tgt"])
+def test_the_validation_files_hold_the_lines_dev_token_lines_returns(
+    tmp_path: Path, toy_spm: Path, placement: str
+) -> None:
+    dev = _toy_dev()
+
+    tokens = dev_token_lines(dev, toy_spm, placement)
+    paths = write_validation(dev, toy_spm, placement, tmp_path)
+
+    assert file_lines(paths.src) == list(tokens.source)
+    assert file_lines(paths.tgt) == list(tokens.target)
+
+
+def test_dev_token_lines_refuses_what_write_validation_refuses(
+    tmp_path: Path, toy_spm: Path
+) -> None:
+    placement: Any = "suffix"
+    with pytest.raises(ValueError, match="placement"):
+        dev_token_lines(_toy_dev(), toy_spm, placement)
+    with pytest.raises(ValueError, match="dev"):
+        dev_token_lines({}, toy_spm, "src")
+    with pytest.raises(ConfigError, match="SentencePiece model"):
+        dev_token_lines(_toy_dev(), tmp_path / "missing.model", "src")
