@@ -85,7 +85,7 @@ def run_training(
     # The file is an Eole config whoever's it is; `what` names it as its validator does.
     cfg = read_config(cfg_path, "Eole config")
     validate(cfg)
-    model_path = _model_path_inside(cfg, run_dir, what)
+    model_path = model_path_inside(cfg, run_dir, what)
     reject_glob_characters("checkpoint directory", model_path)
     build_vocab_command, train_command = eole_commands(cfg_path)
     training = cfg["training"]
@@ -306,7 +306,7 @@ def write_lines(path: Path, lines: Sequence[str]) -> None:
     )
 
 
-def _model_path_inside(cfg: Any, run_dir: Path, what: str) -> Path:
+def model_path_inside(cfg: Any, run_dir: Path, what: str) -> Path:
     """The config's `training.model_path`, which must lie inside `run_dir` (so the
     run keeps everything it writes in one directory)."""
     training = cfg.get("training") if isinstance(cfg, Mapping) else None
