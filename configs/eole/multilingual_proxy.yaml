@@ -1,0 +1,55 @@
+# Base Eole config of the proxy multilingual model (D7): the model the ablation over
+# temperature, back-translation ratio and tag placement would train on real corpora
+# with one GPU. EVERY VALUE BELOW IS AN UNMEASURED PRIOR: no real corpus and no GPU
+# was available when this was written, so nothing here has been trained, timed or
+# tuned. The recipe is the usual transformer-base one (6+6 layers, 512 wide, 2048
+# feed-forward, 8 heads, Adam with beta2 0.998, Noam decay with warmup 8000, label
+# smoothing 0.1, dropout 0.1), scaled to a batch of 8192 tokens. The schema tests only
+# show that Eole accepts the file.
+#
+# As in multilingual_tiny.yaml, the per-run values (src_vocab, training.model_path,
+# transforms_configs.sentencepiece, data, seed) are merged in by the ablation run.
+# The batch, bucket and prefetch settings other than those below stay Eole's defaults.
+seed: 1234
+share_vocab: true
+overwrite: true
+data: {}
+transforms_configs:
+  filtertoolong:
+    src_seq_length: 256
+    tgt_seq_length: 256
+model:
+  architecture: transformer
+  hidden_size: 512
+  encoder:
+    layers: 6
+  decoder:
+    layers: 6
+  heads: 8
+  transformer_ff: 2048
+  embeddings:
+    # Equal to hidden_size: Eole's default of 512 happens to match here, spelled out
+    # so that changing hidden_size cannot silently break the model.
+    word_vec_size: 512
+    position_encoding_type: SinusoidalInterleaved
+  share_embeddings: true
+  share_decoder_embeddings: true
+training:
+  batch_type: tokens
+  batch_size: 8192
+  accum_count: [2]
+  dropout: [0.1]
+  attention_dropout: [0.1]
+  optim: adam
+  adam_beta2: 0.998
+  decay_method: noam
+  learning_rate: 2.0
+  warmup_steps: 8000
+  label_smoothing: 0.1
+  world_size: 1
+  gpu_ranks: [0]
+  compute_dtype: fp16
+  train_steps: 50000
+  valid_steps: 5000
+  save_checkpoint_steps: 5000
+  keep_checkpoint: 3

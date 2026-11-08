@@ -1,0 +1,25 @@
+# The ablation to run once real corpora and a GPU exist: temperature of the corpus
+# mixing, ratio of back-translated data, and placement of the direction tag, over
+# configs/eole/multilingual_proxy.yaml. EVERY VALUE BELOW IS AN UNMEASURED PRIOR:
+# nothing here has been trained or compared, and no result of this matrix exists.
+# 3 temperatures x 4 ratios x 2 placements x 1 seed = 24 variants; add seeds to
+# measure the spread before reading a difference between two variants as real.
+#
+# temperature 1.0 is proportional to size, 0.3 lifts the small directions strongly.
+# bt_ratio 0 trains on authentic data only, 1 asks for as many back-translated rows
+# as authentic ones (fewer when a direction has fewer). weight_total 100 gives about
+# three weight units per corpus when there are 16 directions with a back-translated
+# corpus each: coarse; raise it if the weights come out too uniform.
+#
+# Relative paths are anchored at the repository root.
+name: priors
+base: configs/eole/multilingual_proxy.yaml
+axes:
+  temperature: [0.3, 0.5, 1.0]
+  bt_ratio: [0.0, 0.25, 0.5, 1.0]
+  tag_placement: [src, tgt]
+seeds: [1234]
+weight_total: 100
+dev_max_lines: 1000
+max_variants: 64
+overrides: {}

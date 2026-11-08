@@ -1,0 +1,17 @@
+# The tiny ablation (D7 STOP gate): two variants that differ in the placement of the
+# direction tag, trained on the toy corpora over configs/eole/multilingual_tiny.yaml.
+# The toy sentences are templated and saturate near chrF 100, so this matrix tests the
+# machinery; it cannot rank the variants.
+#
+# Relative paths are anchored at the repository root.
+name: tiny
+base: configs/eole/multilingual_tiny.yaml
+axes:
+  temperature: [0.5]
+  bt_ratio: [0.5]
+  tag_placement: [src, tgt]
+seeds: [1234]
+weight_total: 100
+dev_max_lines: 1000
+max_variants: 64
+overrides: {}

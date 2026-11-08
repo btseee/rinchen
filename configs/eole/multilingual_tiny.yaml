@@ -1,0 +1,63 @@
+# Base Eole config of the tiny multilingual model (D7): the spike's CPU recipe, the one
+# the ablation_tiny.yaml matrix trains. A 64-wide transformer with 2+2 layers, trained
+# from random init in 1000 steps of 2048-token batches; on the toy corpora it reached
+# chrF 98 and more in every direction (a gate that the plumbing works, not a quality
+# measure: those sentences are templated).
+#
+# This file holds no per-run value. The ablation run merges these in for every
+# variant, and the merged config is validated before Eole sees it:
+#   src_vocab, training.model_path         the run directory
+#   transforms_configs.sentencepiece       the SentencePiece model, both sides
+#   data                                   the corpora, their weights and tag prefixes
+#   seed                                   the variant's seed (1234 here is the default)
+# `transforms_configs.filtertoolong` is the switch: the corpora run that transform
+# when the base configures it.
+#
+# The model is the same on every variant: SinusoidalInterleaved positions, full
+# multi-head attention, one shared vocabulary and shared embeddings.
+seed: 1234
+share_vocab: true
+overwrite: true
+data: {}
+transforms_configs:
+  filtertoolong:
+    src_seq_length: 64
+    tgt_seq_length: 64
+model:
+  architecture: transformer
+  hidden_size: 64
+  encoder:
+    layers: 2
+  decoder:
+    layers: 2
+  heads: 4
+  transformer_ff: 128
+  embeddings:
+    # Equal to hidden_size: Eole's default of 512 breaks a smaller model.
+    word_vec_size: 64
+    position_encoding_type: SinusoidalInterleaved
+  share_embeddings: true
+  share_decoder_embeddings: true
+training:
+  batch_type: tokens
+  batch_size: 2048
+  accum_count: [1]
+  # Dropout 0: the toy corpora are small and the run is 1000 steps.
+  dropout: [0.0]
+  attention_dropout: [0.0]
+  optim: adamw
+  decay_method: noam
+  label_smoothing: 0.1
+  world_size: 1
+  train_steps: 1000
+  valid_steps: 500
+  save_checkpoint_steps: 1000
+  keep_checkpoint: 2
+  learning_rate: 0.5
+  warmup_steps: 100
+  compute_dtype: fp32
+  gpu_ranks: []
+  # Eole's defaults (262144 and 200) made 100 steps take twice as long on the CPU.
+  bucket_size: 1024
+  prefetch_factor: 8
+  num_workers: 1
