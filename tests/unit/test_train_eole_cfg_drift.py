@@ -224,11 +224,39 @@ def test_no_list_allows_a_key_that_starts_from_or_adapts_an_existing_model(
     key: str,
 ) -> None:
     # Every Rinchen model trains from random init; adapters, reinforcement learning
-    # and quantisation have no user in D7.
+    # and quantisation have no user. `train_from` is allowed only in the resume
+    # config of a run that continues its own checkpoint, through its own list.
     assert all(key not in allowed for _, allowed, _ in _levels())
 
 
-def test_the_training_list_names_the_keys_the_tiny_and_the_proxy_runs_set() -> None:
+@pytest.mark.parametrize(
+    "key", ["average_decay", "average_every", "accum_steps", "dropout_steps"]
+)
+def test_no_list_allows_a_key_whose_effect_a_resume_would_lose_or_replace(
+    key: str,
+) -> None:
+    # The EMA replaces the live weights in every saved checkpoint and is not restored;
+    # a scheduled value restarts at its first entry after a resume.
+    assert all(key not in allowed for _, allowed, _ in _levels())
+    assert key not in eole_cfg.RESUME_TRAINING_KEYS
+
+
+def test_the_one_key_only_a_resume_config_may_hold_is_a_field_of_the_eole_training_model() -> (
+    None
+):
+    training = {level: cls for level, _, cls in _levels()}["training"]
+
+    assert eole_cfg.RESUME_TRAINING_KEYS == {"train_from"}
+    assert (
+        keys_eole_dropped(
+            "training (resume only)", eole_cfg.RESUME_TRAINING_KEYS, training
+        )
+        == []
+    )
+    assert not eole_cfg.RESUME_TRAINING_KEYS & eole_cfg.TRAINING_KEYS
+
+
+def test_the_training_list_names_the_keys_the_tiny_proxy_and_teacher_runs_set() -> None:
     assert {
         "model_path",
         "train_steps",
@@ -257,10 +285,20 @@ def test_the_training_list_names_the_keys_the_tiny_and_the_proxy_runs_set() -> N
         "bucket_size",
         "prefetch_factor",
         "num_workers",
+        # the teacher runs (D8)
+        "early_stopping",
+        "early_stopping_criteria",
+        "timeout",
+        "master_ip",
+        "master_port",
+        "gpu_backend",
+        "normalization",
+        "batch_size_multiple",
+        "self_attn_backend",
     } == eole_cfg.TRAINING_KEYS
 
 
-def test_the_other_lists_hold_exactly_the_keys_a_d7_config_sets() -> None:
+def test_the_other_lists_hold_exactly_the_keys_a_d7_or_d8_config_sets() -> None:
     assert eole_cfg.TOP_LEVEL_KEYS == {
         "seed",
         "save_data",
@@ -277,6 +315,12 @@ def test_the_other_lists_hold_exactly_the_keys_a_d7_config_sets() -> None:
         "transforms_configs",
         "model",
         "training",
+        # the teacher runs (D8); `valid_metrics` is allowed, and no teacher config
+        # sets it: the validation corpus is pre-tokenised
+        "tensorboard",
+        "tensorboard_log_dir",
+        "log_file",
+        "valid_metrics",
     }
     assert eole_cfg.CORPUS_KEYS == {
         "path_src",
@@ -326,3 +370,55 @@ def test_eoles_own_schema_accepts_the_config_the_validator_is_tested_against() -
     assert config.share_vocab is True
     assert config.overwrite is True
     assert set(config.data) == {"en-mn.auth", "en-mn.bt", "valid"}
+
+
+def test_the_validator_accepts_exactly_the_normalisations_eole_knows() -> None:
+    import typing
+
+    from eole.config.training import TrainingConfig
+
+    eole_values = set(
+        typing.get_args(TrainingConfig.model_fields["normalization"].annotation)
+    )
+
+    assert eole_values == set(eole_cfg.NORMALIZATIONS)
+
+
+def test_eoles_own_schema_accepts_a_config_that_sets_every_added_key() -> None:
+    from eole.config.run import TrainConfig
+
+    cfg = make_config()
+    cfg.update(
+        tensorboard=True,
+        tensorboard_log_dir="run/tensorboard",
+        log_file="run/train.log",
+        valid_metrics=["BLEU", "CHRF"],
+    )
+    cfg["training"].update(
+        early_stopping=6,
+        early_stopping_criteria="ppl",
+        timeout=7200,
+        master_ip="localhost",
+        master_port=10000,
+        gpu_backend="nccl",
+        normalization="tokens",
+        batch_size_multiple=8,
+        self_attn_backend="pytorch",
+    )
+
+    config = TrainConfig(**cfg)
+
+    assert config.training.early_stopping == 6
+    assert config.training.timeout == 7200
+    assert config.training.normalization == "tokens"
+    assert config.tensorboard is True
+    assert config.valid_metrics == ["BLEU", "CHRF"]
+
+
+def test_eoles_own_schema_accepts_the_resume_key_of_a_resume_config() -> None:
+    from eole.config.run import TrainConfig
+
+    cfg = make_config()
+    cfg["training"]["train_from"] = "run/ckpt/step_500"
+
+    assert TrainConfig(**cfg).training.train_from == "run/ckpt/step_500"

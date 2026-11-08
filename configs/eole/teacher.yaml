@@ -1,0 +1,87 @@
+# Base Eole config of the teacher (D8): the model the 8-GPU run trains once the real
+# corpora exist. EVERY VALUE BELOW IS AN UNMEASURED PRIOR: no real corpus and no GPU
+# was available when this was written, so nothing here has been trained, timed or
+# tuned. The shape and the schedule are those of the master plan,
+# docs/research/2026-10-29-rinchen-dev-agent-prompt.md lines 511 to 514 (hidden 1536,
+# encoder 24 and decoder 12 layers, 16 heads, feed-forward 4096, bf16, 8 GPUs, batches
+# of 16384 tokens with an accumulation of 8, dropout 0.1, validation every 5000
+# steps, early stopping after 6 validations without improvement); the rest of the
+# training section (label smoothing, how the checkpoints and the stop are kept, the
+# collective timeout, the optimiser) is the choice of the D8 design and is as
+# unmeasured. The schema tests only show that Eole accepts the file.
+#
+# The batch: 8 GPUs x an accumulation of 8 x 16384 padded tokens is 1,048,576 tokens
+# per update.
+#
+# This file holds no per-run value. `rinchen train ablate --prepare-only` merges them in
+# from the mixture settings the ablations chose, and the merged config is validated
+# before Eole sees it:
+#   src_vocab, training.model_path         the run directory
+#   transforms_configs.sentencepiece       the SentencePiece model, both sides
+#   data                                   the corpora, their weights and tag prefixes
+#   seed                                   the run's seed (1234 here is the default)
+# training.train_steps is the length of the run, which the master plan leaves to the
+# operator: 100000 is Eole's own default, spelled out so that the launcher sees a
+# number. Resuming is not configured here: the launcher renders a separate resume file.
+#
+# The model is the same as everywhere else: SinusoidalInterleaved positions, full
+# multi-head attention, one shared vocabulary and shared embeddings.
+seed: 1234
+share_vocab: true
+overwrite: true
+data: {}
+# Training curves for the operator (loss, perplexity, accuracy, learning rate).
+tensorboard: true
+transforms_configs:
+  filtertoolong:
+    # As the proxy base: not from the master plan.
+    src_seq_length: 256
+    tgt_seq_length: 256
+model:
+  architecture: transformer
+  hidden_size: 1536
+  encoder:
+    layers: 24
+  decoder:
+    layers: 12
+  heads: 16
+  transformer_ff: 4096
+  embeddings:
+    # Equal to hidden_size: Eole's default of 512 breaks a bigger model too.
+    word_vec_size: 1536
+    position_encoding_type: SinusoidalInterleaved
+  share_embeddings: true
+  share_decoder_embeddings: true
+training:
+  batch_type: tokens
+  batch_size: 16384
+  # Constant lists: a scheduled value would restart at its first entry after a resume.
+  accum_count: [8]
+  dropout: [0.1]
+  label_smoothing: 0.1
+  # As the proxy base: Adam with beta2 0.998 and Noam decay.
+  optim: adam
+  adam_beta2: 0.998
+  decay_method: noam
+  learning_rate: 2.0
+  warmup_steps: 8000
+  compute_dtype: bf16
+  # One node, 8 GPUs. Eole spawns one process per entry of gpu_ranks itself.
+  world_size: 8
+  gpu_ranks: [0, 1, 2, 3, 4, 5, 6, 7]
+  gpu_backend: nccl
+  # Rank 0 alone validates and saves while the others wait at the next collective, so
+  # the validation and a save of several GB must fit in this many seconds (Eole's
+  # default is 60).
+  timeout: 7200
+  # Eole's own rule of 8 for half precision is dead code in 0.6.4, so it is set here.
+  batch_size_multiple: 8
+  train_steps: 100000
+  # A validation at every save, and early stopping on one criterion. Eole keeps the
+  # last keep_checkpoint checkpoints, never the best one: more than the patience, so
+  # the best of the last validations is still on disk when the stop comes.
+  valid_steps: 5000
+  save_checkpoint_steps: 5000
+  keep_checkpoint: 8
+  early_stopping: 6
+  early_stopping_criteria: ppl

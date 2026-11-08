@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import copy
 import os
+import re
 from collections.abc import Callable, Iterator, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final, NoReturn
 
@@ -56,10 +58,11 @@ FORBIDDEN_KEYS: Final = frozenset(
 )
 
 
-# The keys a D7 run sets or an ablation plausibly overrides, level by level. Eole 0.6.4
-# rejects any other key of `eole train` (`extra_forbidden`), `eole build_vocab` ignores
-# some, and a typo must not cost a build_vocab run: so a key that no D7 config needs is
-# not here. `test_train_eole_cfg_drift.py` checks every key against the installed Eole.
+# The keys a D7 or D8 run sets or an ablation plausibly overrides, level by level. Eole
+# 0.6.4 rejects any other key of `eole train` (`extra_forbidden`), `eole build_vocab`
+# ignores some, and a typo must not cost a build_vocab run: so a key that no config
+# needs is not here. `test_train_eole_cfg_drift.py` checks every key against the
+# installed Eole.
 
 # Eole's `TrainConfig`.
 TOP_LEVEL_KEYS: Final = frozenset(
@@ -79,6 +82,12 @@ TOP_LEVEL_KEYS: Final = frozenset(
         "transforms_configs",
         "model",
         "training",
+        # The teacher runs (D8). `valid_metrics` is allowed and no teacher config sets
+        # it: the validation corpus is pre-tokenised, so a metric would score pieces.
+        "tensorboard",
+        "tensorboard_log_dir",
+        "log_file",
+        "valid_metrics",
     }
 )
 
@@ -118,8 +127,12 @@ DECODER_KEYS: Final = frozenset(
 # Only the size and the position scheme: the source and target sizes stay Eole's.
 EMBEDDINGS_KEYS: Final = frozenset({"word_vec_size", "position_encoding_type"})
 
-# Eole's `TrainingConfig`: the tiny CPU base and a GPU proxy base, nothing that adapts,
-# continues or quantises a model.
+# Eole's `TrainingConfig`: the tiny CPU base, a GPU proxy base and the teachers, nothing
+# that adapts, continues or quantises a model. Not here, on purpose: `average_decay` and
+# `average_every` (the moving average replaces the live weights in every saved
+# checkpoint and is not restored), `accum_steps` and `dropout_steps` (a scheduled value
+# restarts at its first entry after a resume), `reset_optim` and `update_vocab` (they
+# change how a checkpoint is loaded).
 TRAINING_KEYS: Final = frozenset(
     {
         "model_path",
@@ -149,14 +162,37 @@ TRAINING_KEYS: Final = frozenset(
         "bucket_size",
         "prefetch_factor",
         "num_workers",
+        # The teacher runs (D8).
+        "early_stopping",
+        "early_stopping_criteria",
+        "timeout",
+        "master_ip",
+        "master_port",
+        "gpu_backend",
+        "normalization",
+        "batch_size_multiple",
+        "self_attn_backend",
     }
 )
+
+# The one `training` key only the resume config of a run may hold: it continues the
+# run's own checkpoint (`validate_train_config(..., resumes=True)`). Everywhere else it
+# is an unknown key, because every Rinchen model trains from random init.
+RESUME_TRAINING_KEYS: Final = frozenset({"train_from"})
+
+# What Eole's loss is divided by (`TrainingConfig.normalization`).
+NORMALIZATIONS: Final = ("sents", "tokens")
 
 # Eole 0.6.4 takes one validation corpus and reads it under this name; every other
 # name is a training corpus.
 _VALID: Final = "valid"
 _GLOB_CHARACTERS: Final = frozenset("[]*?")
 _ARCHITECTURE: Final = "transformer"
+_TRAIN_FROM: Final = "train_from"
+# `step_<N>` as Eole names a checkpoint directory; [0-9], not \d, which matches the
+# digits of other scripts.
+_STEP_DIRECTORY: Final = re.compile(r"step_[1-9][0-9]*")
+_MAX_PORT: Final = 65535
 # Exactly these types: YAML's safe dumper looks a value's type up by identity, so a
 # subclass (an enum member, a numpy float) is not dumped although `isinstance` says it
 # is plain.
@@ -175,6 +211,20 @@ _SECTION_LEVELS: Final = (
     (("model", "embeddings"), EMBEDDINGS_KEYS),
     (("training",), TRAINING_KEYS),
 )
+# The keys a section also allows in a resume config.
+_RESUME_KEYS: Final[dict[tuple[str, ...], frozenset[str]]] = {
+    ("training",): RESUME_TRAINING_KEYS
+}
+
+
+@dataclass(frozen=True, slots=True)
+class _ValueRule:
+    """A value rule of a key the teacher runs set: where the key is, whether a value is
+    acceptable, and the words `must be ...` that say what is."""
+
+    parts: tuple[str, ...]
+    accepts: Callable[[object], bool]
+    must_be: str
 
 
 def reject_dollar(what: str, value: Path | str) -> None:
@@ -259,9 +309,13 @@ def dump_config(cfg: dict[str, Any], path: Path) -> None:
         part_path.unlink(missing_ok=True)
 
 
-def validate_train_config(cfg: object) -> None:
+def validate_train_config(cfg: object, *, resumes: bool = False) -> None:
     """Check that `cfg`, a multilingual training config as YAML gave it, is one
     `eole build_vocab` and `eole train` run as written; return None when it is.
+
+    `resumes` says that `cfg` is the resume config of a run, the one file that may
+    hold `training.train_from` (rule 11). It relaxes nothing else: everywhere
+    else `train_from` is an unknown key (rule 5).
 
     The rules, in the order they are checked (the first one broken is reported):
 
@@ -284,7 +338,21 @@ def validate_train_config(cfg: object) -> None:
        (Eole's default of 512 breaks a smaller model), and so is the `hidden_size` of
        the encoder or the decoder when set.
     9. `overwrite` and `share_vocab` are true.
-    10. Every corpus but `valid` has `path_src`, `path_tgt`, a list of `transforms`,
+    10. The keys a teacher run sets hold values of the right kind: `tensorboard` is
+       a boolean, `tensorboard_log_dir` and `log_file` non-empty text, `valid_metrics`
+       a list of non-empty text, `early_stopping` a non-negative integer,
+       `early_stopping_criteria` non-empty text or a list of it, `timeout` and
+       `batch_size_multiple` positive integers, `master_port` an integer from 1 to
+       65535, `master_ip`, `gpu_backend` and `self_attn_backend` non-empty text,
+       `normalization` one of `NORMALIZATIONS`. A boolean is not an integer.
+    11. With `resumes`, `training.train_from`, when present, is text that after
+       normalisation (`os.path.normpath`, the file system is not touched) is
+       `<training.model_path>/step_<N>` for a positive `N` without a leading zero,
+       with no `..` component and no glob character. `training.model_path` must then
+       be non-empty text, in the same form (relative or absolute) as `train_from`.
+       The directory itself is the launcher's to find complete. A resume config that
+       leaves `train_from` out is accepted.
+    12. Every corpus but `valid` has `path_src`, `path_tgt`, a list of `transforms`,
        and both `src_prefix` and `tgt_prefix` as strings (a missing one is a
        TypeError in `build_vocab`; `''` means none), and when it has a `weight` that
        is a positive integer (a boolean is not one; no weight means 1). `valid` has
@@ -300,11 +368,14 @@ def validate_train_config(cfg: object) -> None:
     _check_no_forbidden_keys(cfg)
     _check_no_variable_references(cfg)
     _check_plain_data(cfg)
-    _check_sections(cfg)
+    _check_sections(cfg, resumes=resumes)
     _check_architecture(cfg)
     _check_position_encoding(cfg)
     _check_hidden_size(cfg)
     _check_switches(cfg)
+    _check_run_settings(cfg)
+    if resumes:
+        _check_train_from(cfg)
     _check_corpora(cfg)
 
 
@@ -332,10 +403,12 @@ def merge(base: Mapping[str, Any], overrides: Mapping[str, Any]) -> dict[str, An
     return merged
 
 
-def merged_config(base: Path, overrides: Mapping[str, Any]) -> dict[str, Any]:
+def merged_config(
+    base: Path, overrides: Mapping[str, Any], *, resumes: bool = False
+) -> dict[str, Any]:
     """The training config that is the YAML mapping in `base` with `overrides` merged
-    over it (`merge`), validated (`validate_train_config`); nothing is written. The
-    base need not be complete: the merged config is what is validated.
+    over it (`merge`), validated (`validate_train_config`, with `resumes`); nothing is
+    written. The base need not be complete: the merged config is what is validated.
 
     Raises:
         ConfigError: `base` is missing, cannot be read or parsed, is empty, is not a
@@ -352,13 +425,15 @@ def merged_config(base: Path, overrides: Mapping[str, Any]) -> dict[str, Any]:
         raise ConfigError(f"invalid base Eole config {base}: {problem}")
     _reject_self_reference(overrides, "Eole config overrides")
     cfg = merge(raw, overrides)
-    validate_train_config(cfg)
+    validate_train_config(cfg, resumes=resumes)
     return cfg
 
 
-def render(base: Path, overrides: Mapping[str, Any], out: Path) -> Path:
+def render(
+    base: Path, overrides: Mapping[str, Any], out: Path, *, resumes: bool = False
+) -> Path:
     """Write the training config that is the YAML mapping in `base` with `overrides`
-    merged over it (`merged_config`) to `out`, and return `out`.
+    merged over it (`merged_config`, with `resumes`) to `out`, and return `out`.
 
     A config that fails writes nothing, so a file at `out` stays as it was. The
     directory of `out` is created; the file appears whole (`dump_config`), keys in
@@ -370,7 +445,7 @@ def render(base: Path, overrides: Mapping[str, Any], out: Path) -> Path:
             `merged_config` raises.
     """
     _require_writable_output(base, out)
-    cfg = merged_config(base, overrides)
+    cfg = merged_config(base, overrides, resumes=resumes)
     out.parent.mkdir(parents=True, exist_ok=True)
     dump_config(cfg, out)
     return out
@@ -497,7 +572,7 @@ def _check_keys(
             _fail(_join(path, key), f"unknown key in {level}")
 
 
-def _check_sections(cfg: Mapping[Any, Any]) -> None:
+def _check_sections(cfg: Mapping[Any, Any], *, resumes: bool) -> None:
     # Later checks rely on this one: a section that is present is a mapping.
     _check_keys(cfg, "", TOP_LEVEL_KEYS, "the top level")
     if "data" in cfg:
@@ -513,6 +588,8 @@ def _check_sections(cfg: Mapping[Any, Any]) -> None:
         section = _lookup(cfg, *parts)
         if section is not _MISSING:
             path = ".".join(parts)
+            if resumes:
+                allowed = allowed | _RESUME_KEYS.get(parts, frozenset())
             _check_keys(_as_mapping(section, path), path, allowed, path)
 
 
@@ -576,6 +653,123 @@ def _check_switches(cfg: Mapping[Any, Any]) -> None:
         value = cfg.get(key, _MISSING)
         if value is not True:
             _fail(key, f"must be true: {why}, {_got(value)}")
+
+
+def _is_bool(value: object) -> bool:
+    return isinstance(value, bool)
+
+
+def _count_of(value: object) -> int | None:
+    # A boolean is an int to Python, and neither a count nor a port to Eole.
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _is_non_negative_int(value: object) -> bool:
+    count = _count_of(value)
+    return count is not None and count >= 0
+
+
+def _is_positive_int(value: object) -> bool:
+    count = _count_of(value)
+    return count is not None and count > 0
+
+
+def _is_port(value: object) -> bool:
+    count = _count_of(value)
+    return count is not None and 1 <= count <= _MAX_PORT
+
+
+def _is_text(value: object) -> bool:
+    return isinstance(value, str) and bool(value)
+
+
+def _is_text_list(value: object) -> bool:
+    return isinstance(value, list) and all(_is_text(item) for item in value)
+
+
+def _is_text_or_nonempty_text_list(value: object) -> bool:
+    return _is_text(value) or (_is_text_list(value) and bool(value))
+
+
+def _is_normalization(value: object) -> bool:
+    return value in NORMALIZATIONS
+
+
+_VALUE_RULES: Final = (
+    _ValueRule(("tensorboard",), _is_bool, "true or false"),
+    _ValueRule(("tensorboard_log_dir",), _is_text, "a non-empty string"),
+    _ValueRule(("log_file",), _is_text, "a non-empty string"),
+    _ValueRule(("valid_metrics",), _is_text_list, "a list of non-empty strings"),
+    _ValueRule(
+        ("training", "early_stopping"), _is_non_negative_int, "a non-negative integer"
+    ),
+    _ValueRule(
+        ("training", "early_stopping_criteria"),
+        _is_text_or_nonempty_text_list,
+        "a non-empty string or a list of non-empty strings",
+    ),
+    _ValueRule(("training", "timeout"), _is_positive_int, "a positive integer"),
+    _ValueRule(("training", "master_ip"), _is_text, "a non-empty string"),
+    _ValueRule(
+        ("training", "master_port"), _is_port, f"an integer from 1 to {_MAX_PORT}"
+    ),
+    _ValueRule(("training", "gpu_backend"), _is_text, "a non-empty string"),
+    _ValueRule(
+        ("training", "normalization"),
+        _is_normalization,
+        " or ".join(repr(name) for name in NORMALIZATIONS),
+    ),
+    _ValueRule(
+        ("training", "batch_size_multiple"), _is_positive_int, "a positive integer"
+    ),
+    _ValueRule(("training", "self_attn_backend"), _is_text, "a non-empty string"),
+)
+
+
+def _check_run_settings(cfg: Mapping[Any, Any]) -> None:
+    for rule in _VALUE_RULES:
+        value = _lookup(cfg, *rule.parts)
+        if value is not _MISSING and not rule.accepts(value):
+            _fail(".".join(rule.parts), f"must be {rule.must_be}, got {value!r}")
+
+
+def _check_train_from(cfg: Mapping[Any, Any]) -> None:
+    path = f"training.{_TRAIN_FROM}"
+    train_from = _lookup(cfg, "training", _TRAIN_FROM)
+    if train_from is _MISSING:
+        return
+    if not isinstance(train_from, str):
+        _fail(path, f"must be a string, got {type(train_from).__name__}")
+    if ".." in train_from.split("/"):
+        _fail(
+            path,
+            "holds a '..' component, which could leave the run's checkpoint "
+            f"directory: {train_from!r}",
+        )
+    glob_character = next((c for c in train_from if c in _GLOB_CHARACTERS), None)
+    if glob_character is not None:
+        _fail(
+            path,
+            f"holds {glob_character!r}, which Eole reads as a glob pattern when it "
+            f"loads a checkpoint from it: {train_from!r}",
+        )
+    model_path = _lookup(cfg, "training", "model_path")
+    if not _is_text(model_path):
+        _fail(
+            path,
+            "cannot be checked, training.model_path must be a non-empty string "
+            f"to compare with, {_got(model_path)}",
+        )
+    parent, name = os.path.split(os.path.normpath(train_from))
+    if (parent or ".") != os.path.normpath(model_path) or not _STEP_DIRECTORY.fullmatch(
+        name
+    ):
+        _fail(
+            path,
+            "must be '<training.model_path>/step_<N>' of this run (N a positive "
+            f"number without a leading zero; model_path is {model_path!r}), got "
+            f"{train_from!r}",
+        )
 
 
 def _check_corpora(cfg: Mapping[Any, Any]) -> None:

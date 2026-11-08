@@ -1,7 +1,9 @@
 """The Eole base configs and the ablation matrices shipped under `configs/eole/`:
 `multilingual_tiny.yaml` (the spike's CPU recipe), `multilingual_proxy.yaml` (a GPU
-shaped model whose every value is an unmeasured prior), and the matrices
-`ablation_tiny.yaml` (2 variants) and `ablation_priors.yaml` (24).
+shaped model whose every value is an unmeasured prior), `teacher.yaml` (the 8-GPU
+teacher, every value an unmeasured prior), `teacher_tiny.yaml` (the CPU teacher gate
+of D8), and the matrices `ablation_tiny.yaml` (2 variants) and `ablation_priors.yaml`
+(24).
 
 A base holds no per-run value (`src_vocab`, the checkpoint path, the SentencePiece
 model, the corpora): the ablation run merges those in. These tests merge in the
@@ -18,6 +20,7 @@ import pytest
 
 from rinchen.config.ablation import load_ablation
 from rinchen.config.loader import REPO_ROOT
+from rinchen.errors import ConfigError
 from rinchen.train.eole_cfg import (
     POSITION_ENCODING,
     merge,
@@ -30,10 +33,17 @@ from tests.support.eole_train_config import make_config
 EOLE_DIR = REPO_ROOT / "configs" / "eole"
 TINY_BASE = EOLE_DIR / "multilingual_tiny.yaml"
 PROXY_BASE = EOLE_DIR / "multilingual_proxy.yaml"
+TEACHER_BASE = EOLE_DIR / "teacher.yaml"
+TEACHER_TINY_BASE = EOLE_DIR / "teacher_tiny.yaml"
 TINY_MATRIX = EOLE_DIR / "ablation_tiny.yaml"
 PRIORS_MATRIX = EOLE_DIR / "ablation_priors.yaml"
 
-BASES = [pytest.param(TINY_BASE, id="tiny"), pytest.param(PROXY_BASE, id="proxy")]
+BASES = [
+    pytest.param(TINY_BASE, id="tiny"),
+    pytest.param(PROXY_BASE, id="proxy"),
+    pytest.param(TEACHER_BASE, id="teacher"),
+    pytest.param(TEACHER_TINY_BASE, id="teacher-tiny"),
+]
 
 
 def _per_run_values() -> dict[str, Any]:
@@ -297,3 +307,184 @@ def test_a_shipped_matrix_has_room_for_the_corpora_of_sixteen_directions(
     # A weight per corpus: an authentic and a back-translated corpus for each of up
     # to 16 directions need 32 of the weight total.
     assert load_ablation(matrix_path).weight_total >= 32
+
+
+# --- the teacher bases (D8) -------------------------------------------------------
+
+TEACHER_BASES = [
+    pytest.param(TEACHER_BASE, id="teacher"),
+    pytest.param(TEACHER_TINY_BASE, id="teacher-tiny"),
+]
+
+
+def _entries(node: object) -> list[tuple[str, object, object]]:
+    found: list[tuple[str, object, object]] = []
+    if isinstance(node, dict):
+        for key, value in node.items():
+            found.append(("", key, value))
+            found.extend(_entries(value))
+    elif isinstance(node, list):
+        for value in node:
+            found.extend(_entries(value))
+    return found
+
+
+@pytest.mark.parametrize("path", TEACHER_BASES)
+def test_a_teacher_base_carries_the_position_scheme_and_no_forbidden_key(
+    path: Path,
+) -> None:
+    from rinchen.train.eole_cfg import FORBIDDEN_KEYS
+
+    base = _base(path)
+    keys = {key for _, key, _ in _entries(base) if isinstance(key, str)}
+
+    assert base["model"]["embeddings"]["position_encoding_type"] == (
+        "SinusoidalInterleaved"
+    )
+    assert not keys & FORBIDDEN_KEYS
+    assert "train_from" not in keys
+
+
+@pytest.mark.parametrize("path", TEACHER_BASES)
+def test_a_teacher_base_is_not_a_resume_config(path: Path) -> None:
+    # `train_from` is allowed only in the resume file the launcher renders itself.
+    with pytest.raises(ConfigError, match="train_from"):
+        validate_train_config(
+            merge(_complete(path), {"training": {"train_from": "run/ckpt/step_5"}})
+        )
+
+
+def test_the_teacher_base_is_the_8_gpu_prior_of_the_master_plan() -> None:
+    base = _base(TEACHER_BASE)
+
+    assert base["model"] == {
+        "architecture": "transformer",
+        "hidden_size": 1536,
+        "encoder": {"layers": 24},
+        "decoder": {"layers": 12},
+        "heads": 16,
+        "transformer_ff": 4096,
+        "embeddings": {
+            "word_vec_size": 1536,
+            "position_encoding_type": "SinusoidalInterleaved",
+        },
+        "share_embeddings": True,
+        "share_decoder_embeddings": True,
+    }
+    training = base["training"]
+    assert training["world_size"] == 8
+    assert training["gpu_ranks"] == [0, 1, 2, 3, 4, 5, 6, 7]
+    assert training["gpu_backend"] == "nccl"
+    assert training["compute_dtype"] == "bf16"
+    assert training["batch_type"] == "tokens"
+    assert training["batch_size"] == 16384
+    assert training["accum_count"] == [8]
+    assert training["dropout"] == [0.1]
+    assert training["label_smoothing"] == 0.1
+    assert training["valid_steps"] == 5000
+    assert training["save_checkpoint_steps"] == 5000
+    assert training["early_stopping"] == 6
+    assert training["early_stopping_criteria"] == "ppl"
+    assert training["keep_checkpoint"] == 8
+    assert training["timeout"] == 7200
+    assert training["batch_size_multiple"] == 8
+    assert base["tensorboard"] is True
+
+
+def test_the_teacher_base_keeps_the_best_checkpoint_it_can_stop_on() -> None:
+    # Eole keeps the last `keep_checkpoint` checkpoints, never the best one: with a
+    # validation at every save, early stopping needs one more kept than its patience.
+    training = _base(TEACHER_BASE)["training"]
+
+    assert training["valid_steps"] == training["save_checkpoint_steps"]
+    assert training["keep_checkpoint"] >= training["early_stopping"] + 1
+
+
+def test_the_teacher_base_leaves_the_data_and_the_run_paths_to_the_run() -> None:
+    base = _base(TEACHER_BASE)
+
+    assert base["data"] == {}
+    assert "src_vocab" not in base
+    assert "tgt_vocab" not in base
+    assert "model_path" not in base["training"]
+    assert "sentencepiece" not in base["transforms_configs"]
+    assert "valid_metrics" not in base
+
+
+def test_the_teacher_base_says_in_a_comment_that_every_value_is_an_unmeasured_prior() -> (
+    None
+):
+    comments = " ".join(_comment_lines(TEACHER_BASE)).lower()
+
+    assert "every value" in comments
+    assert "unmeasured prior" in comments
+
+
+def test_the_teacher_base_cites_the_master_plan_lines_its_numbers_come_from() -> None:
+    comments = " ".join(_comment_lines(TEACHER_BASE))
+
+    assert "2026-10-29-rinchen-dev-agent-prompt.md" in comments
+    assert "511" in comments
+    assert "514" in comments
+
+
+def test_the_teacher_base_is_accepted_by_eoles_own_schema_with_its_8_gpu_settings() -> (
+    None
+):
+    import torch
+    from eole.config.run import TrainConfig
+
+    config = TrainConfig(**_complete(TEACHER_BASE))
+
+    assert config.training.compute_dtype == torch.bfloat16
+    assert config.training.world_size == 8
+    assert config.training.gpu_ranks == [0, 1, 2, 3, 4, 5, 6, 7]
+    assert config.training.gpu_backend == "nccl"
+    assert config.training.timeout == 7200
+    assert config.training.early_stopping == 6
+    assert config.training.early_stopping_criteria == "ppl"
+    assert config.training.batch_size_multiple == 8
+    assert config.tensorboard is True
+
+
+def test_the_tiny_teacher_is_the_tiny_base_trained_for_200_steps_with_four_saves() -> (
+    None
+):
+    base = _base(TEACHER_TINY_BASE)
+    tiny = _base(TINY_BASE)
+
+    assert base["model"] == tiny["model"]
+    assert base["transforms_configs"] == tiny["transforms_configs"]
+    assert base["report_every"] == 10
+    assert base["seed"] == 1234
+    expected = {
+        **tiny["training"],
+        "train_steps": 200,
+        "valid_steps": 50,
+        "save_checkpoint_steps": 50,
+        "keep_checkpoint": 4,
+    }
+    assert base["training"] == expected
+    assert base["training"]["dropout"] == [0.0]
+    assert base["training"]["attention_dropout"] == [0.0]
+    assert base["training"]["gpu_ranks"] == []
+    assert base["training"]["world_size"] == 1
+    assert base["training"]["compute_dtype"] == "fp32"
+
+
+def test_the_tiny_teacher_leaves_the_data_and_the_run_paths_to_the_run() -> None:
+    base = _base(TEACHER_TINY_BASE)
+
+    assert base["data"] == {}
+    assert "src_vocab" not in base
+    assert "model_path" not in base["training"]
+    assert "sentencepiece" not in base["transforms_configs"]
+    assert "tensorboard" not in base
+
+
+def test_the_tiny_teacher_keeps_every_checkpoint_of_its_four_saves() -> None:
+    training = _base(TEACHER_TINY_BASE)["training"]
+
+    assert training["train_steps"] // training["save_checkpoint_steps"] == 4
+    assert training["keep_checkpoint"] == 4
+    assert training["valid_steps"] == training["save_checkpoint_steps"]
