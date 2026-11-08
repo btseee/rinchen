@@ -1,49 +1,42 @@
 """Eole runs of the converter: vocabulary and training from a rendered config, and
 prediction from a trained checkpoint.
 
-Each command runs as a subprocess with its output in a log file. Training stays on
-the CPU when the config asks for no GPU, even on a machine that has one, and the
-thread count is set explicitly: both make the tiny run repeatable.
+The runs themselves are `rinchen.train.eole_run`'s, shared with every other Rinchen
+model; this module adds the converter's own parts: its config validator, and the
+character-model tag, tokenisation and decoding of `predict`.
 """
 
 from __future__ import annotations
 
-import os
-import shutil
-import sys
-import time
-from collections.abc import Mapping, Sequence
+from functools import partial
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import NamedTuple
 
-import yaml
-
-from rinchen.errors import ConfigError, DataError, UpstreamError
+from rinchen.errors import ConfigError, DataError
 from rinchen.script_conv.char_model import CONVERTER_TAGS, load_char_processor
-from rinchen.script_conv.config import Profile, dump_config, validate_converter_config
-from rinchen.utils.logged_process import run_logged
+from rinchen.script_conv.config import Profile, validate_converter_config
+from rinchen.train import eole_run
+from rinchen.train.eole_cfg import reject_dollar
+from rinchen.train.eole_run import (
+    CHECKPOINT_FILE,
+    eole_commands,
+    predict_files,
+    split_lines,
+    training_environment,
+    write_lines,
+)
 
-_PREDICT_BATCH_SIZE = 64
-# Eole keeps its newest checkpoint under this name in `model_path` (a link to the file
-# in a step directory), so a run that trained leaves it there with a fresh
-# modification time.
-CHECKPOINT_FILE = "model.00.safetensors"
-# File systems with coarse timestamps can round a modification time down.
-_MTIME_SLACK_SECONDS = 2.0
-
-
-def training_environment(threads: int, *, hide_gpu: bool) -> dict[str, str]:
-    """A copy of the process environment for an Eole subprocess: OpenMP and MKL run
-    `threads` threads, and no CUDA device is visible when `hide_gpu`. Raises ValueError
-    for fewer than one thread."""
-    if threads < 1:
-        raise ValueError(f"threads must be at least 1, got {threads}")
-    env = dict(os.environ)
-    env["OMP_NUM_THREADS"] = str(threads)
-    env["MKL_NUM_THREADS"] = str(threads)
-    if hide_gpu:
-        env["CUDA_VISIBLE_DEVICES"] = ""
-    return env
+# CHECKPOINT_FILE, eole_commands and training_environment moved to `eole_run`; they are
+# still named here for the callers of this module.
+__all__ = [
+    "CHECKPOINT_FILE",
+    "PredictSidePaths",
+    "eole_commands",
+    "predict",
+    "predict_side_paths",
+    "run_training",
+    "training_environment",
+]
 
 
 def run_training(
@@ -81,55 +74,13 @@ def run_training(
             ends with the last lines of its log), the `eole` command is missing, or
             training exits zero without writing a checkpoint after it was launched.
     """
-    _reject_dollar("config path", cfg_path)
-    _reject_dollar("run directory", run_dir)
-    cfg = _load_config(cfg_path)
-    validate_converter_config(cfg, profile=profile)
-    model_path = _model_path_inside(cfg, run_dir)
-    build_vocab_command, train_command = eole_commands(cfg_path)
-    training = cfg["training"]
-    trains_on_gpu = isinstance(training, Mapping) and bool(training.get("gpu_ranks"))
-    env = training_environment(threads, hide_gpu=not trains_on_gpu)
-
-    run_dir.mkdir(parents=True, exist_ok=True)
-
-    def run_eole(command: tuple[str, ...]) -> None:
-        subcommand = command[1]
-        run_logged(
-            list(command),
-            env=env,
-            log_path=run_dir / f"{subcommand}.log",
-            what=f"eole {subcommand}",
-            timeout=timeout,
-        )
-
-    run_eole(build_vocab_command)
-    launched = time.time()
-    run_eole(train_command)
-    if not _written_since(
-        model_path / CHECKPOINT_FILE, launched - _MTIME_SLACK_SECONDS
-    ):
-        raise UpstreamError(
-            f"eole train exited with code 0 but wrote no new checkpoint under "
-            f"{model_path}: expected a fresh {CHECKPOINT_FILE}; see "
-            f"{run_dir / 'train.log'}"
-        )
-    return model_path
-
-
-def eole_commands(cfg_path: Path) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    """The commands `run_training` runs on the config at `cfg_path`, as argument
-    vectors: `eole build_vocab` (counting the whole corpus), then `eole train`.
-
-    Raises:
-        UpstreamError: the `eole` command is not installed next to the interpreter.
-    """
-    eole = _eole_command()
-    config = ("-config", str(cfg_path))
-    # -n_sample -1: count the whole corpus.
-    return (
-        (eole, "build_vocab", *config, "-n_sample", "-1"),
-        (eole, "train", *config),
+    return eole_run.run_training(
+        cfg_path,
+        run_dir,
+        validate=partial(validate_converter_config, profile=profile),
+        threads=threads,
+        timeout=timeout,
+        what="converter config",
     )
 
 
@@ -145,11 +96,12 @@ class PredictSidePaths(NamedTuple):
 def predict_side_paths(out_file: Path) -> PredictSidePaths:
     """The files `predict` writes next to `out_file`: `<out_file>.log`,
     `.predict.yaml`, `.tokens.src` and `.tokens.out`."""
+    files = predict_files(out_file.parent, out_file.name)
     return PredictSidePaths(
-        log=Path(f"{out_file}.log"),
-        config=Path(f"{out_file}.predict.yaml"),
-        token_source=Path(f"{out_file}.tokens.src"),
-        token_output=Path(f"{out_file}.tokens.out"),
+        log=files.log,
+        config=files.config,
+        token_source=files.token_source,
+        token_output=files.token_output,
     )
 
 
@@ -198,62 +150,29 @@ def predict(
         raise ConfigError(
             f"the tag {tag!r} is not a converter tag: expected one of {CONVERTER_TAGS}"
         )
-    side = predict_side_paths(out_file)
-    cfg = {
-        "model_path": ckpt_dir.as_posix(),
-        "src": side.token_source.as_posix(),
-        "output": side.token_output.as_posix(),
-        "beam_size": 1,
-        "batch_size": _PREDICT_BATCH_SIZE,
-        "batch_type": "sents",
-        "gpu_ranks": [],
-        "world_size": 1,
-        "transforms": [],
-    }
-    # `out_file` is enough for the token files in `cfg`: they only add a suffix to it.
+    # `out_file` is enough for the files Eole is given: they only add a suffix to it.
     for name, value in (("checkpoint directory", ckpt_dir), ("output file", out_file)):
-        _reject_dollar(name, value)
+        reject_dollar(name, value)
     processor = load_char_processor(spm_model)
     if processor.piece_to_id(tag) == processor.unk_id():
         raise ConfigError(f"the tag {tag!r} is not a piece of the model {spm_model}")
     source_lines = _read_source_lines(src_file)
-    eole = _eole_command()
-    env = training_environment(threads, hide_gpu=True)
 
-    out_file.parent.mkdir(parents=True, exist_ok=True)
     out_file.unlink(missing_ok=True)
-    side.token_output.unlink(missing_ok=True)
-    _write_lines(
-        side.token_source,
+    raw_lines = eole_run.predict_tokens(
+        ckpt_dir,
         [
             " ".join([tag, *processor.encode(line, out_type=str)])
             for line in source_lines
         ],
-    )
-    dump_config(cfg, side.config)
-    run_logged(
-        [eole, "predict", "-config", str(side.config)],
-        env=env,
-        log_path=side.log,
-        what="eole predict",
+        out_dir=out_file.parent,
+        stem=out_file.name,
+        threads=threads,
         timeout=timeout,
     )
-    if not side.token_output.is_file():
-        raise UpstreamError(
-            f"eole predict exited with code 0 but wrote no output file "
-            f"{side.token_output}"
-        )
-    raw_lines = _split_lines(
-        side.token_output.read_text(encoding="utf-8", newline="\n")
-    )
-    if len(raw_lines) != len(source_lines):
-        raise UpstreamError(
-            f"eole predict wrote {len(raw_lines)} lines for {len(source_lines)} "
-            f"source lines: {side.token_output}"
-        )
     # Pieces hold no U+0020, so splitting at it restores them; `str.split()` would
     # also cut at the suffix gap U+202F, which is a piece of its own.
-    _write_lines(out_file, [processor.decode(line.split(" ")) for line in raw_lines])
+    write_lines(out_file, [processor.decode(line.split(" ")) for line in raw_lines])
     return out_file
 
 
@@ -262,81 +181,7 @@ def _read_source_lines(src_file: Path) -> list[str]:
         text = src_file.read_text(encoding="utf-8", newline="\n")
     except (OSError, UnicodeDecodeError) as exc:
         raise DataError(f"cannot read source file {src_file}: {exc}") from exc
-    lines = _split_lines(text)
+    lines = split_lines(text)
     if not lines:
         raise DataError(f"source file {src_file} has no lines")
     return lines
-
-
-def _split_lines(text: str) -> list[str]:
-    """The lines of `text`, split at LF only (other line separators belong to the
-    line), each ended by an LF; no text is no lines."""
-    if not text:
-        return []
-    return text.removesuffix("\n").split("\n")
-
-
-def _write_lines(path: Path, lines: Sequence[str]) -> None:
-    path.write_text(
-        "".join(f"{line}\n" for line in lines), encoding="utf-8", newline="\n"
-    )
-
-
-def _reject_dollar(what: str, value: Path | str) -> None:
-    # Eole runs `os.path.expandvars` over the text of a config file, so a `$NAME`
-    # in a path would be silently replaced by an environment variable's value.
-    if "$" in str(value):
-        raise ConfigError(
-            f"the {what} holds '$', which Eole would expand as a variable"
-        )
-
-
-def _load_config(cfg_path: Path) -> Any:
-    """What the YAML file holds, which `validate_converter_config` then checks is a
-    mapping of the right shape."""
-    if not cfg_path.is_file():
-        raise ConfigError(f"Eole config file not found: {cfg_path}")
-    try:
-        text = cfg_path.read_text(encoding="utf-8")
-        _reject_dollar(f"text of the config {cfg_path}", text)
-        return yaml.safe_load(text)
-    except (yaml.YAMLError, UnicodeDecodeError, OSError) as exc:
-        raise ConfigError(
-            f"invalid Eole config {cfg_path}: cannot read or parse: {exc}"
-        ) from exc
-
-
-def _model_path_inside(cfg: Mapping[str, Any], run_dir: Path) -> Path:
-    """The config's `training.model_path`, which must lie inside `run_dir` (so the
-    run keeps everything it writes in one directory)."""
-    training = cfg["training"]
-    model_path = training.get("model_path") if isinstance(training, Mapping) else None
-    if not isinstance(model_path, str) or not model_path:
-        raise ConfigError(
-            "invalid converter config: training.model_path: must be a non-empty path"
-        )
-    resolved = Path(model_path).resolve()
-    root = run_dir.resolve()
-    if resolved == root or not resolved.is_relative_to(root):
-        raise ConfigError(
-            f"invalid converter config: training.model_path: {model_path!r} must be "
-            f"inside the run directory {run_dir}"
-        )
-    return Path(model_path)
-
-
-def _written_since(path: Path, since: float) -> bool:
-    try:
-        return path.stat().st_mtime >= since
-    except OSError:  # missing, or a link that points nowhere
-        return False
-
-
-def _eole_command() -> str:
-    # Eole has no `__main__`, so `python -m eole` does not run; its console script
-    # sits next to the interpreter of the environment this code runs in.
-    bin_dir = Path(sys.executable).parent
-    command = shutil.which("eole", path=str(bin_dir))
-    if command is None:
-        raise UpstreamError(f"the `eole` command is not installed in {bin_dir}")
-    return command

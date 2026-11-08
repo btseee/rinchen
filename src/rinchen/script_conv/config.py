@@ -1,9 +1,10 @@
 """The Eole training configuration of the converter.
 
 `render_converter_config` builds the config of one profile as a dict, `dump_config`
-writes it as YAML and `validate_converter_config` checks the invariants a config
-must keep whatever its profile. The two checked-in files `configs/eole/converter.yaml`
-and `converter_tiny.yaml` are renderings, never hand-edited.
+(from `rinchen.train.eole_cfg`, named here for this module's callers) writes it as YAML
+and `validate_converter_config` checks the invariants a config must keep whatever its
+profile. The two checked-in files `configs/eole/converter.yaml` and
+`converter_tiny.yaml` are renderings, never hand-edited.
 
 The tiny profile is the configuration the spike trained on CPU with Eole 0.6.4, with
 more steps: every key in it is needed. The full profile is a set of untuned priors: no
@@ -25,7 +26,17 @@ import yaml
 
 from rinchen.errors import ConfigError
 from rinchen.script_conv.char_model import TO_CYRILLIC_TAG, TO_SCRIPT_TAG
-from rinchen.utils.part_file import unique_part_path
+from rinchen.train.eole_cfg import FORBIDDEN_KEYS, POSITION_ENCODING, dump_config
+
+__all__ = [
+    "FORBIDDEN_KEYS",
+    "ConverterPaths",
+    "Profile",
+    "dump_config",
+    "read_converter_paths",
+    "render_converter_config",
+    "validate_converter_config",
+]
 
 Profile = Literal["tiny", "full"]
 
@@ -45,8 +56,6 @@ _DIRECTION_TAGS: Final = {_CYRL2MONG: TO_SCRIPT_TAG, _MONG2CYRL: TO_CYRILLIC_TAG
 _VALID: Final = "valid"
 _VALID_DIRECTION: Final = _CYRL2MONG
 
-_POSITION_ENCODING: Final = "SinusoidalInterleaved"
-
 # Eole transforms every corpus needs, in this order (see `_data_section`).
 _SENTENCEPIECE: Final = "sentencepiece"
 _PREFIX: Final = "prefix"
@@ -55,36 +64,6 @@ _SEED: Final = 1234
 # Eole's `prefix` transform fails with a TypeError when a corpus has no
 # `tgt_prefix`; an empty string means "no target prefix".
 _NO_TARGET_PREFIX: Final = ""
-
-# Field names of the installed Eole (0.6.4, `eole/config/models.py`) that select or
-# tune a position scheme other than sinusoidal, or restrict or group attention.
-# Eole has no field named for ALiBi (it is a `position_encoding_type` value, rejected
-# below). A key that is present is rejected even with a neutral value, so a config
-# never holds a switch that could be flipped.
-FORBIDDEN_KEYS: Final = frozenset(
-    {
-        # Rotary: `rope_config` holds every other rotary setting.
-        "rope_config",
-        "rotary_interleave",
-        "rotary_theta",
-        "rotary_theta_local",
-        "rotary_dim",
-        "rotary_dim_global",
-        "partial_rotary_factor",
-        "interleave_local",
-        "multidimensional_rope",
-        "xdrope_section",
-        "qk_norm_post_rope",
-        # Relative position bias.
-        "relative_positions_buckets",
-        # Sliding window and per-layer attention types.
-        "sliding_window",
-        "layer_types",
-        # Grouped-query attention.
-        "heads_kv",
-        "global_heads_kv",
-    }
-)
 
 _TOP_LEVEL_KEYS: Final = frozenset(
     {
@@ -276,25 +255,11 @@ def _model_section(settings: _ProfileSettings) -> dict[str, Any]:
         # layer-norm shape error unless it equals `hidden_size`.
         "embeddings": {
             "word_vec_size": settings.hidden_size,
-            "position_encoding_type": _POSITION_ENCODING,
+            "position_encoding_type": POSITION_ENCODING,
         },
         "share_embeddings": True,
         "share_decoder_embeddings": True,
     }
-
-
-def dump_config(cfg: dict[str, Any], path: Path) -> None:
-    """Write `cfg` as YAML (UTF-8, LF, keys in their dict order) so the file appears
-    whole: a failure leaves the old file, if any, and no temporary file. The
-    directory of `path` must exist."""
-    text = yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True)
-    part_path = unique_part_path(path)
-    try:
-        with part_path.open("w", encoding="utf-8", newline="\n") as handle:
-            handle.write(text)
-        part_path.replace(path)
-    finally:
-        part_path.unlink(missing_ok=True)
 
 
 class ConverterPaths(NamedTuple):
@@ -483,8 +448,8 @@ def _check_sections_are_not_strings(cfg: Mapping[str, Any]) -> None:
 
 def _check_position_encoding(cfg: Mapping[str, Any]) -> None:
     embeddings_path = "model.embeddings.position_encoding_type"
-    if _lookup(cfg, embeddings_path) != _POSITION_ENCODING:
-        _fail(embeddings_path, f"must be {_POSITION_ENCODING}")
+    if _lookup(cfg, embeddings_path) != POSITION_ENCODING:
+        _fail(embeddings_path, f"must be {POSITION_ENCODING}")
     embeddings = _lookup(cfg, "model.embeddings")
     if (
         "position_encoding" in embeddings
@@ -495,8 +460,8 @@ def _check_position_encoding(cfg: Mapping[str, Any]) -> None:
             "must be true when set: false would switch the absolute position encoding off",
         )
     for path, key, value in _entries(cfg, ""):
-        if key == "position_encoding_type" and value != _POSITION_ENCODING:
-            _fail(path, f"must be {_POSITION_ENCODING}")
+        if key == "position_encoding_type" and value != POSITION_ENCODING:
+            _fail(path, f"must be {POSITION_ENCODING}")
 
 
 def _check_embedding_size(cfg: Mapping[str, Any]) -> None:

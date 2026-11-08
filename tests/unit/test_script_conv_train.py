@@ -34,6 +34,7 @@ from rinchen.script_conv.train import (
     run_training,
     training_environment,
 )
+from rinchen.train.eole_run import split_lines
 from tests.support.fake_process import FakeProcess
 
 TO_SCRIPT_TAG = "<2mn_Mong>"
@@ -1070,7 +1071,7 @@ def test_predict_rejects_fewer_than_one_thread_before_it_writes_anything(
     ids=repr,
 )
 def test_split_lines_breaks_at_lf_only(text: str, lines: list[str]) -> None:
-    assert train_module._split_lines(text) == lines
+    assert split_lines(text) == lines
 
 
 def _token_source_text(out_file: Path) -> str:
