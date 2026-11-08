@@ -1,0 +1,1164 @@
+"""Tests for the schema half of `rinchen.train.eole_cfg`: `validate_train_config`
+(what a multilingual training config may hold), `merge` and `render`.
+
+The shared half (forbidden keys, `$` guard, reading the YAML) has its tests in
+`test_train_eole_cfg_shared.py`, the allow-lists against the installed Eole in
+`test_train_eole_cfg_drift.py`, the `merge` properties in
+`tests/property/test_train_eole_cfg_merge_property.py`. No test starts Eole.
+
+The baseline is `tests.support.eole_train_config.make_config`, the spike's working
+multilingual config. Each rule is tested by breaking that config in one place and
+reading the message: `invalid Eole config: <path>: ...`.
+"""
+
+from __future__ import annotations
+
+import copy
+import datetime
+import os
+from pathlib import Path
+from typing import Any
+
+import pytest
+import yaml
+
+from rinchen.errors import ConfigError
+from rinchen.train.eole_cfg import (
+    FORBIDDEN_KEYS,
+    merge,
+    render,
+    validate_train_config,
+)
+from tests.support.eole_train_config import BT_CORPUS, CORPUS, make_config
+
+PREFIX = "invalid Eole config: "
+DROP = object()  # in a case: remove the key instead of setting it
+
+
+def broken(*path_and_value: Any) -> dict[str, Any]:
+    """The baseline with the entry at the key path set to the value, or removed
+    when the value is `DROP`. The last argument is the value."""
+    *path, value = path_and_value
+    cfg = make_config()
+    node = cfg
+    for key in path[:-1]:
+        node = node[key]
+    if value is DROP:
+        del node[path[-1]]
+    else:
+        node[path[-1]] = value
+    return cfg
+
+
+def message_of(cfg: object) -> str:
+    with pytest.raises(ConfigError) as raised:
+        validate_train_config(cfg)
+    return str(raised.value)
+
+
+def test_the_spikes_working_config_is_valid() -> None:
+    assert validate_train_config(make_config()) is None
+
+
+def test_the_baseline_is_not_changed_by_validation() -> None:
+    cfg = make_config()
+
+    validate_train_config(cfg)
+
+    assert cfg == make_config()
+
+
+# ---- a config of the wrong shape ------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("cfg", "type_name"),
+    [([], "list"), ("seed: 1", "str"), (None, "NoneType"), (3, "int"), (True, "bool")],
+    ids=["list", "string", "none", "int", "bool"],
+)
+def test_a_config_that_is_not_a_mapping_is_refused_by_type(
+    cfg: object, type_name: str
+) -> None:
+    assert message_of(cfg) == f"{PREFIX}config: expected a mapping, got {type_name}"
+
+
+@pytest.mark.parametrize(
+    ("path", "value", "where"),
+    [
+        (("data",), [], "data"),
+        (("data",), "en-mn", "data"),
+        (("data",), None, "data"),
+        (("data", CORPUS), "path_src: x", f"data.{CORPUS}"),
+        (("data", CORPUS), ["path_src"], f"data.{CORPUS}"),
+        (("data", CORPUS), None, f"data.{CORPUS}"),
+        (("data", "valid"), "path_src: x", "data.valid"),
+        (("transforms_configs",), "dict()", "transforms_configs"),
+        (("transforms_configs",), [], "transforms_configs"),
+        (
+            ("transforms_configs", "sentencepiece"),
+            3,
+            "transforms_configs.sentencepiece",
+        ),
+        (
+            ("transforms_configs", "filtertoolong"),
+            [],
+            "transforms_configs.filtertoolong",
+        ),
+        (("model",), "transformer", "model"),
+        (("model",), [], "model"),
+        (("model", "encoder"), "dict(sliding_window=4)", "model.encoder"),
+        (("model", "decoder"), "__import__('os')", "model.decoder"),
+        (("model", "encoder"), None, "model.encoder"),
+        (("model", "embeddings"), [], "model.embeddings"),
+        (("model", "embeddings"), "x", "model.embeddings"),
+        (("training",), "dict(train_steps=1)", "training"),
+        (("training",), [], "training"),
+        (("training",), None, "training"),
+    ],
+)
+def test_a_section_that_is_not_a_mapping_is_refused_by_its_path_never_by_a_crash(
+    path: tuple[str, ...], value: object, where: str
+) -> None:
+    # A string given for `encoder`, `decoder`, `training` or `transforms_configs` is
+    # evaluated as Python by Eole, so it is not a spelling of a mapping.
+    message = message_of(broken(*path, value))
+
+    assert message.startswith(f"{PREFIX}{where}: expected a mapping, got ")
+
+
+def test_the_model_section_is_required() -> None:
+    assert message_of(broken("model", DROP)) == f"{PREFIX}model: is missing"
+
+
+@pytest.mark.parametrize("name", [1, None, 2.5, True])
+def test_a_corpus_name_that_is_not_text_is_refused(name: object) -> None:
+    cfg = make_config()
+    cfg["data"][name] = cfg["data"].pop(BT_CORPUS)
+
+    assert message_of(cfg).startswith(f"{PREFIX}data.{name}: the corpus name must be")
+
+
+# ---- unknown keys, level by level -----------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("path", "level"),
+    [
+        ((), "the top level"),
+        (("data", CORPUS), "a data corpus"),
+        (("data", "valid"), "a data corpus"),
+        (("transforms_configs",), "transforms_configs"),
+        (("transforms_configs", "sentencepiece"), "transforms_configs.sentencepiece"),
+        (("transforms_configs", "filtertoolong"), "transforms_configs.filtertoolong"),
+        (("model",), "model"),
+        (("model", "encoder"), "model.encoder"),
+        (("model", "decoder"), "model.decoder"),
+        (("model", "embeddings"), "model.embeddings"),
+        (("training",), "training"),
+    ],
+)
+def test_an_unknown_key_is_named_with_its_path_and_its_level(
+    path: tuple[str, ...], level: str
+) -> None:
+    cfg = make_config()
+    node = cfg
+    for key in path:
+        node = node[key]
+    node["bogus_key"] = 1
+
+    where = ".".join([*path, "bogus_key"])
+    assert message_of(cfg) == f"{PREFIX}{where}: unknown key in {level}"
+
+
+@pytest.mark.parametrize(
+    ("path", "level"),
+    [
+        (("train_from",), "the top level"),
+        (("training", "train_from"), "training"),
+        (("training", "lora_rank"), "training"),
+        (("training", "update_vocab"), "training"),
+        (("transforms_configs", "prefix"), "transforms_configs"),
+        (("model", "layers"), "model"),
+        (("model", "embeddings", "src_word_vec_size"), "model.embeddings"),
+        (("data", CORPUS, "src_suffix"), "a data corpus"),
+        (("data", CORPUS, "path_align"), "a data corpus"),
+    ],
+)
+def test_a_key_that_continues_from_or_adapts_a_model_or_that_no_run_sets_is_unknown(
+    path: tuple[str, ...], level: str
+) -> None:
+    cfg = make_config()
+    node = cfg
+    for key in path[:-1]:
+        node = node[key]
+    node[path[-1]] = 1
+
+    assert message_of(cfg) == f"{PREFIX}{'.'.join(path)}: unknown key in {level}"
+
+
+def test_a_key_that_is_not_text_is_unknown_at_its_level() -> None:
+    cfg = make_config()
+    cfg["training"][7] = 1
+
+    assert message_of(cfg) == f"{PREFIX}training.7: unknown key in training"
+
+
+def test_a_typo_in_a_training_key_is_named() -> None:
+    cfg = broken("training", "train_stpes", 5)
+
+    assert message_of(cfg) == f"{PREFIX}training.train_stpes: unknown key in training"
+
+
+# ---- forbidden keys, at any depth -----------------------------------------------
+
+FORBIDDEN_PLACES = [
+    pytest.param((), id="top-level"),
+    pytest.param(("model",), id="model"),
+    pytest.param(("model", "encoder"), id="encoder"),
+    pytest.param(("model", "decoder"), id="decoder"),
+    pytest.param(("model", "embeddings"), id="embeddings"),
+    pytest.param(("training",), id="training"),
+    pytest.param(("data", CORPUS), id="corpus"),
+    pytest.param(("transforms_configs", "filtertoolong"), id="transform"),
+]
+
+
+@pytest.mark.parametrize("place", FORBIDDEN_PLACES)
+@pytest.mark.parametrize("key", sorted(FORBIDDEN_KEYS))
+def test_every_forbidden_key_is_refused_at_every_level_before_the_unknown_key_check(
+    key: str, place: tuple[str, ...]
+) -> None:
+    cfg = make_config()
+    node = cfg
+    for part in place:
+        node = node[part]
+    node[key] = None  # even a neutral value: the key itself is the switch
+
+    where = ".".join([*place, key])
+    assert message_of(cfg).startswith(f"{PREFIX}{where}: is not allowed")
+
+
+@pytest.mark.parametrize("key", sorted(FORBIDDEN_KEYS))
+def test_a_forbidden_key_nested_deep_or_inside_a_list_is_found(key: str) -> None:
+    cfg = make_config()
+    cfg["training"]["accum_count"] = [{"nested": [{key: 4}]}]
+
+    assert message_of(cfg).startswith(
+        f"{PREFIX}training.accum_count[0].nested[0].{key}: is not allowed"
+    )
+
+
+def test_the_forbidden_message_says_what_every_model_uses() -> None:
+    message = message_of(broken("model", "sliding_window", 128))
+
+    assert message == (
+        f"{PREFIX}model.sliding_window: is not allowed: every Rinchen model uses "
+        "sinusoidal positions and full multi-head attention"
+    )
+
+
+# ---- position encoding ----------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["Rotary", "Relative", "Alibi", "sinusoidal", "SinusoidalConcat", "", None, 1],
+)
+def test_the_embeddings_position_encoding_must_be_exactly_sinusoidal_interleaved(
+    value: object,
+) -> None:
+    cfg = broken("model", "embeddings", "position_encoding_type", value)
+
+    assert message_of(cfg) == (
+        f"{PREFIX}model.embeddings.position_encoding_type: must be "
+        f"SinusoidalInterleaved, got {value!r}"
+    )
+
+
+def test_the_embeddings_position_encoding_must_be_set_not_left_to_eoles_default() -> (
+    None
+):
+    cfg = broken("model", "embeddings", "position_encoding_type", DROP)
+
+    assert message_of(cfg) == (
+        f"{PREFIX}model.embeddings.position_encoding_type: must be "
+        "SinusoidalInterleaved, but it is missing"
+    )
+
+
+def test_a_missing_embeddings_section_is_named_before_its_position_encoding() -> None:
+    assert message_of(broken("model", "embeddings", DROP)) == (
+        f"{PREFIX}model.embeddings: is missing"
+    )
+
+
+@pytest.mark.parametrize("layer", ["encoder", "decoder"])
+@pytest.mark.parametrize("value", ["Rotary", "Relative", "sinusoidal", None])
+def test_a_position_encoding_on_the_encoder_or_decoder_must_match_too(
+    layer: str, value: object
+) -> None:
+    cfg = broken("model", layer, "position_encoding_type", value)
+
+    assert message_of(cfg) == (
+        f"{PREFIX}model.{layer}.position_encoding_type: must be "
+        f"SinusoidalInterleaved, got {value!r}"
+    )
+
+
+@pytest.mark.parametrize("layer", ["encoder", "decoder"])
+def test_a_matching_position_encoding_on_the_encoder_or_decoder_is_accepted(
+    layer: str,
+) -> None:
+    cfg = broken("model", layer, "position_encoding_type", "SinusoidalInterleaved")
+
+    assert validate_train_config(cfg) is None
+
+
+# ---- model.architecture ---------------------------------------------------------
+
+
+@pytest.mark.parametrize("value", ["transformer_lm", "rnn", "Transformer", None, 1])
+def test_the_architecture_must_be_the_one_the_allow_lists_describe(
+    value: object,
+) -> None:
+    cfg = broken("model", "architecture", value)
+
+    assert message_of(cfg) == (
+        f"{PREFIX}model.architecture: must be 'transformer', got {value!r}: the "
+        "allow-lists are those of that architecture"
+    )
+
+
+def test_a_missing_architecture_is_refused_before_eole_does() -> None:
+    cfg = broken("model", "architecture", DROP)
+
+    assert message_of(cfg) == (
+        f"{PREFIX}model.architecture: must be 'transformer', but it is missing: "
+        "the allow-lists are those of that architecture"
+    )
+
+
+# ---- no variable references -----------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        (("data", CORPUS, "path_src"), "data/$CORPUS/en.src"),
+        (("training", "model_path"), "$HOME/ckpt"),
+        (("src_vocab",), "run/vocab$1.src"),
+        (("transforms_configs", "sentencepiece", "src_subword_model"), "$"),
+        (("data", CORPUS, "src_prefix"), "<2khk_Cyrl>$"),
+        (("model", "architecture"), "transformer$"),
+    ],
+)
+def test_a_dollar_sign_in_a_string_is_refused_with_its_path(
+    path: tuple[str, ...], value: str
+) -> None:
+    cfg = broken(*path, value)
+
+    assert message_of(cfg) == (
+        f"{PREFIX}{'.'.join(path)}: holds '$', which Eole would expand as a "
+        f"variable: {value!r}"
+    )
+
+
+def test_a_dollar_sign_in_a_list_item_is_refused_with_the_items_index() -> None:
+    cfg = broken("data", CORPUS, "transforms", ["sentencepiece", "pre$fix"])
+
+    assert message_of(cfg).startswith(f"{PREFIX}data.{CORPUS}.transforms[1]: holds '$'")
+
+
+def test_a_dollar_sign_in_a_key_is_refused_before_the_unknown_key_check() -> None:
+    cfg = broken("training", "lr$", 1)
+
+    assert message_of(cfg) == (
+        f"{PREFIX}training.lr$: the key holds '$', which Eole would expand as a "
+        "variable"
+    )
+
+
+def test_a_dollar_sign_in_a_corpus_name_is_refused() -> None:
+    cfg = make_config()
+    cfg["data"]["en$mn"] = cfg["data"].pop(BT_CORPUS)
+
+    assert message_of(cfg).startswith(f"{PREFIX}data.en$mn: the key holds '$'")
+
+
+# ---- plain data only ------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("value", "type_name"),
+    [
+        (Path("run/ckpt"), "PosixPath"),
+        ({"a"}, "set"),
+        (b"bytes", "bytes"),
+        (datetime.date(2026, 11, 8), "date"),
+        (object(), "object"),
+    ],
+)
+def test_a_value_that_is_not_plain_yaml_data_is_refused_so_that_it_cannot_be_dumped_wrongly(
+    value: object, type_name: str
+) -> None:
+    cfg = broken("training", "model_path", value)
+
+    assert message_of(cfg) == (
+        f"{PREFIX}training.model_path: must be plain YAML data (text, a number, "
+        f"true or false, null, a list or a mapping), got {type_name}"
+    )
+
+
+def test_numbers_booleans_null_lists_tuples_and_floats_are_plain_data() -> None:
+    cfg = broken("training", "learning_rate", 0.5)
+    cfg["training"]["gpu_ranks"] = (0, 1)
+    cfg["seed"] = None
+
+    assert validate_train_config(cfg) is None
+
+
+def test_a_mapping_that_contains_itself_is_refused_instead_of_recursing_forever() -> (
+    None
+):
+    cfg = make_config()
+    cfg["training"]["accum_count"] = [cfg["training"]]
+
+    assert message_of(cfg) == (
+        f"{PREFIX}training.accum_count[0]: refers back to a mapping or list that "
+        "contains it"
+    )
+
+
+def test_the_same_list_used_twice_is_not_a_cycle() -> None:
+    cfg = make_config()
+    shared = ["sentencepiece", "prefix", "filtertoolong"]
+    cfg["data"][CORPUS]["transforms"] = shared
+    cfg["data"][BT_CORPUS]["transforms"] = shared
+
+    assert validate_train_config(cfg) is None
+
+
+# ---- overwrite and share_vocab --------------------------------------------------
+
+
+@pytest.mark.parametrize("value", [False, DROP, "true", 1, None])
+def test_overwrite_must_be_true_so_a_rerun_into_a_used_directory_does_not_stop(
+    value: object,
+) -> None:
+    cfg = broken("overwrite", value)
+
+    got = "but it is missing" if value is DROP else f"got {value!r}"
+    assert message_of(cfg) == (
+        f"{PREFIX}overwrite: must be true: Eole stops at an existing vocabulary "
+        f"file otherwise, {got}"
+    )
+
+
+@pytest.mark.parametrize("value", [False, DROP, "true", 1, None])
+def test_share_vocab_must_be_true_for_the_shared_embeddings(value: object) -> None:
+    cfg = broken("share_vocab", value)
+
+    got = "but it is missing" if value is DROP else f"got {value!r}"
+    assert message_of(cfg) == (
+        f"{PREFIX}share_vocab: must be true: every Rinchen model shares one "
+        f"vocabulary, {got}"
+    )
+
+
+# ---- hidden size and embedding size ---------------------------------------------
+
+
+@pytest.mark.parametrize("word_vec_size", [128, 512, 32, "64", None, 64.5])
+def test_the_embedding_size_must_equal_the_hidden_size(word_vec_size: object) -> None:
+    cfg = broken("model", "embeddings", "word_vec_size", word_vec_size)
+
+    assert message_of(cfg) == (
+        f"{PREFIX}model.embeddings.word_vec_size: must equal model.hidden_size "
+        f"(64), got {word_vec_size!r}"
+    )
+
+
+def test_a_hidden_size_that_is_left_to_eoles_default_is_refused() -> None:
+    cfg = broken("model", "hidden_size", DROP)
+
+    assert message_of(cfg) == (
+        f"{PREFIX}model.hidden_size: is missing: Eole's default is 512, which "
+        "breaks a smaller model"
+    )
+
+
+def test_an_embedding_size_that_is_left_to_eoles_default_is_refused() -> None:
+    cfg = broken("model", "embeddings", "word_vec_size", DROP)
+
+    assert message_of(cfg) == (
+        f"{PREFIX}model.embeddings.word_vec_size: is missing: Eole's default is "
+        "512, which breaks a smaller model"
+    )
+
+
+@pytest.mark.parametrize("layer", ["encoder", "decoder"])
+def test_a_hidden_size_set_on_the_encoder_or_decoder_must_equal_the_embedding_size(
+    layer: str,
+) -> None:
+    cfg = broken("model", layer, "hidden_size", 128)
+
+    assert message_of(cfg) == (
+        f"{PREFIX}model.{layer}.hidden_size: must equal "
+        "model.embeddings.word_vec_size (64), got 128"
+    )
+
+
+@pytest.mark.parametrize("layer", ["encoder", "decoder"])
+def test_a_hidden_size_on_the_encoder_or_decoder_that_equals_the_rest_is_accepted(
+    layer: str,
+) -> None:
+    cfg = broken("model", layer, "hidden_size", 64)
+
+    assert validate_train_config(cfg) is None
+
+
+def test_a_larger_model_with_equal_sizes_is_accepted() -> None:
+    cfg = make_config()
+    cfg["model"]["hidden_size"] = 512
+    cfg["model"]["embeddings"]["word_vec_size"] = 512
+    cfg["model"]["encoder"]["layers"] = 6
+    cfg["model"]["decoder"]["hidden_size"] = 512
+
+    assert validate_train_config(cfg) is None
+
+
+# ---- the training corpora -------------------------------------------------------
+
+
+@pytest.mark.parametrize("key", ["path_src", "path_tgt", "transforms"])
+def test_a_training_corpus_without_a_path_or_transforms_is_refused(key: str) -> None:
+    cfg = broken("data", CORPUS, key, DROP)
+
+    assert message_of(cfg) == f"{PREFIX}data.{CORPUS}.{key}: is missing"
+
+
+@pytest.mark.parametrize("key", ["src_prefix", "tgt_prefix"])
+def test_a_training_corpus_without_a_prefix_key_is_refused_for_the_type_error_it_makes(
+    key: str,
+) -> None:
+    cfg = broken("data", CORPUS, key, DROP)
+
+    assert message_of(cfg) == (
+        f"{PREFIX}data.{CORPUS}.{key}: is missing: Eole's prefix transform fails "
+        "with a TypeError without it; use '' for no prefix"
+    )
+
+
+@pytest.mark.parametrize("key", ["src_prefix", "tgt_prefix"])
+@pytest.mark.parametrize("value", [None, 5, ["<2xx>"], True])
+def test_a_prefix_that_is_not_a_string_is_refused_as_it_makes_the_same_type_error(
+    key: str, value: object
+) -> None:
+    cfg = broken("data", CORPUS, key, value)
+
+    assert message_of(cfg) == (
+        f"{PREFIX}data.{CORPUS}.{key}: must be a string ('' for none), got {value!r}"
+    )
+
+
+@pytest.mark.parametrize("key", ["path_src", "path_tgt"])
+@pytest.mark.parametrize("value", ["", None, 3, ["a.src"]])
+def test_a_corpus_path_must_be_a_non_empty_string(key: str, value: object) -> None:
+    cfg = broken("data", CORPUS, key, value)
+
+    assert message_of(cfg) == (
+        f"{PREFIX}data.{CORPUS}.{key}: must be a non-empty path, got {value!r}"
+    )
+
+
+@pytest.mark.parametrize("value", ["sentencepiece", None, {"a": 1}, 3])
+def test_the_transforms_of_a_training_corpus_must_be_a_list_of_names(
+    value: object,
+) -> None:
+    cfg = broken("data", CORPUS, "transforms", value)
+
+    assert message_of(cfg) == (
+        f"{PREFIX}data.{CORPUS}.transforms: must be a list of transform names, "
+        f"got {value!r}"
+    )
+
+
+def test_a_transform_name_that_is_not_a_string_is_refused() -> None:
+    cfg = broken("data", CORPUS, "transforms", ["sentencepiece", 3])
+
+    assert message_of(cfg) == (
+        f"{PREFIX}data.{CORPUS}.transforms: must be a list of transform names, "
+        "got ['sentencepiece', 3]"
+    )
+
+
+def test_every_training_corpus_is_checked_not_only_the_first() -> None:
+    cfg = broken("data", BT_CORPUS, "tgt_prefix", DROP)
+
+    assert message_of(cfg).startswith(
+        f"{PREFIX}data.{BT_CORPUS}.tgt_prefix: is missing"
+    )
+
+
+def test_a_corpus_named_like_a_language_pair_is_not_mistaken_for_valid() -> None:
+    cfg = make_config()
+    cfg["data"]["valid_en-mn"] = cfg["data"][CORPUS]
+    cfg["data"]["valid_en-mn"]["src_prefix"] = "<2khk_Cyrl>"
+
+    assert validate_train_config(cfg) is None
+
+
+def test_an_empty_prefix_is_a_valid_prefix() -> None:
+    cfg = broken("data", CORPUS, "src_prefix", "")
+    cfg["data"][CORPUS]["tgt_prefix"] = "<2khk_Cyrl>"
+
+    assert validate_train_config(cfg) is None
+
+
+def test_a_training_corpus_may_leave_the_weight_out_which_means_one() -> None:
+    cfg = broken("data", CORPUS, "weight", DROP)
+
+    assert validate_train_config(cfg) is None
+
+
+@pytest.mark.parametrize("weight", [1, 2, 7, 100, 10**9])
+def test_a_positive_integer_weight_is_accepted(weight: int) -> None:
+    assert validate_train_config(broken("data", CORPUS, "weight", weight)) is None
+
+
+@pytest.mark.parametrize(
+    "weight", [0, -1, 1.5, 2.0, "2", True, False, None, [1], 0.0], ids=repr
+)
+def test_a_weight_that_is_not_a_positive_integer_is_refused(weight: object) -> None:
+    cfg = broken("data", CORPUS, "weight", weight)
+
+    assert message_of(cfg) == (
+        f"{PREFIX}data.{CORPUS}.weight: must be a positive integer (the number of "
+        f"consecutive examples taken per round), got {weight!r}"
+    )
+
+
+# ---- the validation corpus ------------------------------------------------------
+
+
+def test_the_validation_corpus_may_be_pre_tokenised_with_no_transforms() -> None:
+    assert validate_train_config(make_config()) is None
+
+
+def test_the_validation_corpus_may_leave_the_transforms_out() -> None:
+    assert validate_train_config(broken("data", "valid", "transforms", DROP)) is None
+
+
+def test_a_config_may_have_no_validation_corpus() -> None:
+    assert validate_train_config(broken("data", "valid", DROP)) is None
+
+
+@pytest.mark.parametrize("key", ["src_prefix", "tgt_prefix"])
+@pytest.mark.parametrize("value", ["", "<2khk_Cyrl>"])
+def test_the_validation_corpus_takes_no_prefix_key_even_an_empty_one(
+    key: str, value: str
+) -> None:
+    cfg = broken("data", "valid", key, value)
+
+    assert message_of(cfg) == (
+        f"{PREFIX}data.valid.{key}: not allowed on the validation corpus: Eole "
+        "copies a prefix into the checkpoint, where it overrides every prediction"
+    )
+
+
+def test_the_validation_corpus_takes_no_weight() -> None:
+    cfg = broken("data", "valid", "weight", 1)
+
+    assert message_of(cfg).startswith(
+        f"{PREFIX}data.valid.weight: not allowed on the validation corpus"
+    )
+
+
+@pytest.mark.parametrize(
+    "transforms",
+    [["sentencepiece"], ["sentencepiece", "prefix"], ["prefix"], "sentencepiece", None],
+)
+def test_the_validation_corpus_takes_no_transform_because_the_harness_tokenises_it(
+    transforms: object,
+) -> None:
+    cfg = broken("data", "valid", "transforms", transforms)
+
+    assert message_of(cfg) == (
+        f"{PREFIX}data.valid.transforms: must be [] or left out: the harness "
+        f"tokenises the validation corpus, got {transforms!r}"
+    )
+
+
+@pytest.mark.parametrize("key", ["path_src", "path_tgt"])
+def test_the_validation_corpus_needs_both_paths(key: str) -> None:
+    cfg = broken("data", "valid", key, DROP)
+
+    assert message_of(cfg) == f"{PREFIX}data.valid.{key}: is missing"
+
+
+@pytest.mark.parametrize("key", ["path_src", "path_tgt"])
+def test_the_validation_corpus_paths_must_be_non_empty_strings(key: str) -> None:
+    cfg = broken("data", "valid", key, "")
+
+    assert message_of(cfg) == (
+        f"{PREFIX}data.valid.{key}: must be a non-empty path, got ''"
+    )
+
+
+# ---- the order in which the rules are checked -----------------------------------
+
+
+def test_the_forbidden_key_is_reported_before_the_unknown_key_that_it_also_is() -> None:
+    cfg = broken("model", "encoder", "sliding_window", 4)
+    cfg["model"]["encoder"]["bogus"] = 1
+
+    assert "is not allowed" in message_of(cfg)
+
+
+def test_a_forbidden_key_is_reported_before_a_dollar_sign() -> None:
+    cfg = broken("model", "sliding_window", 128)
+    cfg["training"]["model_path"] = "$HOME/ckpt"
+
+    assert "is not allowed" in message_of(cfg)
+
+
+def test_a_dollar_sign_is_reported_before_an_unknown_key_in_the_same_section() -> None:
+    cfg = broken("training", "bogus", 1)
+    cfg["training"]["model_path"] = "$HOME/ckpt"
+
+    assert "holds '$'" in message_of(cfg)
+
+
+def test_an_unknown_key_is_reported_before_a_wrong_position_encoding() -> None:
+    cfg = broken("model", "embeddings", "position_encoding_type", "Rotary")
+    cfg["model"]["bogus"] = 1
+
+    assert message_of(cfg) == f"{PREFIX}model.bogus: unknown key in model"
+
+
+def test_a_wrong_architecture_is_reported_before_a_wrong_position_encoding() -> None:
+    cfg = broken("model", "embeddings", "position_encoding_type", "Rotary")
+    cfg["model"]["architecture"] = "rnn"
+
+    assert message_of(cfg).startswith(f"{PREFIX}model.architecture")
+
+
+def test_a_wrong_position_encoding_is_reported_before_the_hidden_size() -> None:
+    cfg = broken("model", "embeddings", "position_encoding_type", "Rotary")
+    cfg["model"]["embeddings"]["word_vec_size"] = 128
+
+    assert "position_encoding_type" in message_of(cfg)
+
+
+def test_the_hidden_size_is_reported_before_the_switches() -> None:
+    cfg = broken("model", "embeddings", "word_vec_size", 128)
+    cfg["overwrite"] = False
+
+    assert message_of(cfg).startswith(f"{PREFIX}model.embeddings.word_vec_size")
+
+
+def test_the_switches_are_reported_before_the_corpora() -> None:
+    cfg = broken("overwrite", False)
+    cfg["data"][CORPUS]["weight"] = 0
+
+    assert message_of(cfg).startswith(f"{PREFIX}overwrite")
+
+
+def test_corpora_are_checked_in_the_order_of_the_config() -> None:
+    cfg = broken("data", CORPUS, "weight", 0)
+    del cfg["data"][BT_CORPUS]["src_prefix"]
+
+    assert message_of(cfg).startswith(f"{PREFIX}data.{CORPUS}.weight")
+
+
+# ---- render ---------------------------------------------------------------------
+
+
+def write_base(tmp_path: Path, base: object | None = None) -> Path:
+    """A base config file; by default the baseline with an empty `data` section and
+    without `src_vocab` and `model_path`, which a run fills in."""
+    if base is None:
+        cfg = make_config()
+        cfg["data"] = {}
+        del cfg["src_vocab"]
+        del cfg["training"]["model_path"]
+        base = cfg
+    path = tmp_path / "base.yaml"
+    path.write_text(yaml.safe_dump(base, sort_keys=False), encoding="utf-8")
+    return path
+
+
+def run_overrides() -> dict[str, Any]:
+    full = make_config()
+    return {
+        "src_vocab": full["src_vocab"],
+        "data": full["data"],
+        "training": {"model_path": full["training"]["model_path"]},
+    }
+
+
+def test_render_merges_the_overrides_validates_and_writes_what_the_merge_is(
+    tmp_path: Path,
+) -> None:
+    base = write_base(tmp_path)
+    out = tmp_path / "variants" / "t1" / "config.yaml"
+
+    returned = render(base, run_overrides(), out)
+
+    assert returned == out
+    assert yaml.safe_load(out.read_text(encoding="utf-8")) == make_config()
+
+
+def test_render_round_trips_the_merge_of_the_base_and_the_overrides(
+    tmp_path: Path,
+) -> None:
+    base = write_base(tmp_path)
+    overrides = {**run_overrides(), "training": {"model_path": "x/ckpt", "seed": None}}
+    out = tmp_path / "config.yaml"
+
+    render(base, overrides, out)
+
+    expected = merge(yaml.safe_load(base.read_text(encoding="utf-8")), overrides)
+    assert yaml.safe_load(out.read_text(encoding="utf-8")) == expected
+
+
+def test_render_applies_a_none_override_as_a_deletion(tmp_path: Path) -> None:
+    base = write_base(tmp_path)
+    overrides = {**run_overrides(), "training": {"model_path": "r", "gpu_ranks": None}}
+    out = tmp_path / "config.yaml"
+
+    render(base, overrides, out)
+
+    written = yaml.safe_load(out.read_text(encoding="utf-8"))
+    assert "gpu_ranks" not in written["training"]
+    assert written["training"]["model_path"] == "r"
+
+
+def test_render_creates_the_output_directory(tmp_path: Path) -> None:
+    out = tmp_path / "a" / "b" / "c" / "config.yaml"
+
+    render(write_base(tmp_path), run_overrides(), out)
+
+    assert out.is_file()
+
+
+def test_render_leaves_no_part_file_beside_a_written_config(tmp_path: Path) -> None:
+    out = tmp_path / "out" / "config.yaml"
+
+    render(write_base(tmp_path), run_overrides(), out)
+
+    assert [path.name for path in out.parent.iterdir()] == ["config.yaml"]
+
+
+def test_render_replaces_an_existing_output_whole(tmp_path: Path) -> None:
+    out = tmp_path / "config.yaml"
+    out.write_text("old: config\n", encoding="utf-8")
+
+    render(write_base(tmp_path), run_overrides(), out)
+
+    assert yaml.safe_load(out.read_text(encoding="utf-8")) == make_config()
+
+
+def test_two_renders_of_the_same_input_are_byte_identical(tmp_path: Path) -> None:
+    base = write_base(tmp_path)
+
+    render(base, run_overrides(), tmp_path / "one.yaml")
+    render(base, run_overrides(), tmp_path / "two.yaml")
+
+    assert (tmp_path / "one.yaml").read_bytes() == (tmp_path / "two.yaml").read_bytes()
+
+
+def test_render_writes_through_a_part_file_so_a_failed_write_keeps_the_old_output(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    out = tmp_path / "config.yaml"
+    out.write_text("old: config\n", encoding="utf-8")
+
+    def fail_to_move(self: Path, target: Path) -> Path:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(Path, "replace", fail_to_move)
+    with pytest.raises(OSError, match="disk full"):
+        render(write_base(tmp_path), run_overrides(), out)
+
+    assert out.read_text(encoding="utf-8") == "old: config\n"
+    assert sorted(path.name for path in tmp_path.iterdir()) == [
+        "base.yaml",
+        "config.yaml",
+    ]
+
+
+def test_render_keeps_the_order_of_the_base_then_adds_new_keys_in_override_order(
+    tmp_path: Path,
+) -> None:
+    base = write_base(tmp_path)
+    overrides = {"zeta": None, "src_vocab": "v", "data": make_config()["data"]}
+    out = tmp_path / "config.yaml"
+
+    render(base, overrides, out)
+
+    keys = list(yaml.safe_load(out.read_text(encoding="utf-8")))
+    base_keys = list(yaml.safe_load(base.read_text(encoding="utf-8")))
+    assert keys == [*base_keys, "src_vocab"]
+    data_keys = list(yaml.safe_load(out.read_text(encoding="utf-8"))["data"])
+    assert data_keys == [CORPUS, BT_CORPUS, "valid"]
+
+
+def test_render_does_not_sort_keys_alphabetically(tmp_path: Path) -> None:
+    out = tmp_path / "config.yaml"
+
+    render(write_base(tmp_path), run_overrides(), out)
+
+    assert out.read_text(encoding="utf-8").startswith("seed: 1234\nshare_vocab: true\n")
+
+
+def test_render_changes_neither_the_base_file_nor_the_overrides(tmp_path: Path) -> None:
+    base = write_base(tmp_path)
+    before = base.read_bytes()
+    overrides = run_overrides()
+    snapshot = copy.deepcopy(overrides)
+
+    render(base, overrides, tmp_path / "config.yaml")
+
+    assert base.read_bytes() == before
+    assert overrides == snapshot
+
+
+def test_render_refuses_an_invalid_result_and_writes_nothing(tmp_path: Path) -> None:
+    base = write_base(tmp_path)
+    out = tmp_path / "new_dir" / "config.yaml"
+    overrides = {**run_overrides(), "overwrite": False}
+
+    with pytest.raises(
+        ConfigError, match=r"^invalid Eole config: overwrite: must be true"
+    ):
+        render(base, overrides, out)
+
+    assert not out.parent.exists()
+    assert [path.name for path in tmp_path.iterdir()] == ["base.yaml"]
+
+
+def test_render_keeps_an_existing_output_when_the_result_is_invalid(
+    tmp_path: Path,
+) -> None:
+    out = tmp_path / "config.yaml"
+    out.write_text("old: config\n", encoding="utf-8")
+
+    with pytest.raises(ConfigError):
+        render(write_base(tmp_path), {"bogus": 1}, out)
+
+    assert out.read_text(encoding="utf-8") == "old: config\n"
+    assert sorted(path.name for path in tmp_path.iterdir()) == [
+        "base.yaml",
+        "config.yaml",
+    ]
+
+
+def test_render_validates_the_base_itself_when_the_overrides_change_nothing(
+    tmp_path: Path,
+) -> None:
+    cfg = make_config()
+    cfg["model"]["embeddings"]["word_vec_size"] = 128
+    out = tmp_path / "config.yaml"
+
+    with pytest.raises(ConfigError, match="model.embeddings.word_vec_size"):
+        render(write_base(tmp_path, cfg), {}, out)
+
+    assert not out.exists()
+
+
+def test_render_refuses_a_dollar_sign_an_override_brings(tmp_path: Path) -> None:
+    out = tmp_path / "config.yaml"
+    overrides = {**run_overrides(), "src_vocab": "$HOME/vocab.src"}
+
+    with pytest.raises(ConfigError, match=r"src_vocab: holds '\$'"):
+        render(write_base(tmp_path), overrides, out)
+
+    assert not out.exists()
+
+
+def test_render_refuses_an_override_that_yaml_cannot_dump_and_writes_nothing(
+    tmp_path: Path,
+) -> None:
+    out = tmp_path / "new_dir" / "config.yaml"
+    overrides = {**run_overrides(), "training": {"model_path": Path("run/ckpt")}}
+
+    with pytest.raises(ConfigError, match="must be plain YAML data"):
+        render(write_base(tmp_path), overrides, out)
+
+    assert not out.parent.exists()
+
+
+def test_render_refuses_a_missing_base(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="base Eole config file not found"):
+        render(tmp_path / "missing.yaml", {}, tmp_path / "config.yaml")
+
+    assert [path.name for path in tmp_path.iterdir()] == []
+
+
+def test_render_refuses_a_base_that_is_a_directory(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="base Eole config file not found"):
+        render(tmp_path, {}, tmp_path / "config.yaml")
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads every file")
+def test_render_refuses_a_base_it_cannot_read(tmp_path: Path) -> None:
+    base = write_base(tmp_path)
+    base.chmod(0)
+    try:
+        with pytest.raises(ConfigError, match="cannot read or parse"):
+            render(base, {}, tmp_path / "config.yaml")
+    finally:
+        base.chmod(0o600)
+
+    assert not (tmp_path / "config.yaml").exists()
+
+
+def test_render_refuses_a_base_that_is_not_utf8(tmp_path: Path) -> None:
+    base = tmp_path / "base.yaml"
+    base.write_bytes(b"seed: \xff\xfe\n")
+
+    with pytest.raises(ConfigError, match="cannot read or parse"):
+        render(base, {}, tmp_path / "config.yaml")
+
+    assert not (tmp_path / "config.yaml").exists()
+
+
+def test_render_refuses_a_base_that_is_not_yaml(tmp_path: Path) -> None:
+    base = tmp_path / "base.yaml"
+    base.write_text("key: [unclosed\n", encoding="utf-8")
+
+    with pytest.raises(ConfigError, match="cannot read or parse"):
+        render(base, {}, tmp_path / "config.yaml")
+
+
+def test_render_refuses_an_empty_base(tmp_path: Path) -> None:
+    base = tmp_path / "base.yaml"
+    base.write_text("", encoding="utf-8")
+    out = tmp_path / "config.yaml"
+
+    with pytest.raises(ConfigError, match="base Eole config .*base.yaml: is empty"):
+        render(base, run_overrides(), out)
+
+    assert not out.exists()
+
+
+@pytest.mark.parametrize(
+    ("text", "type_name"),
+    [("- a\n- b\n", "list"), ("just text\n", "str"), ("3\n", "int")],
+)
+def test_render_refuses_a_base_that_is_not_a_mapping_by_type(
+    tmp_path: Path, text: str, type_name: str
+) -> None:
+    base = tmp_path / "base.yaml"
+    base.write_text(text, encoding="utf-8")
+    out = tmp_path / "config.yaml"
+
+    with pytest.raises(
+        ConfigError, match=rf"base Eole config .*: must be a mapping, got {type_name}$"
+    ):
+        render(base, run_overrides(), out)
+
+    assert not out.exists()
+
+
+def test_render_refuses_a_dollar_sign_in_the_base_text(tmp_path: Path) -> None:
+    base = tmp_path / "base.yaml"
+    base.write_text("src_vocab: $HOME/vocab.src\n", encoding="utf-8")
+
+    with pytest.raises(ConfigError, match=r"holds '\$'"):
+        render(base, {}, tmp_path / "config.yaml")
+
+
+def test_render_accepts_a_base_with_an_empty_data_section_once_the_overrides_fill_it(
+    tmp_path: Path,
+) -> None:
+    base = write_base(tmp_path)
+    assert yaml.safe_load(base.read_text(encoding="utf-8"))["data"] == {}
+
+    render(base, run_overrides(), tmp_path / "config.yaml")
+
+
+# ---- merge: the cases -----------------------------------------------------------
+
+
+def test_merge_merges_mappings_recursively_and_keeps_what_the_overrides_leave() -> None:
+    base = {"a": {"b": 1, "c": {"d": 2, "e": 3}}, "f": 4}
+
+    merged = merge(base, {"a": {"c": {"d": 20}}, "g": 5})
+
+    assert merged == {"a": {"b": 1, "c": {"d": 20, "e": 3}}, "f": 4, "g": 5}
+
+
+def test_merge_replaces_lists_and_scalars_whole() -> None:
+    base = {"a": [1, 2, 3], "b": 1, "c": "text", "d": {"x": 1}}
+
+    merged = merge(base, {"a": [9], "b": 2, "c": 3, "d": [1]})
+
+    assert merged == {"a": [9], "b": 2, "c": 3, "d": [1]}
+
+
+def test_merge_replaces_a_scalar_by_a_mapping_and_a_mapping_by_a_scalar() -> None:
+    assert merge({"a": 1}, {"a": {"b": 2}}) == {"a": {"b": 2}}
+    assert merge({"a": {"b": 2}}, {"a": 1}) == {"a": 1}
+
+
+def test_merge_deletes_a_key_whose_override_is_none() -> None:
+    base = {"a": 1, "b": {"c": 2, "d": 3}}
+
+    assert merge(base, {"a": None, "b": {"c": None}}) == {"b": {"d": 3}}
+
+
+def test_merge_deletes_nothing_for_a_none_override_of_an_absent_key() -> None:
+    assert merge({"a": 1}, {"z": None, "y": {"x": None}}) == {"a": 1, "y": {}}
+
+
+def test_merge_drops_none_values_inside_a_mapping_that_replaces_a_scalar() -> None:
+    assert merge({"a": 1}, {"a": {"b": None, "c": 2}}) == {"a": {"c": 2}}
+
+
+def test_merge_keeps_a_none_the_base_already_holds() -> None:
+    assert merge({"a": None, "b": 1}, {"b": 2}) == {"a": None, "b": 2}
+
+
+def test_merge_with_no_overrides_copies_the_base() -> None:
+    base = {"a": {"b": [1, {"c": 2}]}}
+
+    merged = merge(base, {})
+
+    assert merged == base
+    assert merged is not base
+    assert merged["a"] is not base["a"]
+    assert merged["a"]["b"] is not base["a"]["b"]
+
+
+def test_merge_modifies_neither_input_and_shares_no_list_with_them() -> None:
+    base = {"a": {"b": [1, 2]}, "c": [3]}
+    overrides = {"a": {"d": [4, 5]}, "e": {"f": [6]}}
+    base_before = copy.deepcopy(base)
+    overrides_before = copy.deepcopy(overrides)
+
+    merged = merge(base, overrides)
+    merged["a"]["b"].append(99)
+    merged["a"]["d"].append(99)
+    merged["c"].append(99)
+    merged["e"]["f"].append(99)
+
+    assert base == base_before
+    assert overrides == overrides_before
+
+
+def test_merge_keeps_the_key_order_of_the_base_and_appends_new_keys_in_order() -> None:
+    merged = merge({"b": 1, "a": {"y": 1, "x": 2}}, {"d": 4, "a": {"z": 3}, "c": 5})
+
+    assert list(merged) == ["b", "a", "d", "c"]
+    assert list(merged["a"]) == ["y", "x", "z"]
+
+
+def test_merge_returns_a_plain_dict() -> None:
+    from collections import OrderedDict
+
+    merged = merge(OrderedDict(a=OrderedDict(b=1)), {"a": {"c": 2}})
+
+    assert type(merged) is dict
+    assert type(merged["a"]) is dict
