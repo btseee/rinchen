@@ -1,0 +1,72 @@
+# D8 Teacher training: design
+
+Status: binding for the D8 plan (`docs/superpowers/plans/2026-11-08-d8-teacher-training.md`). Written before the build; the build amends it to the finished code (Task 8). Master plan: `docs/research/2026-10-29-rinchen-dev-agent-prompt.md`, milestone D8. Evidence for every Eole fact: `.superpowers/sdd/2026-11-08-d8-teacher-training/spike-findings.md` (a spike on this machine, Eole 0.6.4, CPU, toy data; scratch scripts named there).
+
+## 1. Goal and non-goals
+
+Goal: a resumable, operator-friendly launcher for long Eole trainings. `rinchen train launch` takes a rendered, validated Eole config and a run directory, builds the vocabulary if needed, trains, resumes from the latest COMPLETE checkpoint of the same run after any interruption, recognises completion and early stopping, writes a `command.sh` an operator can run by hand (for example the 8-GPU command), and records what it did; `rinchen train average` averages the last N checkpoints into a usable model. STOP gate: a tiny teacher checkpoint is trained for 200 CPU steps without NaN with the training loss falling by at least 30 %, is interrupted-and-resumed correctly, saved and averaged.
+
+Non-goals:
+- No GPU was used and none is claimed: this machine has an RTX 5070 Ti that the owner did not authorise for a run, so every GPU, NCCL, bf16/fp16, flash-attention and multi-GPU statement is read from Eole's source or from a CPU gloo shim and is labelled UNMEASURED. `configs/eole/teacher.yaml` holds unmeasured priors from the master plan.
+- No real data exists: the tiny teacher trains on the D7 toy set; its quality numbers rank nothing.
+- No document-level data (D9), no distillation (D10), no CTranslate2 export (D11), no evaluation suites (D12, D13).
+- No fine-tuning: a resume continues OUR OWN interrupted run from OUR OWN checkpoint inside the same run directory; `train_from` is never accepted for a foreign path.
+
+## 2. Findings that bind the design (spike)
+
+1. Resume is `training.train_from: <model_path>/step_N` (a directory with `config.json`, `vocab.json`, `optimizer.pt`, the weights); `train_steps` is the ABSOLUTE target; weights, Adam state, step counter and the noam schedule are restored; the optimizer OPTIONS come from the checkpoint's saved config (a new learning rate in the resume YAML is silently ignored); the DATA STREAM RESTARTS from the first line of every corpus; scheduled `accum_count`/`dropout` lists restart at their first value. A resumed run differs from an uninterrupted one (58 of 62 tensors, valid ppl 8.61 vs 8.82 on the toy) but a resume is deterministic.
+2. Eole's checkpoint saver is not atomic: the root `model_path/*` entries are relative symlinks into `step_N/` updated one by one, so a kill mid-save can leave a silent mix (weights from step 50, optimizer from step 100). Resume must name a COMPLETE `step_N` directory, never `model_path` itself. Completeness: all four files exist; `config.json` and `vocab.json` parse; `safetensors.safe_open` opens the weights; `zipfile.ZipFile` opens `optimizer.pt`. `config.json` is written last. Every truncation tried is caught.
+3. Resuming a FINISHED run trains one extra step (step_61 after train_steps 60): a finished run must not be resumed. A fresh launch into a `model_path` that already holds step directories is not refused by Eole: provenance must be recorded.
+4. Eole has NO averaging tool. `average_decay`/`average_every` is an exponential moving average whose EMA REPLACES the live weights in every saved checkpoint (the live weights are never saved) and is not restored on resume: not allowed in configs. We average saved checkpoints ourselves (float64 mean of the safetensors tensors); the output works in `eole predict`. On the toy, averaging neither helps nor hurts beyond noise (and hurts in the steep part of the curve): the runbook says so.
+5. Eole prints, every `report_every` steps, `Step  10/  200; acc: ...; ppl: ...; xent: ...` and, at each validation, `Validation perplexity: ...` and `Validation accuracy: ...` (no xent line, no step number); ppl/xent include label smoothing. A NaN loss prints `nan` and training CONTINUES to the end with exit code 0 and NaN checkpoints: a harness must grep for nan/inf.
+6. `eole train` spawns the per-GPU processes itself (`world_size` > 1 spawns one process per entry of `gpu_ranks`); there is no torchrun and no `RANK`/`WORLD_SIZE` environment. Rules: `world_size` >= `len(gpu_ranks)`; when equal and positive, `min(gpu_ranks)` must be 0; `world_size` 2 with `gpu_ranks` [] is a SILENT no-op (exit 0, no checkpoint). `training.timeout` (60 s by default) is the collective timeout: rank 0 alone validates and saves, the others wait, so a slow validation or a multi-GB save beyond `timeout` kills the job.
+7. Early stopping runs on rank 0 only; the final checkpoint is written complete and then a multi-process job dies after `timeout` seconds with exit code 1 (a single-process job exits 0). Eole keeps the LAST `keep_checkpoint` checkpoints, never the best one. A Ctrl-C makes Eole exit 0 without a final checkpoint.
+8. With several corpora, `all_gather_stats` pickles per-corpus statistics into a 4096-byte buffer: the pickle is 4.0 KB at 100 corpora (the crash is source-derived, untested).
+9. Same seed AND same thread count give byte-identical checkpoints. Unknown config keys are rejected by `eole train`.
+
+## 3. Rulings
+
+S1. `launch` is a separate runner from D7's `run_training`: `run_training` treats any fresh `model.00.safetensors` as success and cannot resume; D7's short ablation runs keep it. Both use `run_logged` and the shared environment helpers.
+S2. Run identity. `launch.json` in the run directory records the sha256 of the canonical JSON of the EFFECTIVE config (after the `--world-size`/`--gpu-ranks` overrides) with `training.train_steps` and `training.train_from` removed, the world size and ranks, and the creation time. A launch whose identity differs from the recorded one, or into a `model_path` that holds step directories without a `launch.json`, is a `ConfigError` naming the problem (resume would silently ignore changed optimizer options). Extending `train_steps` is the one allowed change. A different GPU count is a different identity (the effective batch changes).
+S3. Resume rule. The candidates are the `step_N` directories of `model_path`; the newest COMPLETE one is the resume point (incomplete newer ones are reported and ignored; Eole overwrites them). `train_from` is allowed ONLY in a resume YAML that `launch` itself renders, and only as `<training.model_path>/step_N` for an existing complete directory (`validate_train_config(..., resumes=True)`; everywhere else it stays an unknown key). The resume YAML is `run_dir/launch/resume-<N>.yaml`, a separate file; the base config is never edited.
+S4. Outcomes of `launch`: `already_complete` (a complete `step_<train_steps>` exists: nothing is run), `completed` (the run reached `train_steps`), `early_stopped` (the log has `Early Stop!` and the newest complete step is the stop step, whatever the exit code), each with `resumed_from` (a step or None). Failures: `UpstreamError` for a non-zero exit without an early stop, for exit 0 without the final step and without an early stop (an interrupted run), and for a NaN or infinite loss in the log (the run is finished but the checkpoint is bad: the message names the first step); `ConfigError` for identity mismatches and the GPU rules; `DataError` for unreadable configs. A NaN gate runs on every outcome.
+S5. GPU rules enforced by `launch` before anything starts: `world_size` and `gpu_ranks` rules of finding 6, including refusing `world_size` > 1 with empty `gpu_ranks`; `training.timeout` at least 3600 when `world_size` > 1; at most 80 training corpora when `world_size` > 1; `training.early_stopping_criteria` a single string when early stopping is on; `keep_checkpoint` at least `early_stopping` + 1 when early stopping is on and `valid_steps` equals `save_checkpoint_steps` (else the best checkpoint may be deleted).
+S6. `command.sh` is deterministic text (golden-tested with an injected `eole` path): `#!/usr/bin/env bash`, `set -euo pipefail`, the thread variables, `CUDA_VISIBLE_DEVICES` only when requested (or empty for a CPU run), a guarded `eole build_vocab` (`[ -f vocab ] || ...`) and `eole train -config <base or resume yaml>`. It states the run directory and that it was generated at the moment of the launch (a resume point is fixed at write time; regenerate with `--write-only`).
+S7. Averaging. `average_checkpoints(step_dirs, out_dir)`: at least two COMPLETE step directories of one run (same tensor names, shapes and dtypes, else `DataError`), float64 mean per floating tensor, non-float and buffer tensors taken from the last directory, `config.json`/`vocab.json`/the SPM artifact copied from the last, no `optimizer.pt`; written to `<out>.part` and renamed; `averaged_from.json` records the sources and the sha256 of every input and of the output. `average_decay` stays out of the allow-lists.
+S8. Loss gate. `parse_train_log(text)` extracts the training curve and validation perplexities; the tiny teacher gate is: no NaN/inf anywhere, `xent` at the last report at most 0.7 times the `xent` of the first report (a fall of at least 30 %; the spike measured 60.4 to 62.4 %), and the last validation perplexity below the first.
+S9. Configs. `configs/eole/teacher.yaml` is the 8-GPU prior from the master plan (hidden 1536, encoder 24 / decoder 12, 16 heads, ff 4096, bf16, 16384-token batches x accum 8, dropout 0.1, valid/save every 5000, early stopping 6 on `ppl`, label smoothing 0.1, `timeout` hours, `tensorboard` on, `batch_size_multiple` 8); every value is labelled an unmeasured prior; it passes the schema validator and Eole's own schema in a test, nothing more. `configs/eole/teacher_tiny.yaml` is the CPU gate config (the D7 tiny base shape with 200 steps, `report_every` 10, `valid_steps` = `save_checkpoint_steps` 50, `keep_checkpoint` 4). The data section and the per-run paths come from D7's `prepare_variant` (`rinchen train ablate --prepare-only`), so a teacher run uses the mixture settings chosen by the ablations.
+S10. The validation corpus stays D7's pre-tokenised one; `valid_metrics` is not used in teacher configs (it would score piece strings); BLEU/chrF of a teacher comes from `evaluate_variant` after training.
+
+## 4. Modules
+
+| Module | Job | Depends on |
+| --- | --- | --- |
+| `rinchen.train.eole_cfg` (extended) | allow-list additions, the `resumes` rule of `validate_train_config` | errors, utils |
+| `rinchen.train.checkpoints` | step directories, completeness, run identity, `launch.json` | errors, utils |
+| `rinchen.train.curves` | parse a train log, loss and NaN gates | errors |
+| `rinchen.train.average` | `average_checkpoints` | checkpoints, utils |
+| `rinchen.train.launch` | rules of S5, command rendering, `launch` | eole_cfg, eole_run, checkpoints, curves, logged_process |
+| `rinchen.cli.train` (extended) | `launch`, `average`, `ablate --prepare-only` | the above, D7's ablation modules |
+
+Layering as D7: `train` never imports `script_conv` or `cli`.
+
+## 5. Contracts (summary; the plan's tasks fix the details)
+
+- `eole_cfg`: new TRAINING keys `train_from` (only with `resumes`), `early_stopping`, `early_stopping_criteria`, `timeout`, `master_ip`, `master_port`, `gpu_backend`, `normalization`, `batch_size_multiple`, `self_attn_backend`; new TOP_LEVEL keys `tensorboard`, `tensorboard_log_dir`, `log_file` (and `valid_metrics`, allowed but documented as unused). Not added: `average_decay`, `average_every`, `accum_steps`, `dropout_steps`. Drift tests cover every added key.
+- `checkpoints`: `step_directories(model_path) -> list[StepDirectory(step, path, complete, problem)]` sorted by step; `is_complete(step_dir) -> str | None` (None = complete, else the problem); `latest_complete(model_path)`; `RunIdentity` + `write_launch_record`/`read_launch_record` (strict, atomic).
+- `curves`: `parse_train_log(text) -> TrainCurve(reports=[(step, total, acc, ppl, xent, lr)], validations=[ppl...], accuracies=[...], early_stop_step | None, saved_steps=[...], non_finite_step | None)`; `loss_gate(curve, min_drop=0.3)`.
+- `average`: S7.
+- `launch`: `launch(cfg_path, run_dir, *, world_size=None, gpu_ranks=None, threads=2, timeout=None, write_only=False, eole=None) -> LaunchResult(status, steps, resumed_from, checkpoint, command_sh, log)`; `render_command_sh(...)`.
+- CLI: `rinchen train launch --config --run-dir [--world-size --gpu-ranks --threads --timeout --write-only --cuda-visible-devices]`, `rinchen train average --run-dir --last N [--out]`, `rinchen train ablate ... --prepare-only`. Exit codes as D4 to D7; manifests as D7 (inputs hashed before they are read, manifest last, checkpoint hashes recorded).
+
+## 6. Tests and the gate
+
+- Unit tests with fakes for everything but Eole (fabricated step directories with real small safetensors/zip files; truncation matrices; `run_logged` faked).
+- A drift test for the added allow-list keys against the installed Eole.
+- STOP gate (integration, real `eole`, real binary, CPU): prepare a one-variant tiny teacher through `rinchen train ablate --prepare-only`, `rinchen train launch` it for 200 steps (about 30 s): exit 0, status `completed`, no NaN, xent(200) <= 0.7 x xent(10), last valid ppl below the first, `launch.json` written; a second launch is `already_complete`; truncating the weights of `step_200` and launching again resumes from `step_150` and completes (byte-level check of completeness); extending `train_steps` from 100 to 200 on a run that finished at 100 resumes from `step_100` (`Step 110/ 200` in the log); `rinchen train average --last 3` writes an averaged model that `evaluate_variant` can translate with (plumbing only, no quality threshold); a config change other than `train_steps` is refused. Optional (Task 7): a 2-rank CPU gloo run through a test-only shim exercises the multi-process spawn and the early-stop exit code 1 classification.
+
+## 7. Open questions, recorded as such
+
+- Every GPU-side behaviour (NCCL, bf16, flash attention, the 13 GB checkpoint write, the double division by `world_size`, multi-node) is unmeasured; the teacher prior values are unmeasured.
+- The data position is not restored on resume (the corpora replay from the first line): the bias this introduces for a long run with few resumes is unmeasured.
+- Whether checkpoint averaging helps a real teacher is unmeasured; the toy cannot show it.
