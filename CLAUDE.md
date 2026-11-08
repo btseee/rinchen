@@ -42,11 +42,12 @@ configs/data/sources.yaml configs/data/sources.tiny.yaml configs/data/filters.ya
 configs/data/synth.yaml
 configs/eole/converter{,_tiny}.yaml configs/spm/converter_char.yaml
 configs/eole/{multilingual_tiny,ablation_tiny,multilingual_proxy,ablation_priors}.yaml
+configs/eole/{teacher,teacher_tiny}.yaml
 docs/STACK.md docs/VERIFY.md
 docs/runbooks/00_environment.md docs/runbooks/01_acquisition.md
 docs/runbooks/02_human_testsets.md docs/runbooks/03_tokenizer.md
 docs/runbooks/04_filtering_mining.md docs/runbooks/05_script_converter.md
-docs/runbooks/06_synthetic.md docs/runbooks/07_ablations.md
+docs/runbooks/06_synthetic.md docs/runbooks/07_ablations.md docs/runbooks/08_teacher.md
 docs/research/  docs/superpowers/{specs,plans}/
 src/rinchen/{config,manifest,utils,cli,text,lang,split,spm,corpus,filter,mine,script_conv,synth,metrics,eval,serve}/
 src/rinchen/acquire/{http,opus,hf,warc,commoncrawl,registry}.py
@@ -64,7 +65,9 @@ src/rinchen/synth/{tags,translator,prompts,_chat_completions,vllm_client,llamacp
 src/rinchen/synth/{ct2_baselines,_candidates,_texts,shards,select,plan,bt,ft,run}.py
 src/rinchen/train/{eole_cfg,eole_run,sampling,variants,mixture,corpus_files,eole_data,validation_corpus,evaluate}.py
 src/rinchen/train/{ablation_plan,ablation_config,ablation_layout,ablation_prepare,ablation,ablation_records,ablation_report}.py
-src/rinchen/config/ablation.py src/rinchen/cli/train.py src/rinchen/utils/logged_process.py
+src/rinchen/train/{checkpoints,curves,average,launch,gpu_rules,launch_command,run_lock}.py
+src/rinchen/config/ablation.py src/rinchen/cli/{train,train_runs,train_common}.py
+src/rinchen/utils/{logged_process,integers}.py
 src/rinchen/errors.py src/rinchen/__init__.py
 tests/ scripts/ plans/ reports/ manifests/
 manifests/ucd_standardized_variants.json
@@ -72,7 +75,8 @@ tests/{unit,property,golden,integration}/ tests/fixtures/{annot,golden,raw,spm,s
 tests/support/ (planted corpus and alignments, fake embedders, tiny LID model,
   tiny_converter, stub_runtime, fake_process, script_reference, planted_synth,
   synth_cli, fake_llm_server, shard_files, corpus_rows, eole_train_config, tiny_parallel,
-  tiny_variant, train_cli, fake_ablation)
+  tiny_variant, train_cli, fake_ablation, step_dirs, fake_launch, fake_eole_process, launch_cli,
+  signal_handlers)
 scripts/build_spm_fixture.py (regenerates tests/fixtures/spm/tiny_corpus)
 scripts/build_script_conv_fixtures.py (reference TSV -> lexicon, golden words, tiny fixture)
 data/{raw,clean,mined,synth,test}/ (gitignored content, tracked dirs)
@@ -119,8 +123,16 @@ and not pushed, and no CI run covers it: its STOP gate (a tiny ablation of 2 var
 evaluated through the real `rinchen train ablate` on the CPU) is met on toy templated data that
 saturates at chrF 96 to 99 and ranks nothing. No real corpus, no GPU run and no measured proxy
 config exist (`configs/eole/multilingual_proxy.yaml` and `ablation_priors.yaml` are schema-validated
-priors only); the gates that need them stay open. Next up: D8 (Teacher training). See `STATE.md`
-and `docs/runbooks/07_ablations.md`.
+priors only); the gates that need them stay open. D8 (Teacher training) is done locally on branch
+`d8-teacher-training`, stacked on `d7-multilingual-ablations` (cut from it at `b1a8a47`), not merged and
+not pushed, and no CI run covers it: its STOP gate (a tiny teacher trains 200 CPU steps without NaN, the
+loss falls by at least 30 %, it resumes after a damaged checkpoint, completes and is averaged, through
+the real `rinchen train launch` and `average` and the real Eole) is met on toy templated data. It is
+machinery, not a teacher: no GPU was used (the one on this machine was not authorised), no real corpus
+exists, and `configs/eole/teacher.yaml` is a table of unmeasured priors; everything on a GPU (bf16,
+NCCL, multi-GPU, the 13 GB checkpoint write) and the quality of the teacher shape stay open. The
+whole-branch review of D8 had not run when this was written. Next up: D9 (Document-level). See
+`STATE.md`, `docs/runbooks/07_ablations.md` and `docs/runbooks/08_teacher.md`.
 
 ## Evidence and full plan
 

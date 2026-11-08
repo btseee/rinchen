@@ -568,29 +568,123 @@ macOS, the mixture beyond 4,000,000 rows. [EVIDENCE: the gate chain, the integra
 real binary and the measurement scripts of the runbook, the spike (`spike-findings.md`) and the review
 reports, 2026-11-08, commits `c2db16b` through `f7d1bd0`.]
 
-Branch status (updated 2026-11-08, after the D7 build): `main` holds D3, the D3 research follow-up, D4
+**D8 (teacher training) is done on branch `d8-teacher-training`; its STOP gate (a tiny teacher trains 200
+CPU steps without NaN, the loss falls by at least 30 %, it resumes, completes and is averaged) is met
+locally.** The branch is stacked on `d7-multilingual-ablations` (cut from it at `b1a8a47` on 2026-11-08), is
+not merged and not pushed (the overnight run made no merge and no push), and no CI run covers it. It is 10
+commits ahead of `d7-multilingual-ablations` and 58 ahead of `main` as of the commit `D8: review minors of the
+launcher` (`3e357ae`, the last commit before the one that carries these records). It is machinery, not a
+result: the only data it ever ran on is the templated toy set of D7, no real corpus exists, **no GPU was
+used** (this machine has a GeForce RTX 5070 Ti that the owner did not authorise for a run; every Eole process
+of D8 had `CUDA_VISIBLE_DEVICES=""` and `gpu_ranks: []`), and `configs/eole/teacher.yaml` is a table of
+unmeasured priors that Eole's schema accepts and nothing has trained. Built: `rinchen.train.checkpoints` (step
+directories, `is_complete`, the run identity, `launch.json`), `curves` (`parse_train_log`, `loss_gate`),
+`average` (`average_checkpoints`), `launch` (`launch`, the resumable launcher), `gpu_rules`, `launch_command`
+(`command.sh`), `run_lock` (an exclusive `flock` that the Eole processes inherit), additions to `eole_cfg` (the
+teacher keys, the `resumes` flag), `eole_run` and `corpus_files`, `rinchen.utils.integers` and
+`run_logged(inherit_fds=)`, the commands `rinchen train launch` and `rinchen train average` and the option
+`rinchen train ablate --prepare-only` (`rinchen.cli.train_runs`, `train_common`, `train`), the configs
+`configs/eole/{teacher,teacher_tiny}.yaml`, the test helpers `step_dirs.py`, `fake_launch.py`,
+`fake_eole_process.py`, `launch_cli.py` and `signal_handlers.py` in `tests/support/`, and
+`docs/runbooks/08_teacher.md`. The design is `docs/superpowers/specs/2026-11-08-d8-teacher-training-design.md`
+(amended to the finished code, with a section listing each ruling and decision made while building); its
+rulings S1 to S10 and the controller rulings, made without a review round because the user said "Proceed. I'm
+going to sleep now. Don't stop until you finish everything. Commit everything.", are condensed in DECISIONS.md
+("2026-11-08: D8 teacher training - the rulings, made without a review round"). Built task by task with tests
+first after a spike on the real Eole (Tasks 1 and 2; 3 and 4; 5; 6, the STOP gate; an interlude; Task 7, the
+optional two-rank CPU gloo test, was SKIPPED and the runbook says so). One review ran (an independent
+reviewer, Tasks 1 to 6, `ab405e7..7c57d76`): no Critical finding, three Important ones, each reproduced and
+fixed in the interlude (a SIGKILL of the launcher released the run lock while Eole kept training, so the next
+launch started a second Eole into the same checkpoint directory; a run started by hand from `command.sh` left
+no log, so a later launch saw neither a NaN nor an early stop; `is_complete` raised for a damaged zip central
+directory), and eleven Minor ones (four fixed, the rest documented in the runbook). **The whole-branch review of
+D8 had NOT run when these records were written**; its findings and fixes get an addendum to this paragraph and
+to DECISIONS.md. Gates, run for real on Linux, CPython 3.14.10: `ruff format --check .`, `ruff check .` and
+`mypy src` clean and `pytest -m "not network" -q` -- 6148 passed after Task 1, 6485 after Task 2, 6588 and 6829
+after Tasks 3 and 4, 6853 and 7020 after the two commits of Task 5, 7048 after Task 6 (10 min 36 s on a loaded
+machine), 7085 and then **7114 passed, 1 skipped, 10 deselected** after the interlude (10 min 10 s and 10 min 50
+s; 5968 on D7's last commit) and again, with these records in the tree (only documents had changed), 7114
+passed, 1 skipped, 10 deselected in 10 min 34 s of pytest (10 min 37 s with ruff and mypy, which were clean); the D5 and D7 regression sets stayed green (1284 passed at the interlude), as the
+plan required. Mutation checks by hand, one
+mutant at a time, as recorded per task: Task 1 36, Task 2 70 (one equivalent removed), Task 3 about 145, Task 4
+about 110, Task 5 14 and about 74 (three equivalent survivors), the interlude about 50; the reviewer's own 25 of
+25.
+Evidence of the STOP gate, through the real `rinchen` binary and the real Eole on the CPU with the GPU hidden,
+on the toy set of `tests/support/tiny_parallel.py` with `configs/eole/teacher_tiny.yaml` (64 wide, 2+2 layers,
+2048-token batches, 200 steps, a validation and a save every 50, 2 threads), measured again for the runbook on
+2026-11-08 (Intel Core Ultra 7 265K, 20 cores, 46 GiB): `ablate --prepare-only` 0.78 s; `launch` from nothing
+25.61 s, `completed`, training `xent` 5.44, 5.40, 4.64, 2.81, 2.28, 2.14 at steps 10, 20, 50, 100, 150, 200 (a
+60.7 % fall; the gate asks 30 %), validation perplexity 83.6869, 16.6115, 10.1611, 8.81733, no NaN, the weights
+of `step_200` SHA-256 `32a1c92e...` (the spike's value for an uninterrupted run); a second `launch` 0.73 s,
+`already_complete`, the run directory unchanged; with the weights of `step_200` cut in half, `launch` resumed
+from step 150 (9.60 s, `incomplete step directories skipped: [200]`, the log starting at `Step 160/  200`,
+`launch.json` unchanged) and finished with other weights (`7e62604f...`: a resumed run is not the
+uninterrupted one, because the data stream restarts at line 1 of every corpus), a separate run of 100 steps
+extended to 200 resumed from step 100 (`Step 110/  200`, 13.50 s) and lowering `train_steps` or changing the
+learning rate was refused (exit 2, nothing written); `average --last 3` (steps 100, 150, 200) 0.74 s, 58 of 62
+tensors averaged; a real SIGTERM ended the launcher with 143 in 0.21 to 0.26 s with no Eole process left and
+the next launch finished the run; a SIGKILL of the launcher left the Eole running, which kept the lock, so the
+next launch was refused (exit 2) and the one after the orphan ended said `already_complete`. Those numbers
+rank nothing: the model memorises a templated grammar. ARITHMETIC, not measurement (the formula reproduces the
+real tiny checkpoint exactly, 820,458 tensor elements and 3,289,000 bytes): the teacher shape (24+12 layers,
+hidden 1536, feed-forward 4096) has 1,004,601,868 parameters with a 64,000-piece vocabulary and 1,102,969,868
+with 128,000, a step directory of 12.1 and 13.3 GB (fp32 weights plus 8 bytes per parameter of Adam state), and
+the config's batch is 8 x 8 x 16384 = 1,048,576 padded tokens per update.
+Findings worth knowing: upstream facts about Eole 0.6.4, in `docs/VERIFY.md` ("D8 findings") and in
+DECISIONS.md. A resume is `training.train_from: <model_path>/step_N` with an absolute `train_steps`; the data
+stream restarts, the RNG and the EMA are not restored, scheduled lists restart, the optimiser options come from
+the checkpoint (a new learning rate is silently ignored, hence the identity rule); Eole's saver is not atomic
+(a kill mid-save leaves a silent mix of two steps when resumed through `model_path`); Eole has no averaging tool
+and `average_decay` saves the EMA in place of the live weights; a NaN loss does not stop Eole (exit 0, NaN
+checkpoints); `eole train` spawns the per-GPU processes itself (no torchrun), `world_size` 2 with no `gpu_ranks`
+is a silent no-op, `timeout` (60 s) is the collective timeout and must be hours because rank 0 alone validates
+and saves, early stopping runs on rank 0 only and a multi-process job then dies with exit 1 after the timeout,
+the statistics gather has a 4096-byte buffer (about 100 corpora), the loss is divided by `world_size` twice
+(`max_grad_norm` acts `world_size` times looser), and the wheel ships no training recipes. The checks of
+`is_complete` catch every truncation (800 of 800) but not a flipped byte in the tensor data (random single-byte
+flips flagged: weights 3 of 200, optimizer 1 of 200, `config.json` 138 of 200, `vocab.json` 179 of 200).
+Averaging neither helps nor hurts beyond noise on the toy and hurts in the steep part of the curve.
+Open gates (none can be done without real data or a GPU): everything on a GPU (bf16, NCCL, flash attention,
+multi-GPU, multi-node, the tokens per second, the memory and the 13 GB checkpoint write of the teacher shape,
+a one-GPU smoke test that the owner has to authorise); the quality of the teacher shape and every value of
+`teacher.yaml`; whether averaging helps a real teacher; the real two-rank early stop (only unit fakes and the
+spike's CPU shim); a live abort on NaN (it is detected when an attempt ends); `flock` on network file systems;
+the D3 gates assigned to D4, the D5 gates that need real text or a reader and the D6 and D7 gates stay open.
+Known and open: `--write-only` leaves an existing manifest with a stale `command.sh` digest; an
+`already_complete` rerun re-hashes the final step directory (GB scale); a hand-run `command.sh` is not guarded
+by the lock; `teacher.yaml` does not set `tensorboard_log_dir` (Eole's default is a relative `runs/eole`) and its
+comment cites master plan lines 511 to 514 where the teacher block is 511 to 516; the parked minors are listed
+in the runbook. NOT verified: any run on a GPU or a real corpus, the multi-process path under NCCL, Windows and
+macOS. [EVIDENCE: the gate chain, the integration test module, the real-binary runs and the arithmetic script of
+the runbook, the spike (`spike-findings.md`) and the review report, 2026-11-08, commits `36559a1` through
+`3e357ae`.]
+
+Branch status (updated 2026-11-08, after the D8 build): `main` holds D3, the D3 research follow-up, D4
 and D5, and is at `0d534a3` (the commit that records the D5 merge; `862e176` is the D5 merge tip,
 `2346cea` was the D3 end, `b38eaae` the D4 merge tip and `4eac98f` the commit that recorded the D4 merge;
 no `d3-research-followup`, `d4-filtering-mining` or `d5-script-converter` ref remains). D6 lives on its own
 branch, `d6-synthetic-data`, cut from `main` at `0d534a3`; D7 lives on `d7-multilingual-ablations`, stacked
-on it (cut from `d6-synthetic-data` at `9973319`). Neither is merged into `main` and neither is pushed;
-merging D7 means merging D6 first. At the D5 merge `main` was 81 commits ahead of `origin/main` (`9e7b0ec`);
-it is unpushed, and no CI run covers D3, D4, D5, D6 or D7. The full local gate was last run on the D7
-branch: 5968 passed, 1 skipped, 10 deselected (D6 and D7 included), on `D7: re-review minors` (5966 on `cbd2365`, 5944 on `f7d1bd0`); on D6's last commit
-(`D6: re-review minors`) it gave 4331 passed; on the merged D5 tree `main` gave 2833 passed.
+on it (cut from `d6-synthetic-data` at `9973319`); D8 lives on `d8-teacher-training`, stacked on D7 (cut from
+`d7-multilingual-ablations` at `b1a8a47`). None of the three is merged into `main` and none is pushed;
+merging D8 means merging D6 and D7 first. At the D5 merge `main` was 81 commits ahead of `origin/main`
+(`9e7b0ec`); it is unpushed, and no CI run covers D3, D4, D5, D6, D7 or D8. The full local gate was last run
+on the D8 branch: 7114 passed, 1 skipped, 10 deselected (D6, D7 and D8 included), on `D8: review minors of the
+launcher` (`3e357ae`; 7020 after Task 5, 5968 on D7's last commit, `D7: re-review minors`); on D6's last commit
+(`D6: re-review minors`) it gave 4331 passed; on the merged D5 tree `main` gave 2833 passed. The whole-branch
+review of D8 had not run when this paragraph was written.
 
-Next step: D8 (Teacher training). Nothing in D7 blocks it. Its inputs from D7: the validated config
-renderer (`rinchen.train.eole_cfg.render`, `merged_config` and `validate_train_config`, whose allow-lists a
-teacher config must stay inside), the Eole runner (`rinchen.train.eole_run.run_training`, which builds the
-vocabulary and trains in one process with the threads pinned and the GPU hidden when `gpu_ranks` is empty,
-and `predict_tokens`), the training mixture and the integer weights (`load_training_rows`,
-`build_corpora`, `mixing_probabilities`, `integer_weights`), the evaluation harness (`evaluate_variant`),
-and the resumable run with its fingerprint (`run_ablation`). What D7 does not give D8: a multi-GPU or
-`torchrun` launch (D7 starts a single `eole train`), a resume of one training from its latest checkpoint
-(D7 resumes whole variants only), averaging (Eole 0.6.4 has no averaging command, `D-EOLE-CLI`, so the
-averager is ours), and any measured model size, batch or learning rate: `multilingual_proxy.yaml` is a
-prior. Nothing real exists to feed it: no real corpus and no GPU run, so D8 can only train on planted or
-tiny data; the open gates above and the D3, D5 and D6 gates stay open.
+Next step: D9 (Document-level). Nothing in D8 blocks it. Its inputs from D8: `rinchen train launch` (the
+resumable launcher: start, resume from the newest complete checkpoint, `already_complete`, the NaN gate, the
+run lock, `command.sh` for the operator, the manifest of the final step) for continuing OUR teacher
+(`train_from` is allowed only as the launcher's own resume, inside the run directory, and the run identity
+excludes only `train_steps` and `train_from`, so D9's continued training on document-level data, which changes
+the data section and the schedule, will need a CONSCIOUS extension of the identity rule and of the
+`resumes` validation, decided and recorded rather than patched in), `rinchen train average` (a plain mean of the
+last checkpoints; not a checkpoint to resume from), `rinchen train ablate --prepare-only` (the corpora and the
+config of a variant from the mixture the ablations chose), `check_gpu_rules`, `curves.parse_train_log` and
+`loss_gate`, and `configs/eole/teacher.yaml` (a prior). What D8 does not give D9: any trained teacher (no real
+corpus and no GPU run exist), any measured batch, learning rate, throughput or memory, a live NaN abort, and any
+evidence on a GPU; the open gates above and the D3, D5, D6 and D7 gates stay open.
 
 D0 (environment, skeleton, doctor): `pyproject.toml` restructured to the
 master plan's toolchain (see `docs/STACK.md` for resolved versions),

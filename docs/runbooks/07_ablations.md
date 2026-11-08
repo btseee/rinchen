@@ -30,10 +30,14 @@ placement is better.
   most 5,200 toy rows. The proxy base config (`configs/eole/multilingual_proxy.yaml`) and the
   ablation that uses it (`configs/eole/ablation_priors.yaml`) are unmeasured priors, checked only by
   schema tests (Eole accepts the files); nothing was trained or timed with them.
-- **No teacher, averaging, export, serving or final evaluation** (D8 and later). Evaluation reads the
-  DEV split only (model selection); the test split and FLORES+ devtest are never read here.
+- **No teacher, export, serving or final evaluation** (D8 and later). D8 has since built the resumable
+  launcher, the checkpoint averager and `ablate --prepare-only` (`docs/runbooks/08_teacher.md`); no
+  teacher was trained. Evaluation reads the DEV split only (model selection); the test split and
+  FLORES+ devtest are never read here.
 - **No fine-tuning.** Every variant is trained from random initialisation; `train_from` is not an
-  allowed Eole key.
+  allowed Eole key of an ablation config. (D8's launcher allows it in one place only: the config it
+  renders itself to resume its OWN run from a complete checkpoint of the same run directory,
+  `validate_train_config(..., resumes=True)`; see `docs/runbooks/08_teacher.md`.)
 
 Every number below is from a test, the code, the design, the spike (`spike-findings.md` in the SDD
 workspace; toy data) or a measurement made for this runbook on 2026-11-08 ("Measured numbers"); a
@@ -47,8 +51,8 @@ invocations, a probe of the mixture build at 1,000,000 and 4,000,000 rows).
 
 | Module | Job |
 |---|---|
-| `rinchen/utils/logged_process.py` | `run_logged`: a command with its output in a log, a timeout, a wait in 0.2 s slices that Ctrl-C can interrupt, SIGTERM and SIGHUP turned into an exit, and a kill of the whole process group (moved from `script_conv/_subprocess.py`) |
-| `rinchen/train/eole_cfg.py` | Allow-lists of Eole config keys per level, `FORBIDDEN_KEYS`, `validate_train_config`, `merge`, `merged_config`, `render`, `read_config`, `dump_config`, `reject_dollar`, `reject_glob_characters` |
+| `rinchen/utils/logged_process.py` | `run_logged`: a command with its output in a log, a timeout, a wait in 0.2 s slices that Ctrl-C can interrupt, SIGTERM and SIGHUP turned into an exit, and a kill of the whole process group (moved from `script_conv/_subprocess.py`; D8 added `inherit_fds`) |
+| `rinchen/train/eole_cfg.py` | Allow-lists of Eole config keys per level, `FORBIDDEN_KEYS`, `validate_train_config`, `merge`, `merged_config`, `render`, `read_config`, `dump_config`, `reject_dollar`, `reject_glob_characters` (D8 extended the lists and added the `resumes` flag: runbook 08) |
 | `rinchen/train/eole_run.py` | `run_training` (`eole build_vocab` then `eole train`), `predict_tokens` (`eole predict` on token lines, optionally with forced prefixes), `training_environment`, `eole_commands`, `CHECKPOINT_FILE` |
 | `rinchen/train/sampling.py` | `mixing_probabilities` (temperature over directions) and `integer_weights` (largest-remainder rounding to `weight_total`) |
 | `rinchen/config/ablation.py` | `AblationMatrix`, `Axes`, `load_ablation`, `TagPlacement`, `id_number`; imports no feature package |
@@ -66,7 +70,7 @@ invocations, a probe of the mixture build at 1,000,000 and 4,000,000 rows).
 | `rinchen/train/ablation_report.py` | `write_results`: `results.tsv`, `results.json`, `results.md` |
 | `rinchen/train/ablation.py` | `run_ablation`: the loop over the variants, reuse, `train.json`, `result.json` |
 | `rinchen/metrics/bleu_chrf.py` | `corpus_scores` (added): corpus chrF and BLEU with the sacrebleu signatures |
-| `rinchen/cli/train.py` | `rinchen train ablate`; the only module that writes the manifest |
+| `rinchen/cli/train.py` | `rinchen train ablate` (with `--prepare-only` since D8) and its manifest; it also registers `launch` and `average`, which live in `cli/train_runs.py` (runbook 08) |
 
 The layering: `config.ablation` imports no feature package; `train` imports `config`, `corpus`,
 `metrics`, `utils`, `manifest`, `errors` and `synth.tags` (the origin-to-tag helper) and, from
@@ -136,13 +140,14 @@ The matrix has no axis for an Eole key. To compare two values of one (a learning
 ### Allow-lists
 
 `validate_train_config` allows only these keys, level by level (copied from
-`src/rinchen/train/eole_cfg.py`, alphabetical here). Eole 0.6.4 rejects any other key of `eole
+`src/rinchen/train/eole_cfg.py`, alphabetical here; D8 added 4 top-level and 9 `training` keys for the
+teacher runs). Eole 0.6.4 rejects any other key of `eole
 train` (`D-EOLE-UNKNOWN-KEYS`), and `tests/unit/test_train_eole_cfg_drift.py` checks every listed key
 against the fields of the installed Eole.
 
 | Level | Keys |
 |---|---|
-| top level (15) | `data`, `model`, `n_sample`, `overwrite`, `report_every`, `save_data`, `seed`, `share_vocab`, `src_vocab`, `src_vocab_size`, `tgt_vocab`, `tgt_vocab_size`, `training`, `transforms`, `transforms_configs` |
+| top level (19) | `data`, `log_file`, `model`, `n_sample`, `overwrite`, `report_every`, `save_data`, `seed`, `share_vocab`, `src_vocab`, `src_vocab_size`, `tensorboard`, `tensorboard_log_dir`, `tgt_vocab`, `tgt_vocab_size`, `training`, `transforms`, `transforms_configs`, `valid_metrics` |
 | `data.<corpus>` (6) | `path_src`, `path_tgt`, `src_prefix`, `tgt_prefix`, `transforms`, `weight` |
 | `transforms_configs` (2) | `filtertoolong`, `sentencepiece` |
 | `transforms_configs.sentencepiece` (2) | `src_subword_model`, `tgt_subword_model` |
@@ -151,11 +156,14 @@ against the fields of the installed Eole.
 | `model.encoder` (5) | `heads`, `hidden_size`, `layers`, `position_encoding_type`, `transformer_ff` |
 | `model.decoder` (5) | `heads`, `hidden_size`, `layers`, `position_encoding_type`, `transformer_ff` |
 | `model.embeddings` (2) | `position_encoding_type`, `word_vec_size` |
-| `training` (27) | `accum_count`, `adam_beta2`, `attention_dropout`, `batch_size`, `batch_type`, `bucket_size`, `compute_dtype`, `decay_method`, `dropout`, `gpu_ranks`, `keep_checkpoint`, `label_smoothing`, `learning_rate`, `max_grad_norm`, `model_path`, `num_workers`, `optim`, `param_init`, `param_init_method`, `prefetch_factor`, `save_checkpoint_steps`, `train_steps`, `valid_batch_size`, `valid_steps`, `warmup_steps`, `weight_decay`, `world_size` |
+| `training` (36) | `accum_count`, `adam_beta2`, `attention_dropout`, `batch_size`, `batch_size_multiple`, `batch_type`, `bucket_size`, `compute_dtype`, `decay_method`, `dropout`, `early_stopping`, `early_stopping_criteria`, `gpu_backend`, `gpu_ranks`, `keep_checkpoint`, `label_smoothing`, `learning_rate`, `master_ip`, `master_port`, `max_grad_norm`, `model_path`, `normalization`, `num_workers`, `optim`, `param_init`, `param_init_method`, `prefetch_factor`, `save_checkpoint_steps`, `self_attn_backend`, `timeout`, `train_steps`, `valid_batch_size`, `valid_steps`, `warmup_steps`, `weight_decay`, `world_size` |
 | forbidden at any depth (16) | `global_heads_kv`, `heads_kv`, `interleave_local`, `layer_types`, `multidimensional_rope`, `partial_rotary_factor`, `qk_norm_post_rope`, `relative_positions_buckets`, `rope_config`, `rotary_dim`, `rotary_dim_global`, `rotary_interleave`, `rotary_theta`, `rotary_theta_local`, `sliding_window`, `xdrope_section` |
 
-Nothing that adapts, continues or quantises a model is listed (no `train_from`, no LoRA), and no
+Nothing that adapts, continues or quantises a model is listed (no LoRA; `train_from` is accepted only by
+`validate_train_config(..., resumes=True)`, which D8's launcher uses for its own resume config), and no
 relative, rotary, ALiBi, sliding-window or grouped-query key; the lists describe a plain transformer.
+`average_decay`, `average_every`, `accum_steps`, `dropout_steps`, `reset_optim` and `update_vocab` are
+deliberately absent (runbook 08).
 
 ### The rules of `validate_train_config`, in the order they are checked
 
@@ -187,8 +195,10 @@ The first rule broken is reported, as `invalid Eole config: <dotted.path>: <prob
     `D-EOLE-PREFIX-OVERRIDE`) and no weight.
 
 What it does NOT check: the type of the value of a known key (a `train_steps` of `"ten"` passes the
-dry run and fails in `eole train`, which has its own pydantic check), and that the config has at
-least one training corpus (the plan does, below).
+dry run and fails in `eole train`, which has its own pydantic check; the keys D8 added are the
+exception, their kinds of value are checked), and that the config has at least one training corpus
+(the plan does, below). D8 added two rules between the ninth and the tenth: the kinds of value of the
+teacher keys and, with `resumes`, the form of `train_from`.
 
 `merge(base, overrides)` merges mappings key by key at any depth; every other value, a list included,
 replaces; an override of `None` deletes the key; neither input is changed. `render(base, overrides,
@@ -352,6 +362,7 @@ unchanged; only the `train_seconds` cell of `results.tsv` differs (33.7, now 34.
 | `--timeout S` | none | Seconds after which each Eole command (the vocabulary, the training, the translation) is killed; a positive, finite number |
 | `--force` | off | Train every variant again, ignoring `result.json` and `train.json` |
 | `--dry-run` | off | Print the plan and write nothing, not even the directory |
+| `--prepare-only` | off | (D8) Write each variant's corpora, validation files and `config.yaml` exactly as a run would, train and score nothing, print `prepared <id>: <config.yaml>` per variant; the manifest is of stage `train_prepare`, which `ablate` and `--prepare-only` refuse in each other's output directory. `--force` and `--timeout` are refused with it, `--threads` is only recorded, `--dry-run` wins (runbook 08) |
 
 The flow, in order: reject a `--timeout` that is not positive and finite and a repeated `--corpus`; hash
 the matrix, load it, refuse a foreign manifest and an `--out-dir` that is an input's directory (both
@@ -766,12 +777,15 @@ gates assigned to D4 and the D5 gates that need real text stay open as recorded 
   model is unknown. That the sum of the weights must stay well below `bucket_size` is from reading
   the code (`D-EOLE-WEIGHT-SEMANTICS`).
 - **`num_workers` above 1 with weights**, weight `None`, GPU or bf16 runs, dropout above 0,
-  learning-rate or warmup tuning, larger models, `train_from`: not tested (the spike's list).
+  learning-rate or warmup tuning, larger models: not tested (the spike's list). `train_from` is not
+  an ablation key; D8 tested resuming a run's own checkpoint (runbook 08).
 - **`xavier_uniform` at scale**: toy only.
 - **CTranslate2 export and Eole-native prediction of a tag-on-target model**: not tested (the
   harness predicts from pre-tokenised lines with the tag forced). D5's `export_ct2` fails for an
   output directory with glob characters (`D-EOLE-GLOB-CKPT`); D5 was not changed.
-- **SIGKILL** of `rinchen`: the child is not cleaned up (above).
+- **SIGKILL** of `rinchen`: the child is not cleaned up (above). `rinchen train launch` (D8) holds a
+  lock that the Eole it started keeps, so a second launch is refused while an orphan trains (runbook
+  08); `ablate` has no such lock.
 - **Concurrent runs into one output directory are not guarded.**
 - **Only one seed** in the gate and in every measurement here; the seed-to-seed spread of a variant on
   a real corpus is unknown.
@@ -819,8 +833,9 @@ files (`build_inputs.py`, `weights_tables.py`, `gen_1m.py`, `measure_mixture.py`
 
 ## Where the code lives
 
-`src/rinchen/train/`, `src/rinchen/config/ablation.py`, `src/rinchen/cli/train.py`,
-`src/rinchen/utils/logged_process.py`, `src/rinchen/metrics/bleu_chrf.py` (`corpus_scores`),
+`src/rinchen/train/` (D8 added the launcher modules, runbook 08), `src/rinchen/config/ablation.py`,
+`src/rinchen/cli/train.py`, `src/rinchen/utils/logged_process.py`,
+`src/rinchen/metrics/bleu_chrf.py` (`corpus_scores`),
 `configs/eole/{multilingual_tiny,ablation_tiny,multilingual_proxy,ablation_priors}.yaml`; unit and
 property tests named `test_train_*`, `test_cli_train.py`, `test_config_ablation.py`,
 `test_eole_configs_shipped.py`, `test_metrics_corpus_scores.py`, `test_utils_logged_process.py`;

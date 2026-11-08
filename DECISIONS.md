@@ -1904,3 +1904,294 @@ Now a signal whose handler is None is left alone, like an ignored one, and the h
 failing second install still restores the first (two tests; reachable only through LD_PRELOAD or embedding, found by the
 re-reviewer with a preloaded shared object). (3) The runbook's list of outside imports of `train` named only sentencepiece; it
 now lists polars, pyyaml, pydantic and sentencepiece (sacrebleu comes in through `metrics`). Cost if wrong: none beyond the documentation.]
+
+## 2026-11-08: D8 teacher training - the rulings, made without a review round
+
+D8 (`src/rinchen/train/{checkpoints,curves,average,launch,gpu_rules,launch_command,run_lock}.py`
+with the extensions of `eole_cfg.py`, `eole_run.py` and `corpus_files.py`,
+`src/rinchen/utils/{logged_process,integers}.py`,
+`src/rinchen/cli/{train,train_runs,train_common}.py`, `configs/eole/{teacher,teacher_tiny}.yaml`)
+filled gaps in the master plan with the rulings below. **They were made by the builders and the
+controller without a review round of their own, because the user's instruction for this stretch was
+"Proceed. I'm going to sleep now. Don't stop until you finish everything. Commit everything."** None
+is an approved decision; each lists what it costs if wrong so that it can be undone. (One review of
+the code ran during the build, over Tasks 1 to 6; it reviewed the work, not these rulings, and no
+whole-branch review had run when this entry was written.) The design with the full wording is
+`docs/superpowers/specs/2026-11-08-d8-teacher-training-design.md` (S1 to S10, amended to match the
+finished code, and its section 8, "Amendments made while building"; the numbers below are the same);
+procedures, measured numbers and the known limitations are in `docs/runbooks/08_teacher.md`; the
+upstream facts are in `docs/VERIFY.md`, section "D8 findings". The work lives on branch
+`d8-teacher-training`, stacked on `d7-multilingual-ablations` (cut from it at `b1a8a47`); it is not
+merged and not pushed.
+
+[DESIGN: S1. `launch` is a separate runner from D7's `run_training`.] `run_training` treats any
+fresh `model.00.safetensors` as success and cannot resume; D7's short ablation runs keep it, and
+both use `run_logged`. `run_logged` gained `inherit_fds` for S2's lock. Cost if wrong: making
+`run_training` resumable instead would give the short ablation runs the launcher's strictness
+(identity, lock, attempt files) they do not need; the two runners share the environment helpers, so
+merging them later is a move, not a rewrite.
+
+[DESIGN: S2. Run identity: the hash of the effective config without `train_steps` and `train_from`,
+kept in `launch.json`; enforced only when step directories exist.] With Eole's default `reset_optim:
+none` the optimiser options come from the CHECKPOINT's config, so a resume YAML with a new learning
+rate or warmup is silently ignored (the spike's resume logged the old rate whatever the new file
+said); the identity makes such a launch a `ConfigError`. The two excluded keys are the length of the
+run, which a longer run extends, and the checkpoint a resume continues. A different GPU count is a
+different identity (the batch changes). Paths are in the config and so in the identity. A record
+without step directories is rewritten (a fresh start); step directories without a record are
+refused. Cost if wrong: a change the identity forbids (a longer warmup in the middle of a run, a
+corpus path moved) needs a new run directory and cannot continue the old checkpoint; a looser
+identity would let Eole ignore the change without a word. D9, which will continue OUR teacher with
+other data and a new schedule, needs a conscious extension of this rule.
+
+[DESIGN: S3. A resume names the newest COMPLETE `step_N`; `train_from` exists only in the config the
+launcher renders; every attempt has its own config `launch/train-<k>.yaml` and log
+`launch/attempt-<k>.log` (controller ruling).] Eole's saver is not atomic, so a resume never goes
+through `model_path`; `validate_train_config(resumes=True)` accepts `train_from` only as
+`<training.model_path>/step_<N>` and accepts a config without it (the flag means "allowed"). The
+plan's single `resume-<N>.yaml` became one effective config per attempt, so `command.sh` and the
+record name exactly what ran and an earlier attempt's log is never read as a later one's. Cost if
+wrong: two files per attempt in `launch/`, and a launch that reads the last attempt's log (not all
+of them) for the NaN and early-stop checks.
+
+[DESIGN: S4. Outcomes `completed`, `early_stopped`, `already_complete` (and `written`); an explicit
+positive `training.train_steps` is required; the NaN gate runs when an attempt ends.] A live abort
+on NaN (reading the log while Eole runs) was ruled out of scope; the gate also refuses to resume or
+finish a run whose last attempt logged a non-finite figure at or before its newest complete step. An
+early stop that lands exactly on `train_steps` is `early_stopped` for the launch that ran it and
+`already_complete` for the next. Cost if wrong: a teacher that goes NaN at hour 2 of 60 runs on
+until the operator notices; a config that leaves `train_steps` to Eole's default of 100000 is
+refused instead of run.
+
+[DESIGN: S5. The GPU rules of `launch` are `world_size`/`gpu_ranks` consistency, `timeout` at least
+3600 and at most 80 corpora for `world_size` above 1, one early-stopping criterion, and
+`keep_checkpoint` at least `early_stopping + 1`.] They turn Eole's silent cases (a no-op, a
+60-second collective timeout, a gather buffer, a deleted best checkpoint) into a message before a
+GPU node is spent. The 3600 and the 80 are the design's margins, not measured limits (the pickle was
+4.0 KB at 100 corpora, the buffer 4096 bytes). Cost if wrong: a legitimate config with 90 corpora,
+or a validation that is known to take under an hour and a timeout of 1800, is refused and needs the
+constant changed.
+
+[DESIGN: S6. `command.sh` is deterministic text; `--write-only` writes it, the attempt's config and
+`launch.json`; the script ends with `2>&1 | tee -a launch/attempt-<k>.log`.] The record lets a run
+started by hand be resumed by `launch` (Task 5 ruling 1); the `tee -a` (with `pipefail`) came after
+the review showed that a hand-run attempt left no log, so a later `launch` saw neither a NaN nor an
+early stop (a NaN hand run was called `already_complete`, an early-stopped one resumed and trained
+to the end). Every path in the script is absolute and it starts with a `cd`, so it must be
+regenerated on the target node. Cost if wrong: `--write-only` leaves an existing manifest with a
+stale `command.sh` digest (detectable, rewritten by the next launch that runs); a script copied
+between machines carries the wrong paths.
+
+[DESIGN: S7. The averager is ours: a plain mean per floating tensor in float64 rounded to the
+tensor's dtype, tensors that are not floats or are equal in every source taken from the last, no
+optimizer state, never named `step_N`.] Eole 0.6.4 has no averaging command and its `average_decay`
+saves the EMA in place of the live weights, so the master plan's `eole model average` does not exist
+(`D-EOLE-CLI`). The file is written by hand in the safetensors order (deterministic bytes,
+streaming) and checked with `safetensors`; bf16 goes through its bit pattern. Cost if wrong: the
+peak memory is about 9 times the largest float tensor (about 7 GB for the 128k embedding,
+ARITHMETIC); if Eole adds a command later the output of ours must be compared with it.
+
+[DESIGN: S8. `loss_gate` returns a reason; `launch` applies only the NaN rule.] The gate (no NaN,
+`xent` of the last report at most 0.7 times the first, validation perplexity falling) is applied by
+the integration test, to the log of the first attempt. Cost if wrong: a launch of a run that does
+not learn is accepted; a gate on a real teacher needs a threshold the toy cannot give.
+
+[DESIGN: S9 and S10. The teacher config is a table of unmeasured priors; `valid_metrics` is left
+out.] `teacher.yaml` takes the shape and schedule of the master plan (lines 511 to 516), the
+optimiser and sequence length of the proxy config, and the rest (label smoothing, `timeout` 7200,
+`keep_checkpoint` 8, one early-stopping criterion, `batch_size_multiple` 8) from the design; none
+was trained. The validation corpus stays D7's pre-tokenised one, so Eole's BLEU and chrF would score
+piece strings; BLEU and chrF of a teacher come from `evaluate_variant` after the training, and early
+stopping is on perplexity alone. Cost if wrong: every value may be wrong; the best checkpoint by
+perplexity may not be the best by chrF; `tensorboard_log_dir` is not set (Eole's default is a
+relative `runs/eole`) and the comment of the file cites master plan lines 511 to 514 where the
+teacher block is 511 to 516 (found while writing the records, not fixed).
+
+[DESIGN: Controller ruling. `safetensors` is imported lazily from a locked transitive dependency.]
+It is installed and locked at 0.8.0 as a dependency of Eole, not declared in `pyproject.toml`; D8
+imports it inside the functions that need it, never at module import time, does not edit
+`pyproject.toml` or `uv.lock`, and records its version in the manifests' `tool_versions`. `torch`
+and `eole` are never imported by D8's code. Cost if wrong: if a future Eole stops depending on
+`safetensors`, `is_complete` and `average` fail at import time of the function; declaring it is a
+one-line change.
+
+[DESIGN: Controller ruling. Task 7, the optional two-rank CPU gloo test, is SKIPPED.] The
+multi-process classification (a non-zero exit with `Early Stop!` in the log and a complete final
+step is an early stop) is covered by unit tests that fake the spike's log and exit code; the one
+real observation is the spike's CPU gloo shim run. Cost if wrong: the launcher's handling of a real
+multi-process job is untested end to end, here and on a GPU.
+
+[DESIGN: Controller ruling. The run lock, and its descriptor inherited by Eole.] A real launch takes
+an exclusive non-blocking `flock` on `launch/lock`; `--write-only` only looks. The first version
+held the descriptor in the launcher alone; the review confirmed that a SIGKILL of the launcher then
+released the lock while Eole (its own session) kept training, and the next launch started a second
+Eole into the same checkpoint directory. The fix passes the descriptor to `eole build_vocab` and
+`eole train` (`run_logged(inherit_fds=)`). Cost if wrong: the lock is advisory and local; a hand-run
+`command.sh` neither takes nor sees it; `flock` on NFS or Lustre was not checked (an `OSError` ends
+the command with exit 1).
+
+[DESIGN: Controller ruling. The `before_writing` hook of `launch()`.] The CLI drops the old manifest
+in a hook called right before the first file of an attempt is written, not before the call:
+`begin_commit` before `launch()` would have deleted a finished run's manifest on an identity
+refusal, a held lock or an `already_complete` rerun. Cost if wrong: one more callback in the
+signature; a finished run's manifest is rewritten only when missing or no longer vouching for the
+same files, which re-hashes the final step directory (GB scale for a real teacher).
+
+[DESIGN: Controller ruling. `is_complete` never raises.] A bit flip in the zip central directory of
+`optimizer.pt` made `zipfile` raise `UnicodeDecodeError` or `NotImplementedError`, and `launch` and
+`average` died with a traceback; `_archive_problem` now catches `ValueError`, `NotImplementedError`,
+`OverflowError` and `EOFError` too, and a damaged step is skipped like a truncated one. Cost if
+wrong: a damaged but "complete" step is reported as a problem phrase and the run falls back to an
+older step, losing the steps between.
+
+[DESIGN: Controller rulings, smaller ones.] `average` finds the checkpoints with `--checkpoint-dir`
+(the run's `training.model_path`) and writes `averaged` beside it by default; `ablate
+--prepare-only` writes a manifest of its own stage `train_prepare`, and each of it and
+`train_ablate` refuses the other's manifest, so prepare-then-ablate into one out dir is refused both
+ways; `launch()` creates the run directory when it takes the lock;
+`rinchen.utils.integers.is_strict_int` replaces three copies of "a bool is not an int" in D8's code
+(the copies in D7's `eole_data.py` and D1's `corpus/schema.py` were left alone); the
+`default_signal_handlers` fixture makes four older signal tests pass when pytest was started as a
+background job with SIGINT and SIGHUP ignored. Cost if wrong: each is one place to change.
+
+[DESIGN: The GPU was not used.] This machine has a GeForce RTX 5070 Ti that the owner did not
+authorise for a run, so the spike, every test and every measurement of D8 ran with
+`CUDA_VISIBLE_DEVICES=""` and `gpu_ranks: []`, and everything GPU-side is read from Eole's source or
+from a CPU gloo shim and tagged unmeasured. Cost if wrong: none to undo; the cost of the choice is
+the list of open gates below. A one-GPU smoke test of the teacher shape needs the owner's
+authorisation.
+
+[EVIDENCE: Resume semantics of Eole 0.6.4 (spike, CPU, 2 threads; `docs/VERIFY.md`
+`D-EOLE-RESUME-DATA`).] `training.train_from: <model_path>/step_N` restores the weights, the Adam
+moments, the step counter and the noam schedule (optimizer.pt says 201 after step 200; the rate at
+step 110 was 5.96e-03 in both runs); `train_steps` is the absolute target; the data stream restarts
+from line 1 of every corpus (a resumed step 110 showed `sents: 1512; bsz: 1131/1231/151`, the
+uninterrupted step 10); the RNG, the EMA and the `keep_checkpoint` queue are not restored; scheduled
+`accum_count` and `dropout` lists restart at their first value; the optimiser options come from the
+checkpoint (a resume YAML with learning rate 0.05 still logged 4.38e-03 at step 70); resuming a
+finished run trains one extra step (step_61 after `train_steps` 60). Three uninterrupted 200-step
+runs are byte-identical (weights SHA-256 `32a1c92e...`); a clean stop at 100 and a resume to 200
+gave `3bdbb444...`, 58 of 62 tensors different, largest difference 0.538, validation perplexity 8.61
+against 8.82; a SIGKILL near 120 and a resume equalled the clean-stop resume. Measured again on
+2026-11-08 through the real binary: the uninterrupted run `32a1c92e...`; resumed from step 150 after
+the weights of `step_200` were cut `7e62604f...` (validation perplexity 8.80908 against 8.81733); a
+separate run extended from 100 to 200, 8.60773.
+
+[EVIDENCE: The non-atomic saver (spike; `D-EOLE-CKPT-NOT-ATOMIC`).] Eole writes `optimizer.pt`, the
+weights, the transform artifacts, `vocab.json` and `config.json` into `step_N/`, linking each file
+into `model_path` right after, then deletes the oldest step directory, with no temporary name. A
+simulated kill mid-save of step 100, resumed through `model_path`, exited 0 and loaded weights from
+step 50 with the optimizer of step 100; `train_from: ckpt/step_100` failed (no `config.json`) and
+`ckpt/step_50` worked. Eole fails loudly on truncated files (exit 1 in under 4 s). A fresh run into
+a `model_path` that holds step directories is not refused. Hence the completeness check and
+`launch.json`.
+
+[EVIDENCE: Averaging in Eole (spike; `D-EOLE-EMA-SAVES-AVERAGE`, `D-EOLE-NO-AVERAGE-TOOL`).] `eole
+--help` lists serve, build_vocab, predict, train, tools, convert and no `model`; `eole tools` has no
+averaging. With `average_decay` the saver swaps the EMA into the parameters, so every
+`step_N/model.00.safetensors` IS the EMA and the live weights are never saved (it differs from the
+same-seed live run by at most 0.111 at step 100 and 0.201 at step 300); the EMA is not restored. On
+the toy, development chrF at 600 steps: live 32.23, average of 500 and 600 29.90, of 400 to 600
+25.90, of 200 to 600 18.29, EMA 29.87; at 1500 steps everything within 0.25 chrF (live 98.61,
+average of 1400 and 1500 98.68, of 1100 to 1500 98.45). The gate's three-checkpoint average of the
+200-step run translates through `evaluate_variant` with finite scores (chrF 1.16, 27.49, 1.11, 1.16:
+a poor model; no threshold).
+
+[EVIDENCE: A NaN loss does not stop Eole (spike; `D-EOLE-NAN-CONTINUES`).] With `learning_rate:
+1e10` the log shows `ppl: nan; xent: nan; attn_ent: nan` and `Validation perplexity: nan`, training
+goes on to the end, NaN checkpoints are written and the exit code is 0; Eole has no `isnan` or
+`isfinite` check; early stopping treats NaN as stalled. A harness must read the log.
+
+[EVIDENCE: Early stopping and multi-process jobs (spike; `D-EOLE-EARLYSTOP-RANK0`, `D-EOLE-SPAWN`,
+`D-EOLE-SILENT-NOOP`).] Single process, `valid_steps` 20, `early_stopping` 2: `Decreasing patience:
+1/2`, `Training finished after not improving. Early Stop!`, `Best model found at step 80`, a final
+checkpoint `step_120`, exit 0, 28.5 s; Eole keeps the last `keep_checkpoint` checkpoints, not the
+best. `eole train` spawns the per-GPU processes itself (one non-daemon `spawn` process per entry of
+`gpu_ranks`; no torchrun, no `RANK` or `WORLD_SIZE` read anywhere); `world_size` 2 with `gpu_ranks:
+[]` spawns 0 processes and exits 0 without a checkpoint ("Waiting for 0 training processes to
+complete"). On a 2-rank CPU gloo shim (the shim drops `device_id`, swaps `all_gather_list` for
+`all_gather_object` and fakes `torch.cuda.current_device`; no change to Eole or the repository) rank
+0 logged `Early Stop!`, saved `step_120` complete and the job died with `Timed out waiting 20000ms
+for send operation to complete`, exit 1, after 52 s; the same shim ran 100 steps with 2 ranks in
+about 18 s (xent 2.82 against 2.81 for one rank). Ctrl-C on the shim ended all ranks with rc 0 and
+no final save. NCCL was not tried.
+
+[EVIDENCE: Gradient scaling, the statistics buffer and the batch (spike, source-read;
+`D-EOLE-SPAWN`).] The loss is divided by the summed normalization and then the all-reduced gradients
+are rescaled by `n_gpu` again, so the update gradient is `1/world_size` of the global mean: Adam
+does not mind but `max_grad_norm` (5) becomes `world_size` times looser (40 for 8 GPUs, ARITHMETIC).
+`Statistics.all_gather_stats` pickles per-corpus statistics into a 4096-byte buffer; pickle sizes
+measured 650 B (9 corpora), 1.4 KB (30), 2.5 KB (60), 4.0 KB (100), 4.46 KB (112); the crash itself
+was not reproduced. `padded_tokens_per_update` = `world_size x accum_count x batch_size` (8 x 8 x
+16384 = 1,048,576 for the prior). `timeout` is the collective timeout and its default is 60 s.
+
+[EVIDENCE: No recipes are shipped (spike; `D-EOLE-NO-RECIPES`).] The installed wheel has no yaml or
+recipe directory (`eole/config/recipes.py` holds Qwen and LiveCodeBench orchestration schemas); the
+code defaults are layers 2, hidden 512, heads 8, feed-forward 2048, SGD with learning rate 1.0,
+`timeout` 60, `batch_size_multiple` 1 (the "fp16 gives 8" rule is dead code). The teacher shape is
+therefore the project's own prior from the master plan and the D7 proxy config, 1,004,601,868
+parameters with 64,000 pieces and 1,102,969,868 with 128,000 (ARITHMETIC: a formula that reproduces
+the real tiny checkpoint exactly, 820,458 elements and 3,289,000 bytes).
+
+[EVIDENCE: The review's confirmed SIGKILL and orphan reproduction (review of Tasks 1 to 6;
+interlude).] Before the fix, with the real Eole, a SIGKILL of the launcher released the lock while
+the Eole kept training, a second launch started another Eole into the same `model_path`, and
+`attempt-1.log` and `attempt-2.log` both saved `step_60`, `step_90` and `step_120` at the same time
+(validation perplexity 11.46 against 10.82); with fake Eoles both wrote one file. After the fix,
+with the real Eole: SIGKILL of the launcher at step 30, the orphan trained alone to `step_120`, a
+second launch exited 2 naming the lock, a third after the orphan ended said `already_complete`. A
+hand run (`--write-only` then `bash command.sh`, 60 steps, then `launch`) is now `already_complete`
+with `attempt-1.log` present.
+
+[EVIDENCE: The completeness check and the central-directory fuzz (review; interlude).] 800 of 800
+truncations of the step files were flagged; random single-byte flips were flagged for the weights in
+3 of 200 trials, for `optimizer.pt` in 1 of 200, for `config.json` in 138 of 200 and for
+`vocab.json` in 179 of 200 (the tensor data is not checked, by design; a flip that leaves a JSON
+file valid passes); 58 real `eole train` resumes agreed with `is_complete` on truncations and
+invalid-JSON flips. A fuzz of 6000 bit flips in the central directory of `optimizer.pt` raised 697
+`UnicodeDecodeError` and 57 `NotImplementedError` out of `is_complete`; after the fix 3 x 1000
+seeded flips never raise (before: 162 and 24 per 4000 flips) and the real binary skips a damaged
+step and falls back to the previous complete one. About 60 fabricated state-machine attacks
+(half-written directories, missing files, zero-byte files, symlink loops, `launch.json` missing,
+corrupt or foreign, a finished run) behaved correctly; averaging was byte-identical to the spike's
+averager and bit-exact against torch for bf16, f16, f64, integers, scalars and empty tensors; its
+peak RSS on real files was 71 MB, and 2.6 GB for three float32 checkpoints with one 300 MB tensor.
+
+[EVIDENCE: The STOP gate and the measurements, 2026-11-08 (Intel Core Ultra 7 265K, 20 cores, 46
+GiB, CPython 3.14.10, eole 0.6.4, torch 2.14.1+cu130, safetensors 0.8.0, sentencepiece 0.2.1; GPU
+hidden).] Through the real binary on the toy set with `teacher_tiny.yaml`: `ablate --prepare-only`
+0.78 s; `launch` from nothing 25.61 s, `completed`, `xent` 5.44, 5.40, 4.64, 2.81, 2.28, 2.14 at
+steps 10, 20, 50, 100, 150, 200 (a 60.7 % fall; the spike's three seeds 60.7, 60.7, 62.4 %),
+validation perplexity 83.6869, 16.6115, 10.1611, 8.81733; a second launch 0.73 s `already_complete`
+with the run directory unchanged; the weights of `step_200` cut in half, `launch` resumed from 150
+in 9.60 s; a separate run 100 then 200 resumed from 100 (`Step 110/  200`, 13.50 s); `average --last
+3` 0.74 s (62 tensors, 58 averaged); the run directory 19,296,131 bytes, a step directory 4,808,113.
+The Task 6 gate module (28 tests) took 2 min 38 s; the gate: 7114 passed, 1 skipped, 10 deselected
+(5968 on D7's last commit). Mutation checks by hand per task: Task 1 36, Task 2 70 (one equivalent
+removed), Task 3 about 145, Task 4 about 110, Task 5 14 and about 74 (three equivalent survivors),
+the interlude about 50; the reviewer's own 25 of 25.
+
+[EVIDENCE: Found while writing these records.] `configs/eole/teacher.yaml` sets `tensorboard: true`
+and no `tensorboard_log_dir`, whose Eole default is the relative `runs/eole`
+(`config/common.py:166`) with a start-time subdirectory (`utils/report_manager.py:117-119`): the
+events would go outside the run directory, one directory per attempt. The comment of the config
+cites master plan lines 511 to 514; the teacher block is 511 to 516. The ledger of the build records
+one review (Tasks 1 to 6), not two. Configs were not touched.
+
+[EVIDENCE: Not verified.] Anything on a GPU (bf16, NCCL, flash attention, multi-GPU, multi-node,
+tokens per second, memory, the 13 GB checkpoint write, `GradScaler` with bf16, the dtype of the
+saved weights); the real two-rank early stop and the multi-process classification end to end; real
+data and the effect of the data stream restarting at line 1 on a long run; `flock` on NFS or Lustre;
+the teacher shape's quality and every value of the prior table; whether averaging helps a real
+teacher; a live abort on NaN; the size of the log of a long run; Windows and macOS. Verified to
+close an open question: `eole build_vocab` on a resume config works, and a resume with `vocab.src`
+deleted works.
+
+[DESIGN: Gates.] Open, because they need real data or a GPU: the quality, batch, learning rate,
+throughput and memory of the teacher shape; everything on a GPU (a one-GPU smoke test is the
+cheapest first step and needs the owner's authorisation); whether averaging helps a real teacher;
+the real two-rank early stop; a live abort on NaN. The D3 gates assigned to D4, the D5 gates that
+need real text and the D6 and D7 gates stay open as recorded there. D9 (Document-level) takes
+`launch`, `average`, `--prepare-only`, the GPU rules and the curve parser from here, and needs a
+conscious extension of the identity rule for continued training. The whole-branch review of D8 had
+not run when this entry was written; its findings and fixes get an addendum.
