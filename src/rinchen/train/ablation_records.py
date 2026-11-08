@@ -16,6 +16,7 @@ evaluation again (`trained_checkpoint`); else it trains again.
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -207,3 +208,14 @@ def scores_the_dev_sets(dev: DevResult, sets: Mapping[str, DevSet]) -> bool:
         scores.lines == len(sets[direction].src)
         for direction, scores in dev.directions.items()
     )
+
+
+def non_finite_scores(dev: DevResult) -> list[str]:
+    """What in `dev` is not a finite number (JSON has no NaN or infinity), each as
+    words and value, e.g. `BLEU of eng_Latn-khk_Cyrl is nan`; empty when every score
+    is finite."""
+    named = [("mean chrF", dev.chrf_mean), ("minimum chrF", dev.chrf_min)]
+    for direction, scores in dev.directions.items():
+        named.append((f"chrF of {direction}", scores.chrf))
+        named.append((f"BLEU of {direction}", scores.bleu))
+    return [f"{name} is {value}" for name, value in named if not math.isfinite(value)]

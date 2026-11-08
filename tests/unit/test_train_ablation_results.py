@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import math
 from pathlib import Path
 
 import pytest
@@ -435,6 +436,24 @@ def test_the_tables_are_written_again_with_the_same_bytes(
     assert files == result_files(scripted.plan.out_dir)
     assert {name: _read(scripted, name) for name in before} == before
     assert not list(scripted.plan.out_dir.rglob("*.part"))
+
+
+def test_a_score_that_is_not_finite_writes_no_table_at_all(
+    scripted: AblationRun, tmp_path: Path
+) -> None:
+    # `results.json` must stay JSON (no `NaN` token), and the three tables are written
+    # whole or not at all: this is the guard behind the check of `run_ablation`.
+    first, *others = scripted.result.variants
+    broken = dataclasses.replace(
+        first, dev=dataclasses.replace(first.dev, chrf_mean=math.nan)
+    )
+    plan = dataclasses.replace(scripted.plan, out_dir=tmp_path / "out")
+    result = AblationResult(plan, scripted.result.threads, (broken, *others))
+
+    with pytest.raises(ValueError, match="not JSON compliant"):
+        write_results(result)
+
+    assert list((tmp_path / "out").iterdir()) == []
 
 
 def test_a_matrix_name_with_a_lone_surrogate_does_not_fail_the_write(

@@ -28,6 +28,7 @@ from rinchen.train.ablation_records import (
     VariantProgress,
     VariantResult,
     complete_result,
+    non_finite_scores,
     scores_the_dev_sets,
     trained_checkpoint,
     write_train_record,
@@ -104,7 +105,8 @@ def run_ablation(
 
     Raises:
         UpstreamError: training left no checkpoint file, or the evaluation scored
-            other dev sets than the plan's; what `train` and `evaluate` raise
+            other dev sets than the plan's or produced a score that is not finite
+            (the variant keeps its `train.json`); what `train` and `evaluate` raise
             (UpstreamError, ConfigError, DataError) is not changed.
         OSError: a directory or file cannot be created or written.
         And what `prepare_variant` raises (`ValueError` for fewer than one thread,
@@ -188,6 +190,12 @@ def _train_and_evaluate(
             f"the evaluation of variant {variant.id} scored the directions "
             f"{sorted(dev.directions)}, not the dev sets of the plan "
             f"{sorted(plan.dev.sets)} line for line"
+        )
+    unusable = non_finite_scores(dev)
+    if unusable:
+        raise UpstreamError(
+            f"the evaluation of variant {variant.id} produced a non-finite score "
+            f"({'; '.join(unusable)}): no result file can hold it"
         )
     result = VariantResult(
         planned=prepared.planned,

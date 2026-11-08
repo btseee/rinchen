@@ -5,7 +5,7 @@
                   valid.src, valid.tgt      the pre-tokenised validation corpus
                   run/                      Eole's vocabulary, logs and checkpoint
                   eval/                     the dev evaluation's files
-                  train.json                written once trained, until it is scored
+                  train.json                written once trained, kept after it is scored
                   result.json               written last: the variant is complete
     results.tsv, results.json, results.md   the tables of the run
 

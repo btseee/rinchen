@@ -12,6 +12,7 @@ import dataclasses
 import hashlib
 import inspect
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -560,6 +561,122 @@ def test_an_evaluation_that_does_not_score_the_dev_sets_of_the_plan_is_an_upstre
         Run(plan, evaluate=FakeEvaluate({ID_SRC: scored}))
 
     assert not (plan.out_dir / "variants" / ID_SRC / "result.json").exists()
+
+
+def _with_scores_replaced(scored: DevResult, **fields: float) -> DevResult:
+    return dataclasses.replace(scored, **fields)
+
+
+def _with_one_chrf_replaced(direction: str, chrf: float) -> DevResult:
+    """Every score finite but one direction's chrF, which the mean and the minimum
+    do not show."""
+    scored = dev_result(80.0)
+    directions = dict(scored.directions)
+    directions[direction] = dataclasses.replace(directions[direction], chrf=chrf)
+    return dataclasses.replace(scored, directions=directions)
+
+
+# (the scores, the words the error uses for the first score that is not finite)
+_NON_FINITE_SCORES = [
+    pytest.param(
+        dev_result({**dict.fromkeys(DIRECTIONS, 80.0), DIRECTIONS[1]: math.inf}),
+        f"chrF of {DIRECTIONS[1]} is inf",
+        id="chrF of one direction infinite",
+    ),
+    pytest.param(
+        _with_one_chrf_replaced(DIRECTIONS[1], math.nan),
+        f"chrF of {DIRECTIONS[1]} is nan",
+        id="chrF of one direction NaN, mean and minimum finite",
+    ),
+    pytest.param(
+        dev_result(80.0, {**dict.fromkeys(DIRECTIONS, 40.0), DIRECTIONS[2]: math.nan}),
+        f"BLEU of {DIRECTIONS[2]} is nan",
+        id="BLEU of one direction NaN",
+    ),
+    pytest.param(
+        dev_result(80.0, {**dict.fromkeys(DIRECTIONS, 40.0), DIRECTIONS[3]: -math.inf}),
+        f"BLEU of {DIRECTIONS[3]} is -inf",
+        id="BLEU of one direction minus infinity",
+    ),
+    pytest.param(
+        _with_scores_replaced(dev_result(80.0), chrf_mean=math.nan),
+        "mean chrF is nan",
+        id="mean chrF NaN",
+    ),
+    pytest.param(
+        _with_scores_replaced(dev_result(80.0), chrf_min=math.inf),
+        "minimum chrF is inf",
+        id="minimum chrF infinite",
+    ),
+    pytest.param(
+        dev_result(math.nan),
+        "mean chrF is nan; minimum chrF is nan; chrF of",
+        id="every chrF NaN",
+    ),
+]
+
+
+@pytest.mark.parametrize(("scored", "words"), _NON_FINITE_SCORES)
+def test_a_non_finite_score_is_an_upstream_error_that_leaves_no_result_file(
+    default_plan: AblationPlan, tmp_path: Path, scored: DevResult, words: str
+) -> None:
+    # JSON has no NaN or infinity: written anyway, the file would not parse as JSON and
+    # the variant would be evaluated again on every run.
+    plan = _plan_in(default_plan, tmp_path)
+
+    with pytest.raises(UpstreamError, match=ID_SRC) as raised:
+        Run(plan, evaluate=FakeEvaluate({ID_SRC: scored}))
+
+    assert "produced a non-finite score" in str(raised.value)
+    assert words in str(raised.value)
+    variants = plan.out_dir / "variants"
+    assert not (variants / ID_SRC / "result.json").exists()
+    assert not list(plan.out_dir.glob("results.*"))
+    assert (variants / ID_SRC / "train.json").is_file()
+
+
+def test_only_the_scores_that_are_not_finite_are_named(
+    default_plan: AblationPlan, tmp_path: Path
+) -> None:
+    plan = _plan_in(default_plan, tmp_path)
+    scored = dev_result(
+        80.0, {**dict.fromkeys(DIRECTIONS, 40.0), DIRECTIONS[2]: math.nan}
+    )
+
+    with pytest.raises(UpstreamError) as raised:
+        Run(plan, evaluate=FakeEvaluate({ID_SRC: scored}))
+
+    message = str(raised.value)
+    assert [d for d in DIRECTIONS if f"BLEU of {d}" in message] == [DIRECTIONS[2]]
+    assert "chrF" not in message
+
+
+def test_a_non_finite_score_of_a_forced_rerun_leaves_the_earlier_tables_as_they_were(
+    default_plan: AblationPlan, tmp_path: Path
+) -> None:
+    plan = _plan_in(default_plan, tmp_path)
+    Run(plan)
+    before = {path.name: path.read_bytes() for path in plan.out_dir.glob("results.*")}
+    assert len(before) == 3
+
+    with pytest.raises(UpstreamError, match=ID_SRC):
+        Run(plan, force=True, evaluate=FakeEvaluate({ID_SRC: dev_result(math.nan)}))
+
+    after = {path.name: path.read_bytes() for path in plan.out_dir.glob("results.*")}
+    assert after == before
+
+
+def test_the_rerun_after_a_non_finite_score_evaluates_the_trained_checkpoint_only(
+    default_plan: AblationPlan, tmp_path: Path
+) -> None:
+    plan = _plan_in(default_plan, tmp_path)
+    with pytest.raises(UpstreamError, match=ID_SRC):
+        Run(plan, evaluate=FakeEvaluate({ID_SRC: dev_result(math.nan)}))
+
+    resumed = Run(plan)
+
+    assert resumed.train.variant_ids == [ID_TGT]
+    assert resumed.evaluate.variant_ids == [ID_SRC, ID_TGT]
 
 
 def test_an_interrupt_stops_the_run_and_leaves_no_result_for_the_variant(

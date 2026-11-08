@@ -8,6 +8,7 @@ that a timeout or an interrupt kills the child's whole process group.
 
 from __future__ import annotations
 
+import contextlib
 import importlib
 import os
 import signal
@@ -17,6 +18,7 @@ import threading
 import time
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -392,6 +394,172 @@ def test_a_real_termination_signal_ends_the_run_and_kills_the_process_group(
     assert ended_after < 1.5, f"the run ended {ended_after:.2f} s after the signal"
     assert survivors == [], f"processes still running after the signal: {survivors}"
     assert _handlers() == sentinel_handlers
+
+
+# ---- a signal that was ignored stays ignored --------------------------------------
+#
+# `nohup` starts a command with SIGHUP ignored, and the disposition is inherited. A run
+# that replaced it with a handler of its own would turn the hangup that `nohup` is there
+# to absorb into the end of a training that was meant to survive it.
+
+
+@dataclass
+class _Sent:
+    """What `_signal_once_the_child_runs` did: when it sent the signal and which handler
+    the signal had at that moment."""
+
+    at: list[float] = field(default_factory=list)
+    handler_then: list[Any] = field(default_factory=list)
+
+
+@contextlib.contextmanager
+def _signal_once_the_child_runs(pid_file: Path, signum: int) -> Iterator[_Sent]:
+    """Send `signum` to this process 0.4 s after the child has written `pid_file`;
+    on leaving, stop the sender and kill what the child started."""
+    sent = _Sent()
+    stop = threading.Event()
+
+    def send() -> None:
+        while not pid_file.exists():  # a loaded machine may start the child late
+            if stop.wait(0.02):
+                return
+        sent.handler_then.append(signal.getsignal(signum))
+        sent.at.append(time.monotonic())
+        os.kill(os.getpid(), signum)
+
+    sender = threading.Timer(0.4, send)
+    sender.start()
+    try:
+        yield sent
+    finally:
+        stop.set()
+        sender.cancel()
+        sender.join()
+        if pid_file.exists():
+            _kill_quietly(_read_pids(pid_file))
+
+
+@linux_only
+@pytest.mark.timeout(30)
+@pytest.mark.parametrize("signum", _TERMINATION_SIGNALS, ids=["SIGTERM", "SIGHUP"])
+def test_an_ignored_termination_signal_stays_ignored_and_the_run_finishes(
+    tmp_path: Path, sentinel_handlers: dict[int, Any], signum: signal.Signals
+) -> None:
+    signal.signal(signum, signal.SIG_IGN)  # what `nohup` leaves for SIGHUP
+    pid_file = tmp_path / "pids"
+
+    with _signal_once_the_child_runs(pid_file, signum) as sent:
+        try:
+            _run(
+                _python(_CHILD_WITH_GRANDCHILD, str(pid_file), "1.2"),
+                tmp_path / "child.log",
+            )
+        except SystemExit as ended:
+            pytest.fail(f"the ignored signal ended the run: SystemExit({ended.code})")
+
+    assert sent.at, "the signal was never sent"
+    assert sent.handler_then == [signal.SIG_IGN]  # still ignored while the child ran
+    assert signal.getsignal(signum) is signal.SIG_IGN  # and afterwards
+
+
+@linux_only
+@pytest.mark.timeout(30)
+@pytest.mark.parametrize(
+    ("ignored", "delivered"),
+    [(signal.SIGHUP, signal.SIGTERM), (signal.SIGTERM, signal.SIGHUP)],
+    ids=["SIGTERM with SIGHUP ignored", "SIGHUP with SIGTERM ignored"],
+)
+def test_the_signal_that_was_not_ignored_still_ends_the_run(
+    tmp_path: Path,
+    sentinel_handlers: dict[int, Any],
+    ignored: signal.Signals,
+    delivered: signal.Signals,
+) -> None:
+    signal.signal(ignored, signal.SIG_IGN)
+    pid_file = tmp_path / "pids"
+
+    with _signal_once_the_child_runs(pid_file, delivered) as sent:
+        with pytest.raises(SystemExit) as raised:
+            _run(
+                _python(_CHILD_WITH_GRANDCHILD, str(pid_file), "6"),
+                tmp_path / "child.log",
+            )
+        ended_after = time.monotonic() - sent.at[0]
+        survivors = [pid for pid in _read_pids(pid_file) if not _wait_until_gone(pid)]
+
+    assert raised.value.code == 128 + delivered
+    assert ended_after < 1.5, f"the run ended {ended_after:.2f} s after the signal"
+    assert survivors == [], f"processes still running after the signal: {survivors}"
+    assert signal.getsignal(ignored) is signal.SIG_IGN
+    assert signal.getsignal(delivered) is sentinel_handlers[delivered]
+
+
+# The runner is what `nohup rinchen train ablate ...` is: a process that starts with
+# SIGHUP ignored (`ignore`) or not (`default`) and runs a long command through
+# `run_logged`.
+_HANGUP_RUNNER = """
+import os, signal, sys
+from pathlib import Path
+from rinchen.utils.logged_process import run_logged
+
+disposition, workdir, command = sys.argv[1:4]
+signal.signal(signal.SIGHUP, signal.SIG_IGN if disposition == "ignore" else signal.SIG_DFL)
+run_logged(
+    [sys.executable, "-c", command, workdir],
+    env=os.environ,
+    log_path=Path(workdir) / "command.log",
+    what="the long command",
+)
+"""
+
+# It says when it has started and when it has finished, 2 s apart.
+_LONG_COMMAND = """
+import pathlib, sys, time
+workdir = pathlib.Path(sys.argv[1])
+(workdir / "started").write_text("1")
+time.sleep(2)
+(workdir / "finished").write_text("1")
+"""
+
+
+@linux_only
+@pytest.mark.timeout(60)
+@pytest.mark.parametrize(
+    ("disposition", "exit_status", "command_finished"),
+    [("ignore", 0, True), ("default", 128 + signal.SIGHUP, False)],
+    ids=["started with SIGHUP ignored, as nohup does", "started with SIGHUP default"],
+)
+def test_a_hangup_ends_a_run_only_when_it_was_not_ignored_from_the_start(
+    tmp_path: Path, disposition: str, exit_status: int, command_finished: bool
+) -> None:
+    runner = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            _HANGUP_RUNNER,
+            disposition,
+            str(tmp_path),
+            _LONG_COMMAND,
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        deadline = time.monotonic() + 20
+        while not (tmp_path / "started").exists():
+            if runner.poll() is not None or time.monotonic() > deadline:
+                pytest.fail(f"the long command did not start: {runner.communicate()}")
+            time.sleep(0.02)
+        time.sleep(0.5)
+        os.kill(runner.pid, signal.SIGHUP)
+        _, stderr = runner.communicate(timeout=20)
+    finally:
+        if runner.poll() is None:
+            runner.kill()
+            runner.wait()
+
+    assert runner.returncode == exit_status, stderr.decode(errors="replace")
+    assert (tmp_path / "finished").exists() is command_finished
 
 
 @pytest.mark.parametrize("scenario", ["success", "failure", "timeout", "no command"])

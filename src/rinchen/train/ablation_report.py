@@ -73,6 +73,8 @@ def write_results(result: AblationResult) -> ResultFiles:
     `(temperature, bt_ratio, tag_placement)`, with the number of seeds.
 
     Raises:
+        ValueError: a score is NaN or infinite (JSON cannot hold it); no file is
+            written. `run_ablation` stops such a run before it gets here.
         OSError: a file cannot be written.
     """
     files = result_files(result.plan.out_dir)
@@ -138,7 +140,7 @@ def _tsv(result: AblationResult) -> str:
 
 
 def _json(result: AblationResult) -> str:
-    return json.dumps(result.to_dict(), indent=2) + "\n"
+    return json.dumps(result.to_dict(), indent=2, allow_nan=False) + "\n"
 
 
 def _markdown_row(cells: Sequence[str]) -> str:

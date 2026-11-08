@@ -59,9 +59,11 @@ def run_logged(
     to this process, which would then die and leave the command running. So while
     this call runs on the main thread, both signals raise `SystemExit(128 + signal
     number)` (the shell's status for a process ended by a signal) and the usual path
-    kills the command's group; the caller's handlers are put back afterwards. SIGKILL
-    cannot be caught: a child left running after `kill -9` of this process is a known
-    limit.
+    kills the command's group; the caller's handlers are put back afterwards. A signal
+    that is ignored when the call starts stays ignored: an inherited ignore is a
+    request not to die on it (`nohup` ignores SIGHUP so that a closed terminal does
+    not end a long run). SIGKILL cannot be caught: a child left running after `kill
+    -9` of this process is a known limit.
 
     Raises:
         UpstreamError: the command exits with a non-zero code, or runs past
@@ -97,9 +99,10 @@ def run_logged(
 @contextlib.contextmanager
 def _exit_on_termination_signals() -> Iterator[None]:
     """While the block runs, SIGTERM and SIGHUP raise `SystemExit(128 + signal number)`
-    in the main thread; the handlers that were there are restored afterwards, whatever
-    the block does. Handlers can only be set from the main thread, so elsewhere the
-    block just runs."""
+    in the main thread, except a signal that is ignored (`signal.SIG_IGN`), which is
+    left alone; the handlers that were replaced are restored afterwards, whatever the
+    block does. Handlers can only be set from the main thread, so elsewhere the block
+    just runs."""
     if threading.current_thread() is not threading.main_thread():
         yield
         return
@@ -110,6 +113,7 @@ def _exit_on_termination_signals() -> Iterator[None]:
     previous = {
         number: signal.signal(number, exit_with_status)
         for number in _TERMINATION_SIGNALS
+        if signal.getsignal(number) is not signal.SIG_IGN
     }
     try:
         yield

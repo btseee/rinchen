@@ -35,6 +35,11 @@ from rinchen.errors import ConfigError
 TagPlacement = Literal["src", "tgt"]
 _PLACEMENTS: Final = get_args(TagPlacement)
 
+# Far above any useful share of back-translated data (1 asks for as many rows as the
+# authentic ones, 1000 for a thousand times as many): a larger number is a typo, and
+# the rows it asks for would print as a number of hundreds of digits.
+MAX_BT_RATIO: Final = 1000
+
 # Strict so a quoted number or a YAML boolean is a typo to report, not a value to
 # coerce.
 _PositiveInt = Annotated[int, Field(strict=True, gt=0)]
@@ -125,7 +130,7 @@ _Temperature = Annotated[
 _BtRatio = Annotated[
     float,
     BeforeValidator(_explain_number_text),
-    Field(strict=True, ge=0, allow_inf_nan=False),
+    Field(strict=True, ge=0, le=MAX_BT_RATIO, allow_inf_nan=False),
     AfterValidator(_reject_negative_zero),
 ]
 _NonBlankString = Annotated[str, AfterValidator(_reject_blank)]
@@ -163,7 +168,8 @@ class Axes(BaseModel):
     # Corpus mixing: size ** temperature over the directions; below 1 favours the
     # small ones, 1 is proportional.
     temperature: _Temperatures = Field(default_factory=lambda: [1.0])
-    # Back-translated rows per authentic row of a direction; 0 uses none.
+    # Back-translated rows per authentic row of a direction; 0 uses none, at most
+    # MAX_BT_RATIO.
     bt_ratio: _BtRatios = Field(default_factory=lambda: [0.0])
     tag_placement: _Placements = Field(default_factory=_default_placements)
 

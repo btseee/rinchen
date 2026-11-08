@@ -264,6 +264,27 @@ def test_a_bt_ratio_of_zero_is_allowed(tmp_path: Path) -> None:
     assert load_ablation(_write(tmp_path, document)).axes.bt_ratio == [0.0]
 
 
+def test_a_bt_ratio_of_1000_is_allowed(tmp_path: Path) -> None:
+    document = _document(tmp_path, **_axes(bt_ratio=[1000]))
+
+    assert load_ablation(_write(tmp_path, document)).axes.bt_ratio == [1000.0]
+
+
+@pytest.mark.parametrize("ratio", [1000.0001, 1.0e6, 1.0e308])
+def test_a_bt_ratio_above_1000_is_an_error_that_names_the_bound(
+    tmp_path: Path, ratio: float
+) -> None:
+    message = _message(tmp_path, **_axes(bt_ratio=[ratio]))
+
+    assert "axes.bt_ratio.0" in message
+    assert "less than or equal to 1000" in message
+
+
+def test_the_axes_model_refuses_a_bt_ratio_above_1000_too() -> None:
+    with pytest.raises(ValidationError, match="less than or equal to 1000"):
+        Axes(bt_ratio=[1000.5])
+
+
 def test_a_bt_ratio_of_negative_zero_is_an_error_that_says_to_write_zero(
     tmp_path: Path,
 ) -> None:
@@ -318,10 +339,10 @@ def test_an_exponent_with_a_point_and_a_sign_is_a_number_in_yaml(
     (tmp_path / "base.yaml").write_text("seed: 1\n", encoding="utf-8")
     path = _write(
         tmp_path,
-        f"name: t\nbase: {tmp_path / 'base.yaml'}\naxes:\n  {axis}: [1.0e-5, 2.5e+3]\n",
+        f"name: t\nbase: {tmp_path / 'base.yaml'}\naxes:\n  {axis}: [1.0e-5, 2.5e+2]\n",
     )
 
-    assert getattr(load_ablation(path).axes, axis) == [1e-05, 2500.0]
+    assert getattr(load_ablation(path).axes, axis) == [1e-05, 250.0]
 
 
 @pytest.mark.parametrize("text", ["abc", "", "nan-ish"])
