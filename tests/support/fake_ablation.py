@@ -18,13 +18,9 @@ from typing import Any
 
 from rinchen.config.ablation import AblationMatrix, TagPlacement
 from rinchen.config.loader import REPO_ROOT
-from rinchen.train.ablation import (
-    AblationPlan,
-    AblationResult,
-    VariantProgress,
-    plan_ablation,
-    run_ablation,
-)
+from rinchen.train.ablation import run_ablation
+from rinchen.train.ablation_plan import AblationPlan, plan_ablation
+from rinchen.train.ablation_records import AblationResult, VariantProgress
 from rinchen.train.eole_cfg import read_config
 from rinchen.train.eole_run import CHECKPOINT_FILE
 from rinchen.train.evaluate import DevResult, DirectionScores

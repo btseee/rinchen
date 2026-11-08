@@ -19,12 +19,8 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 from rinchen.config.ablation import AblationMatrix
-from rinchen.train.ablation import (
-    AblationPlan,
-    AblationResult,
-    VariantResult,
-    plan_ablation,
-)
+from rinchen.train.ablation_plan import AblationPlan, plan_ablation
+from rinchen.train.ablation_records import AblationResult, VariantResult
 from rinchen.train.ablation_report import write_results
 from rinchen.train.variants import expand_variants
 from tests.support.fake_ablation import (

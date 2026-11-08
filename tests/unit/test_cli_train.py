@@ -8,7 +8,7 @@ scores). The toy corpus and the toy SentencePiece model are real, so the plan, t
 corpora, the validation files and the rendered Eole configs are the ones a real run
 makes. Everything lands under pytest's temporary directories.
 
-The numbers of the default plan are worked out in `tests/unit/test_train_ablation.py`:
+The numbers of the default plan are worked out in `tests/unit/test_train_ablation_plan.py`:
 5,600 rows read (3,600 training rows, 1,200 back-translated, 400 dev, 400 test), 4,800
 kept, 800 left out as `not_train`, and the weights 22 6 22 6 15 7 15 7.
 """
@@ -36,7 +36,8 @@ from rinchen.cli.main import app
 from rinchen.errors import ConfigError, DataError, RinchenError, UpstreamError
 from rinchen.manifest import store
 from rinchen.manifest.model import Manifest
-from rinchen.train.ablation import AblationPlan, AblationResult
+from rinchen.train.ablation_plan import AblationPlan
+from rinchen.train.ablation_records import AblationResult
 from rinchen.train.eole_cfg import read_config, validate_train_config
 from tests.support.corpus_rows import corpus_row
 from tests.support.fake_ablation import (

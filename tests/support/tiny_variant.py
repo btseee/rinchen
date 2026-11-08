@@ -22,7 +22,8 @@ from typing import Final
 
 from rinchen.config.ablation import AblationMatrix, TagPlacement
 from rinchen.config.loader import REPO_ROOT
-from rinchen.train.ablation import plan_ablation, prepare_variant
+from rinchen.train.ablation_plan import plan_ablation
+from rinchen.train.ablation_prepare import prepare_variant
 from rinchen.train.eole_cfg import validate_train_config
 from rinchen.train.eole_run import run_training
 from rinchen.train.mixture import DevSet, load_dev_rows, load_training_rows

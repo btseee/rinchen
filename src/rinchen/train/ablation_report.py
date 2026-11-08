@@ -13,15 +13,11 @@ import json
 import statistics
 from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Final, NamedTuple
+from typing import Final, NamedTuple
 
 from rinchen.config.ablation import id_number
+from rinchen.train.ablation_records import AblationResult, VariantResult
 from rinchen.utils.part_file import replace_file
-
-if TYPE_CHECKING:
-    # The orchestrator imports this module to write the files: its types are only
-    # named here.
-    from rinchen.train.ablation import AblationResult, VariantResult
 
 RESULTS_TSV: Final = "results.tsv"
 RESULTS_JSON: Final = "results.json"

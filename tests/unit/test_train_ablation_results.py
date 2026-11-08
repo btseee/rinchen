@@ -1,5 +1,6 @@
-"""Tests for the results of `rinchen.train.ablation`: `result.json` of a variant and
-`results.tsv`, `results.json` and `results.md` of the run (D7 spec section 5.8).
+"""Tests for `rinchen.train.ablation_report`: `results.tsv`, `results.json` and
+`results.md` of a run, and the `result.json` of each variant that `results.json`
+repeats (D7 spec section 5.8).
 
 The run is four variants (tag placement `src` and `tgt`, seeds 1 and 2, at temperature
 0.5 and bt ratio 0.5) with scripted dev scores, durations and a corpus that gives a
@@ -24,8 +25,9 @@ from pathlib import Path
 
 import pytest
 
-from rinchen.train.ablation import AblationResult, plan_ablation
-from rinchen.train.ablation_report import write_results
+from rinchen.train.ablation_plan import plan_ablation
+from rinchen.train.ablation_records import AblationResult
+from rinchen.train.ablation_report import result_files, write_results
 from rinchen.train.eole_run import CHECKPOINT_FILE
 from tests.support.corpus_rows import EN_MN, MN_EN, MN_RU, RU_MN
 from tests.support.fake_ablation import (
@@ -413,7 +415,7 @@ def test_the_tables_are_written_again_with_the_same_bytes(
 
     files = write_results(scripted.result)
 
-    assert files == scripted.result.files
+    assert files == result_files(scripted.plan.out_dir)
     assert {name: _read(scripted, name) for name in before} == before
     assert not list(scripted.plan.out_dir.rglob("*.part"))
 

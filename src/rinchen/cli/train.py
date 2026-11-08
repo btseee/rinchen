@@ -35,15 +35,11 @@ from rinchen.manifest.stage import (
     refuse_foreign_manifest,
     tool_versions,
 )
-from rinchen.train.ablation import (
-    CONFIG_FILE,
-    VARIANTS_DIR,
-    AblationPlan,
-    AblationResult,
-    VariantProgress,
-    plan_ablation,
-    run_ablation,
-)
+from rinchen.train.ablation import run_ablation
+from rinchen.train.ablation_plan import AblationPlan, plan_ablation
+from rinchen.train.ablation_prepare import CONFIG_FILE, VARIANTS_DIR
+from rinchen.train.ablation_records import AblationResult, VariantProgress
+from rinchen.train.ablation_report import result_files
 from rinchen.train.eole_run import run_training
 from rinchen.train.evaluate import evaluate_variant
 
@@ -218,7 +214,7 @@ def _train_variants(
         f"reused {len(result.variants) - trained})"
     )
     typer.echo(f"manifest: {manifest_path}")
-    tables = result.files
+    tables = result_files(result.plan.out_dir)
     typer.echo(f"results.tsv: {tables.tsv}")
     typer.echo(f"results.json: {tables.json}")
     typer.echo(f"results.md: {tables.md}")
@@ -383,7 +379,7 @@ def _output_files(result: AblationResult) -> list[ManifestFile]:
     """The three result tables, then the rendered config and the checkpoint of each
     variant. A checkpoint is listed with the digest its variant recorded when it
     trained and evaluated it (a reused variant's was checked against the file)."""
-    tables = result.files
+    tables = result_files(result.plan.out_dir)
     outputs = [
         output_file(tables.tsv, len(result.variants)),
         output_file(tables.json, None),
