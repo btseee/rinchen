@@ -17,6 +17,7 @@ import time
 from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 from types import FrameType
+from typing import Any
 
 from rinchen.errors import UpstreamError
 
@@ -99,9 +100,9 @@ def run_logged(
 @contextlib.contextmanager
 def _exit_on_termination_signals() -> Iterator[None]:
     """While the block runs, SIGTERM and SIGHUP raise `SystemExit(128 + signal number)`
-    in the main thread, except a signal that is ignored (`signal.SIG_IGN`), which is
-    left alone; the handlers that were replaced are restored afterwards, whatever the
-    block does. Handlers can only be set from the main thread, so elsewhere the block
+    in the main thread, except a signal that is ignored (`signal.SIG_IGN`) or handled
+    outside Python, which is left alone; the handlers that were replaced are restored
+    afterwards, whatever the block does (also when a later install fails). Handlers can only be set from the main thread, so elsewhere the block
     just runs."""
     if threading.current_thread() is not threading.main_thread():
         yield
@@ -110,12 +111,15 @@ def _exit_on_termination_signals() -> Iterator[None]:
     def exit_with_status(signum: int, frame: FrameType | None) -> None:
         raise SystemExit(128 + signum)
 
-    previous = {
-        number: signal.signal(number, exit_with_status)
-        for number in _TERMINATION_SIGNALS
-        if signal.getsignal(number) is not signal.SIG_IGN
-    }
+    previous: dict[signal.Signals, Any] = {}
     try:
+        for number in _TERMINATION_SIGNALS:
+            current = signal.getsignal(number)
+            # None: a handler installed outside Python, which Python can neither
+            # restore nor safely replace.
+            if current is signal.SIG_IGN or current is None:
+                continue
+            previous[number] = signal.signal(number, exit_with_status)
         yield
     finally:
         for number, handler in previous.items():

@@ -465,8 +465,9 @@ binary against a loopback stand-in for a server (the interrupt, and `out[1]`, `o
 ablation of 2 variants trains and evaluates through the real CLI) is met locally.** The branch is stacked
 on `d6-synthetic-data` (cut from it at `9973319` on 2026-11-08), is not merged and not pushed (the
 overnight run made no merge and no push), and no CI run covers it. It is 21 commits ahead of
-`d6-synthetic-data` and 46 ahead of `main` as of `cbd2365` (`D7: final review fixes`, the
-last commit of code; the commit that records the fixes in the documents comes after it). It is machinery, not a result: the only data it
+`d6-synthetic-data` and 48 ahead of `main` as of the commit `D7: re-review minors` (the last
+commit of the branch; `cbd2365` was the last code commit of the final fix wave, and the re-review's
+minors follow its documents). It is machinery, not a result: the only data it
 ever ran on is a templated toy set that the model saturates (chrF 96.25 to 99.72 in every direction of
 both variants), no real corpus exists, no GPU was used, and `configs/eole/multilingual_proxy.yaml` and
 `ablation_priors.yaml` are unmeasured priors that Eole's schema accepts and nothing has trained. Built:
@@ -507,7 +508,9 @@ commit, 4435 after Task 1, 4861 after Task 2, 5278 after Task 5, 5446 after Task
 5769 after Task 8, 5776 after the `run_logged` fix); the D5 regression set (1,245 unit tests and 23
 integration tests with 1 skipped, as of the `run_logged` fix) stayed green after every move. After the
 final-review fixes, on `cbd2365`: `ruff format --check .`, `ruff check .` and `mypy src` clean, `pytest -m
-"not network" -q` -- **5966 passed, 1 skipped, 10 deselected** in 6 min 37 s; the D5 regression sets green.
+"not network" -q` -- **5966 passed, 1 skipped, 10 deselected** in 6 min 37 s; the D5 regression sets green;
+**5968 passed** (7 min 43 s on a loaded machine) after the re-review's two added tests (a signal handled
+outside Python is left alone, a failed second install restores the first).
 Evidence of the STOP gate, through the real `rinchen` binary and the real Eole on the CPU with the GPU
 hidden, on the toy set of `tests/support/tiny_parallel.py` (en-mn 1,200 and ru-mn 600 training pairs in
 both directions, 300 back-translated pairs per language pair, 100 dev lines per direction) with
@@ -573,7 +576,7 @@ branch, `d6-synthetic-data`, cut from `main` at `0d534a3`; D7 lives on `d7-multi
 on it (cut from `d6-synthetic-data` at `9973319`). Neither is merged into `main` and neither is pushed;
 merging D7 means merging D6 first. At the D5 merge `main` was 81 commits ahead of `origin/main` (`9e7b0ec`);
 it is unpushed, and no CI run covers D3, D4, D5, D6 or D7. The full local gate was last run on the D7
-branch: 5966 passed, 1 skipped, 10 deselected (D6 and D7 included), on `cbd2365` (5944 on `f7d1bd0`); on D6's last commit
+branch: 5968 passed, 1 skipped, 10 deselected (D6 and D7 included), on `D7: re-review minors` (5966 on `cbd2365`, 5944 on `f7d1bd0`); on D6's last commit
 (`D6: re-review minors`) it gave 4331 passed; on the merged D5 tree `main` gave 2833 passed.
 
 Next step: D8 (Teacher training). Nothing in D7 blocks it. Its inputs from D7: the validated config

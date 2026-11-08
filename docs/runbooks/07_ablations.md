@@ -70,7 +70,8 @@ invocations, a probe of the mixture build at 1,000,000 and 4,000,000 rows).
 
 The layering: `config.ablation` imports no feature package; `train` imports `config`, `corpus`,
 `metrics`, `utils`, `manifest`, `errors` and `synth.tags` (the origin-to-tag helper) and, from
-outside the repository, `sentencepiece` (`validation_corpus` and `evaluate` only), never
+outside the repository, `polars`, `pyyaml`, `pydantic` and `sentencepiece` (the last in
+`validation_corpus` and `evaluate` only; `sacrebleu` comes in through `metrics`), never
 `script_conv`, `spm` or `cli`; `script_conv` imports `train.eole_cfg`, `train.eole_run` and
 `utils.logged_process` (D5's runner and validator wrap the shared ones); `cli` imports everything it
 needs and nothing imports `cli`. Inside `train` the order is `eole_cfg`, `eole_run`, `mixture`,

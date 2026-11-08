@@ -595,6 +595,60 @@ def test_the_handlers_of_the_caller_are_back_after_every_way_a_run_can_end(
     assert _handlers() == sentinel_handlers
 
 
+def test_a_signal_handled_in_c_code_is_left_alone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # `signal.getsignal` returns None for a handler installed outside Python (an
+    # embedding program, a preloaded library). `signal.signal(n, None)` raises, so
+    # such a handler can be neither restored nor safely replaced.
+    touched: list[tuple[int, object]] = []
+    real_signal = signal.signal
+    real_getsignal = signal.getsignal
+
+    def getsignal(number: int) -> object:
+        return None if number == signal.SIGHUP else real_getsignal(number)
+
+    def recording_signal(number: int, handler: Any) -> Any:
+        touched.append((number, handler))
+        return real_signal(number, handler)
+
+    monkeypatch.setattr(signal, "getsignal", getsignal)
+    monkeypatch.setattr(signal, "signal", recording_signal)
+
+    with logged_process._exit_on_termination_signals():
+        pass
+
+    assert [number for number, _ in touched] == [signal.SIGTERM, signal.SIGTERM]
+
+
+def test_a_handler_installed_before_a_later_one_failed_is_restored(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_signal = signal.signal
+    calls: list[int] = []
+
+    def failing_second_install(number: int, handler: Any) -> Any:
+        calls.append(number)
+        if len(calls) == 2:
+            raise OSError("cannot install")
+        return real_signal(number, handler)
+
+    before = signal.getsignal(signal.SIGTERM)
+    monkeypatch.setattr(signal, "signal", failing_second_install)
+
+    try:
+        with (
+            pytest.raises(OSError, match="cannot install"),
+            logged_process._exit_on_termination_signals(),
+        ):
+            pass  # pragma: no cover - the install fails before the block runs
+        monkeypatch.setattr(signal, "signal", real_signal)
+        assert signal.getsignal(signal.SIGTERM) == before
+    finally:
+        # A failing test must not leave our handler in the pytest process.
+        real_signal(signal.SIGTERM, before)
+
+
 def test_run_logged_does_not_touch_the_handlers_off_the_main_thread(
     tmp_path: Path, sentinel_handlers: dict[int, Any]
 ) -> None:

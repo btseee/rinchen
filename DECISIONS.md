@@ -1895,3 +1895,12 @@ non-finite score 8, all killed). The full gate: 5966 passed, 1 skipped, 10 desel
 child running (`D-LOGGED-TERM`). D5's `export_ct2` is still unguarded against glob characters in the
 checkpoint directory. Concurrent runs into one output directory are still not guarded. Every item of
 the section above that lists what is open or not verified stays so.
+
+[EVIDENCE: addendum to the D7 final review entry, from its scoped re-review. (1) The correction list there named runbook 05 as the
+only document that said SIGTERM and SIGHUP are not handled; the D5 design spec said so too and now points at `D-LOGGED-TERM`.
+(2) `signal.getsignal` returns None for a handler installed outside Python (a preloaded library, an embedding program), and
+`signal.signal(n, None)` raises TypeError: `run_logged` restored such a handler with that call and so could fail after the wait.
+Now a signal whose handler is None is left alone, like an ignored one, and the handlers are installed inside the try block so a
+failing second install still restores the first (two tests; reachable only through LD_PRELOAD or embedding, found by the
+re-reviewer with a preloaded shared object). (3) The runbook's list of outside imports of `train` named only sentencepiece; it
+now lists polars, pyyaml, pydantic and sentencepiece (sacrebleu comes in through `metrics`). Cost if wrong: none beyond the documentation.]

@@ -328,7 +328,7 @@ from its file.
   with its combined output in a log file. On POSIX the child leads a session of its own; a
   timeout, or any exception raised while waiting (a `KeyboardInterrupt`), kills the child's whole
   process group (`os.killpg`, SIGKILL) and reaps it, so a data-loader worker does not outlive its
-  command. SIGTERM and SIGHUP sent to the parent are not handled. An `UpstreamError` names the
+  command. SIGTERM and SIGHUP sent to the parent were not handled when D5 was built; D7 added handlers (see `docs/VERIFY.md` `D-LOGGED-TERM`). An `UpstreamError` names the
   command, its exit code or signal, the log and the last 20 lines of it (each cut to 300
   characters). A timeout is per command, not a total.
 - `run_training(cfg_path, run_dir, *, threads: int = 2, timeout: float | None = None,
