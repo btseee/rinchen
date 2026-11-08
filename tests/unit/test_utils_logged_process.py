@@ -8,10 +8,12 @@ that a timeout or an interrupt kills the child's whole process group.
 
 from __future__ import annotations
 
+import importlib
 import os
 import signal
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -19,6 +21,7 @@ from typing import Any
 import pytest
 
 from rinchen.errors import UpstreamError
+from rinchen.utils import logged_process
 from rinchen.utils.logged_process import LOG_TAIL_LINES, run_logged
 
 pytestmark = pytest.mark.subprocess  # the tests start real child processes
@@ -27,19 +30,21 @@ linux_only = pytest.mark.skipif(
     sys.platform != "linux", reason="needs process groups, fork and /proc"
 )
 
-# The child forks a grandchild, records both pids and then sleeps. 20 s is far
-# longer than any timeout below, so a child that survives is a defect and not luck.
+# The child forks a grandchild, records both pids and then sleeps for the seconds
+# of its second argument. The default 20 s is far longer than any timeout below, so a
+# child that survives is a defect and not luck.
 _CHILD_WITH_GRANDCHILD = """
 import os, sys, time
+lifetime = float(sys.argv[2]) if len(sys.argv) > 2 else 20
 grandchild = os.fork()
 if grandchild == 0:
-    time.sleep(20)
+    time.sleep(lifetime)
     os._exit(0)
 with open(sys.argv[1] + ".tmp", "w") as handle:
     handle.write(f"{os.getpid()} {grandchild}")
 os.replace(sys.argv[1] + ".tmp", sys.argv[1])
 print("child started", flush=True)
-time.sleep(20)
+time.sleep(lifetime)
 """
 
 
@@ -263,3 +268,88 @@ def test_run_logged_kills_the_process_group_when_it_is_interrupted(
             _kill_quietly(_read_pids(pid_file))
 
     assert survivors == [], f"processes still running after the interrupt: {survivors}"
+
+
+@linux_only
+@pytest.mark.timeout(30)
+def test_a_real_sigint_interrupts_the_wait_while_the_child_runs(tmp_path: Path) -> None:
+    # Once polars is imported (every `rinchen` command has it) a SIGINT sent to the
+    # process does not wake a blocking wait that has no timeout: the interrupt is
+    # raised only when the child ends by itself, which for an Eole training is hours
+    # later (docs/VERIFY.md, D-POLARS-SIGINT). The child here lives 6 s, so a wait
+    # that is not woken fails the assertion below and does not hang the suite.
+    importlib.import_module("polars")
+    pid_file = tmp_path / "pids"
+    signalled_at: list[float] = []
+    stop = threading.Event()
+
+    def send_sigint_once_the_child_runs() -> None:
+        while not pid_file.exists():  # a loaded machine may start the child late
+            if stop.wait(0.02):
+                return
+        signalled_at.append(time.monotonic())
+        os.kill(os.getpid(), signal.SIGINT)
+
+    interrupter = threading.Timer(0.4, send_sigint_once_the_child_runs)
+    interrupter.start()
+
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            _run(
+                _python(_CHILD_WITH_GRANDCHILD, str(pid_file), "6"),
+                tmp_path / "child.log",
+            )
+        interrupted_after = time.monotonic() - signalled_at[0]
+        pids = _read_pids(pid_file)
+        survivors = [pid for pid in pids if not _wait_until_gone(pid)]
+    finally:
+        stop.set()
+        interrupter.cancel()
+        interrupter.join()
+        if pid_file.exists():
+            _kill_quietly(_read_pids(pid_file))
+
+    assert interrupted_after < 2.0, (
+        f"the interrupt was raised {interrupted_after:.2f} s after the signal"
+    )
+    assert survivors == [], f"processes still running after the interrupt: {survivors}"
+
+
+@pytest.mark.parametrize("timeout", [None, 30.0])
+def test_run_logged_waits_through_several_polls_for_a_child_that_fails_late(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, timeout: float | None
+) -> None:
+    monkeypatch.setattr(logged_process, "_INTERRUPT_POLL_S", 0.1)
+    code = "import sys, time; time.sleep(0.6); print('finished late'); sys.exit(3)"
+
+    with pytest.raises(UpstreamError) as raised:
+        _run(_python(code), tmp_path / "child.log", timeout=timeout)
+
+    message = str(raised.value)
+    assert message.startswith("the child failed: exit code 3;")
+    assert message.endswith("finished late")
+
+
+@pytest.mark.parametrize("poll_s", [0.2, 5.0])
+@pytest.mark.parametrize(("timeout", "wording"), [(0, "0"), (0.5, "0.5")])
+def test_run_logged_stops_waiting_at_its_timeout_whatever_the_poll(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    poll_s: float,
+    timeout: float,
+    wording: str,
+) -> None:
+    # A slice longer than what is left of the timeout would let the child run on:
+    # this one would return normally after 3 s.
+    monkeypatch.setattr(logged_process, "_INTERRUPT_POLL_S", poll_s)
+    started = time.monotonic()
+
+    with pytest.raises(UpstreamError) as raised:
+        _run(
+            _python("import time; time.sleep(3)"),
+            tmp_path / "child.log",
+            timeout=timeout,
+        )
+
+    assert f"the child timed out after {wording} s and was killed" in str(raised.value)
+    assert time.monotonic() - started < 2.5

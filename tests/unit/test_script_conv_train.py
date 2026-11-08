@@ -35,7 +35,8 @@ from rinchen.script_conv.train import (
     training_environment,
 )
 from rinchen.train.eole_run import split_lines
-from tests.support.fake_process import FakeProcess
+from rinchen.utils import logged_process
+from tests.support.fake_process import LONG_POLL_S, FakeProcess
 
 TO_SCRIPT_TAG = "<2mn_Mong>"
 TO_CYRILLIC_TAG = "<2mn_Cyrl>"
@@ -121,6 +122,7 @@ class FakeEole:
 def fake_eole(monkeypatch: pytest.MonkeyPatch) -> FakeEole:
     fake = FakeEole()
     monkeypatch.setattr(subprocess, "Popen", fake)
+    monkeypatch.setattr(logged_process, "_INTERRUPT_POLL_S", LONG_POLL_S)
     return fake
 
 
@@ -334,7 +336,7 @@ def test_run_training_does_not_bound_the_commands_unless_asked(
 ) -> None:
     run_training(tiny_config, run_dir)
 
-    assert fake_eole.waits == [None, None]
+    assert fake_eole.waits == [LONG_POLL_S, LONG_POLL_S]
 
 
 def test_run_training_bounds_each_command_by_the_timeout(
@@ -342,7 +344,7 @@ def test_run_training_bounds_each_command_by_the_timeout(
 ) -> None:
     run_training(tiny_config, run_dir, timeout=7.5)
 
-    assert fake_eole.waits == [7.5, 7.5]
+    assert fake_eole.waits == [pytest.approx(7.5, abs=0.5)] * 2
 
 
 # ---- run_training: results and logs ---------------------------------------------
@@ -873,7 +875,7 @@ def test_predict_bounds_the_command_by_the_timeout_only_when_asked(
     _predict(tmp_path, spm_model)
     _predict(tmp_path, spm_model, timeout=3.5)
 
-    assert fake_eole.waits == [None, 3.5]
+    assert fake_eole.waits == [LONG_POLL_S, pytest.approx(3.5, abs=0.5)]
 
 
 def test_predict_writes_the_combined_log_next_to_the_output_file(

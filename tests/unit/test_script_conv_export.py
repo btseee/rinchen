@@ -28,7 +28,8 @@ from rinchen.script_conv.export import (
     export_log_path,
     parity,
 )
-from tests.support.fake_process import FakeProcess
+from rinchen.utils import logged_process
+from tests.support.fake_process import LONG_POLL_S, FakeProcess
 
 TO_SCRIPT_TAG = "<2mn_Mong>"
 DUMMY_PREFIX = chr(0x2581)
@@ -61,6 +62,7 @@ class FakeConverter:
 def fake_converter(monkeypatch: pytest.MonkeyPatch) -> FakeConverter:
     fake = FakeConverter()
     monkeypatch.setattr(subprocess, "Popen", fake)
+    monkeypatch.setattr(logged_process, "_INTERRUPT_POLL_S", LONG_POLL_S)
     return fake
 
 
@@ -147,7 +149,7 @@ def test_export_ct2_bounds_the_converter_by_the_timeout_only_when_asked(
     export_ct2(tmp_path / "ckpt", tmp_path / "first")
     export_ct2(tmp_path / "ckpt", tmp_path / "second", timeout=12.5)
 
-    assert fake_converter.waits == [None, 12.5]
+    assert fake_converter.waits == [LONG_POLL_S, pytest.approx(12.5, abs=0.5)]
 
 
 def test_export_ct2_creates_the_parent_of_the_output_directory(

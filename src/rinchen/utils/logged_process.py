@@ -8,9 +8,11 @@ the end of that log.
 from __future__ import annotations
 
 import contextlib
+import math
 import os
 import signal
 import subprocess
+import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
@@ -23,6 +25,12 @@ _TAIL_READ_BYTES = 64 * 1024
 _TAIL_LINE_CHARS = 300
 _ELLIPSIS = "..."
 _POSIX = os.name == "posix"
+# With polars imported (every `rinchen` command has it) SIGINT is handled by a
+# handler that restarts a blocking call: a wait without a timeout is not woken, and
+# Ctrl-C would be raised only when the command ends (hours into an Eole training),
+# while a wait with a timeout is interrupted at once. So the wait is made in slices
+# of this length (docs/VERIFY.md, D-POLARS-SIGINT).
+_INTERRUPT_POLL_S = 0.2
 
 
 def run_logged(
@@ -59,7 +67,7 @@ def run_logged(
             start_new_session=_POSIX,
         )
         try:
-            returncode = process.wait(timeout=timeout)
+            returncode = _wait_for_exit(process, timeout)
         except subprocess.TimeoutExpired:
             _kill_with_descendants(process)
             raise failure_with_log_tail(
@@ -70,6 +78,22 @@ def run_logged(
             raise
     if returncode != 0:
         raise failure_with_log_tail(f"{what} failed: {_describe(returncode)}", log_path)
+
+
+def _wait_for_exit(process: subprocess.Popen[bytes], timeout: float | None) -> int:
+    """The exit code of `process`, waited for in slices of `_INTERRUPT_POLL_S` so that
+    a pending interrupt is raised between them. Raises `subprocess.TimeoutExpired`
+    once `timeout` seconds have passed; None waits for as long as the process runs."""
+    limit = math.inf if timeout is None else timeout
+    deadline = time.monotonic() + limit
+    while True:
+        # A slice never runs past the deadline, so the timeout is not stretched.
+        slice_s = min(_INTERRUPT_POLL_S, max(deadline - time.monotonic(), 0.0))
+        try:
+            return process.wait(timeout=slice_s)
+        except subprocess.TimeoutExpired:
+            if time.monotonic() >= deadline:
+                raise subprocess.TimeoutExpired(process.args, limit) from None
 
 
 def _describe(returncode: int) -> str:
