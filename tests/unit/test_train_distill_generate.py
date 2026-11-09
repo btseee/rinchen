@@ -449,6 +449,7 @@ def test_the_teacher_translator_is_a_kd_translator_and_its_counters_are_reported
         "empty_source": 0,
         "truncated": 0,
         "line_break": 0,
+        "reserved_symbol": 0,
     }
     assert result.matches_reference == {EN_MN: 1, "total": 1}
     assert len(ct2.calls) == 1

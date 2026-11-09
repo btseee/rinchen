@@ -326,6 +326,7 @@ def test_generate_sends_every_authentic_training_source_and_keeps_almost_all(
         "empty_source": 0,
         "truncated": 0,
         "line_break": 0,
+        "reserved_symbol": 0,
     }
     assert kd.counts["letterless_sources"]["total"] == 0
 

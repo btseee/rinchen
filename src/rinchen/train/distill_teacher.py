@@ -13,11 +13,18 @@ against what the library does silently (measured in the D10 spike):
   sign: a hypothesis counts only when it ends with the end token of the converter's
   `config.json` (`return_end_token`), and a source of more than `max_source_pieces` is not sent;
 - a source without a piece gets no candidates (a bare tag is translated into a made-up sentence)
-  and a hypothesis that holds a line break is dropped (it would split a text file's line).
+  and a hypothesis that holds a line break is dropped (it would split a text file's line);
+- a hypothesis that holds a piece no translation holds is dropped before it is decoded: the
+  unknown piece of the SentencePiece model (decoded to the text of U+2047 between spaces), the
+  end token in the middle, or a reserved symbol of the project (a direction tag, `<bt>`, `<doc>`,
+  a numbered placeholder; decoded to its own letters). Either would pass the script rule of the
+  selection and a student would learn to emit it. The pieces of a byte-fallback model
+  (`<0x41>`) are ordinary and stay.
 
 `counters()` is what THIS translator did since it was made: `sources` (texts given),
-`source_too_long` and `empty_source` (texts not sent), `truncated` and `line_break` (hypotheses
-dropped). A failed call adds nothing. The files read at construction are checked against the
+`source_too_long` and `empty_source` (texts not sent), `truncated`, `line_break` and
+`reserved_symbol` (hypotheses dropped, each under the first reason that applies, in that
+order). A failed call adds nothing. The files read at construction are checked against the
 SHA-256 `verify_export` took (`distill_export_files`); `model.bin` is loaded by CTranslate2.
 
 No GPU was used and none is claimed: the device is `cpu` by default, `cuda` is an explicit
@@ -35,6 +42,7 @@ from typing import Any, Final, Literal, Protocol
 from rinchen.config.ablation import TagPlacement, require_placement
 from rinchen.config.languages import direction_tag, known_language_codes
 from rinchen.errors import ConfigError, DataError, UpstreamError
+from rinchen.spm.symbols import user_defined_symbols
 from rinchen.synth._candidates import clean_candidates
 from rinchen.synth._texts import require_encodable
 from rinchen.train.distill_export import SPM_FILE, VerifiedExport
@@ -54,6 +62,7 @@ COUNTER_KEYS: Final = (
     "empty_source",
     "truncated",
     "line_break",
+    "reserved_symbol",
 )
 
 # CTranslate2's `max_input_length` is 1,024 and cuts a longer source silently; a tag in the
@@ -212,6 +221,7 @@ class TeacherTranslator:
         self._translator = (
             translator if translator is not None else _load_ct2(export, options)
         )
+        self._reserved = _reserved_pieces(self._processor, self._end_token)
         self._checked_tags: set[str] = set()
         self._counters = dict.fromkeys(COUNTER_KEYS, 0)
 
@@ -352,12 +362,24 @@ class TeacherTranslator:
             if not tokens or tokens[-1] != self._end_token:
                 tally["truncated"] += 1
                 continue
-            text = self._processor.decode(tokens[:-1])
+            pieces = tokens[:-1]
+            if any(piece in self._reserved for piece in pieces):
+                tally["reserved_symbol"] += 1
+                continue
+            text = self._processor.decode(pieces)
             if any(character in text for character in LINE_BREAK_CHARACTERS):
                 tally["line_break"] += 1
                 continue
             kept.append(text)
         return clean_candidates(kept)
+
+
+def _reserved_pieces(processor: ProcessorLike, end_token: str) -> frozenset[str]:
+    """The pieces a translation never holds: the unknown piece of `processor`, the
+    `end_token` (a hypothesis ends with it once) and every reserved symbol of the project
+    (every SentencePiece model of ours keeps them as single pieces)."""
+    unknown = processor.id_to_piece(processor.unk_id())
+    return frozenset({unknown, end_token, *user_defined_symbols()})
 
 
 def _languages_of(direction: str) -> tuple[str, str]:

@@ -50,6 +50,7 @@ TEACHER_COUNTERS = {
     "empty_source": 0,
     "truncated": 2,
     "line_break": 1,
+    "reserved_symbol": 3,
 }
 COUNT_LINE = (
     "sources {sources}, candidates {candidates}, dropped_empty {dropped_empty}, "
@@ -175,7 +176,7 @@ def result_lines(workspace: GenerateWorkspace) -> list[str]:
         "letterless sources: 0 (not sent to the teacher)",
         (
             "teacher counters (this process only): sources 7, source_too_long 0, "
-            "empty_source 0, truncated 2, line_break 1"
+            "empty_source 0, truncated 2, line_break 1, reserved_symbol 3"
         ),
         "shards: planned 2, reused 0, generated 2, regenerated_invalid 0",
         "qe: skipped: not requested",

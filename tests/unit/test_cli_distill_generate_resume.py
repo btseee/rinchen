@@ -284,7 +284,7 @@ def test_the_real_teacher_translates_with_the_tag_in_the_source_and_the_default_
         assert call.options == CT2_OPTIONS
     assert (
         "teacher counters (this process only): sources 7, source_too_long 0, "
-        "empty_source 0, truncated 0, line_break 0"
+        "empty_source 0, truncated 0, line_break 0, reserved_symbol 0"
     ) in result.stdout.splitlines()
 
 
@@ -327,7 +327,7 @@ def test_a_source_over_the_piece_limit_is_not_sent_and_the_counters_say_so(
     lines = result.stdout.splitlines()
     assert (
         "teacher counters (this process only): sources 7, source_too_long 2, "
-        "empty_source 0, truncated 0, line_break 0"
+        "empty_source 0, truncated 0, line_break 0, reserved_symbol 0"
     ) in lines
     sent = {tuple(line) for call in library.calls for line in call.source}
     assert ("<2khk_Cyrl>", f"{SPIECE}Good", f"{SPIECE}morning") not in sent

@@ -29,7 +29,14 @@ from tests.support.distill_teachers import (
 )
 from tests.support.fake_ct2 import ScriptedCt2
 
-COUNTER_KEYS = ("sources", "source_too_long", "empty_source", "truncated", "line_break")
+COUNTER_KEYS = (
+    "sources",
+    "source_too_long",
+    "empty_source",
+    "truncated",
+    "line_break",
+    "reserved_symbol",
+)
 # The characters `str.splitlines` splits at, by code point.
 LINE_BREAKS = [0x0A, 0x0D, 0x0B, 0x0C, 0x1C, 0x1D, 0x1E, 0x85, 0x2028, 0x2029]
 
@@ -508,6 +515,7 @@ def test_the_counters_start_at_zero_with_exactly_these_keys(tmp_path):
         "empty_source": 0,
         "truncated": 0,
         "line_break": 0,
+        "reserved_symbol": 0,
     }
 
 
@@ -529,6 +537,7 @@ def test_the_counters_accumulate_over_calls_and_count_every_text_given(tmp_path)
         "empty_source": 1,
         "truncated": 1,
         "line_break": 0,
+        "reserved_symbol": 0,
     }
 
 
