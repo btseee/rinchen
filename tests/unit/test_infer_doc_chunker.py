@@ -95,8 +95,11 @@ def test_the_whole_infer_package_stays_free_of_training_and_the_command_line() -
     assert {path.name for path in files} == {
         "__init__.py",
         "doc_chunker.py",
+        "engine.py",
+        "engine_types.py",
         "script_mask.py",
         "source_tokens.py",
+        "translator.py",
     }
     for path in files:
         for module in imported_modules(path):

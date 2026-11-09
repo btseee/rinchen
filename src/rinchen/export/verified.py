@@ -158,9 +158,9 @@ def verified_bytes(export: VerifiedExport, name: str) -> bytes:
     return content
 
 
-def shared_vocabulary(export: VerifiedExport) -> frozenset[str]:
-    """The entries of `shared_vocabulary.json`, the vocabulary CTranslate2 maps tokens to
-    (a token outside it silently becomes `<unk>`).
+def vocabulary_entries(export: VerifiedExport) -> tuple[str, ...]:
+    """The entries of `shared_vocabulary.json` in the order of the file (the order of the
+    ids CTranslate2 maps tokens to), each as the file has it.
 
     Raises:
         DataError: the file is not valid JSON or not a non-empty list of strings.
@@ -174,7 +174,18 @@ def shared_vocabulary(export: VerifiedExport) -> frozenset[str]:
         or not all(isinstance(entry, str) for entry in document)
     ):
         raise DataError(f"{file} must be a non-empty JSON list of strings")
-    return frozenset(document)
+    return tuple(document)
+
+
+def shared_vocabulary(export: VerifiedExport) -> frozenset[str]:
+    """The entries of `shared_vocabulary.json` as a set, the vocabulary CTranslate2 maps
+    tokens to (a token outside it silently becomes `<unk>`).
+
+    Raises:
+        DataError: the file is not valid JSON or not a non-empty list of strings.
+        ConfigError: the file changed after the export was verified.
+    """
+    return frozenset(vocabulary_entries(export))
 
 
 def end_token(export: VerifiedExport) -> str:

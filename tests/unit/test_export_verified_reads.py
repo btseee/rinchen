@@ -14,6 +14,8 @@ import os
 from pathlib import Path
 
 import pytest
+
+from rinchen.errors import ConfigError, DataError
 from rinchen.export.verified import (
     VerifiedExport,
     end_token,
@@ -23,9 +25,8 @@ from rinchen.export.verified import (
     verified_bytes,
     verified_content,
     verify_export,
+    vocabulary_entries,
 )
-
-from rinchen.errors import ConfigError, DataError
 from tests.support.distill_exports import sha256_of_bytes
 from tests.support.model_exports import write_model_export
 from tests.support.step_dirs import SOURCE_VOCABULARY
@@ -109,6 +110,45 @@ def test_a_vocabulary_that_changed_after_the_export_was_verified_is_refused(
 
     with pytest.raises(ConfigError, match=r"shared_vocabulary\.json changed after"):
         shared_vocabulary(export)
+
+
+# ---- vocabulary_entries ---------------------------------------------------------------
+
+
+def test_the_entries_of_the_vocabulary_are_in_the_order_of_the_file(
+    tmp_path: Path,
+) -> None:
+    tokens = ("<unk>", "zeta", "alpha", "mid", "</s>")
+    export = verified_with(tmp_path, tokens=tokens)
+
+    assert vocabulary_entries(export) == tokens
+    assert shared_vocabulary(export) == frozenset(tokens)
+
+
+@pytest.mark.parametrize(
+    "content",
+    [b"not json", b'{"a": 1}', b'["a", 2]', b"[]", b""],
+    ids=["not json", "object", "non-string", "empty list", "empty file"],
+)
+def test_the_entries_of_a_vocabulary_that_is_no_list_of_strings_are_a_data_error(
+    tmp_path: Path, content: bytes
+) -> None:
+    export = verified_with(tmp_path, vocabulary_bytes=content)
+
+    with pytest.raises(DataError, match=r"shared_vocabulary\.json"):
+        vocabulary_entries(export)
+
+
+def test_the_entries_of_a_vocabulary_that_changed_after_the_verification_are_refused(
+    tmp_path: Path,
+) -> None:
+    export = verified_with(tmp_path)
+    (export.directory / "shared_vocabulary.json").write_bytes(
+        json.dumps(["x"]).encode()
+    )
+
+    with pytest.raises(ConfigError, match=r"shared_vocabulary\.json changed after"):
+        vocabulary_entries(export)
 
 
 # ---- end_token ------------------------------------------------------------------------
