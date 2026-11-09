@@ -47,6 +47,8 @@ from tests.support.step_dirs import (
     sha256,
 )
 
+pytestmark = pytest.mark.usefixtures("spm_model_in_the_cwd")
+
 STEP_FILES = ("model.00.safetensors", "optimizer.pt", "config.json", "vocab.json")
 AVERAGED_FILES = ("model.00.safetensors", "config.json", "vocab.json")
 # A text of each file that a one-byte change leaves a complete directory with: JSON stays
@@ -701,8 +703,10 @@ def test_every_file_is_hashed_once_and_the_checks_reuse_the_digests(
     found = verify_source(teacher.final)
     check_continuation(continuation_config(Path("/runs/new")), found)
 
+    # The four files and the manifest, then the two SentencePiece models the second gate
+    # compares (the config's and the source's copy), each once for both sides.
     assert sorted(path.name for path in hashed) == sorted(
-        [*STEP_FILES, "manifest.json"]
+        [*STEP_FILES, "manifest.json", "toy.model", "toy.model"]
     )
 
 
@@ -868,6 +872,170 @@ def test_the_check_changes_nothing(teacher: FabricatedRun) -> None:
 
     assert cfg == before
     assert step_dirs.tree_digest(teacher.run_dir) == files
+
+
+# ---- the SentencePiece model ------------------------------------------------------------
+# Eole copies the model into every step directory; the teacher's vocabulary is the pieces
+# that model gave its data, so a continuation cut with another model would read the pieces
+# the teacher lacks as `<unk>`, without a word.
+
+OTHER_MODEL = b"another sentencepiece model"
+
+
+def state_model(cfg: dict[str, Any], key: str, path: Path | None) -> None:
+    section = cfg["transforms_configs"]["sentencepiece"]
+    if path is None:
+        del section[key]
+    else:
+        section[key] = str(path)
+
+
+def test_the_same_model_under_another_path_is_the_sources_model(
+    teacher: FabricatedRun, tmp_path: Path
+) -> None:
+    elsewhere = tmp_path / "elsewhere" / "any-name.model"
+    elsewhere.parent.mkdir()
+    elsewhere.write_bytes(step_dirs.SPM_BYTES)
+    cfg = good_config()
+    for key in ("src_subword_model", "tgt_subword_model"):
+        state_model(cfg, key, elsewhere)
+
+    assert check_continuation(cfg, verify_source(teacher.final)) is None
+
+
+@pytest.mark.parametrize("key", ["src_subword_model", "tgt_subword_model"])
+def test_a_model_that_is_not_the_sources_is_refused_naming_the_side(
+    teacher: FabricatedRun, tmp_path: Path, key: str
+) -> None:
+    other = tmp_path / "other.model"
+    other.write_bytes(OTHER_MODEL)
+    cfg = good_config()
+    state_model(cfg, key, other)
+
+    message = problems_of(cfg, verify_source(teacher.final))
+
+    assert f"transforms_configs.sentencepiece.{key}" in message
+    assert str(other) in message
+    assert "not the SentencePiece model the source was trained with" in message
+    assert hashlib.sha256(OTHER_MODEL).hexdigest()[:12] in message
+    assert hashlib.sha256(step_dirs.SPM_BYTES).hexdigest()[:12] in message
+    other_key = (
+        "tgt_subword_model" if key == "src_subword_model" else "src_subword_model"
+    )
+    assert f"sentencepiece.{other_key}" not in message
+
+
+def test_a_model_that_is_not_the_averaged_sources_is_refused_too(
+    tmp_path: Path,
+) -> None:
+    averaged = make_averaged_dir(tmp_path / "avg", spm_bytes=OTHER_MODEL)
+
+    message = problems_of(good_config(), verify_source(averaged))
+
+    assert "not the SentencePiece model the source was trained with" in message
+
+
+@pytest.mark.parametrize("key", ["src_subword_model", "tgt_subword_model"])
+def test_a_config_that_does_not_state_the_model_is_refused_by_name(
+    teacher: FabricatedRun, key: str
+) -> None:
+    cfg = good_config()
+    state_model(cfg, key, None)
+
+    message = problems_of(cfg, verify_source(teacher.final))
+
+    assert f"transforms_configs.sentencepiece.{key} is not stated" in message
+
+
+def test_a_config_with_no_sentencepiece_section_names_both_sides(
+    teacher: FabricatedRun,
+) -> None:
+    cfg = good_config()
+    del cfg["transforms_configs"]["sentencepiece"]
+
+    message = problems_of(cfg, verify_source(teacher.final))
+
+    assert "sentencepiece.src_subword_model is not stated" in message
+    assert "sentencepiece.tgt_subword_model is not stated" in message
+
+
+def test_a_model_file_that_does_not_exist_is_refused_naming_it(
+    teacher: FabricatedRun, tmp_path: Path
+) -> None:
+    cfg = good_config()
+    state_model(cfg, "src_subword_model", tmp_path / "missing.model")
+
+    message = problems_of(cfg, verify_source(teacher.final))
+
+    assert f"{tmp_path / 'missing.model'}, which is not a file" in message
+
+
+def test_a_model_that_is_a_directory_is_refused(
+    teacher: FabricatedRun, tmp_path: Path
+) -> None:
+    cfg = good_config()
+    state_model(cfg, "tgt_subword_model", tmp_path)
+
+    assert "which is not a file" in problems_of(cfg, verify_source(teacher.final))
+
+
+def test_a_source_without_its_copy_of_the_model_is_refused_naming_it(
+    teacher: FabricatedRun,
+) -> None:
+    source = verify_source(teacher.final)
+    (teacher.final / "toy.model").unlink()
+
+    message = problems_of(good_config(), source)
+
+    assert "no copy of its SentencePiece model" in message
+    assert "toy.model" in message
+
+
+def test_a_source_that_does_not_record_its_model_is_refused(tmp_path: Path) -> None:
+    run = make_finished_run(tmp_path / "unrecorded", record_spm=False)
+
+    message = problems_of(good_config(), verify_source(run.final))
+
+    assert "does not record its src_subword_model" in message
+    assert "does not record its tgt_subword_model" in message
+
+
+def test_the_copy_is_the_file_the_sources_config_names(tmp_path: Path) -> None:
+    # Not a file called toy.model: the one config.json says Eole copied.
+    run = make_finished_run(tmp_path / "named", spm_name="teacher.model")
+
+    assert check_continuation(good_config(), verify_source(run.final)) is None
+    (run.final / "teacher.model").write_bytes(OTHER_MODEL)
+    message = problems_of(good_config(), verify_source(run.final))
+
+    assert "teacher.model" in message
+    assert "not the SentencePiece model the source was trained with" in message
+
+
+def test_every_problem_is_named_in_one_refusal(
+    teacher: FabricatedRun, tmp_path: Path
+) -> None:
+    other = tmp_path / "other.model"
+    other.write_bytes(OTHER_MODEL)
+    cfg = good_config()
+    state_model(cfg, "src_subword_model", other)
+    del cfg["training"]["learning_rate"]
+
+    message = problems_of(cfg, verify_source(teacher.final))
+
+    assert "training.learning_rate" in message
+    assert "sentencepiece.src_subword_model" in message
+
+
+def test_the_message_never_holds_the_bytes_of_a_model(
+    teacher: FabricatedRun, tmp_path: Path
+) -> None:
+    other = tmp_path / "other.model"
+    other.write_bytes(b"SECRET-MODEL-BYTES")
+    cfg = good_config()
+    state_model(cfg, "src_subword_model", other)
+
+    assert "SECRET-MODEL-BYTES" not in problems_of(cfg, verify_source(teacher.final))
 
 
 @pytest.mark.parametrize("path", MODEL_KEYS, ids=lambda path: ".".join(path))

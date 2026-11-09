@@ -46,6 +46,8 @@ from tests.support.step_dirs import (
     tree_digest,
 )
 
+pytestmark = pytest.mark.usefixtures("spm_model_in_the_cwd")
+
 FAILED = "eole train failed: exit code 1; log: x; last 20 lines:\nboom"
 
 

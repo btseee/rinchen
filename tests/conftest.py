@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 from hypothesis import settings
 
 from tests.support.signal_handlers import DEFAULT_HANDLERS, handlers_installed
+from tests.support.step_dirs import SPM_ARTIFACT, write_spm_model
 
 settings.register_profile("rinchen", derandomize=True, deadline=None, max_examples=200)
 settings.load_profile("rinchen")
@@ -30,3 +32,17 @@ def default_signal_handlers() -> Iterator[None]:
     afterwards. For tests that send themselves a real signal or expect the default."""
     with handlers_installed(DEFAULT_HANDLERS):
         yield
+
+
+@pytest.fixture
+def spm_model_in_the_cwd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[Path]:
+    """Run the test in `tmp_path`, where `spm/toy.model` (the SentencePiece model the D7
+    test config states, relative) exists with the bytes of the copy every fabricated step
+    directory holds (`tests.support.step_dirs`). A config that continues one of those
+    steps must state the model the source was trained with, and a relative path is read
+    from the working directory, as Eole reads it."""
+    write_spm_model(tmp_path / "spm")
+    monkeypatch.chdir(tmp_path)
+    yield tmp_path / "spm" / SPM_ARTIFACT

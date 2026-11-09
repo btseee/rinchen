@@ -1221,7 +1221,7 @@ CONTINUATION = {"adam_beta2": 0.998, "train_steps": 400}
 
 
 @pytest.fixture
-def new_run(tmp_path: Path) -> LaunchWorkspace:
+def new_run(tmp_path: Path, spm_model_in_the_cwd: Path) -> LaunchWorkspace:
     return make_launch_workspace(tmp_path / "new", **CONTINUATION)
 
 

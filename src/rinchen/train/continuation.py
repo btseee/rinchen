@@ -44,8 +44,10 @@ a stale directory or a foreign one, not against a writer that swaps a file after
 
 `check_continuation` is the second gate, on the config that would continue the source (T6):
 the architecture must be stated and equal to the source's, the optimizer options must be
-stated (Eole inherits every omitted one from the checkpoint), and the vocabulary of the
-source must hold the symbols the new data needs, `<doc>` and `<sep>` first among them.
+stated (Eole inherits every omitted one from the checkpoint), the SentencePiece model the
+config states must be the one the source was trained with (the copy Eole saved into its
+directory, compared by SHA-256), and the vocabulary of the source must hold the symbols
+the new data needs, `<doc>` and `<sep>` first among them.
 
 The launcher (`rinchen.train.launch`) sequences these; it takes the lock of the run before
 it calls `verify_source`, and writes nothing until every check has passed.
@@ -59,7 +61,7 @@ import os
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Final
 
 from rinchen.errors import ConfigError, DataError
@@ -121,6 +123,7 @@ _OPTIMIZER_OPTIONS: Final = (
 )
 # The symbols the document windows always carry, whatever the prefixes say.
 _WINDOW_SYMBOLS: Final = ("<doc>", "<sep>")
+_SENTENCEPIECE_KEYS: Final = ("src_subword_model", "tgt_subword_model")
 _ANGLE_TOKEN: Final = re.compile(r"<[^<>\s]+>")
 _PREFIXES: Final = ("src_prefix", "tgt_prefix")
 _VOCABULARY_SIDES: Final = ("src", "tgt")
@@ -302,6 +305,13 @@ def check_continuation(cfg: Mapping[str, Any], provenance: SourceProvenance) -> 
     - the optimizer options (`learning_rate`, `warmup_steps`, `decay_method`, `optim`,
       `adam_beta2`) are stated in `training`: Eole inherits an omitted one from the
       checkpoint, which a new run must not rely on;
+    - the SentencePiece model the config states for both sides
+      (`transforms_configs.sentencepiece.src_subword_model` and `tgt_subword_model`) has
+      the bytes of the copy Eole saved into the source directory, the file its
+      `config.json` names (`${MODEL_PATH}/<name>`): the vocabulary of the source is the
+      pieces that model gave its data, so another model would read pieces the teacher
+      lacks as `<unk>` without a word. A source with no recorded or no saved copy cannot
+      be compared and is refused. The manifest does not vouch for the copy;
     - the `vocab.json` of the source holds `<doc>`, `<sep>` and every token written like a
       symbol (`<...>`) in the prefixes of the data corpora, on both sides. A teacher
       trained before the vocabulary invariant lacks the first two and would read them as
@@ -320,6 +330,7 @@ def check_continuation(cfg: Mapping[str, Any], provenance: SourceProvenance) -> 
         provenance.path / CONFIG_FILE, provenance.config_sha256, "config"
     )
     problems += _architecture_problems(cfg, saved)
+    problems += _sentencepiece_problems(cfg, saved, provenance.path)
     vocabulary = _vocabulary_of(provenance)
     problems += _vocabulary_problems(cfg, vocabulary)
     if problems:
@@ -633,6 +644,73 @@ def _vocabulary_of(provenance: SourceProvenance) -> dict[str, frozenset[str]]:
             )
         sides[side] = frozenset(tokens)
     return sides
+
+
+def _sentencepiece_problems(
+    cfg: Mapping[str, Any], saved: Mapping[str, Any], source: Path
+) -> list[str]:
+    """What is wrong with the SentencePiece models `cfg` states beside the one the source
+    was trained with (the copy in `source` that its saved `config.json` names), per side.
+    Each file is hashed once."""
+    stated = _sentencepiece_section(cfg)
+    recorded = _sentencepiece_section(saved)
+    digests: dict[Path, str] = {}
+
+    def digest(file: Path) -> str:
+        if file not in digests:
+            digests[file] = _hashed(file, source)
+        return digests[file]
+
+    problems: list[str] = []
+    for key in _SENTENCEPIECE_KEYS:
+        where = f"transforms_configs.sentencepiece.{key}"
+        model = stated.get(key)
+        if not isinstance(model, str) or not model:
+            problems.append(
+                f"{where} is not stated in the config: a continuation must say which "
+                "SentencePiece model cuts its text, and it must be the one the source "
+                "was trained with"
+            )
+            continue
+        name = _copy_name(recorded.get(key))
+        copy = None if name is None else source / name
+        if name is None:
+            problems.append(
+                f"the config.json of the source does not record its {key}, so there is "
+                f"no SentencePiece model of the source to compare {where} with"
+            )
+        elif copy is None or not copy.is_file():
+            problems.append(
+                f"the source has no copy of its SentencePiece model: its config.json "
+                f"names {name}, which is not a file in {source}"
+            )
+        if not Path(model).is_file():
+            problems.append(f"{where} names {model}, which is not a file")
+        elif copy is not None and copy.is_file():
+            mine, theirs = digest(Path(model)), digest(copy)
+            if mine != theirs:
+                problems.append(
+                    f"{where} ({model}, SHA-256 {mine[:_DIGEST_SHOWN]}...) is not the "
+                    f"SentencePiece model the source was trained with ({name} in the "
+                    f"source, SHA-256 {theirs[:_DIGEST_SHOWN]}...): the vocabulary of "
+                    "the source is the pieces that model gave its data, and a piece it "
+                    "lacks would be read as <unk>"
+                )
+    return problems
+
+
+def _sentencepiece_section(cfg: Mapping[str, Any]) -> Mapping[str, Any]:
+    configs = cfg.get("transforms_configs")
+    section = configs.get("sentencepiece") if isinstance(configs, Mapping) else None
+    return section if isinstance(section, Mapping) else {}
+
+
+def _copy_name(recorded: object) -> str | None:
+    """The file name of the copy Eole saved: the last component of the path the saved
+    `config.json` records (`${MODEL_PATH}/<name>`)."""
+    if not isinstance(recorded, str) or not recorded:
+        return None
+    return PurePosixPath(recorded).name or None
 
 
 def _needed_symbols(cfg: Mapping[str, Any]) -> list[str]:

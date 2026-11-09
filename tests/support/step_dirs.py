@@ -46,6 +46,10 @@ OPTIMIZER_FILE = "optimizer.pt"
 CONFIG_FILE = "config.json"
 VOCAB_FILE = "vocab.json"
 SPM_ARTIFACT = "toy.model"
+# The bytes of the SentencePiece model every fabricated step directory holds a copy of
+# (Eole copies the model into each step directory); a config that continues one of them
+# must state a file with these bytes (`write_spm_model`).
+SPM_BYTES = b"sentencepiece model of the toy corpus"
 # A member of `optimizer.pt` whose name is not ASCII (Mongolian "state").
 UTF8_MEMBER = "optimizer/төлөв.pkl"
 
@@ -226,6 +230,9 @@ def make_step_dir(
     model: Mapping[str, Any] | None = None,
     vocab_tokens: Sequence[str] | None = None,
     vocab_document: Mapping[str, Any] | None = None,
+    spm_bytes: bytes = SPM_BYTES,
+    record_spm: bool = True,
+    spm_name: str = SPM_ARTIFACT,
 ) -> Path:
     """Create `model_path/step_<step>` as a COMPLETE step directory and return it.
 
@@ -235,7 +242,9 @@ def make_step_dir(
     (`eole_model_section`); without it the config has none. `vocab_tokens` are the
     tokens of `vocab.json` as Eole writes it (`eole_vocabulary`) and `vocab_document` is
     the whole content of that file; without either the file is a small stub.
-    `model_path` is created when missing.
+    `model_path` is created when missing. The SentencePiece model copy has the bytes
+    `spm_bytes` and the file name `spm_name`, and the saved `config.json` records it as
+    Eole does (`${MODEL_PATH}/` and its name) unless `record_spm` is false.
     """
     from safetensors.numpy import save_file
 
@@ -265,12 +274,19 @@ def make_step_dir(
     if vocab_document is not None:
         vocabulary = vocab_document
     (step_dir / VOCAB_FILE).write_text(json.dumps(vocabulary), encoding="utf-8")
-    (step_dir / SPM_ARTIFACT).write_bytes(b"sentencepiece model of the toy corpus")
+    (step_dir / spm_name).write_bytes(spm_bytes)
     # Eole writes the config last, so it is the file that says the rest was saved.
     saved_config: dict[str, Any] = {
         "training": {"model_path": str(model_path)},
         "saved_at": step,
     }
+    if record_spm:
+        saved_config["transforms_configs"] = {
+            "sentencepiece": {
+                "src_subword_model": f"${{MODEL_PATH}}/{spm_name}",
+                "tgt_subword_model": f"${{MODEL_PATH}}/{spm_name}",
+            }
+        }
     if model is not None:
         saved_config["model"] = dict(model)
     (step_dir / CONFIG_FILE).write_text(json.dumps(saved_config), encoding="utf-8")
@@ -398,6 +414,15 @@ def write_manifest(
     return store.write(directory, manifest)
 
 
+def write_spm_model(directory: Path) -> Path:
+    """`directory/toy.model` with the bytes of the model a fabricated step directory holds
+    a copy of (`directory` is created when missing), and its path."""
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / SPM_ARTIFACT
+    path.write_bytes(SPM_BYTES)
+    return path
+
+
 def write_run_record(run_dir: Path) -> None:
     """The `launch.json` that `rinchen train launch` writes into a run directory (which
     must exist): what makes the directory a run of ours."""
@@ -419,12 +444,16 @@ def make_finished_run(
     status: Mapping[str, str] | None = None,
     listed: Sequence[str] = REQUIRED_FILES,
     listed_step: int | None = None,
+    spm_bytes: bytes = SPM_BYTES,
+    record_spm: bool = True,
+    spm_name: str = SPM_ARTIFACT,
 ) -> FabricatedRun:
     """A finished run in `root/run`: complete step directories for `steps` (the model of
     `eole_model_section` unless `model` says), a real `launch.json`, a `command.sh` and,
     when `manifest`, a manifest of `stage` that lists the files named in `listed` of the
     step `listed_step` (the final one unless said), the other two outputs of a launch
-    being `launch.json` and `command.sh`."""
+    being `launch.json` and `command.sh`. `spm_bytes`, `record_spm` and `spm_name` are
+    those of `make_step_dir`."""
     run_dir = root / "run"
     model_path = run_dir / "ckpt"
     for step in steps:
@@ -434,6 +463,9 @@ def make_finished_run(
             model=eole_model_section() if model is None else model,
             vocab_tokens=vocab_tokens,
             vocab_document=vocab_document,
+            spm_bytes=spm_bytes,
+            record_spm=record_spm,
+            spm_name=spm_name,
         )
     write_run_record(run_dir)
     (run_dir / "command.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
@@ -480,6 +512,8 @@ def make_averaged_dir(
     inputs: Sequence[AveragedSource] | None = None,
     recorded_weights_sha256: str | None = None,
     record_text: str | None = None,
+    spm_bytes: bytes = SPM_BYTES,
+    record_spm: bool = True,
 ) -> Path:
     """What `rinchen train average` leaves in `directory`: the weights, the config and
     vocabulary of the last step, the SentencePiece artifact (never `optimizer.pt`),
@@ -497,6 +531,8 @@ def make_averaged_dir(
         model=eole_model_section() if model is None else model,
         vocab_tokens=vocab_tokens,
         vocab_document=vocab_document,
+        spm_bytes=spm_bytes,
+        record_spm=record_spm,
     )
     directory.mkdir(parents=True)
     for name in (WEIGHTS_FILE, CONFIG_FILE, VOCAB_FILE, SPM_ARTIFACT):
