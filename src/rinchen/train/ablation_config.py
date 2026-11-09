@@ -21,19 +21,15 @@ from pathlib import Path
 from typing import Any
 
 from rinchen.config.ablation import AblationMatrix
-from rinchen.errors import ConfigError
 from rinchen.train.ablation_layout import VariantPaths
 from rinchen.train.eole_cfg import merged_config, read_config
 from rinchen.train.eole_data import CorpusEntry, data_section
-from rinchen.train.validation_corpus import load_processor
 from rinchen.train.variants import Variant
-from rinchen.utils.integers import is_strict_int
-
-# Eole adds `<blank>`, its pad token, to the vocabulary of every model, and a SentencePiece
-# model has no such piece (it has no pad piece), so a vocabulary of all the pieces holds
-# one token more than the model has pieces.
-_EOLE_EXTRA_TOKENS = 1
-_VOCABULARY_SIZE_KEYS = ("src_vocab_size", "tgt_vocab_size")
+from rinchen.train.vocabulary_size import (
+    VOCABULARY_SIZE_KEYS,
+    needed_vocabulary_size,
+    require_vocabulary_size,
+)
 
 
 def variant_overrides(
@@ -119,36 +115,19 @@ def _vocabulary_size(
     it out (an override of `None` deletes the base's), as an override over the layered
     ones; nothing when a size is given. Either size that is given is checked against the
     model's vocabulary."""
-    needed = load_processor(spm_model).GetPieceSize() + _EOLE_EXTRA_TOKENS
+    needed = needed_vocabulary_size(spm_model)
     given = {
         key: overrides[key] if key in overrides else _lookup(base, key)
-        for key in _VOCABULARY_SIZE_KEYS
+        for key in VOCABULARY_SIZE_KEYS
     }
     for key, size in given.items():
         if size is not None:
-            _require_vocabulary_size(key, size, needed, spm_model)
+            require_vocabulary_size(key, size, needed, spm_model)
     return {} if given["src_vocab_size"] is not None else {"src_vocab_size": needed}
 
 
 def _lookup(config: object, key: str) -> Any:
     return config.get(key) if isinstance(config, Mapping) else None
-
-
-def _require_vocabulary_size(
-    key: str, size: object, needed: int, spm_model: Path
-) -> None:
-    if not is_strict_int(size) or size < 1:
-        raise ConfigError(
-            f"invalid Eole config: {key}: must be a positive integer, got {size!r}"
-        )
-    if size < needed:
-        pieces = needed - _EOLE_EXTRA_TOKENS
-        raise ConfigError(
-            f"invalid Eole config: {key}: {size} is below {needed}, what the "
-            f"vocabulary of the SentencePiece model {spm_model} needs ({pieces} pieces "
-            "and Eole's pad token): Eole would cut the reserved symbols that are added "
-            "at the end of its vocabulary file"
-        )
 
 
 def _layered(

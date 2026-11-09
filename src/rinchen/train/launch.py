@@ -163,6 +163,7 @@ from rinchen.train.eole_run import (
 from rinchen.train.gpu_rules import GpuSettings, check_gpu_rules
 from rinchen.train.launch_command import render_command_sh
 from rinchen.train.run_lock import holding_the_run, refuse_a_held_run
+from rinchen.train.vocabulary_size import require_stated_sizes_to_fit
 from rinchen.utils.integers import is_strict_int
 from rinchen.utils.logged_process import run_logged
 from rinchen.utils.part_file import replace_file
@@ -274,6 +275,7 @@ def launch(
 
     Raises:
         ConfigError: the config is unusable (see `eole_cfg.validate_train_config`), it
+            states a vocabulary size below its SentencePiece model's (`vocabulary_size`),
             sets no positive `training.train_steps` or a `training.model_path` outside
             `run_dir`, the GPU rules or the device list are broken, the path or the
             text holds `$` (or the checkpoint directory a glob character), the run's
@@ -474,6 +476,7 @@ def _plan(
 ) -> _Plan:
     cfg = read_config(cfg_path, _WHAT)
     validate_train_config(cfg)
+    require_stated_sizes_to_fit(cfg)
     model_path = model_path_inside(cfg, run_dir, _WHAT)
     reject_glob_characters("checkpoint directory", model_path)
     if ".." in model_path.parts:

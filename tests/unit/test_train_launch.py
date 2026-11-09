@@ -43,8 +43,14 @@ from tests.support.fake_launch import (
     launch_config,
     write_config,
 )
+from tests.support.tiny_parallel import train_toy_spm
 
 FAILED = "eole train failed: exit code 1; log: x; last 20 lines:\nboom"
+
+
+@pytest.fixture(scope="module")
+def toy_spm(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    return train_toy_spm(tmp_path_factory.mktemp("launch_spm"))
 
 
 @pytest.fixture
@@ -220,6 +226,73 @@ def test_an_existing_vocabulary_that_lacks_symbols_is_topped_up_before_training(
 
     assert fake.vocabularies == []
     assert fake.trains[0].vocabulary == _complete(b"a\t2\n<sep>\t7\n")
+
+
+def _with_stated_vocabulary_size(
+    base: dict[str, Any], spm: Path, size: int
+) -> dict[str, Any]:
+    cfg = json.loads(json.dumps(base))
+    cfg["src_vocab_size"] = size
+    cfg["transforms_configs"]["sentencepiece"] = {
+        "src_subword_model": str(spm),
+        "tgt_subword_model": str(spm),
+    }
+    return cfg
+
+
+def test_a_stated_vocabulary_size_below_the_pieces_is_refused_before_anything_is_written(
+    tmp_path: Path,
+    run_dir: Path,
+    base_cfg: dict[str, Any],
+    fake: FakeEole,
+    toy_spm: Path,
+) -> None:
+    # 640 pieces, so the reserved symbols appended at the end of the vocabulary file
+    # would be cut by Eole, and the teacher would be said to predate the invariant.
+    config = write_config(
+        tmp_path / "small.yaml", _with_stated_vocabulary_size(base_cfg, toy_spm, 640)
+    )
+
+    with pytest.raises(ConfigError, match="src_vocab_size: 640 is below 641"):
+        go(config, run_dir)
+
+    assert fake.calls == []
+    assert not run_dir.exists()
+
+
+@pytest.mark.parametrize("size", [641, 32768])
+def test_a_stated_vocabulary_size_that_holds_the_pieces_and_the_pad_token_launches(
+    tmp_path: Path,
+    run_dir: Path,
+    base_cfg: dict[str, Any],
+    fake: FakeEole,
+    toy_spm: Path,
+    size: int,
+) -> None:
+    config = write_config(
+        tmp_path / "enough.yaml", _with_stated_vocabulary_size(base_cfg, toy_spm, size)
+    )
+
+    result = go(config, run_dir)
+
+    assert result.status == "completed"
+
+
+def test_a_stated_vocabulary_size_is_checked_when_the_launch_only_writes(
+    tmp_path: Path,
+    run_dir: Path,
+    base_cfg: dict[str, Any],
+    fake: FakeEole,
+    toy_spm: Path,
+) -> None:
+    config = write_config(
+        tmp_path / "small.yaml", _with_stated_vocabulary_size(base_cfg, toy_spm, 100)
+    )
+
+    with pytest.raises(ConfigError, match="src_vocab_size: 100 is below 641"):
+        go(config, run_dir, write_only=True)
+
+    assert not run_dir.exists()
 
 
 def test_an_empty_vocabulary_is_refused_before_eole_trains_on_it(
