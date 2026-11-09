@@ -222,6 +222,21 @@ def test_an_existing_vocabulary_that_lacks_symbols_is_topped_up_before_training(
     assert fake.trains[0].vocabulary == _complete(b"a\t2\n<sep>\t7\n")
 
 
+def test_an_empty_vocabulary_is_refused_before_eole_trains_on_it(
+    config_path: Path, run_dir: Path, fake: FakeEole
+) -> None:
+    # A truncated `build_vocab` leaves such a file, and a run that went on would train on
+    # the reserved symbols alone, every real piece being `<unk>`.
+    run_dir.mkdir()
+    (run_dir / "vocab.src").write_bytes(b"")
+
+    with pytest.raises(DataError, match="holds no token"):
+        go(config_path, run_dir)
+
+    assert fake.trains == []
+    assert (run_dir / "vocab.src").read_bytes() == b""
+
+
 def test_a_complete_existing_vocabulary_is_not_rewritten(
     config_path: Path, run_dir: Path, fake: FakeEole
 ) -> None:

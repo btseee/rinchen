@@ -156,15 +156,6 @@ def test_a_file_without_a_final_newline_gets_one_before_the_symbols(
     assert vocab.read_bytes() == b"a\t5\nb\t3\n<x>\t1\n"
 
 
-def test_an_empty_file_becomes_the_symbols_alone(vocab: Path) -> None:
-    _write(vocab, b"")
-
-    appended = add_reserved_symbols(vocab, ["<x>", "<y>"])
-
-    assert appended == ("<x>", "<y>")
-    assert vocab.read_bytes() == b"<x>\t1\n<y>\t1\n"
-
-
 def test_crlf_line_endings_are_kept_and_the_new_lines_end_in_lf(vocab: Path) -> None:
     # The existing bytes are not normalised; Eole drops a `\r` at the end of a line.
     _write(vocab, b"a\t5\r\n<x>\t3\r\n")
@@ -261,6 +252,52 @@ def test_a_missing_vocabulary_file_is_a_data_error_and_nothing_is_created(
 def test_a_vocabulary_that_is_a_directory_is_a_data_error(tmp_path: Path) -> None:
     with pytest.raises(DataError, match="vocabulary file"):
         add_reserved_symbols(tmp_path, ["<x>"])
+
+
+@pytest.mark.parametrize(
+    "content",
+    [b"", b"\n", b"\n\n\n", b"\r\n", b" \t \n", b"  ", b"\n\r\n  \n"],
+    ids=[
+        "no bytes",
+        "one LF",
+        "LFs",
+        "one CRLF",
+        "spaces and a tab",
+        "spaces",
+        "blank lines of every kind",
+    ],
+)
+def test_a_vocabulary_with_no_token_is_a_data_error_and_is_left_as_it_is(
+    vocab: Path, content: bytes
+) -> None:
+    # `eole build_vocab` that was cut short leaves such a file; with the symbols alone
+    # added, every real piece would be `<unk>` to the model, and Eole itself refuses an
+    # empty vocabulary.
+    _write(vocab, content)
+
+    with pytest.raises(DataError, match="holds no token") as info:
+        add_reserved_symbols(vocab, ["<x>", "<y>"])
+
+    assert str(vocab) in str(info.value)
+    assert vocab.read_bytes() == content
+    assert sorted(path.name for path in vocab.parent.iterdir()) == ["vocab.src"]
+
+
+def test_a_vocabulary_with_no_token_is_refused_even_when_no_symbol_is_asked_for(
+    vocab: Path,
+) -> None:
+    _write(vocab, b"")
+
+    with pytest.raises(DataError, match="holds no token"):
+        add_reserved_symbols(vocab, [])
+
+
+def test_one_token_among_blank_lines_is_a_vocabulary(vocab: Path) -> None:
+    _write(vocab, b"\n  \na\t5\n\n")
+
+    appended = add_reserved_symbols(vocab, ["<x>"])
+
+    assert appended == ("<x>",)
 
 
 @pytest.mark.parametrize(

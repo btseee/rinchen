@@ -166,7 +166,9 @@ def add_reserved_symbols(vocab_file: Path, symbols: Sequence[str]) -> tuple[str,
     Raises:
         ValueError: a symbol is empty or holds a tab, an LF or a CR (it would break the
             line format); nothing is written.
-        DataError: `vocab_file` cannot be read.
+        DataError: `vocab_file` cannot be read, or holds no token (empty, or blank lines
+            only: a truncated `build_vocab`, which Eole itself would refuse); nothing is
+            written.
     """
     wanted = _distinct_symbols(symbols)
     try:
@@ -174,7 +176,13 @@ def add_reserved_symbols(vocab_file: Path, symbols: Sequence[str]) -> tuple[str,
     except OSError as exc:
         raise DataError(f"cannot read the vocabulary file {vocab_file}: {exc}") from exc
     lines = _vocabulary_lines(content)
-    counted = _has_counts(lines[0]) if lines else True
+    if not any(line.strip() for line in lines):
+        raise DataError(
+            f"the vocabulary file {vocab_file} holds no token (it is empty or only "
+            "blank lines): `eole build_vocab` did not finish writing it, and training "
+            "on the reserved symbols alone would read every real piece as <unk>"
+        )
+    counted = _has_counts(lines[0])
     present = {_token_of(line, counted) for line in lines}
     missing = tuple(symbol for symbol in wanted if symbol.encode() not in present)
     if not missing:
