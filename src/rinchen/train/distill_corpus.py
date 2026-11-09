@@ -6,7 +6,9 @@ A KD file is a corpus Parquet file made by `rinchen distill generate`, with the
 so `load_kd_rows` refuses one without that manifest, with a manifest of another stage or of
 a generation that did not finish, with a manifest that does not list it, or whose SHA-256 or
 row count is not the file's now (a `ConfigError` naming the file). The file is hashed once,
-before anything of it is read.
+before anything of it is read: by `load_kd_rows`, or by the caller, who passes the digests it
+took (`digests`) so that a command that vouches for its inputs does not hash a large file
+twice.
 
 Every row of every file is counted once, in the kept rows or under the first of these
 reasons that matches (`KD_EXCLUSION_REASONS`, in this order):
@@ -27,7 +29,7 @@ counted (`duplicate_ids`): two teachers, or one teacher twice, may produce the s
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Final
@@ -97,19 +99,38 @@ class _FileRows:
     usable: pl.DataFrame
 
 
-def load_kd_rows(paths: Sequence[Path], *, directions: Collection[str]) -> KdRows:
+def load_kd_rows(
+    paths: Sequence[Path],
+    *,
+    directions: Collection[str],
+    digests: Mapping[Path, str] | None = None,
+) -> KdRows:
     """Read the KD files, each vouched for by its manifest, and keep the rows that train
     (see the module's text); `directions` are those of the original corpora.
 
+    `digests` maps each path to the SHA-256 the caller took of the file before anything
+    read it; it is compared with the manifest's in place of a hash of the file here. The
+    caller's digest is trusted to be that of the file it hashed: nothing reads the bytes it
+    hashed again.
+
     Raises:
-        ConfigError: a file has no manifest, or one that does not vouch for it.
+        ValueError: `digests` is given and lacks one of the paths.
+        ConfigError: a file has no manifest, or one that does not vouch for it (for the
+            digest it has, or the one `digests` gives).
         DataError: no file is given; a file is missing, unreadable or not a corpus table; a
             kept row has no id or no corpus label; no row is kept.
     """
     if not paths:
         raise DataError("no KD file was given")
+    if digests is not None:
+        absent = [str(path) for path in paths if path not in digests]
+        if absent:
+            raise ValueError(f"no digest was given for the KD files {absent}")
     known = sorted(set(directions))
-    files = [_read_file(path, known) for path in paths]
+    files = [
+        _read_file(path, known, None if digests is None else digests[path])
+        for path in paths
+    ]
     rows_read = sum(file.rows_read for file in files)
     reasons: Counter[str] = Counter()
     for file in files:
@@ -141,8 +162,10 @@ def _counts(frame: pl.DataFrame, column: str) -> dict[str, int]:
     return dict(sorted(frame.group_by(column).len().iter_rows()))
 
 
-def _read_file(path: Path, known_directions: Sequence[str]) -> _FileRows:
-    recorded_rows = _digest_the_vouched_file(path)
+def _read_file(
+    path: Path, known_directions: Sequence[str], digest: str | None
+) -> _FileRows:
+    recorded_rows = _digest_the_vouched_file(path, digest)
     try:
         lazy = scan_corpus(path)
         rows_read = lazy.select(pl.len()).collect().item()
@@ -210,9 +233,10 @@ def _reason(known_directions: Sequence[str]) -> pl.Expr:
     )
 
 
-def _digest_the_vouched_file(path: Path) -> int:
+def _digest_the_vouched_file(path: Path, given: str | None) -> int:
     """Check the manifest beside `path` and the file against it, hashing the file once and
-    before anything of it is parsed; return the row count the manifest records for it.
+    before anything of it is parsed (or comparing the digest `given` by the caller, which
+    hashed it); return the row count the manifest records for it.
 
     Raises:
         DataError: `path` is not a file or cannot be read.
@@ -223,7 +247,7 @@ def _digest_the_vouched_file(path: Path) -> int:
         raise DataError(f"KD file not found: {path}")
     entry = _manifest_entry(path)
     try:
-        digest = sha256_of(path)
+        digest = sha256_of(path) if given is None else given
     except OSError as exc:
         raise DataError(f"cannot read KD file {path}: {exc}") from exc
     if digest != entry.sha256:

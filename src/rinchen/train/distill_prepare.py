@@ -29,7 +29,7 @@ the per-run values laid over it. A base holds no corpora and never `train_from` 
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
@@ -132,10 +132,18 @@ def prepare_student(
     dev_max_lines: int,
     weight_total: int,
     dry_run: bool,
+    kd_digests: Mapping[Path, str] | None = None,
+    before_writing: Callable[[], None] | None = None,
 ) -> PreparedStudent:
     """Read the original corpus files and the KD files, plan the corpora and their weights
     and, unless `dry_run`, write the files of the module's text. Everything that can be
     refused is refused before the first write; a dry run writes nothing, not even `out_dir`.
+
+    `kd_digests` are the SHA-256 of the KD files the caller took before anything read them
+    (`load_kd_rows` compares them with the manifests instead of hashing the files again).
+    `before_writing` is called once, after everything that can be refused and before the
+    first write, never for a dry run: where a command removes the old manifest of the
+    directory and makes it. An exception of it stops the run before anything is written.
 
     `corpora` are the original corpus files (their `train` rows are the authentic and
     back-translated rows, their `dev` rows the validation), `kd_files` the KD files, each
@@ -145,7 +153,7 @@ def prepare_student(
 
     Raises:
         ValueError: a placement other than `src` or `tgt`, a `bt_ratio`, `temperature` or
-            `dev_max_lines` out of range.
+            `dev_max_lines` out of range; `kd_digests` lacks one of the KD files.
         ConfigError: the base config is not one a student may start from or is not valid;
             `out_dir` or `spm_model` holds a character Eole reads specially; the model cannot
             be loaded or lacks a tag as one piece; a stated vocabulary size is too small;
@@ -170,7 +178,7 @@ def prepare_student(
         directions=training.directions,
         training=training,
     )
-    kd = load_kd_rows(kd_files, directions=training.directions)
+    kd = load_kd_rows(kd_files, directions=training.directions, digests=kd_digests)
     _require_tags_and_vocabulary(spm, dev, base_config, kd_tag=kd_tag)
     plan = _plan(
         training,
@@ -195,6 +203,8 @@ def prepare_student(
             valid_lines=valid_lines,
             written=False,
         )
+    if before_writing is not None:
+        before_writing()
     run_dir = target / _RUN_DIR
     built = build_corpora(
         training, bt_ratio=bt_ratio, seed=seed, data_dir=target / "data"
