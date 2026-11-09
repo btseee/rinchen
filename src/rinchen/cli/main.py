@@ -8,6 +8,7 @@ from rinchen.cli import (
     annotate,
     convert_script,
     data,
+    distill,
     doctor,
     export,
     mine,
@@ -33,6 +34,7 @@ app.add_typer(mine.app, name="mine")
 app.add_typer(convert_script.app, name="convert-script")
 app.add_typer(synth.app, name="synth")
 app.add_typer(train.app, name="train")
+app.add_typer(distill.app, name="distill")
 app.add_typer(export.app, name="export")
 app.add_typer(eval_cli.app, name="eval")
 app.add_typer(serve.app, name="serve")
