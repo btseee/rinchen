@@ -95,12 +95,20 @@ def assert_refused_with_nothing_made(
     converter: FakeConverter,
     error: type[Exception],
 ) -> str:
-    before = tree_digest(checkpoint.parent.parent)
+    # The files of the checkpoint's own tree only: a step directory is `<run>/ckpt/step_N`,
+    # an averaged model is a directory of its own. The temporary directory above them also
+    # holds the files of other tests, some of which are unreadable on purpose.
+    tree = (
+        checkpoint
+        if (checkpoint / "averaged_from.json").exists()
+        else (checkpoint.parent.parent)
+    )
+    before = tree_digest(tree)
     with pytest.raises(error) as raised:
         export(checkpoint, target, spm_model, placement)
     assert not target.exists()
     assert converter.calls == []
-    assert tree_digest(checkpoint.parent.parent) == before
+    assert tree_digest(tree) == before
     return str(raised.value)
 
 
