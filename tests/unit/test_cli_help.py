@@ -21,6 +21,7 @@ SUBCOMMANDS = [
     "annotate",
     "doctor",
     "tiny",
+    "translate",
 ]
 
 

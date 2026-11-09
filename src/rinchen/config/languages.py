@@ -22,6 +22,11 @@ from rinchen.errors import ConfigError
 from rinchen.lang.scripts import Script
 
 LANGUAGES_PATH = REPO_ROOT / "configs" / "languages.yaml"
+# The copy a built wheel carries (`pyproject.toml` force-includes the repository copy there):
+# an installed package has no `configs/` beside it.
+PACKAGED_LANGUAGES_PATH = (
+    Path(__file__).resolve().parent.parent / "_data" / "languages.yaml"
+)
 
 
 class LanguageEntry(BaseModel):
@@ -45,11 +50,19 @@ class LanguageEntry(BaseModel):
 _LIST_ADAPTER = TypeAdapter(list[LanguageEntry])
 
 
-def load_languages(path: Path = LANGUAGES_PATH) -> list[LanguageEntry]:
-    """Load and validate a `languages.yaml`-shaped file. Raises ConfigError
-    on any violation (missing, unreadable or unparseable file, malformed top
-    level, missing/extra field, unknown or empty scripts, wrong direction
-    tag, duplicate code)."""
+def default_languages_path() -> Path:
+    """The registry to read when none is named: the repository copy when it exists,
+    else the one packaged with the wheel. Resolved at each call."""
+    return LANGUAGES_PATH if LANGUAGES_PATH.is_file() else PACKAGED_LANGUAGES_PATH
+
+
+def load_languages(path: Path | None = None) -> list[LanguageEntry]:
+    """Load and validate a `languages.yaml`-shaped file (default: `default_languages_path()`).
+    Raises ConfigError on any violation (missing, unreadable or unparseable file, malformed
+    top level, missing/extra field, unknown or empty scripts, wrong direction tag, duplicate
+    code)."""
+    if path is None:
+        path = default_languages_path()
     if not path.is_file():
         raise ConfigError(f"language registry file not found: {path}")
     try:

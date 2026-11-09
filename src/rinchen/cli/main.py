@@ -24,6 +24,7 @@ from rinchen.cli import (
 from rinchen.cli import (
     filter as filter_cli,
 )
+from rinchen.cli.translate import translate_command
 
 app = typer.Typer(name="rinchen", no_args_is_help=True)
 
@@ -41,3 +42,4 @@ app.add_typer(serve.app, name="serve")
 app.add_typer(annotate.app, name="annotate")
 app.add_typer(doctor.app, name="doctor")
 app.add_typer(tiny.app, name="tiny")
+app.command(name="translate")(translate_command)

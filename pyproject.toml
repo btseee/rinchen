@@ -87,6 +87,9 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/rinchen"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"configs/languages.yaml" = "rinchen/_data/languages.yaml"
+
 [tool.pytest.ini_options]
 pythonpath = ["scripts"]
 filterwarnings = [

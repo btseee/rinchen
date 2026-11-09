@@ -6,8 +6,12 @@ from pathlib import Path
 import pytest
 import yaml
 
+import rinchen
+from rinchen.config import languages as languages_module
 from rinchen.config.languages import (
     LANGUAGES_PATH,
+    PACKAGED_LANGUAGES_PATH,
+    default_languages_path,
     direction_tag,
     known_language_codes,
     load_languages,
@@ -189,3 +193,97 @@ def test_missing_registry_file_raises_config_error(tmp_path: Path):
 def test_default_path_points_into_repo_configs():
     assert LANGUAGES_PATH.name == "languages.yaml"
     assert LANGUAGES_PATH.parent.name == "configs"
+
+
+# --- the registry of the installed package (D11, ruling T14) -------------------------------
+
+ONE_LANGUAGE_YAML = """
+languages:
+  - code: eng_Latn
+    scripts: [Latin]
+    direction_tag: "<2eng_Latn>"
+"""
+
+
+def test_the_packaged_registry_is_named_inside_the_package():
+    assert PACKAGED_LANGUAGES_PATH == (
+        Path(rinchen.__file__).parent / "_data" / "languages.yaml"
+    )
+
+
+def test_the_default_path_is_the_repository_copy_when_it_exists():
+    assert LANGUAGES_PATH.is_file()
+    assert default_languages_path() == LANGUAGES_PATH
+
+
+def test_the_default_path_is_the_packaged_copy_when_the_repository_has_none(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    monkeypatch.setattr(
+        languages_module, "LANGUAGES_PATH", tmp_path / "configs" / "l.yaml"
+    )
+
+    assert default_languages_path() == PACKAGED_LANGUAGES_PATH
+
+
+def test_the_repository_copy_wins_over_the_packaged_copy(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    packaged = tmp_path / "packaged.yaml"
+    packaged.write_text(ONE_LANGUAGE_YAML, encoding="utf-8")
+    monkeypatch.setattr(languages_module, "PACKAGED_LANGUAGES_PATH", packaged)
+
+    assert default_languages_path() == LANGUAGES_PATH
+    assert len(load_languages()) == len(SPEC_CODES)
+
+
+def test_load_languages_without_a_path_reads_the_packaged_copy_when_there_is_no_repository_one(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    packaged = tmp_path / "packaged.yaml"
+    packaged.write_text(ONE_LANGUAGE_YAML, encoding="utf-8")
+    monkeypatch.setattr(languages_module, "LANGUAGES_PATH", tmp_path / "missing.yaml")
+    monkeypatch.setattr(languages_module, "PACKAGED_LANGUAGES_PATH", packaged)
+
+    assert [entry.code for entry in load_languages()] == ["eng_Latn"]
+
+
+def test_load_languages_without_a_path_resolves_the_copy_at_each_call(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    packaged = tmp_path / "packaged.yaml"
+    packaged.write_text(ONE_LANGUAGE_YAML, encoding="utf-8")
+    before = len(load_languages())
+    monkeypatch.setattr(languages_module, "LANGUAGES_PATH", tmp_path / "missing.yaml")
+    monkeypatch.setattr(languages_module, "PACKAGED_LANGUAGES_PATH", packaged)
+    during = len(load_languages())
+    monkeypatch.undo()
+
+    assert (before, during, len(load_languages())) == (
+        len(SPEC_CODES),
+        1,
+        len(SPEC_CODES),
+    )
+
+
+def test_without_either_copy_the_error_names_the_packaged_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    packaged = tmp_path / "packaged.yaml"
+    monkeypatch.setattr(languages_module, "LANGUAGES_PATH", tmp_path / "missing.yaml")
+    monkeypatch.setattr(languages_module, "PACKAGED_LANGUAGES_PATH", packaged)
+
+    with pytest.raises(ConfigError, match="not found") as excinfo:
+        load_languages()
+
+    assert str(packaged) in str(excinfo.value)
+
+
+def test_an_explicit_path_is_still_read_whatever_the_default_is(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    explicit = tmp_path / "explicit.yaml"
+    explicit.write_text(ONE_LANGUAGE_YAML, encoding="utf-8")
+
+    assert [entry.code for entry in load_languages(explicit)] == ["eng_Latn"]
+    assert [entry.code for entry in load_languages(path=explicit)] == ["eng_Latn"]
