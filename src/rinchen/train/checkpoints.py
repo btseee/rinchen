@@ -46,7 +46,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated, Any, Final, Literal, Self
+from typing import Annotated, Any, Final, Self
 
 from pydantic import (
     BaseModel,
@@ -58,6 +58,7 @@ from pydantic import (
 )
 
 from rinchen.errors import ConfigError, DataError
+from rinchen.export.record import ContinuationKind
 from rinchen.utils.part_file import replace_file
 
 WEIGHTS_FILE: Final = "model.00.safetensors"
@@ -112,7 +113,6 @@ _SHA256_HEX: Final = r"^[0-9a-f]{64}$"
 # What a record without a source is written as, and the version that holds one.
 _PLAIN_SCHEMA_VERSION: Final = 1
 _CONTINUATION_SCHEMA_VERSION: Final = 2
-ContinuationKind = Literal["step", "averaged"]
 
 
 @dataclass(frozen=True, slots=True)

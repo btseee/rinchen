@@ -76,11 +76,16 @@ def test_the_export_package_imports_nothing_of_the_layers_above_it() -> None:
 
 
 def test_the_export_package_holds_no_other_module() -> None:
+    # D11 added the record, its reader, quantisation and `convert` beside the converter call.
     package = Path(eole_ct2.__file__).parent
 
     assert sorted(path.name for path in package.glob("*.py")) == [
         "__init__.py",
+        "ct2.py",
         "eole_ct2.py",
+        "quantize.py",
+        "record.py",
+        "verified.py",
     ]
     assert (package / "__init__.py").read_text(encoding="utf-8") == ""
 
@@ -131,3 +136,93 @@ def test_a_missing_model_is_looked_for_in_the_output_directory_and_reported_in_t
     assert built == [private]
     assert f"left no model.bin in {tmp_path / 'published'}, or an empty one" in message
     assert ".ct2.private" not in message
+
+
+class RecordingConverter:
+    """Replace the converter's process by one that records its command and leaves a
+    `model.bin` in the directory it was told to write to."""
+
+    def __init__(self) -> None:
+        self.commands: list[list[str]] = []
+
+    def __call__(self, command: Any, *, log_path: Path, **options: Any) -> None:
+        self.commands.append(list(command))
+        built = Path(command[command.index("--output_dir") + 1])
+        built.mkdir(parents=True)
+        (built / "model.bin").write_bytes(b"weights")
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text("converter log\n", encoding="utf-8")
+
+
+@pytest.fixture
+def recorder(monkeypatch: pytest.MonkeyPatch) -> RecordingConverter:
+    recording = RecordingConverter()
+    monkeypatch.setattr(eole_ct2, "run_logged", recording)
+    return recording
+
+
+def test_a_quantization_is_appended_to_the_command_of_the_converter(
+    tmp_path: Path, recorder: RecordingConverter
+) -> None:
+    eole_ct2.export_ct2(tmp_path / "ckpt", tmp_path / "ct2", quantization="int8")
+
+    (command,) = recorder.commands
+    assert command[1:] == [
+        "-I",
+        "-W",
+        "ignore",
+        "-m",
+        "ctranslate2.converters.eole_ct2",
+        "--model_path",
+        str(tmp_path / "ckpt"),
+        "--output_dir",
+        str(tmp_path / "ct2"),
+        "--quantization",
+        "int8",
+    ]
+
+
+@pytest.mark.parametrize(
+    "quantization", ["float32", "float16", "int8", "int8_float16", "int16"]
+)
+def test_the_quantization_is_passed_as_it_is_given(
+    tmp_path: Path, recorder: RecordingConverter, quantization: str
+) -> None:
+    eole_ct2.export_ct2(tmp_path / "ckpt", tmp_path / "ct2", quantization=quantization)
+
+    (command,) = recorder.commands
+    assert command[-2:] == ["--quantization", quantization]
+    assert command.count("--quantization") == 1
+
+
+def test_no_quantization_is_appended_when_none_is_given(
+    tmp_path: Path, recorder: RecordingConverter
+) -> None:
+    # The converter then keeps the type the checkpoint stores.
+    eole_ct2.export_ct2(tmp_path / "ckpt", tmp_path / "ct2")
+    eole_ct2.export_ct2(tmp_path / "ckpt", tmp_path / "ct3", quantization=None)
+
+    for command in recorder.commands:
+        assert "--quantization" not in command
+        assert command[command.index("--output_dir") + 2 :] == []
+
+
+def test_a_quantized_export_still_hides_the_gpu_from_the_converter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[dict[str, str]] = []
+
+    def run(command: Any, *, env: Any, log_path: Path, **options: Any) -> None:
+        seen.append(dict(env))
+        built = Path(command[command.index("--output_dir") + 1])
+        built.mkdir(parents=True)
+        (built / "model.bin").write_bytes(b"weights")
+
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "0")
+    monkeypatch.setattr(eole_ct2, "run_logged", run)
+
+    eole_ct2.export_ct2(
+        tmp_path / "ckpt", tmp_path / "ct2", quantization="int8_float16"
+    )
+
+    assert seen[0]["CUDA_VISIBLE_DEVICES"] == ""
