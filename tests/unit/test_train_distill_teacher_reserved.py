@@ -33,6 +33,7 @@ from tests.support.distill_teachers import (
     scripted_teacher,
 )
 from tests.support.fake_ct2 import FakeProcessor, Hypothesis
+from tests.support.step_dirs import SOURCE_VOCABULARY
 from tests.support.tiny_parallel import build_toy
 
 PLACEHOLDER = chr(0x27E6) + "7" + chr(0x27E7)
@@ -221,6 +222,69 @@ def test_ordinary_pieces_that_look_like_markup_are_kept(tmp_path: Path) -> None:
     assert teacher.counters()["reserved_symbol"] == 0
 
 
+# ---- the entries of the vocabulary that are no piece of the model ----------------------
+
+
+FOREIGN_TOKENS = (
+    "<unk>",
+    "<blank>",
+    "<s>",
+    END,
+    TAG,
+    "<2eng_Latn>",
+    "<2rus_Cyrl>",
+    "held",
+    "averyunlikelytoken0",
+)
+
+
+@pytest.mark.parametrize("foreign", ["<blank>", "averyunlikelytoken0"])
+def test_a_vocabulary_entry_the_model_does_not_hold_is_dropped_and_counted(
+    tmp_path: Path, foreign: str
+) -> None:
+    # Eole adds `<blank>` to the vocabulary and pads it with made-up tokens; the model could
+    # emit one, and the processor would write it as its letters.
+    script = {
+        (TAG, SP + "a"): [
+            hyp(SP + "x", foreign, END),
+            hyp("held", END),
+        ]
+    }
+    teacher, _ = scripted_teacher(
+        tmp_path,
+        script,
+        options=TeacherOptions(beam_size=2, n=2),
+        tokens=FOREIGN_TOKENS,
+        processor=FakeProcessor([TAG, "<2eng_Latn>", "<2rus_Cyrl>", "held"]),
+    )
+
+    assert teacher.translate(["a"], ENG, KHK) == [["held"]]
+    assert teacher.counters()["reserved_symbol"] == 1
+
+
+def test_a_vocabulary_entry_the_model_holds_is_kept(tmp_path: Path) -> None:
+    script = {(TAG, SP + "a"): [hyp(SP + "x", "held", END)]}
+    teacher, _ = scripted_teacher(
+        tmp_path,
+        script,
+        tokens=FOREIGN_TOKENS,
+        processor=FakeProcessor([TAG, "<2eng_Latn>", "<2rus_Cyrl>", "held"]),
+    )
+
+    assert teacher.translate(["a"], ENG, KHK) == [["xheld"]]
+    assert teacher.counters()["reserved_symbol"] == 0
+
+
+def test_a_piece_outside_the_vocabulary_is_not_the_teachers_to_judge(
+    tmp_path: Path,
+) -> None:
+    # CTranslate2 cannot emit it; what is decided is by the vocabulary the export holds.
+    script = {(TAG, SP + "a"): [hyp(SP + "x", "stranger", END)]}
+    teacher, _ = scripted_teacher(tmp_path, script, tokens=FOREIGN_TOKENS)
+
+    assert teacher.translate(["a"], ENG, KHK) == [["xstranger"]]
+
+
 # ---- against a real SentencePiece model with byte fallback ------------------------------
 
 
@@ -293,6 +357,21 @@ def test_a_real_model_decodes_a_leaked_tag_to_literal_text_and_the_teacher_drops
     assert teacher.counters()["reserved_symbol"] == 1
 
 
+@pytest.mark.parametrize("foreign", ["<blank>", "averyunlikelytoken0"])
+def test_a_real_model_writes_a_vocabulary_padding_token_as_letters_and_the_teacher_drops_it(
+    tmp_path: Path, real_model: sentencepiece.SentencePieceProcessor, foreign: str
+) -> None:
+    pieces = [*pieces_of(real_model, "Сайн"), foreign, *pieces_of(real_model, "уу")]
+    assert foreign in real_model.decode(pieces)
+    tokens = (*SOURCE_VOCABULARY, "averyunlikelytoken0")
+    teacher, _ = scripted_teacher(
+        tmp_path, answering(hyp(*pieces, END)), processor=real_model, tokens=tokens
+    )
+
+    assert teacher.translate(["a"], ENG, KHK) == [[]]
+    assert teacher.counters()["reserved_symbol"] == 1
+
+
 @pytest.mark.parametrize("marker", ["<unk>", "<bt>", "<ft>", "<doc>", PLACEHOLDER])
 def test_a_real_model_marker_inside_a_hypothesis_is_dropped(
     tmp_path: Path, real_model: sentencepiece.SentencePieceProcessor, marker: str
@@ -312,8 +391,13 @@ def test_byte_pieces_of_a_byte_fallback_model_are_legitimate_and_stay(
     text = "Сайн " + chr(0x2605) + " уу"
     pieces = pieces_of(real_model, text)
     assert any(piece.startswith("<0x") for piece in pieces)
+    # The pieces of the text are entries of the vocabulary, as they are of a real export.
+    tokens = (*SOURCE_VOCABULARY, *pieces)
     teacher, _ = scripted_teacher(
-        tmp_path, answering(hyp(*pieces, END)), processor=real_model
+        tmp_path,
+        answering(hyp(*pieces, END)),
+        processor=real_model,
+        tokens=tokens,
     )
 
     assert teacher.translate(["a"], ENG, KHK) == [[text]]

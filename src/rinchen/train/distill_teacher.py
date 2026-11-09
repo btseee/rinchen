@@ -16,10 +16,11 @@ against what the library does silently (measured in the D10 spike):
   and a hypothesis that holds a line break is dropped (it would split a text file's line);
 - a hypothesis that holds a piece no translation holds is dropped before it is decoded: the
   unknown piece of the SentencePiece model (decoded to the text of U+2047 between spaces), the
-  end token in the middle, or a reserved symbol of the project (a direction tag, `<bt>`, `<doc>`,
-  a numbered placeholder; decoded to its own letters). Either would pass the script rule of the
-  selection and a student would learn to emit it. The pieces of a byte-fallback model
-  (`<0x41>`) are ordinary and stay.
+  end token in the middle, a reserved symbol of the project (a direction tag, `<bt>`, `<doc>`,
+  a numbered placeholder) or an entry of `shared_vocabulary.json` that is no piece of the model
+  (Eole's `<blank>`, the padding of its vocabulary): those decode to their own letters. Either
+  would pass the script rule of the selection and a student would learn to emit it. The pieces
+  of a byte-fallback model (`<0x41>`) are ordinary and stay.
 
 `counters()` is what THIS translator did since it was made: `sources` (texts given),
 `source_too_long` and `empty_source` (texts not sent), `truncated`, `line_break` and
@@ -221,7 +222,9 @@ class TeacherTranslator:
         self._translator = (
             translator if translator is not None else _load_ct2(export, options)
         )
-        self._reserved = _reserved_pieces(self._processor, self._end_token)
+        self._reserved = _reserved_pieces(
+            self._processor, self._end_token, self._vocabulary
+        )
         self._checked_tags: set[str] = set()
         self._counters = dict.fromkeys(COUNTER_KEYS, 0)
 
@@ -374,12 +377,19 @@ class TeacherTranslator:
         return clean_candidates(kept)
 
 
-def _reserved_pieces(processor: ProcessorLike, end_token: str) -> frozenset[str]:
+def _reserved_pieces(
+    processor: ProcessorLike, end_token: str, vocabulary: frozenset[str]
+) -> frozenset[str]:
     """The pieces a translation never holds: the unknown piece of `processor`, the
-    `end_token` (a hypothesis ends with it once) and every reserved symbol of the project
-    (every SentencePiece model of ours keeps them as single pieces)."""
-    unknown = processor.id_to_piece(processor.unk_id())
-    return frozenset({unknown, end_token, *user_defined_symbols()})
+    `end_token` (a hypothesis ends with it once), every reserved symbol of the project
+    (every SentencePiece model of ours keeps them as single pieces) and every entry of the
+    export's `vocabulary` that is no piece of `processor`: Eole adds its pad token and
+    pads the vocabulary with made-up tokens, which the model could emit and
+    `processor.decode` would write as their letters."""
+    unknown_id = processor.unk_id()
+    foreign = (e for e in vocabulary if processor.piece_to_id(e) == unknown_id)
+    unknown = processor.id_to_piece(unknown_id)
+    return frozenset({unknown, end_token, *user_defined_symbols(), *foreign})
 
 
 def _languages_of(direction: str) -> tuple[str, str]:
