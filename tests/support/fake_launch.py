@@ -53,6 +53,15 @@ def launch_config(run_dir: Path, **training: Any) -> dict[str, Any]:
     return cfg
 
 
+def continuation_config(run_dir: Path, **training: Any) -> dict[str, Any]:
+    """`launch_config` as the base of a continuation: the optimizer options Eole would
+    otherwise inherit from the source checkpoint are all explicit (`adam_beta2` is the one
+    the D7 test config leaves out), 400 steps counted from 1."""
+    cfg = launch_config(run_dir, train_steps=400, adam_beta2=0.998)
+    cfg["training"].update(training)
+    return cfg
+
+
 def saved_model_section(model: dict[str, Any]) -> dict[str, Any]:
     """The `model` section Eole saves into `config.json` for the `model` section `model`
     of a config (as `launch_config` writes it): the real layout with the sizes the config
@@ -124,6 +133,9 @@ class FakeEole:
     scripts: list[Script] = field(default_factory=list)
     vocabulary_error: BaseException | None = None
     writes_vocabulary: bool = True  # false: `build_vocab` exits 0 and leaves no file
+    # The tokens of the `vocab.json` of every step it saves (as Eole writes the file);
+    # None: the small stub of `step_dirs.make_step_dir`.
+    saved_vocabulary: Sequence[str] | None = None
 
     def queue(self, *scripts: Script) -> None:
         """The scripts of the next `eole train` calls, in order."""
@@ -195,7 +207,10 @@ class FakeEole:
             if existing.exists():
                 shutil.rmtree(existing)
             made = step_dirs.make_step_dir(
-                model_path, step, model=saved_model_section(call.config["model"])
+                model_path,
+                step,
+                model=saved_model_section(call.config["model"]),
+                vocab_tokens=self.saved_vocabulary,
             )
             if step in script.cut:
                 step_dirs.truncate(made, step_dirs.WEIGHTS_FILE, 10)
@@ -214,9 +229,14 @@ class Training:
 
 def simulate_training(cfg: dict[str, Any], script: Script) -> Training:
     """The log and the saved steps of an `eole train` of `script` on the config `cfg`
-    (resuming from its `training.train_from` when it has one)."""
+    (resuming from its `training.train_from` when it has one; with `reset_optim: all` it
+    starts a new count at step 1, as Eole does when it continues another run)."""
     training = cfg["training"]
-    start = _step_of(training.get("train_from"))
+    start = (
+        0
+        if training.get("reset_optim") == "all"
+        else _step_of(training.get("train_from"))
+    )
     end = script.early_stop_at or script.to_step or training["train_steps"]
     saves = _saves(start, end, script, cfg)
     model_path = Path(training["model_path"])

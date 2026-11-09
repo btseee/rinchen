@@ -1801,6 +1801,434 @@ def test_merged_config_passes_the_resume_flag_on_and_defaults_to_no_resume(
     assert cfg["training"]["train_from"] == f"{RUN_CKPT}/step_500"
 
 
+# ---- continues: the config of the first attempt of a continuation ---------------------
+#
+# A continuation trains a new run on from one of our own checkpoints, which is the one place
+# `train_from` and `reset_optim` may appear besides the resume config. The launcher renders
+# that attempt's config and says which directory it continues; the validator accepts the two
+# keys only in exactly that form.
+
+SOURCE = "/runs/teacher/ckpt/step_200"
+
+
+def continuing_config(
+    train_from: object = SOURCE, reset_optim: object = "all"
+) -> dict[str, Any]:
+    cfg = make_config()
+    if train_from is not DROP:
+        cfg["training"]["train_from"] = train_from
+    if reset_optim is not DROP:
+        cfg["training"]["reset_optim"] = reset_optim
+    return cfg
+
+
+def continuation_message(cfg: object, source: object = SOURCE) -> str:
+    with pytest.raises(ConfigError) as raised:
+        validate_train_config(cfg, continues=source)  # type: ignore[arg-type]
+    return str(raised.value)
+
+
+def test_a_continuation_config_names_the_source_and_resets_the_optimizer() -> None:
+    assert validate_train_config(continuing_config(), continues=SOURCE) is None
+
+
+def test_the_source_may_be_a_path_object() -> None:
+    assert validate_train_config(continuing_config(), continues=Path(SOURCE)) is None
+
+
+@pytest.mark.parametrize(
+    "train_from",
+    [
+        "/runs/teacher/ckpt/step_200/",
+        "/runs//teacher/ckpt/step_200",
+        "/runs/teacher/./ckpt/step_200",
+    ],
+)
+def test_the_source_is_compared_as_a_normalised_path(train_from: str) -> None:
+    assert (
+        validate_train_config(continuing_config(train_from), continues=SOURCE) is None
+    )
+
+
+def test_the_source_need_not_lie_in_the_model_path() -> None:
+    cfg = continuing_config()
+    assert cfg["training"]["model_path"] == "run/ckpt"
+
+    assert validate_train_config(cfg, continues=SOURCE) is None
+
+
+def test_an_averaged_directory_is_a_source_like_any_other() -> None:
+    source = "/runs/teacher/averaged"
+
+    assert validate_train_config(continuing_config(source), continues=source) is None
+
+
+def test_a_continuation_config_may_hold_neither_key() -> None:
+    cfg = continuing_config(DROP, DROP)
+
+    assert validate_train_config(cfg, continues=SOURCE) is None
+
+
+@pytest.mark.parametrize(
+    "train_from",
+    ["/runs/other/ckpt/step_200", "/runs/teacher/ckpt/step_100", "run/ckpt/step_5", ""],
+)
+def test_a_train_from_that_is_not_the_source_is_refused(train_from: str) -> None:
+    message = continuation_message(continuing_config(train_from))
+
+    assert message.startswith(
+        f"{PREFIX}training.train_from: must be the continuation source '{SOURCE}'"
+    )
+    assert repr(train_from) in message
+
+
+def test_a_train_from_that_is_not_text_is_refused() -> None:
+    message = continuation_message(continuing_config(5))
+
+    assert message == f"{PREFIX}training.train_from: must be a string, got int"
+
+
+def test_the_source_that_is_not_the_one_asked_for_is_refused_the_other_way_round() -> (
+    None
+):
+    message = continuation_message(continuing_config(), source="/runs/other/step_9")
+
+    assert "'/runs/other/step_9'" in message
+
+
+@pytest.mark.parametrize(
+    "train_from",
+    ["/runs/teacher/ckpt/../ckpt/step_200", "/runs/teacher/../teacher/ckpt/step_200"],
+)
+def test_a_dotdot_component_is_refused_even_when_it_normalises_to_the_source(
+    train_from: str,
+) -> None:
+    message = continuation_message(continuing_config(train_from))
+
+    assert message.startswith(f"{PREFIX}training.train_from: holds a '..' component")
+
+
+@pytest.mark.parametrize("char", ["[", "]", "*", "?"])
+def test_a_glob_character_in_the_source_is_refused(char: str) -> None:
+    source = f"/runs/teacher{char}/ckpt/step_200"
+
+    message = continuation_message(continuing_config(source), source=source)
+
+    assert message.startswith(
+        f"{PREFIX}training.train_from: holds {char!r}, which Eole reads as a glob"
+    )
+
+
+def test_a_dollar_sign_in_the_source_is_refused_as_in_every_string() -> None:
+    source = "/runs/$HOME/ckpt/step_200"
+
+    message = continuation_message(continuing_config(source), source=source)
+
+    assert message.startswith(f"{PREFIX}training.train_from: holds '$'")
+
+
+@pytest.mark.parametrize(
+    "reset_optim",
+    [
+        "none",
+        "states",
+        "keep_states",
+        "All",
+        "ALL",
+        " all",
+        "all ",
+        "",
+        True,
+        1,
+        None,
+        ["all"],
+    ],
+)
+def test_reset_optim_must_be_exactly_the_text_all(reset_optim: object) -> None:
+    message = continuation_message(continuing_config(SOURCE, reset_optim))
+
+    assert message.startswith(f"{PREFIX}training.reset_optim: must be 'all', got ")
+    assert repr(reset_optim) in message
+
+
+def test_a_source_without_reset_optim_would_inherit_the_sources_optimizer() -> None:
+    message = continuation_message(continuing_config(SOURCE, DROP))
+
+    assert message.startswith(f"{PREFIX}training.reset_optim: must be 'all'")
+    assert "but it is missing" in message
+
+
+def test_reset_optim_without_a_source_means_nothing_and_is_refused() -> None:
+    message = continuation_message(continuing_config(DROP, "all"))
+
+    assert message.startswith(f"{PREFIX}training.train_from: is missing")
+
+
+@pytest.mark.parametrize("key", ["update_vocab", "keep_states", "states", "none"])
+def test_no_other_key_that_changes_how_a_checkpoint_is_loaded_is_known(
+    key: str,
+) -> None:
+    cfg = continuing_config()
+    cfg["training"][key] = True
+
+    assert continuation_message(cfg) == (
+        f"{PREFIX}training.{key}: unknown key in training"
+    )
+
+
+@pytest.mark.parametrize("key", ["train_from", "reset_optim"])
+def test_the_two_keys_stay_unknown_at_the_top_level_and_in_other_sections(
+    key: str,
+) -> None:
+    top = continuing_config()
+    top[key] = SOURCE
+    model = continuing_config()
+    model["model"][key] = SOURCE
+
+    assert continuation_message(top) == f"{PREFIX}{key}: unknown key in the top level"
+    assert continuation_message(model) == f"{PREFIX}model.{key}: unknown key in model"
+
+
+def test_without_the_flag_both_keys_are_unknown() -> None:
+    cfg = continuing_config()
+
+    assert message_of(cfg) == f"{PREFIX}training.train_from: unknown key in training"
+    del cfg["training"]["train_from"]
+    assert message_of(cfg) == f"{PREFIX}training.reset_optim: unknown key in training"
+
+
+def test_a_resume_config_does_not_know_reset_optim_even_beside_train_from() -> None:
+    cfg = resume_config()
+    cfg["training"]["reset_optim"] = "all"
+
+    with pytest.raises(ConfigError) as raised:
+        validate_train_config(cfg, resumes=True)
+
+    assert str(raised.value) == f"{PREFIX}training.reset_optim: unknown key in training"
+
+
+def test_a_config_cannot_be_a_resume_and_a_continuation_at_once() -> None:
+    with pytest.raises(ValueError, match="resumes.*continues"):
+        validate_train_config(make_config(), resumes=True, continues=SOURCE)
+
+
+def test_the_source_must_be_named() -> None:
+    with pytest.raises(ValueError, match="continues"):
+        validate_train_config(make_config(), continues="")
+
+
+def test_the_continuation_flag_is_keyword_only() -> None:
+    with pytest.raises(TypeError):
+        validate_train_config(make_config(), False, SOURCE)  # type: ignore[misc]
+
+
+def test_a_continuation_config_is_checked_like_any_other_beyond_the_two_keys() -> None:
+    cfg = continuing_config()
+    cfg["model"]["hidden_size"] = 65
+
+    assert continuation_message(cfg).startswith(
+        f"{PREFIX}model.embeddings.word_vec_size: must equal"
+    )
+
+
+def test_validating_a_continuation_config_does_not_change_it() -> None:
+    cfg = continuing_config()
+    before = copy.deepcopy(cfg)
+
+    validate_train_config(cfg, continues=SOURCE)
+
+    assert cfg == before
+
+
+# ---- resumes_continuation: the resume config of a run that began as a continuation ----
+
+
+def continued_resume_config(
+    train_from: object = f"{RUN_CKPT}/step_500", reset_optim: object = "none"
+) -> dict[str, Any]:
+    cfg = resume_config(train_from)
+    if reset_optim is not DROP:
+        cfg["training"]["reset_optim"] = reset_optim
+    return cfg
+
+
+def continued_resume_message(cfg: object) -> str:
+    with pytest.raises(ConfigError) as raised:
+        validate_train_config(cfg, resumes=True, resumes_continuation=True)  # type: ignore[arg-type]
+    return str(raised.value)
+
+
+def test_the_resume_of_a_continuation_states_reset_optim_none() -> None:
+    assert (
+        validate_train_config(
+            continued_resume_config(), resumes=True, resumes_continuation=True
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize(
+    "reset_optim",
+    [
+        "all",
+        "states",
+        "keep_states",
+        "None",
+        "NONE",
+        " none",
+        "",
+        True,
+        0,
+        None,
+        ["none"],
+    ],
+)
+def test_the_resume_of_a_continuation_must_say_exactly_none(
+    reset_optim: object,
+) -> None:
+    message = continued_resume_message(continued_resume_config(reset_optim=reset_optim))
+
+    assert message.startswith(f"{PREFIX}training.reset_optim: must be 'none', got ")
+    assert repr(reset_optim) in message
+    assert "restart at 1" in message
+
+
+def test_the_resume_of_a_continuation_may_not_leave_reset_optim_out() -> None:
+    message = continued_resume_message(continued_resume_config(reset_optim=DROP))
+
+    assert message.startswith(
+        f"{PREFIX}training.reset_optim: must be 'none', but it is missing"
+    )
+
+
+def test_reset_optim_without_a_checkpoint_to_resume_means_nothing() -> None:
+    cfg = continued_resume_config()
+    del cfg["training"]["train_from"]
+
+    assert continued_resume_message(cfg).startswith(
+        f"{PREFIX}training.train_from: is missing"
+    )
+
+
+def test_a_plain_resume_config_still_does_not_know_reset_optim() -> None:
+    cfg = continued_resume_config()
+
+    with pytest.raises(ConfigError) as raised:
+        validate_train_config(cfg, resumes=True)
+
+    assert str(raised.value) == f"{PREFIX}training.reset_optim: unknown key in training"
+
+
+def test_the_resume_of_a_continuation_keeps_the_other_resume_rules() -> None:
+    assert continued_resume_message(
+        continued_resume_config("elsewhere/ckpt/step_500")
+    ).startswith(f"{PREFIX}training.train_from: must be '<training.model_path>/step_")
+
+
+def test_update_vocab_is_not_known_to_the_resume_of_a_continuation() -> None:
+    cfg = continued_resume_config()
+    cfg["training"]["update_vocab"] = True
+
+    assert continued_resume_message(cfg) == (
+        f"{PREFIX}training.update_vocab: unknown key in training"
+    )
+
+
+def test_reset_optim_stays_unknown_at_the_top_level_of_a_continuation_resume() -> None:
+    cfg = continued_resume_config()
+    cfg["reset_optim"] = "none"
+
+    assert (
+        continued_resume_message(cfg)
+        == f"{PREFIX}reset_optim: unknown key in the top level"
+    )
+
+
+def test_resumes_continuation_needs_resumes_and_excludes_continues() -> None:
+    with pytest.raises(ValueError, match="resumes_continuation needs resumes"):
+        validate_train_config(make_config(), resumes_continuation=True)
+    with pytest.raises(ValueError, match="resumes.*continues"):
+        validate_train_config(
+            make_config(), resumes=True, continues=SOURCE, resumes_continuation=True
+        )
+
+
+def continuation_overrides(**training: Any) -> dict[str, Any]:
+    return {
+        **run_overrides(),
+        "training": {
+            "model_path": RUN_CKPT,
+            "train_from": SOURCE,
+            "reset_optim": "all",
+            **training,
+        },
+    }
+
+
+def test_render_refuses_the_two_keys_unless_it_is_told_the_config_continues(
+    tmp_path: Path,
+) -> None:
+    base = write_base(tmp_path)
+    out = tmp_path / "launch" / "train-1.yaml"
+
+    with pytest.raises(ConfigError) as raised:
+        render(base, continuation_overrides(), out)
+
+    assert str(raised.value) == f"{PREFIX}training.train_from: unknown key in training"
+    assert not out.parent.exists()
+
+
+def test_render_writes_the_continuation_config_when_told_the_config_continues(
+    tmp_path: Path,
+) -> None:
+    base = write_base(tmp_path)
+    out = tmp_path / "launch" / "train-1.yaml"
+    before = base.read_bytes()
+
+    assert render(base, continuation_overrides(), out, continues=SOURCE) == out
+
+    written = yaml.safe_load(out.read_text(encoding="utf-8"))
+    assert written["training"]["train_from"] == SOURCE
+    assert written["training"]["reset_optim"] == "all"
+    assert base.read_bytes() == before
+
+
+def test_render_with_the_continuation_flag_refuses_another_source_and_writes_nothing(
+    tmp_path: Path,
+) -> None:
+    base = write_base(tmp_path)
+    out = tmp_path / "launch" / "train-1.yaml"
+
+    with pytest.raises(ConfigError) as raised:
+        render(base, continuation_overrides(reset_optim="none"), out, continues=SOURCE)
+
+    assert str(raised.value).startswith(f"{PREFIX}training.reset_optim: must be 'all'")
+    assert not out.parent.exists()
+
+
+def test_merged_config_passes_the_continuation_flag_on(tmp_path: Path) -> None:
+    base = write_base(tmp_path)
+
+    with pytest.raises(ConfigError, match="train_from: unknown key in training"):
+        merged_config(base, continuation_overrides())
+
+    cfg = merged_config(base, continuation_overrides(), continues=SOURCE)
+    assert cfg["training"]["reset_optim"] == "all"
+
+
+def test_the_flags_of_merged_config_and_render_exclude_each_other(
+    tmp_path: Path,
+) -> None:
+    base = write_base(tmp_path)
+
+    with pytest.raises(ValueError, match="resumes.*continues"):
+        merged_config(base, run_overrides(), resumes=True, continues=SOURCE)
+    with pytest.raises(ValueError, match="resumes.*continues"):
+        render(
+            base, run_overrides(), tmp_path / "o.yaml", resumes=True, continues=SOURCE
+        )
+
+
 # ---- merge: the cases -----------------------------------------------------------
 
 

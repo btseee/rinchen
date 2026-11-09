@@ -38,11 +38,14 @@ def render_command_sh(
     cuda_visible_devices: str | None,
     attempt: int,
     resumes_from: int | None,
+    continues: Path | None = None,
 ) -> str:
     """The text of `command.sh` for attempt `attempt` of the run in `run_dir`.
 
     `config` is the rendered config of that attempt (it holds `train_from` when
-    `resumes_from`, the step it resumes from, is set), `eole` the `eole` command and
+    `resumes_from`, the step it resumes from, is set, or `continues`, the checkpoint of
+    ours the first attempt of a continuation starts from: an attempt does one or the
+    other), `eole` the `eole` command and
     `src_vocab` the vocabulary file: when it is missing the script builds it first.
     The output of `eole train` is appended to `attempt_log` and that of `eole
     build_vocab` to `build_vocab_log` (`mkdir -p` makes their directory first); the
@@ -53,10 +56,13 @@ def render_command_sh(
     environment the script runs in.
 
     Raises:
-        ValueError: a path (`eole` included) is not absolute, or `threads` is below 1.
+        ValueError: a path (`eole` and `continues` included) is not absolute, `threads`
+            is below 1, or both `resumes_from` and `continues` are given.
     """
     if threads < 1:
         raise ValueError(f"threads must be at least 1, got {threads}")
+    if resumes_from is not None and continues is not None:
+        raise ValueError("an attempt either resumes or continues, not both")
     for name, path in (
         ("run_dir", run_dir),
         ("working_directory", working_directory),
@@ -65,6 +71,7 @@ def render_command_sh(
         ("src_vocab", src_vocab),
         ("attempt_log", attempt_log),
         ("build_vocab_log", build_vocab_log),
+        *(() if continues is None else (("continues", continues),)),
     ):
         if not path.is_absolute():
             raise ValueError(f"{name} must be an absolute path, got {str(path)!r}")
@@ -79,7 +86,7 @@ def render_command_sh(
             f"# Written by `rinchen train launch` for attempt {attempt} of the run in "
             f"{json.dumps(str(run_dir))}."
         ),
-        _origin(resumes_from),
+        _origin(resumes_from, continues),
         "# What it resumes from is fixed at that moment: write it again with",
         "# `rinchen train launch --write-only` after the run changed.",
         (
@@ -119,7 +126,13 @@ def render_command_sh(
     return "\n".join(lines) + "\n"
 
 
-def _origin(resumes_from: int | None) -> str:
+def _origin(resumes_from: int | None, continues: Path | None) -> str:
+    if continues is not None:
+        # json.dumps, as for the run directory: a line break stays inside the comment.
+        return (
+            f"# It continues {json.dumps(str(continues))} (training.train_from of the "
+            "config it names, with reset_optim: all: its weights, a fresh optimizer)."
+        )
     if resumes_from is None:
         return (
             "# It starts the run from scratch: no checkpoint of it was complete when "

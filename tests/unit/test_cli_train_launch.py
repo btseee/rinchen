@@ -14,6 +14,7 @@ import hashlib
 import importlib.metadata
 import json
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -31,6 +32,7 @@ from rinchen.cli.main import app
 from rinchen.errors import ConfigError, DataError, RinchenError, UpstreamError
 from rinchen.manifest import store
 from rinchen.manifest.model import Manifest
+from tests.support import step_dirs
 from tests.support.fake_launch import Script
 from tests.support.launch_cli import (
     LOCK_HOLDER,
@@ -1168,6 +1170,7 @@ def test_the_command_passes_its_options_to_the_launcher(
         "timeout": 9.5,
         "cuda_visible_devices": "4,5,6,7",
         "write_only": True,
+        "continue_from": None,
     }
     # A write-only launch begins no commit: it writes no manifest.
     assert kwargs["before_writing"] is None
@@ -1206,3 +1209,486 @@ def test_relative_paths_work_and_a_rerun_from_the_same_place_changes_nothing(
     again = run_ok(arguments)
     assert again.stdout.splitlines()[0] == "status: already_complete"
     assert snapshot(workspace.run_dir) == before
+
+
+# --- --continue-from: a new run that starts from one of our own checkpoints -----------------
+#
+# The source is a finished run or an averaged model whose manifest vouches for its files:
+# fabricated with a real manifest (`tests.support.step_dirs`) for most tests, and written by
+# the real `launch` and `average` commands (behind the fake Eole) for the round trip.
+
+CONTINUATION = {"adam_beta2": 0.998, "train_steps": 400}
+
+
+@pytest.fixture
+def new_run(tmp_path: Path) -> LaunchWorkspace:
+    return make_launch_workspace(tmp_path / "new", **CONTINUATION)
+
+
+@pytest.fixture
+def new_fake(
+    monkeypatch: pytest.MonkeyPatch, new_run: LaunchWorkspace
+) -> LinkingFakeEole:
+    stand_in = install_fake_eole(monkeypatch, new_run)
+    stand_in.saved_vocabulary = step_dirs.SOURCE_VOCABULARY
+    return stand_in
+
+
+@pytest.fixture
+def teacher(tmp_path: Path) -> step_dirs.FabricatedRun:
+    return step_dirs.make_finished_run(tmp_path / "teacher")
+
+
+def continue_args(workspace: LaunchWorkspace, source: Path, *extra: str) -> list[str]:
+    return workspace.args("--continue-from", str(source), *extra)
+
+
+def test_launch_help_names_the_continue_from_option() -> None:
+    result = runner.invoke(app, ["train", "launch", "--help"])
+
+    assert result.exit_code == 0
+    assert "--continue-from" in result.stdout
+
+
+def test_a_continuation_prints_where_it_continues_from_before_the_status(
+    new_run: LaunchWorkspace,
+    new_fake: LinkingFakeEole,
+    teacher: step_dirs.FabricatedRun,
+) -> None:
+    result = run_ok(continue_args(new_run, teacher.final))
+
+    assert result.stdout.splitlines() == [
+        f"continued from: step {teacher.final}",
+        "status: completed",
+        "steps: 400",
+        "resumed from: none",
+        "attempt: 1",
+        f"checkpoint: {new_run.step_dir(400)}",
+        f"log: {new_run.attempt_log(1)}",
+        f"command.sh: {new_run.command_sh}",
+        f"manifest: {new_run.manifest}",
+    ]
+
+
+def test_an_averaged_source_prints_its_kind(
+    tmp_path: Path, new_run: LaunchWorkspace, new_fake: LinkingFakeEole
+) -> None:
+    averaged = step_dirs.make_averaged_dir(tmp_path / "averaged")
+
+    result = run_ok(continue_args(new_run, averaged))
+
+    assert result.stdout.splitlines()[0] == f"continued from: averaged {averaged}"
+
+
+def test_a_plain_launch_prints_no_continued_from_line_and_records_no_source(
+    workspace: LaunchWorkspace, fake: LinkingFakeEole
+) -> None:
+    lines = stdout_of(workspace)
+
+    assert not any(line.startswith("continued from") for line in lines)
+    manifest = manifest_of(workspace)
+    assert [item.path for item in manifest.inputs] == [str(workspace.config)]
+    assert not any(key.startswith("continued_from") for key in manifest.metrics)
+
+
+def test_the_manifest_of_a_continuation_lists_the_source_files_as_inputs(
+    new_run: LaunchWorkspace,
+    new_fake: LinkingFakeEole,
+    teacher: step_dirs.FabricatedRun,
+) -> None:
+    run_ok(continue_args(new_run, teacher.final))
+
+    manifest = manifest_of(new_run)
+    assert manifest.stage == "train_launch"
+    assert manifest.status == {"launch": "ok"}
+    assert [(item.path, item.sha256) for item in manifest.inputs] == [
+        (str(new_run.config), sha256(new_run.config)),
+        *(
+            (str(teacher.final / name), sha256(teacher.final / name))
+            for name in STEP_FILES
+        ),
+        (str(teacher.manifest), sha256(teacher.manifest)),
+    ]
+    assert manifest.config_sha256 == sha256(new_run.config)
+    assert [item.path for item in manifest.outputs] == [
+        *(str(new_run.step_dir(400) / name) for name in STEP_FILES),
+        str(new_run.record),
+        str(new_run.command_sh),
+    ]
+
+
+def test_the_manifest_of_a_continuation_names_the_source_in_its_metrics(
+    new_run: LaunchWorkspace,
+    new_fake: LinkingFakeEole,
+    teacher: step_dirs.FabricatedRun,
+) -> None:
+    run_ok(continue_args(new_run, teacher.final))
+
+    metrics = manifest_of(new_run).metrics
+    assert metrics["continued_from.kind"] == 0.0
+    assert metrics["continued_from.step"] == 200.0
+    assert metrics["steps"] == 400.0
+    assert metrics["attempt"] == 1.0
+    assert "resumed_from" not in metrics
+
+
+def test_the_manifest_of_an_averaged_continuation_has_no_step_and_no_optimizer(
+    tmp_path: Path, new_run: LaunchWorkspace, new_fake: LinkingFakeEole
+) -> None:
+    averaged = step_dirs.make_averaged_dir(tmp_path / "averaged")
+
+    run_ok(continue_args(new_run, averaged))
+
+    manifest = manifest_of(new_run)
+    assert [(item.path, item.sha256) for item in manifest.inputs[1:]] == [
+        (str(averaged / name), sha256(averaged / name))
+        for name in (
+            "model.00.safetensors",
+            "config.json",
+            "vocab.json",
+            "manifest.json",
+        )
+    ]
+    assert manifest.metrics["continued_from.kind"] == 1.0
+    assert "continued_from.step" not in manifest.metrics
+
+
+def test_the_source_files_are_listed_by_their_hashes_not_read_again(
+    new_run: LaunchWorkspace,
+    new_fake: LinkingFakeEole,
+    teacher: step_dirs.FabricatedRun,
+) -> None:
+    run_ok(continue_args(new_run, teacher.final))
+
+    entries = manifest_of(new_run).inputs[1:]
+    assert all(item.bytes is None for item in entries)
+
+
+def test_a_continuation_never_writes_into_its_source(
+    new_run: LaunchWorkspace,
+    new_fake: LinkingFakeEole,
+    teacher: step_dirs.FabricatedRun,
+) -> None:
+    before = step_dirs.tree_digest(teacher.run_dir)
+    new_fake.queue(crash(120))
+    assert runner.invoke(app, continue_args(new_run, teacher.final)).exit_code == 4
+
+    run_ok(continue_args(new_run, teacher.final))
+
+    assert step_dirs.tree_digest(teacher.run_dir) == before
+
+
+def test_a_finished_continuation_changes_nothing_on_disk_when_launched_again(
+    new_run: LaunchWorkspace,
+    new_fake: LinkingFakeEole,
+    teacher: step_dirs.FabricatedRun,
+) -> None:
+    first = run_ok(continue_args(new_run, teacher.final))
+    before = snapshot(new_run.run_dir)
+
+    again = run_ok(continue_args(new_run, teacher.final))
+
+    assert again.stdout.splitlines()[:2] == [
+        f"continued from: step {teacher.final}",
+        "status: already_complete",
+    ]
+    assert first.stdout.splitlines()[0] == again.stdout.splitlines()[0]
+    assert snapshot(new_run.run_dir) == before
+
+
+def test_a_finished_continuation_whose_source_is_gone_still_changes_nothing(
+    new_run: LaunchWorkspace,
+    new_fake: LinkingFakeEole,
+    teacher: step_dirs.FabricatedRun,
+) -> None:
+    run_ok(continue_args(new_run, teacher.final))
+    before = snapshot(new_run.run_dir)
+    shutil.rmtree(teacher.run_dir)
+
+    again = run_ok(continue_args(new_run, teacher.final))
+
+    assert again.stdout.splitlines()[1] == "status: already_complete"
+    assert snapshot(new_run.run_dir) == before
+
+
+def test_a_finished_continuation_without_a_manifest_gets_the_same_one_back(
+    new_run: LaunchWorkspace,
+    new_fake: LinkingFakeEole,
+    teacher: step_dirs.FabricatedRun,
+) -> None:
+    run_ok(continue_args(new_run, teacher.final))
+    first = manifest_of(new_run)
+    new_run.manifest.unlink()
+    shutil.rmtree(teacher.run_dir)
+
+    run_ok(continue_args(new_run, teacher.final))
+
+    again = manifest_of(new_run)
+    assert again.inputs == first.inputs
+    assert again.metrics == first.metrics
+
+
+def test_an_interrupted_continuation_resumes_and_records_both_facts(
+    new_run: LaunchWorkspace,
+    new_fake: LinkingFakeEole,
+    teacher: step_dirs.FabricatedRun,
+) -> None:
+    new_fake.queue(crash(120))
+    assert runner.invoke(app, continue_args(new_run, teacher.final)).exit_code == 4
+    assert not new_run.manifest.exists()
+
+    result = run_ok(continue_args(new_run, teacher.final))
+
+    assert result.stdout.splitlines()[:4] == [
+        f"continued from: step {teacher.final}",
+        "status: completed",
+        "steps: 400",
+        "resumed from: 100",
+    ]
+    metrics = manifest_of(new_run).metrics
+    assert metrics["resumed_from"] == 100.0
+    assert metrics["continued_from.step"] == 200.0
+    resumed = yaml.safe_load(
+        new_run.run_dir.joinpath("launch", "train-2.yaml").read_text()
+    )
+    assert resumed["training"]["train_from"] == str(new_run.step_dir(100))
+    assert resumed["training"]["reset_optim"] == "none"
+
+
+def test_write_only_prints_the_path_of_command_sh_and_writes_no_manifest(
+    new_run: LaunchWorkspace,
+    new_fake: LinkingFakeEole,
+    teacher: step_dirs.FabricatedRun,
+) -> None:
+    result = run_ok(continue_args(new_run, teacher.final, "--write-only"))
+
+    assert result.stdout.splitlines() == [str(new_run.command_sh)]
+    assert not new_run.manifest.exists()
+    assert new_fake.calls == []
+    record = json.loads(new_run.record.read_text(encoding="utf-8"))
+    assert record["schema_version"] == 2
+    assert record["continued_from"]["path"] == str(teacher.final)
+
+
+@pytest.mark.parametrize("flag", [[], ["--write-only"]])
+def test_a_source_the_manifest_does_not_vouch_for_exits_2_and_writes_nothing_of_the_run(
+    new_run: LaunchWorkspace,
+    new_fake: LinkingFakeEole,
+    teacher: step_dirs.FabricatedRun,
+    flag: list[str],
+) -> None:
+    step_dirs.flip_one_byte(teacher.final / "model.00.safetensors")
+
+    result = runner.invoke(app, continue_args(new_run, teacher.final, *flag))
+
+    assert_one_error(result, 2, "cannot continue from")
+    assert "model.00.safetensors" in result.stderr
+    assert new_fake.calls == []
+    assert not new_run.manifest.exists()
+    assert not new_run.record.exists()
+
+
+def test_a_source_without_a_manifest_exits_2(
+    tmp_path: Path, new_run: LaunchWorkspace, new_fake: LinkingFakeEole
+) -> None:
+    run = step_dirs.make_finished_run(tmp_path / "bare", manifest=False)
+
+    result = runner.invoke(app, continue_args(new_run, run.final))
+
+    assert_one_error(result, 2, "cannot continue from")
+    assert "no manifest" in result.stderr
+
+
+def test_a_source_whose_manifest_cannot_be_read_exits_3(
+    new_run: LaunchWorkspace,
+    new_fake: LinkingFakeEole,
+    teacher: step_dirs.FabricatedRun,
+) -> None:
+    teacher.manifest.write_text("{", encoding="utf-8")
+
+    result = runner.invoke(app, continue_args(new_run, teacher.final))
+
+    assert_one_error(result, 3, "cannot continue from")
+    assert not new_run.record.exists()
+
+
+def test_a_source_that_is_not_there_exits_2(
+    tmp_path: Path, new_run: LaunchWorkspace, new_fake: LinkingFakeEole
+) -> None:
+    result = runner.invoke(app, continue_args(new_run, tmp_path / "nowhere"))
+
+    assert_one_error(result, 2, "cannot continue from")
+    assert "does not exist" in result.stderr
+
+
+def test_a_source_inside_the_new_run_exits_2_and_creates_nothing(
+    new_run: LaunchWorkspace, new_fake: LinkingFakeEole
+) -> None:
+    inside = step_dirs.make_finished_run(new_run.run_dir / "old")
+
+    result = runner.invoke(app, continue_args(new_run, inside.final))
+
+    assert_one_error(result, 2, "")
+    assert "or inside it" in result.stderr
+    assert not (new_run.run_dir / "launch").exists()
+
+
+def test_the_new_runs_own_checkpoint_directory_exits_2(
+    new_run: LaunchWorkspace, new_fake: LinkingFakeEole
+) -> None:
+    step_dirs.make_step_dir(new_run.model_path, 200)
+
+    result = runner.invoke(app, continue_args(new_run, new_run.model_path))
+
+    assert_one_error(result, 2, "")
+    assert "or inside it" in result.stderr
+
+
+def test_a_source_path_with_a_dollar_sign_exits_2_before_anything_is_created(
+    tmp_path: Path, new_run: LaunchWorkspace, new_fake: LinkingFakeEole
+) -> None:
+    result = runner.invoke(app, continue_args(new_run, tmp_path / "$HOME" / "step_5"))
+
+    assert_one_error(result, 2, "the continuation source holds '$'")
+    assert not new_run.run_dir.exists()
+
+
+def test_a_continuation_into_a_run_that_began_from_random_init_exits_2(
+    new_run: LaunchWorkspace,
+    new_fake: LinkingFakeEole,
+    teacher: step_dirs.FabricatedRun,
+) -> None:
+    run_ok(new_run.args())
+    before = snapshot(new_run.run_dir)
+
+    result = runner.invoke(app, continue_args(new_run, teacher.final))
+
+    assert_one_error(result, 2, "")
+    assert "was not started as a continuation" in result.stderr
+    assert snapshot(new_run.run_dir) == before
+
+
+def test_a_plain_launch_of_a_continuation_exits_2_naming_the_source(
+    new_run: LaunchWorkspace,
+    new_fake: LinkingFakeEole,
+    teacher: step_dirs.FabricatedRun,
+) -> None:
+    run_ok(continue_args(new_run, teacher.final))
+
+    result = runner.invoke(app, new_run.args())
+
+    assert_one_error(result, 2, "the config is not the one this run was started with")
+    assert str(teacher.final) in result.stderr
+
+
+def test_the_command_passes_the_source_to_the_launcher(
+    new_run: LaunchWorkspace,
+    teacher: step_dirs.FabricatedRun,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, Any]] = []
+
+    def recording(*args: Any, **kwargs: Any) -> Any:
+        calls.append(kwargs)
+        raise ConfigError("stop here")
+
+    monkeypatch.setattr(train_runs, "launch_run", recording)
+
+    runner.invoke(app, continue_args(new_run, teacher.final))
+
+    (kwargs,) = calls
+    assert kwargs["continue_from"] == teacher.final
+
+
+# --- the commands' own manifests are what the continuation reads ------------------------------
+
+
+@pytest.fixture
+def real_teacher(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> LaunchWorkspace:
+    """A teacher run by the real `launch` command (behind the fake Eole, which writes the
+    vocabulary Eole writes), and the average of its last two steps by the real `average`."""
+    teacher = make_launch_workspace(tmp_path / "real")
+    fake = install_fake_eole(monkeypatch, teacher)
+    fake.saved_vocabulary = step_dirs.SOURCE_VOCABULARY
+    run_ok(teacher.args())
+    run_ok(
+        [
+            "train",
+            "average",
+            "--checkpoint-dir",
+            str(teacher.model_path),
+            "--last",
+            "2",
+        ]
+    )
+    return teacher
+
+
+def test_the_final_step_of_a_run_the_launch_command_finished_is_a_source(
+    real_teacher: LaunchWorkspace,
+    new_run: LaunchWorkspace,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = install_fake_eole(monkeypatch, new_run)
+    fake.saved_vocabulary = step_dirs.SOURCE_VOCABULARY
+    source = real_teacher.step_dir(200)
+
+    result = run_ok(continue_args(new_run, source))
+
+    assert result.stdout.splitlines()[:2] == [
+        f"continued from: step {source}",
+        "status: completed",
+    ]
+    manifest = manifest_of(new_run)
+    assert manifest.inputs[-1].path == str(real_teacher.manifest)
+    assert manifest.metrics["continued_from.step"] == 200.0
+
+
+def test_the_model_the_average_command_wrote_is_a_source(
+    real_teacher: LaunchWorkspace,
+    new_run: LaunchWorkspace,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = install_fake_eole(monkeypatch, new_run)
+    fake.saved_vocabulary = step_dirs.SOURCE_VOCABULARY
+    averaged = real_teacher.run_dir / "averaged"
+    assert (averaged / "manifest.json").is_file()
+
+    result = run_ok(continue_args(new_run, averaged))
+
+    assert result.stdout.splitlines()[0] == f"continued from: averaged {averaged}"
+    assert manifest_of(new_run).metrics["continued_from.kind"] == 1.0
+
+
+def test_a_step_that_the_launch_command_did_not_finish_with_is_refused(
+    real_teacher: LaunchWorkspace,
+    new_run: LaunchWorkspace,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = install_fake_eole(monkeypatch, new_run)
+    fake.saved_vocabulary = step_dirs.SOURCE_VOCABULARY
+
+    result = runner.invoke(app, continue_args(new_run, real_teacher.step_dir(150)))
+
+    assert_one_error(result, 2, "cannot continue from")
+    assert "final step" in result.stderr
+
+
+def test_a_chain_of_continuations_is_accepted(
+    tmp_path: Path,
+    real_teacher: LaunchWorkspace,
+    new_run: LaunchWorkspace,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = install_fake_eole(monkeypatch, new_run)
+    fake.saved_vocabulary = step_dirs.SOURCE_VOCABULARY
+    run_ok(continue_args(new_run, real_teacher.step_dir(200)))
+    third = make_launch_workspace(tmp_path / "third", **CONTINUATION)
+    again = install_fake_eole(monkeypatch, third)
+    again.saved_vocabulary = step_dirs.SOURCE_VOCABULARY
+
+    result = run_ok(continue_args(third, new_run.step_dir(400)))
+
+    assert (
+        result.stdout.splitlines()[0] == f"continued from: step {new_run.step_dir(400)}"
+    )

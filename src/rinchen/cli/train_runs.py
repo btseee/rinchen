@@ -6,11 +6,13 @@ are registered on the `train` group by `rinchen.cli.train`.
 launch
 ------
 `rinchen train launch --config C --run-dir R [--world-size N] [--gpu-ranks 0,1,2,3]
-[--threads 2] [--timeout S] [--cuda-visible-devices 0,1,2,3] [--write-only]`
+[--threads 2] [--timeout S] [--cuda-visible-devices 0,1,2,3] [--write-only]
+[--continue-from SOURCE]`
 
 Without `--write-only` it starts or resumes the run (see `rinchen.train.launch`) and, when
 it succeeded, prints one fact per line, always in this order:
 
+    continued from: <step | averaged> <SOURCE>    (only for a continuation, see below)
     status: completed | early_stopped | already_complete
     steps: <the newest complete step>
     resumed from: <step> | none
@@ -25,12 +27,25 @@ With `--write-only` it prints the path of `command.sh` and nothing else, runs no
 writes no manifest (an existing one is left as it is). A run that is already finished has
 nothing to write: the path is not printed, a note goes to standard error, the exit code is 0.
 
+`--continue-from SOURCE` starts a NEW run from one of our own checkpoints (D9): SOURCE is the
+final `step_<N>` directory of a run that `rinchen train launch` finished, or a directory that
+`rinchen train average` wrote, in either case with the manifest the command wrote, which must
+vouch for the files as they are now. Anything else is refused (exit 2; exit 3 for a manifest
+or run record that cannot be read), and nothing but the lock file of the run is written. See
+`rinchen.train.continuation` for the rules and `rinchen.train.launch` for the attempts. The
+same option must be given again to resume, extend or write the files of that run; a run found
+finished needs none of the source's files.
+
 The manifest (stage `train_launch`) describes the state of the run directory when the
-command ends, and comes last. Inputs: the config, hashed before it is read. Outputs: the
+command ends, and comes last. Inputs: the config, hashed before it is read; for a
+continuation also the files of the source with the SHA-256 the verification took (the
+weights, `optimizer.pt` for a step, `config.json`, `vocab.json`) and its manifest. Outputs: the
 four files of the final step directory (`model.00.safetensors`, `optimizer.pt`,
 `config.json`, `vocab.json`; never the links Eole puts in the checkpoint directory),
 `launch.json` and `command.sh`. Metrics: `steps`, `attempt`, `incomplete_skipped`,
-`early_stopped` (0 or 1), `resumed_from` (when the attempt resumed), and from the log of
+`early_stopped` (0 or 1), `resumed_from` (when the attempt resumed), for a continuation
+`continued_from.kind` (0 for a step, 1 for an averaged model) and `continued_from.step` (a
+step source only), and from the log of
 the last attempt `xent_first`, `xent_last`, `valid_ppl_first`, `valid_ppl_last` (when it
 has them; they start at the attempt's own first report, so a resumed attempt's curve starts
 at the resume). Its seed is the config's `seed`, or -1 (Eole's own default: none).
@@ -100,6 +115,11 @@ from rinchen.train.checkpoints import (
     step_directories,
     step_of,
 )
+from rinchen.train.continuation import (
+    AVERAGE_STAGE,
+    LAUNCH_STAGE,
+    SourceProvenance,
+)
 from rinchen.train.curves import parse_train_log
 from rinchen.train.eole_cfg import read_config
 from rinchen.train.launch import (
@@ -110,8 +130,8 @@ from rinchen.train.launch import (
 from rinchen.train.launch import launch as launch_run
 from rinchen.utils.integers import is_strict_int
 
-_LAUNCH_STAGE = "train_launch"
-_AVERAGE_STAGE = "train_average"
+_LAUNCH_STAGE = LAUNCH_STAGE
+_AVERAGE_STAGE = AVERAGE_STAGE
 _DEFAULT_THREADS = 2
 _LAUNCH_PACKAGES = ("eole", "torch", "safetensors", "sentencepiece")
 _AVERAGE_PACKAGES = ("safetensors", "numpy")
@@ -120,6 +140,8 @@ _AVERAGE_OUTPUTS = "averaged model"
 _CONFIG = "Eole config"
 _STEP_FILES = (WEIGHTS_FILE, OPTIMIZER_FILE, CONFIG_FILE, VOCAB_FILE)
 _UNSEEDED = -1  # Eole's own default: no seed
+# A metric is a number: the kind of source a continuation started from.
+_SOURCE_KIND_METRIC = {"step": 0.0, "averaged": 1.0}
 _MIN_AVERAGED = 2
 # A GPU number has a handful of digits; this stops a pasted blob from reaching `int`.
 _MAX_RANK_DIGITS = 9
@@ -193,13 +215,26 @@ def launch_command(
             ),
         ),
     ] = False,
+    continue_from: Annotated[
+        Path | None,
+        typer.Option(
+            "--continue-from",
+            help=(
+                "Start the run from a checkpoint of ours: the final step_<N> directory "
+                "of a finished run, or a directory `train average` wrote, each with the "
+                "manifest its command wrote (checked against the files). The weights "
+                "only; the optimizer starts fresh and the config must state its options."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Start or resume the Eole training of a config in a run directory.
 
     A run resumes after any interruption from its newest complete checkpoint; the
     config may change only its train_steps. A finished run is not run again. Only one
     launch at a time works in a run directory. Eole runs on the CPU unless the config
-    (or --world-size and --gpu-ranks) says GPUs."""
+    (or --world-size and --gpu-ranks) says GPUs. With --continue-from the run is a new
+    one that continues a checkpoint of ours (give the option again to resume it)."""
     with rinchen_errors_as_exit_codes():
         require_usable_timeout(timeout)
         ranks = parse_gpu_ranks(gpu_ranks)
@@ -220,6 +255,7 @@ def launch_command(
                 write_only=write_only,
                 cuda_visible_devices=cuda_visible_devices,
                 before_writing=None if write_only else _drop_the_manifest(run_dir),
+                continue_from=continue_from,
             )
             if write_only:
                 _say_what_was_written(result)
@@ -361,22 +397,36 @@ def _record_the_run(
     """The manifest of the run after the launch: written, or kept when nothing ran and it
     still vouches for the same files."""
     outputs = _launch_outputs(run_dir, result)
+    inputs = [config_file, *_source_inputs(result.continued_from)]
     ran = result.log is not None
     if not ran:
         existing = _readable_manifest(run_dir)
-        if existing is not None and _vouches_for(existing, config_file, outputs):
+        if existing is not None and _vouches_for(
+            existing, config_file, inputs, outputs
+        ):
             return store.manifest_path(run_dir)
     return write_manifest(
         run_dir,
         stage=_LAUNCH_STAGE,
         config_sha256=config_file.sha256,
         seed=seed,
-        inputs=[config_file],
+        inputs=inputs,
         outputs=outputs,
         metrics=_launch_metrics(run_dir, result),
         packages=_LAUNCH_PACKAGES,
         status={"launch": "ok"},
     )
+
+
+def _source_inputs(source: SourceProvenance | None) -> list[ManifestFile]:
+    """The files a continuation started from, with the digests the verification took
+    (they are not hashed again, and no size is recorded: the source may be gone when a
+    finished run's manifest is written again)."""
+    if source is None:
+        return []
+    return [
+        ManifestFile(path=str(path), sha256=digest) for path, digest in source.files()
+    ]
 
 
 def _launch_outputs(run_dir: Path, result: LaunchResult) -> list[ManifestFile]:
@@ -400,12 +450,15 @@ def _readable_manifest(run_dir: Path) -> Manifest | None:
 
 
 def _vouches_for(
-    manifest: Manifest, config_file: ManifestFile, outputs: list[ManifestFile]
+    manifest: Manifest,
+    config_file: ManifestFile,
+    inputs: list[ManifestFile],
+    outputs: list[ManifestFile],
 ) -> bool:
     return (
         manifest.stage == _LAUNCH_STAGE
         and manifest.config_sha256 == config_file.sha256
-        and manifest.inputs == [config_file]
+        and manifest.inputs == inputs
         and manifest.outputs == outputs
     )
 
@@ -426,6 +479,11 @@ def _launch_metrics(run_dir: Path, result: LaunchResult) -> dict[str, float]:
     }
     if result.resumed_from is not None:
         metrics["resumed_from"] = float(result.resumed_from)
+    source = result.continued_from
+    if source is not None:
+        metrics["continued_from.kind"] = _SOURCE_KIND_METRIC[source.kind]
+        if source.step is not None:
+            metrics["continued_from.step"] = float(source.step)
     if log is not None:
         curve = parse_train_log(log.read_text(encoding="utf-8", errors="replace"))
         if curve.reports:
@@ -438,7 +496,12 @@ def _launch_metrics(run_dir: Path, result: LaunchResult) -> dict[str, float]:
 
 
 def _launch_facts(result: LaunchResult, manifest_path: Path) -> list[str]:
-    lines = [
+    lines = []
+    if result.continued_from is not None:
+        lines.append(
+            f"continued from: {result.continued_from.kind} {result.continued_from.path}"
+        )
+    lines += [
         f"status: {result.status}",
         f"steps: {result.steps}",
         f"resumed from: {_or_none(result.resumed_from)}",

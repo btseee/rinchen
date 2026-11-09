@@ -422,3 +422,72 @@ def test_eoles_own_schema_accepts_the_resume_key_of_a_resume_config() -> None:
     cfg["training"]["train_from"] = "run/ckpt/step_500"
 
     assert TrainConfig(**cfg).training.train_from == "run/ckpt/step_500"
+
+
+def test_the_two_keys_only_a_continuation_config_may_hold_are_eole_training_fields() -> (
+    None
+):
+    training = {level: cls for level, _, cls in _levels()}["training"]
+
+    assert eole_cfg.CONTINUATION_TRAINING_KEYS == {"train_from", "reset_optim"}
+    assert (
+        keys_eole_dropped(
+            "training (continuation only)",
+            eole_cfg.CONTINUATION_TRAINING_KEYS,
+            training,
+        )
+        == []
+    )
+    assert not eole_cfg.CONTINUATION_TRAINING_KEYS & eole_cfg.TRAINING_KEYS
+    assert eole_cfg.RESUME_TRAINING_KEYS < eole_cfg.CONTINUATION_TRAINING_KEYS
+
+
+def test_the_continuation_keys_leave_out_the_ones_that_adapt_or_crash() -> None:
+    # `update_vocab` remaps the embeddings of a checkpoint to a new vocabulary, and the
+    # `keep_states` value of `reset_optim` crashes Eole 0.6.4 (spike, D9).
+    assert "update_vocab" not in eole_cfg.CONTINUATION_TRAINING_KEYS
+    assert "keep_states" not in eole_cfg.CONTINUATION_TRAINING_KEYS
+    assert all(
+        "update_vocab" not in allowed and "reset_optim" not in allowed
+        for _, allowed, _ in _levels()
+    )
+
+
+def test_eole_still_has_the_reset_optim_value_the_launcher_writes() -> None:
+    import typing
+
+    from eole.config.training import TrainingConfig
+
+    values = set(typing.get_args(TrainingConfig.model_fields["reset_optim"].annotation))
+
+    assert eole_cfg.CONTINUATION_RESET_OPTIM in values
+    assert eole_cfg.CONTINUATION_RESET_OPTIM == "all"
+
+
+def test_eoles_own_schema_accepts_the_two_keys_of_a_continuation_config() -> None:
+    from eole.config.run import TrainConfig
+
+    cfg = make_config()
+    cfg["training"]["train_from"] = "/runs/teacher/ckpt/step_200"
+    cfg["training"]["reset_optim"] = "all"
+
+    config = TrainConfig(**cfg)
+
+    assert config.training.train_from == "/runs/teacher/ckpt/step_200"
+    assert config.training.reset_optim == "all"
+
+
+def test_eole_still_has_the_reset_optim_value_a_resume_of_a_continuation_states() -> (
+    None
+):
+    import typing
+
+    from eole.config.training import TrainingConfig
+
+    values = set(typing.get_args(TrainingConfig.model_fields["reset_optim"].annotation))
+
+    assert eole_cfg.CONTINUATION_RESUME_RESET_OPTIM in values
+    assert eole_cfg.CONTINUATION_RESUME_RESET_OPTIM == "none"
+    # What Eole does when the key is left out is the default: the same value.
+    default = TrainingConfig.model_fields["reset_optim"].default
+    assert default == eole_cfg.CONTINUATION_RESUME_RESET_OPTIM

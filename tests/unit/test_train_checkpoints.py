@@ -26,6 +26,7 @@ from rinchen.train import checkpoints
 from rinchen.train.checkpoints import (
     LAUNCH_FILE,
     ArchitectureMismatch,
+    ContinuedFrom,
     RunIdentity,
     StepDirectory,
     architecture_mismatch,
@@ -1503,3 +1504,318 @@ def test_step_of_agrees_with_what_step_directories_lists(model_path: Path) -> No
     assert listed == {
         path.name for path in model_path.iterdir() if step_of(path) is not None
     }
+
+
+# ---- a run that continues one of our own checkpoints (D9) ------------------------------
+
+
+def continued(**changes: Any) -> ContinuedFrom:
+    fields: dict[str, Any] = {
+        "kind": "step",
+        "path": "/runs/teacher/ckpt/step_200",
+        "weights_sha256": "01" * 32,
+        "optimizer_sha256": "02" * 32,
+        "config_sha256": "03" * 32,
+        "vocab_sha256": "04" * 32,
+        "manifest_sha256": "05" * 32,
+        "manifest_stage": "train_launch",
+        "step": 200,
+        "source_run": "/runs/teacher",
+    }
+    return ContinuedFrom(**{**fields, **changes})
+
+
+def averaged_source(**changes: Any) -> ContinuedFrom:
+    return continued(
+        kind="averaged",
+        path="/runs/teacher/averaged",
+        optimizer_sha256=None,
+        manifest_stage="train_average",
+        step=None,
+        source_run=None,
+        **changes,
+    )
+
+
+def test_a_source_record_of_each_kind_can_be_made() -> None:
+    assert continued().kind == "step"
+    assert averaged_source().kind == "averaged"
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"kind": "checkpoint"},
+        {"path": ""},
+        {"weights_sha256": "ab" * 31},
+        {"weights_sha256": "AB" * 32},
+        {"config_sha256": ""},
+        {"vocab_sha256": None},
+        {"manifest_sha256": "zz" * 32},
+        {"optimizer_sha256": "ab"},
+        {"manifest_stage": ""},
+        {"step": 0},
+        {"step": True},
+        {"step": "200"},
+        {"note": "x"},
+        # a step source has a step, an optimizer and a run; its manifest is a launch's
+        {"step": None},
+        {"optimizer_sha256": None},
+        {"source_run": None},
+    ],
+)
+def test_a_step_source_record_that_could_not_be_read_back_cannot_be_made(
+    changes: dict[str, Any],
+) -> None:
+    with pytest.raises(ValueError):
+        continued(**changes)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"step": 200},
+        {"optimizer_sha256": "02" * 32},
+        {"source_run": "/runs/teacher"},
+    ],
+)
+def test_an_averaged_source_record_has_no_step_optimizer_or_run(
+    changes: dict[str, Any],
+) -> None:
+    fields = {
+        "kind": "averaged",
+        "path": "/runs/teacher/averaged",
+        "optimizer_sha256": None,
+        "manifest_stage": "train_average",
+        "step": None,
+        "source_run": None,
+        **changes,
+    }
+
+    with pytest.raises(ValueError):
+        continued(**fields)
+
+
+def test_a_source_record_is_immutable() -> None:
+    with pytest.raises(ValueError):
+        continued().step = 1  # type: ignore[misc]
+
+
+def test_a_launch_record_without_a_source_has_none() -> None:
+    assert record().continued_from is None
+
+
+def test_a_launch_record_of_a_continuation_round_trips_as_version_2(
+    tmp_path: Path,
+) -> None:
+    for source in (continued(), averaged_source()):
+        write_launch_record(tmp_path, record(continued_from=source))
+
+        assert read_launch_record(tmp_path) == record(continued_from=source)
+
+
+def test_a_continuation_record_file_is_version_2_and_holds_the_source(
+    tmp_path: Path,
+) -> None:
+    write_launch_record(tmp_path, record(continued_from=continued()))
+
+    assert json.loads((tmp_path / LAUNCH_FILE).read_text(encoding="utf-8")) == {
+        "schema_version": 2,
+        "identity": HEX,
+        "world_size": 8,
+        "gpu_ranks": [0, 1, 2, 3, 4, 5, 6, 7],
+        "created": NOW,
+        "continued_from": {
+            "kind": "step",
+            "path": "/runs/teacher/ckpt/step_200",
+            "weights_sha256": "01" * 32,
+            "optimizer_sha256": "02" * 32,
+            "config_sha256": "03" * 32,
+            "vocab_sha256": "04" * 32,
+            "manifest_sha256": "05" * 32,
+            "manifest_stage": "train_launch",
+            "step": 200,
+            "source_run": "/runs/teacher",
+        },
+    }
+
+
+def test_a_record_without_a_source_is_still_written_as_version_1_without_the_key(
+    tmp_path: Path,
+) -> None:
+    write_launch_record(tmp_path, record())
+
+    document = json.loads((tmp_path / LAUNCH_FILE).read_text(encoding="utf-8"))
+    assert document["schema_version"] == 1
+    assert "continued_from" not in document
+
+
+def test_a_version_1_record_is_read_with_no_source(tmp_path: Path) -> None:
+    write_raw(tmp_path, json.dumps(good_document()).encode())
+
+    assert read_launch_record(tmp_path) == record(world_size=1, gpu_ranks=())
+
+
+def test_a_version_1_record_cannot_hold_a_source(tmp_path: Path) -> None:
+    document = good_document()
+    document["continued_from"] = json.loads(continued().model_dump_json())
+    write_raw(tmp_path, json.dumps(document).encode())
+
+    with pytest.raises(DataError, match="schema_version"):
+        read_launch_record(tmp_path)
+
+
+def test_a_version_2_record_must_hold_a_source(tmp_path: Path) -> None:
+    document = good_document()
+    document["schema_version"] = 2
+    write_raw(tmp_path, json.dumps(document).encode())
+
+    with pytest.raises(DataError, match="schema_version"):
+        read_launch_record(tmp_path)
+
+
+def test_a_version_3_record_is_refused(tmp_path: Path) -> None:
+    document = good_document()
+    document["schema_version"] = 3
+    write_raw(tmp_path, json.dumps(document).encode())
+
+    with pytest.raises(DataError, match="schema_version"):
+        read_launch_record(tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("weights_sha256", "ab" * 31),
+        ("kind", "other"),
+        ("step", 0),
+        ("step", "200"),
+        ("path", 5),
+        ("extra", 1),
+    ],
+)
+def test_a_source_with_a_wrong_field_is_a_data_error_naming_the_field(
+    tmp_path: Path, key: str, value: object
+) -> None:
+    source = json.loads(continued().model_dump_json())
+    source[key] = value
+    write_raw(
+        tmp_path,
+        json.dumps(
+            {**good_document(), "schema_version": 2, "continued_from": source}
+        ).encode(),
+    )
+
+    with pytest.raises(DataError) as raised:
+        read_launch_record(tmp_path)
+
+    assert key in str(raised.value)
+    assert "continued_from" in str(raised.value)
+
+
+def test_a_source_missing_a_field_is_a_data_error_naming_it(tmp_path: Path) -> None:
+    source = json.loads(continued().model_dump_json())
+    del source["manifest_sha256"]
+    write_raw(
+        tmp_path,
+        json.dumps(
+            {**good_document(), "schema_version": 2, "continued_from": source}
+        ).encode(),
+    )
+
+    with pytest.raises(DataError, match="manifest_sha256"):
+        read_launch_record(tmp_path)
+
+
+def test_the_old_check_path_reads_the_identity_of_a_continuation_record(
+    tmp_path: Path,
+) -> None:
+    # What a D8 caller does with a record: compare `identity`; the new field is beside it.
+    write_launch_record(tmp_path, record(continued_from=continued()))
+
+    reread = read_launch_record(tmp_path)
+
+    assert reread is not None
+    assert (reread.identity, reread.world_size, reread.gpu_ranks) == (
+        HEX,
+        8,
+        tuple(range(8)),
+    )
+
+
+def test_the_identity_of_a_plain_config_is_not_changed_by_the_source_argument() -> None:
+    assert identity_of(config(), continued_from=None) == identity_of(config())
+
+
+def test_the_identity_of_a_continuation_differs_from_the_plain_config_s() -> None:
+    assert identity_of(config(), continued_from=continued()) != identity_of(config())
+
+
+def test_the_identity_of_a_continuation_is_64_hex_characters() -> None:
+    identity = identity_of(config(), continued_from=continued())
+
+    assert len(identity) == 64
+    assert int(identity, 16) >= 0
+
+
+def test_another_source_weights_file_is_another_identity() -> None:
+    first = identity_of(config(), continued_from=continued())
+    second = identity_of(config(), continued_from=continued(weights_sha256="09" * 32))
+
+    assert first != second
+
+
+def test_another_kind_of_source_is_another_identity() -> None:
+    step = identity_of(config(), continued_from=continued())
+    averaged = identity_of(config(), continued_from=averaged_source())
+
+    assert step != averaged
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"path": "/elsewhere/ckpt/step_200"},
+        {"manifest_sha256": "0a" * 32},
+        {"optimizer_sha256": "0d" * 32},
+        {"source_run": "/elsewhere"},
+    ],
+)
+def test_where_the_source_is_and_what_else_it_holds_do_not_change_the_identity(
+    changes: dict[str, Any],
+) -> None:
+    # The same files moved to another place, or vouched for by a manifest written again,
+    # are the same source.
+    assert identity_of(config(), continued_from=continued(**changes)) == identity_of(
+        config(), continued_from=continued()
+    )
+
+
+@pytest.mark.parametrize("field", ["config_sha256", "vocab_sha256"])
+def test_the_config_and_the_vocabulary_of_the_source_are_part_of_the_identity(
+    field: str,
+) -> None:
+    # The same weights read through another vocabulary are another starting point.
+    assert identity_of(config(), continued_from=continued(**{field: "0e" * 32})) != (
+        identity_of(config(), continued_from=continued())
+    )
+
+
+def test_a_continuation_identity_still_ignores_train_steps_and_train_from() -> None:
+    longer = config()
+    longer["training"]["train_steps"] = 5000
+    resumed = config()
+    resumed["training"]["train_from"] = "run/ckpt/step_100"
+
+    expected = identity_of(config(), continued_from=continued())
+    assert identity_of(longer, continued_from=continued()) == expected
+    assert identity_of(resumed, continued_from=continued()) == expected
+
+
+def test_a_continuation_identity_changes_with_the_config_too() -> None:
+    changed = config()
+    changed["training"]["learning_rate"] = 0.25
+
+    assert identity_of(changed, continued_from=continued()) != identity_of(
+        config(), continued_from=continued()
+    )

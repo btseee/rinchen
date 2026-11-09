@@ -24,6 +24,13 @@ still be the same run (`identity_of`); a launch whose identity differs from the 
 one would resume with options Eole silently ignores (the optimiser options come from the
 checkpoint's own config).
 
+A run that continues one of our own checkpoints (D9, `rinchen.train.continuation`) records
+that checkpoint in `continued_from`: where it was and the SHA-256 of what it held. The
+record is then schema version 2; a run that continues nothing keeps writing version 1,
+byte for byte as before, and both versions are read. The identity of such a run includes
+the kind and the files of its source, so the same config pointed at another source is
+another run.
+
 `safetensors` is a dependency of Eole, not one of Rinchen's own: it is imported where it
 is used, so importing this module stays light.
 """
@@ -39,9 +46,16 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated, Any, Final
+from typing import Annotated, Any, Final, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from rinchen.errors import ConfigError, DataError
 from rinchen.utils.part_file import replace_file
@@ -91,7 +105,10 @@ _ARCHITECTURE_KEYS: Final = (
 _ABSENT: Final = object()
 _MAX_RECORD_BYTES: Final = 64 * 1024
 _SHA256_HEX: Final = r"^[0-9a-f]{64}$"
-_SCHEMA_VERSION: Final = 1
+# What a record without a source is written as, and the version that holds one.
+_PLAIN_SCHEMA_VERSION: Final = 1
+_CONTINUATION_SCHEMA_VERSION: Final = 2
+ContinuationKind = Literal["step", "averaged"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -286,10 +303,17 @@ def is_complete(step_dir: Path) -> str | None:
     return None
 
 
-def identity_of(cfg: Mapping[str, Any]) -> str:
+def identity_of(
+    cfg: Mapping[str, Any], *, continued_from: ContinuedFrom | None = None
+) -> str:
     """The SHA-256 (64 hex characters) of the canonical JSON of the effective config
     `cfg` without `training.train_steps` and `training.train_from`: the same for any
     key order, different for a change of any other value. `cfg` is not modified.
+
+    A run that continues a checkpoint of ours (`continued_from`) is another run than the
+    same config trained from random init, and than the same config continuing other
+    files: the identity then also covers the kind of the source and the SHA-256 of its
+    weights, `config.json` and `vocab.json`, not where it lies nor its manifest.
 
     The canonical JSON has sorted keys, no spaces and non-ASCII text as it is.
 
@@ -304,9 +328,22 @@ def identity_of(cfg: Mapping[str, Any]) -> str:
             for key, value in training.items()
             if key not in IDENTITY_EXCLUDED_KEYS
         }
+    document: dict[str, Any] = stripped
+    if continued_from is not None:
+        # A plain config's top-level keys are those of Eole's schema, so this wrapper
+        # cannot equal one.
+        document = {
+            "config": stripped,
+            "continued_from": {
+                "kind": continued_from.kind,
+                "weights_sha256": continued_from.weights_sha256,
+                "config_sha256": continued_from.config_sha256,
+                "vocab_sha256": continued_from.vocab_sha256,
+            },
+        }
     try:
         text = json.dumps(
-            stripped,
+            document,
             sort_keys=True,
             ensure_ascii=False,
             separators=(",", ":"),
@@ -319,14 +356,59 @@ def identity_of(cfg: Mapping[str, Any]) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+_Sha256 = Annotated[str, Field(pattern=_SHA256_HEX)]
+
+
+class ContinuedFrom(BaseModel):
+    """The checkpoint of ours that a run was started from, as `launch.json` records it.
+
+    `kind` is `step` (the final `step_<N>` directory of a run that `rinchen train launch`
+    finished) or `averaged` (a directory `rinchen train average` wrote); `path` is where
+    it was, as given and made absolute. The SHA-256 are those of the files the manifest of
+    the source vouched for and `manifest_sha256` that of the manifest itself;
+    `manifest_stage` is its stage. A `step` source has an `optimizer_sha256`, a `step` and
+    a `source_run` (the run directory that holds its manifest); an `averaged` one has
+    none of the three. Strict, frozen and closed to other fields, like the record.
+    """
+
+    model_config = ConfigDict(
+        strict=True, frozen=True, extra="forbid", allow_inf_nan=False
+    )
+
+    kind: ContinuationKind
+    path: Annotated[str, Field(min_length=1)]
+    weights_sha256: _Sha256
+    optimizer_sha256: _Sha256 | None
+    config_sha256: _Sha256
+    vocab_sha256: _Sha256
+    manifest_sha256: _Sha256
+    manifest_stage: Annotated[str, Field(min_length=1)]
+    step: Annotated[int, Field(ge=1)] | None
+    source_run: Annotated[str, Field(min_length=1)] | None
+
+    @model_validator(mode="after")
+    def _the_kind_decides_what_else_is_recorded(self) -> Self:
+        held = (self.optimizer_sha256, self.step, self.source_run)
+        if self.kind == "step" and None in held:
+            raise ValueError(
+                "a step source records optimizer_sha256, step and source_run"
+            )
+        if self.kind == "averaged" and any(item is not None for item in held):
+            raise ValueError(
+                "an averaged source has no optimizer_sha256, step or source_run"
+            )
+        return self
+
+
 class RunIdentity(BaseModel):
     """What `launch.json` records about the first launch of a run.
 
-    `identity` is `identity_of` the effective config, `world_size` and `gpu_ranks` the
-    effective GPU settings (they are inside the identity too; here they are for the
-    reader), `created` the ISO 8601 time of the launch with its UTC offset. The model
-    is strict, frozen and refuses any other field: a record that would not read back as
-    written cannot be made.
+    `identity` is `identity_of` the effective config (and source, for a continuation),
+    `world_size` and `gpu_ranks` the effective GPU settings (they are inside the
+    identity too; here they are for the reader), `created` the ISO 8601 time of the launch
+    with its UTC offset, `continued_from` the checkpoint of ours the run was started from,
+    None for a run from random init. The model is strict, frozen and refuses any other
+    field: a record that would not read back as written cannot be made.
     """
 
     model_config = ConfigDict(
@@ -337,6 +419,7 @@ class RunIdentity(BaseModel):
     world_size: Annotated[int, Field(ge=1)]
     gpu_ranks: tuple[Annotated[int, Field(ge=0)], ...]
     created: str
+    continued_from: ContinuedFrom | None = None
 
     @field_validator("created")
     @classmethod
@@ -351,22 +434,45 @@ class RunIdentity(BaseModel):
 
 
 class _LaunchDocument(RunIdentity):
-    """The content of `launch.json`: the record and the version of its format."""
+    """The content of `launch.json`: the record and the version of its format. Version
+    1 has no `continued_from`; version 2 has one."""
 
-    # Not `Literal[1]`: that accepts `true`.
-    schema_version: Annotated[int, Field(ge=_SCHEMA_VERSION, le=_SCHEMA_VERSION)]
+    # Not `Literal[1, 2]`: that accepts `true`.
+    schema_version: Annotated[
+        int, Field(ge=_PLAIN_SCHEMA_VERSION, le=_CONTINUATION_SCHEMA_VERSION)
+    ]
+
+    @model_validator(mode="after")
+    def _the_version_says_whether_a_source_is_recorded(self) -> Self:
+        has_source = self.continued_from is not None
+        if has_source != (self.schema_version == _CONTINUATION_SCHEMA_VERSION):
+            raise ValueError(
+                f"schema_version {self.schema_version} "
+                f"{'must not' if has_source else 'must'} record continued_from"
+            )
+        return self
 
 
 def write_launch_record(run_dir: Path, record: RunIdentity) -> Path:
     """Write `record` as `run_dir/launch.json`, whole or not at all (a temporary file
     and a rename), replacing any earlier record, and return its path. `run_dir` must
-    exist.
+    exist. A record with a `continued_from` is written as schema version 2, any other as
+    version 1 without the key.
 
     Raises:
         OSError: the file cannot be written.
     """
     path = run_dir / LAUNCH_FILE
-    document = {"schema_version": _SCHEMA_VERSION, **record.model_dump(mode="json")}
+    if record.continued_from is None:
+        document = {
+            "schema_version": _PLAIN_SCHEMA_VERSION,
+            **record.model_dump(mode="json", exclude={"continued_from"}),
+        }
+    else:
+        document = {
+            "schema_version": _CONTINUATION_SCHEMA_VERSION,
+            **record.model_dump(mode="json"),
+        }
     replace_file(path, (json.dumps(document, indent=2) + "\n").encode("utf-8"))
     return path
 

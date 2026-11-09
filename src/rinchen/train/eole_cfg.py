@@ -133,7 +133,8 @@ EMBEDDINGS_KEYS: Final = frozenset({"word_vec_size", "position_encoding_type"})
 # `average_every` (the moving average replaces the live weights in every saved
 # checkpoint and is not restored), `accum_steps` and `dropout_steps` (a scheduled value
 # restarts at its first entry after a resume), `reset_optim` and `update_vocab` (they
-# change how a checkpoint is loaded).
+# change how a checkpoint is loaded; `reset_optim` has its own list below, and
+# `update_vocab`, which remaps a checkpoint's embeddings to a new vocabulary, none).
 TRAINING_KEYS: Final = frozenset(
     {
         "model_path",
@@ -181,6 +182,22 @@ TRAINING_KEYS: Final = frozenset(
 # is an unknown key, because every Rinchen model trains from random init.
 RESUME_TRAINING_KEYS: Final = frozenset({"train_from"})
 
+# The two `training` keys only the FIRST attempt of a continuation may hold (D9,
+# `validate_train_config(..., continues=...)`): the launcher starts a new run from one of
+# our own checkpoints with `train_from` set to that checkpoint and `reset_optim` set to
+# `CONTINUATION_RESET_OPTIM`, which loads the weights only. Everywhere else they are
+# unknown keys. `update_vocab` is never a key, and the other `reset_optim` values are
+# never accepted: `none` and `states` keep the optimizer options of the checkpoint and
+# ignore the new config's, `keep_states` crashes Eole 0.6.4.
+CONTINUATION_TRAINING_KEYS: Final = frozenset({"train_from", "reset_optim"})
+CONTINUATION_RESET_OPTIM: Final = "all"
+# A resume of a run that began as a continuation must say `reset_optim: none` (Eole's own
+# default, here stated): the checkpoints of such a run record `reset_optim: all`, and Eole
+# fills a key the resume config omits from the checkpoint's record, so a resume that left
+# it out would load only the weights, restart the step count at 1 and repeat the warm-up
+# (measured with Eole 0.6.4: a "resume" of step 40 that ran 200 steps from step 1).
+CONTINUATION_RESUME_RESET_OPTIM: Final = "none"
+
 # What Eole's loss is divided by (`TrainingConfig.normalization`).
 NORMALIZATIONS: Final = ("sents", "tokens")
 
@@ -190,6 +207,15 @@ _VALID: Final = "valid"
 _GLOB_CHARACTERS: Final = frozenset("[]*?")
 _ARCHITECTURE: Final = "transformer"
 _TRAIN_FROM: Final = "train_from"
+_RESET_OPTIM: Final = "reset_optim"
+_RESUME_WHY: Final = (
+    "the checkpoints of a continuation record reset_optim: all, which Eole would "
+    "apply again to a resume that leaves it out: the step count would restart at 1"
+)
+_CONTINUE_WHY: Final = (
+    "a continuation loads the weights of the source and nothing else, or Eole keeps "
+    "the optimizer options of the source and ignores the new ones"
+)
 # `step_<N>` as Eole names a checkpoint directory; [0-9], not \d, which matches the
 # digits of other scripts.
 _STEP_DIRECTORY: Final = re.compile(r"step_[1-9][0-9]*")
@@ -212,9 +238,16 @@ _SECTION_LEVELS: Final = (
     (("model", "embeddings"), EMBEDDINGS_KEYS),
     (("training",), TRAINING_KEYS),
 )
-# The keys a section also allows in a resume config.
+# The keys a section also allows in a resume config, and in the first attempt of a
+# continuation.
 _RESUME_KEYS: Final[dict[tuple[str, ...], frozenset[str]]] = {
     ("training",): RESUME_TRAINING_KEYS
+}
+_CONTINUATION_KEYS: Final[dict[tuple[str, ...], frozenset[str]]] = {
+    ("training",): CONTINUATION_TRAINING_KEYS
+}
+_CONTINUATION_RESUME_KEYS: Final[dict[tuple[str, ...], frozenset[str]]] = {
+    ("training",): RESUME_TRAINING_KEYS | {"reset_optim"}
 }
 
 
@@ -310,13 +343,26 @@ def dump_config(cfg: dict[str, Any], path: Path) -> None:
         part_path.unlink(missing_ok=True)
 
 
-def validate_train_config(cfg: object, *, resumes: bool = False) -> None:
+def validate_train_config(
+    cfg: object,
+    *,
+    resumes: bool = False,
+    continues: Path | str | None = None,
+    resumes_continuation: bool = False,
+) -> None:
     """Check that `cfg`, a multilingual training config as YAML gave it, is one
     `eole build_vocab` and `eole train` run as written; return None when it is.
 
     `resumes` says that `cfg` is the resume config of a run, the one file that may
     hold `training.train_from` (rule 11). It relaxes nothing else: everywhere
     else `train_from` is an unknown key (rule 5).
+
+    `continues` names the checkpoint of ours that `cfg` is the first attempt of a
+    continuation of (D9): the other place `training.train_from` may be, and the only
+    one `training.reset_optim` may (rule 13). It relaxes nothing else, and it excludes
+    `resumes`: an attempt resumes its own run or continues another's, not both.
+    `resumes_continuation` (with `resumes`) says that the run being resumed began as a
+    continuation: `training.reset_optim` is then allowed, and required, as `none` (rule 14).
 
     The rules, in the order they are checked (the first one broken is reported):
 
@@ -359,17 +405,42 @@ def validate_train_config(cfg: object, *, resumes: bool = False) -> None:
        is a positive integer (a boolean is not one; no weight means 1). `valid` has
        `path_src` and `path_tgt`, may have `transforms: []`, and nothing else: Eole
        copies its prefix into the checkpoint, where it overrides every prediction.
+    13. With `continues`, `training.train_from`, when present, is text that after
+       normalisation (`os.path.normpath`) is `continues` normalised, with no `..`
+       component and no glob character, and `training.reset_optim` is then present
+       and exactly the text `all` (it loads the weights only; the other values keep
+       the optimizer options of the checkpoint, or crash). `reset_optim` without
+       `train_from` means nothing and is refused. A config that holds neither key is
+       accepted. `update_vocab` stays an unknown key.
+    14. With `resumes_continuation`, `training.reset_optim` is present and exactly the
+       text `none` whenever `training.train_from` is (see
+       `CONTINUATION_RESUME_RESET_OPTIM`), and means nothing without it.
 
     Raises:
+        ValueError: `resumes` and `continues` are both given, `continues` is empty, or
+            `resumes_continuation` is given without `resumes`.
         ConfigError: a rule is broken; the message is
             `invalid Eole config: <dotted.path>: <problem>`.
     """
+    if resumes and continues is not None:
+        raise ValueError("a config either resumes or continues, not both")
+    if continues is not None and not str(continues):
+        raise ValueError("continues must name the checkpoint the config continues")
+    if resumes_continuation and not resumes:
+        raise ValueError("resumes_continuation needs resumes")
     if not isinstance(cfg, Mapping):
         _fail("config", f"expected a mapping, got {type(cfg).__name__}")
     _check_no_forbidden_keys(cfg)
     _check_no_variable_references(cfg)
     _check_plain_data(cfg)
-    _check_sections(cfg, resumes=resumes)
+    _check_sections(
+        cfg,
+        _extra_keys(
+            resumes=resumes,
+            continues=continues,
+            resumes_continuation=resumes_continuation,
+        ),
+    )
     _check_architecture(cfg)
     _check_position_encoding(cfg)
     _check_hidden_size(cfg)
@@ -377,6 +448,10 @@ def validate_train_config(cfg: object, *, resumes: bool = False) -> None:
     _check_run_settings(cfg)
     if resumes:
         _check_train_from(cfg)
+    if resumes_continuation:
+        _check_reset_optim(cfg, CONTINUATION_RESUME_RESET_OPTIM, why=_RESUME_WHY)
+    if continues is not None:
+        _check_continuation(cfg, str(continues))
     _check_corpora(cfg)
 
 
@@ -405,11 +480,16 @@ def merge(base: Mapping[str, Any], overrides: Mapping[str, Any]) -> dict[str, An
 
 
 def merged_config(
-    base: Path, overrides: Mapping[str, Any], *, resumes: bool = False
+    base: Path,
+    overrides: Mapping[str, Any],
+    *,
+    resumes: bool = False,
+    continues: Path | str | None = None,
 ) -> dict[str, Any]:
     """The training config that is the YAML mapping in `base` with `overrides` merged
-    over it (`merge`), validated (`validate_train_config`, with `resumes`); nothing is
-    written. The base need not be complete: the merged config is what is validated.
+    over it (`merge`), validated (`validate_train_config`, with `resumes` and
+    `continues`); nothing is written. The base need not be complete: the merged config
+    is what is validated.
 
     Raises:
         ConfigError: `base` is missing, cannot be read or parsed, is empty, is not a
@@ -426,15 +506,21 @@ def merged_config(
         raise ConfigError(f"invalid base Eole config {base}: {problem}")
     _reject_self_reference(overrides, "Eole config overrides")
     cfg = merge(raw, overrides)
-    validate_train_config(cfg, resumes=resumes)
+    validate_train_config(cfg, resumes=resumes, continues=continues)
     return cfg
 
 
 def render(
-    base: Path, overrides: Mapping[str, Any], out: Path, *, resumes: bool = False
+    base: Path,
+    overrides: Mapping[str, Any],
+    out: Path,
+    *,
+    resumes: bool = False,
+    continues: Path | str | None = None,
 ) -> Path:
     """Write the training config that is the YAML mapping in `base` with `overrides`
-    merged over it (`merged_config`, with `resumes`) to `out`, and return `out`.
+    merged over it (`merged_config`, with `resumes` and `continues`) to `out`, and
+    return `out`.
 
     A config that fails writes nothing, so a file at `out` stays as it was. The
     directory of `out` is created; the file appears whole (`dump_config`), keys in
@@ -446,7 +532,7 @@ def render(
             `merged_config` raises.
     """
     _require_writable_output(base, out)
-    cfg = merged_config(base, overrides, resumes=resumes)
+    cfg = merged_config(base, overrides, resumes=resumes, continues=continues)
     out.parent.mkdir(parents=True, exist_ok=True)
     dump_config(cfg, out)
     return out
@@ -573,7 +659,22 @@ def _check_keys(
             _fail(_join(path, key), f"unknown key in {level}")
 
 
-def _check_sections(cfg: Mapping[Any, Any], *, resumes: bool) -> None:
+def _extra_keys(
+    *, resumes: bool, continues: Path | str | None, resumes_continuation: bool
+) -> Mapping[tuple[str, ...], frozenset[str]]:
+    """The keys a section may hold besides its allow-list, for the kind of config."""
+    if resumes_continuation:
+        return _CONTINUATION_RESUME_KEYS
+    if resumes:
+        return _RESUME_KEYS
+    if continues is not None:
+        return _CONTINUATION_KEYS
+    return {}
+
+
+def _check_sections(
+    cfg: Mapping[Any, Any], extra_keys: Mapping[tuple[str, ...], frozenset[str]]
+) -> None:
     # Later checks rely on this one: a section that is present is a mapping.
     _check_keys(cfg, "", TOP_LEVEL_KEYS, "the top level")
     if "data" in cfg:
@@ -589,8 +690,7 @@ def _check_sections(cfg: Mapping[Any, Any], *, resumes: bool) -> None:
         section = _lookup(cfg, *parts)
         if section is not _MISSING:
             path = ".".join(parts)
-            if resumes:
-                allowed = allowed | _RESUME_KEYS.get(parts, frozenset())
+            allowed = allowed | extra_keys.get(parts, frozenset())
             _check_keys(_as_mapping(section, path), path, allowed, path)
 
 
@@ -726,11 +826,9 @@ def _check_run_settings(cfg: Mapping[Any, Any]) -> None:
             _fail(".".join(rule.parts), f"must be {rule.must_be}, got {value!r}")
 
 
-def _check_train_from(cfg: Mapping[Any, Any]) -> None:
-    path = f"training.{_TRAIN_FROM}"
-    train_from = _lookup(cfg, "training", _TRAIN_FROM)
-    if train_from is _MISSING:
-        return
+def _check_free_of_dotdot_and_globs(train_from: object, path: str) -> None:
+    """`train_from` is text that no `..` component could turn into another directory and
+    that Eole will not read as a glob pattern when it loads a checkpoint from it."""
     if not isinstance(train_from, str):
         _fail(path, f"must be a string, got {type(train_from).__name__}")
     if ".." in train_from.split("/"):
@@ -746,6 +844,14 @@ def _check_train_from(cfg: Mapping[Any, Any]) -> None:
             f"holds {glob_character!r}, which Eole reads as a glob pattern when it "
             f"loads a checkpoint from it: {train_from!r}",
         )
+
+
+def _check_train_from(cfg: Mapping[Any, Any]) -> None:
+    path = f"training.{_TRAIN_FROM}"
+    train_from = _lookup(cfg, "training", _TRAIN_FROM)
+    if train_from is _MISSING:
+        return
+    _check_free_of_dotdot_and_globs(train_from, path)
     model_path = _lookup(cfg, "training", "model_path")
     if not _is_text(model_path):
         _fail(
@@ -762,6 +868,39 @@ def _check_train_from(cfg: Mapping[Any, Any]) -> None:
             "must be '<training.model_path>/step_<N>' of this run (N a positive "
             f"number without a leading zero; model_path is {model_path!r}), got "
             f"{train_from!r}",
+        )
+
+
+def _check_continuation(cfg: Mapping[Any, Any], source: str) -> None:
+    train_from = _lookup(cfg, "training", _TRAIN_FROM)
+    if train_from is not _MISSING:
+        _check_free_of_dotdot_and_globs(train_from, f"training.{_TRAIN_FROM}")
+        if os.path.normpath(train_from) != os.path.normpath(source):
+            _fail(
+                f"training.{_TRAIN_FROM}",
+                f"must be the continuation source {os.path.normpath(source)!r}, got "
+                f"{train_from!r}",
+            )
+    _check_reset_optim(cfg, CONTINUATION_RESET_OPTIM, why=_CONTINUE_WHY)
+
+
+def _check_reset_optim(cfg: Mapping[Any, Any], wanted: str, *, why: str) -> None:
+    """`training.reset_optim` is exactly `wanted` whenever `training.train_from` is
+    there, and is not there without it (it would mean nothing)."""
+    train_from = _lookup(cfg, "training", _TRAIN_FROM)
+    reset_optim = _lookup(cfg, "training", _RESET_OPTIM)
+    if train_from is _MISSING:
+        if reset_optim is not _MISSING:
+            _fail(
+                f"training.{_TRAIN_FROM}",
+                f"is missing: training.{_RESET_OPTIM} means nothing without the "
+                "checkpoint it applies to",
+            )
+        return
+    if not isinstance(reset_optim, str) or reset_optim != wanted:
+        _fail(
+            f"training.{_RESET_OPTIM}",
+            f"must be {wanted!r}, {_got(reset_optim)}: {why}",
         )
 
 

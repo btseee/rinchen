@@ -1,4 +1,4 @@
-"""Fabricated Eole checkpoint directories for the tests of D8.
+"""Fabricated Eole checkpoint directories for the tests of D8 and D9.
 
 A COMPLETE `step_<N>` directory holds what Eole 0.6.4 writes into one (spike, D8): the
 weights as a real safetensors file (written through the `safetensors` package), an
@@ -10,21 +10,36 @@ one of them the way an interrupted save or a bad disk would.
 
 Eole also links the files of the newest step into the checkpoint directory itself,
 through relative symbolic links (`link_newest_step`); a resume never goes through them.
+
+D9 adds the SOURCES of a continuation: `make_finished_run` is a run that `rinchen train
+launch` finished (its step directories, `launch.json` and a `train_launch` manifest listing
+the final step's four files with their real SHA-256, written through `rinchen.manifest`),
+and `make_averaged_dir` is what `rinchen train average` leaves (the averaged weights, the
+files beside them, `averaged_from.json` and a `train_average` manifest). Their vocabulary
+is laid out as Eole 0.6.4 writes it (`eole_vocabulary`): a list of tokens for each side.
 """
 
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import os
+import shutil
 import struct
 import zipfile
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
+
+from rinchen.manifest import store
+from rinchen.manifest.model import Manifest, ManifestFile
+from rinchen.spm.symbols import user_defined_symbols
+from rinchen.train.checkpoints import LAUNCH_FILE, RunIdentity, write_launch_record
 
 WEIGHTS_FILE = "model.00.safetensors"
 OPTIMIZER_FILE = "optimizer.pt"
@@ -37,6 +52,13 @@ UTF8_MEMBER = "optimizer/төлөв.pkl"
 # The four files that make a step directory complete, then the artifact Eole also writes.
 REQUIRED_FILES = (WEIGHTS_FILE, OPTIMIZER_FILE, CONFIG_FILE, VOCAB_FILE)
 ALL_FILES = (*REQUIRED_FILES, SPM_ARTIFACT)
+AVERAGED_FROM_FILE = "averaged_from.json"
+MANIFEST_FILE = "manifest.json"
+# What the specials of a vocabulary file hold in Eole 0.6.4, then the tokens a corpus
+# showed, then every reserved symbol of the project: the vocabulary a teacher has when
+# `launch` has made it (the vocabulary invariant of D9).
+EOLE_SPECIALS = ("<unk>", "<blank>", "<s>", "</s>")
+SOURCE_VOCABULARY = (*EOLE_SPECIALS, "a", "b", *user_defined_symbols())
 
 
 # The `model` section of the `config.json` that Eole 0.6.4 saved into `step_20` of a real
@@ -178,6 +200,23 @@ def bfloat16_bytes(*patterns: int) -> bytes:
     return struct.pack(f"<{len(patterns)}H", *patterns)
 
 
+def eole_vocabulary(tokens: Sequence[str]) -> dict[str, Any]:
+    """The content of the `vocab.json` Eole 0.6.4 saves for a shared vocabulary of
+    `tokens`: the list of tokens for each side, the decoder start token and the
+    specials."""
+    return {
+        "src": list(tokens),
+        "tgt": list(tokens),
+        "decoder_start_token": "<s>",
+        "specials": {
+            "unk_token": "<unk>",
+            "pad_token": "<blank>",
+            "bos_token": "<s>",
+            "eos_token": "</s>",
+        },
+    }
+
+
 def make_step_dir(
     model_path: Path,
     step: int,
@@ -185,14 +224,18 @@ def make_step_dir(
     tensors: Mapping[str, NDArray[Any]] | None = None,
     weights: bytes | None = None,
     model: Mapping[str, Any] | None = None,
+    vocab_tokens: Sequence[str] | None = None,
+    vocab_document: Mapping[str, Any] | None = None,
 ) -> Path:
     """Create `model_path/step_<step>` as a COMPLETE step directory and return it.
 
     The weights are `tensors` (default `default_tensors(step)`) written by
     `safetensors.numpy.save_file`, or, when `weights` is given, those bytes as the
     weights file (`safetensors_bytes`). `model` is the `model` section of `config.json`
-    (`eole_model_section`); without it the config has none. `model_path` is created
-    when missing.
+    (`eole_model_section`); without it the config has none. `vocab_tokens` are the
+    tokens of `vocab.json` as Eole writes it (`eole_vocabulary`) and `vocab_document` is
+    the whole content of that file; without either the file is a small stub.
+    `model_path` is created when missing.
     """
     from safetensors.numpy import save_file
 
@@ -212,10 +255,16 @@ def make_step_dir(
         # A member name that is not ASCII is stored with the UTF-8 flag, so the reader
         # decodes it: damage in the central directory can then raise a decoding error.
         archive.writestr(UTF8_MEMBER, b"x")
-    (step_dir / VOCAB_FILE).write_text(
-        json.dumps({"src": [["a", 0], ["b", 1]], "tgt": [["a", 0]], "specials": {}}),
-        encoding="utf-8",
-    )
+    vocabulary: Mapping[str, Any] = {
+        "src": [["a", 0], ["b", 1]],
+        "tgt": [["a", 0]],
+        "specials": {},
+    }
+    if vocab_tokens is not None:
+        vocabulary = eole_vocabulary(vocab_tokens)
+    if vocab_document is not None:
+        vocabulary = vocab_document
+    (step_dir / VOCAB_FILE).write_text(json.dumps(vocabulary), encoding="utf-8")
     (step_dir / SPM_ARTIFACT).write_bytes(b"sentencepiece model of the toy corpus")
     # Eole writes the config last, so it is the file that says the rest was saved.
     saved_config: dict[str, Any] = {
@@ -281,3 +330,168 @@ def replace_with_symlink_to(step_dir: Path, name: str, target: Path) -> None:
     """Make `step_dir/name` a symbolic link to the existing `target`."""
     (step_dir / name).unlink()
     (step_dir / name).symlink_to(target)
+
+
+# ---- the sources of a continuation -------------------------------------------------
+
+LAUNCH_STAGE = "train_launch"
+AVERAGE_STAGE = "train_average"
+_NOW = "2026-11-09T10:00:00+00:00"
+
+
+def sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+@dataclass(frozen=True)
+class FabricatedRun:
+    """A run `rinchen train launch` finished: `run_dir` holds `ckpt/step_<N>` for each of
+    `steps`, `launch.json`, `command.sh` and `manifest.json`."""
+
+    run_dir: Path
+    steps: tuple[int, ...]
+
+    @property
+    def model_path(self) -> Path:
+        return self.run_dir / "ckpt"
+
+    @property
+    def final(self) -> Path:
+        return self.step(self.steps[-1])
+
+    @property
+    def manifest(self) -> Path:
+        return self.run_dir / MANIFEST_FILE
+
+    def step(self, step: int) -> Path:
+        return self.model_path / f"step_{step}"
+
+
+def write_manifest(
+    directory: Path,
+    files: Sequence[Path],
+    *,
+    stage: str = LAUNCH_STAGE,
+    status: Mapping[str, str] | None = None,
+) -> Path:
+    """The manifest of `stage` in `directory`, written through `rinchen.manifest.store`,
+    listing `files` as outputs with their real SHA-256 and size (the way a stage lists
+    the files it wrote, by the path they had then)."""
+    outputs = [
+        ManifestFile(path=str(path), sha256=sha256(path), bytes=path.stat().st_size)
+        for path in files
+    ]
+    ok = {"launch": "ok"} if stage == LAUNCH_STAGE else {"average": "ok"}
+    manifest = Manifest(
+        stage=stage,
+        created=_NOW,
+        code_version="0000000",
+        config_sha256="0" * 64,
+        seed=1234,
+        inputs=[],
+        outputs=outputs,
+        metrics={"steps": 200.0},
+        tool_versions={"eole": "0.6.4"},
+        status=dict(ok if status is None else status),
+    )
+    return store.write(directory, manifest)
+
+
+def make_finished_run(
+    root: Path,
+    *,
+    steps: Sequence[int] = (50, 100, 150, 200),
+    model: Mapping[str, Any] | None = None,
+    vocab_tokens: Sequence[str] | None = SOURCE_VOCABULARY,
+    vocab_document: Mapping[str, Any] | None = None,
+    manifest: bool = True,
+    stage: str = LAUNCH_STAGE,
+    status: Mapping[str, str] | None = None,
+    listed: Sequence[str] = REQUIRED_FILES,
+    listed_step: int | None = None,
+) -> FabricatedRun:
+    """A finished run in `root/run`: complete step directories for `steps` (the model of
+    `eole_model_section` unless `model` says), a real `launch.json`, a `command.sh` and,
+    when `manifest`, a manifest of `stage` that lists the files named in `listed` of the
+    step `listed_step` (the final one unless said), the other two outputs of a launch
+    being `launch.json` and `command.sh`."""
+    run_dir = root / "run"
+    model_path = run_dir / "ckpt"
+    for step in steps:
+        make_step_dir(
+            model_path,
+            step,
+            model=eole_model_section() if model is None else model,
+            vocab_tokens=vocab_tokens,
+            vocab_document=vocab_document,
+        )
+    write_launch_record(
+        run_dir,
+        RunIdentity(identity="a" * 64, world_size=1, gpu_ranks=(), created=_NOW),
+    )
+    (run_dir / "command.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    run = FabricatedRun(run_dir, tuple(steps))
+    if manifest:
+        named = run.step(steps[-1] if listed_step is None else listed_step)
+        files = [named / name for name in listed]
+        files += [run_dir / LAUNCH_FILE, run_dir / "command.sh"]
+        write_manifest(run_dir, files, stage=stage, status=status)
+    return run
+
+
+def make_averaged_dir(
+    directory: Path,
+    *,
+    model: Mapping[str, Any] | None = None,
+    vocab_tokens: Sequence[str] | None = SOURCE_VOCABULARY,
+    vocab_document: Mapping[str, Any] | None = None,
+    manifest: bool = True,
+    stage: str = AVERAGE_STAGE,
+    status: Mapping[str, str] | None = None,
+    listed: Sequence[str] = (WEIGHTS_FILE, AVERAGED_FROM_FILE, CONFIG_FILE, VOCAB_FILE),
+) -> Path:
+    """What `rinchen train average` leaves in `directory`: the weights, the config and
+    vocabulary of the last step, the SentencePiece artifact (never `optimizer.pt`),
+    `averaged_from.json` and, when `manifest`, a manifest of `stage` listing `listed`."""
+    scratch = directory.parent / f".{directory.name}.steps"
+    step = make_step_dir(
+        scratch,
+        200,
+        model=eole_model_section() if model is None else model,
+        vocab_tokens=vocab_tokens,
+        vocab_document=vocab_document,
+    )
+    directory.mkdir(parents=True)
+    for name in (WEIGHTS_FILE, CONFIG_FILE, VOCAB_FILE, SPM_ARTIFACT):
+        shutil.copyfile(step / name, directory / name)
+    shutil.rmtree(scratch)
+    (directory / AVERAGED_FROM_FILE).write_text(
+        json.dumps({"schema_version": 1, "sources": []}), encoding="utf-8"
+    )
+    if manifest:
+        write_manifest(
+            directory, [directory / name for name in listed], stage=stage, status=status
+        )
+    return directory
+
+
+def flip_one_byte(path: Path, *, marker: bytes | None = None) -> None:
+    """Change one byte of `path`: the first byte of `marker` (a text that occurs in it, so
+    a JSON file stays valid JSON), or the last byte of the file."""
+    content = bytearray(path.read_bytes())
+    index = content.index(marker) if marker is not None else len(content) - 1
+    content[index] ^= 0x01
+    path.write_bytes(bytes(content))
+
+
+def tree_digest(directory: Path) -> str:
+    """One digest of every file (name and bytes), link (target) and directory (name) under
+    `directory`: equal before and after exactly when nothing there was written."""
+    digest = hashlib.sha256()
+    for path in sorted(directory.rglob("*")):
+        digest.update(str(path.relative_to(directory)).encode())
+        if path.is_symlink():
+            digest.update(b"->" + str(path.readlink()).encode())
+        elif path.is_file():
+            digest.update(path.read_bytes())
+    return digest.hexdigest()

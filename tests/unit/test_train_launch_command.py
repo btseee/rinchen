@@ -110,6 +110,25 @@ mkdir -p /runs/t1/launch
 /venv/bin/eole train -config /runs/t1/launch/train-3.yaml 2>&1 | tee -a /runs/t1/launch/attempt-3.log
 """
 
+CONTINUES = """\
+#!/usr/bin/env bash
+# Written by `rinchen train launch` for attempt 1 of the run in "/runs/t1".
+# It continues "/runs/teacher/ckpt/step_200" (training.train_from of the config it names, with reset_optim: all: its weights, a fresh optimizer).
+# What it resumes from is fixed at that moment: write it again with
+# `rinchen train launch --write-only` after the run changed.
+# launch.json beside it records the run, so `rinchen train launch` can resume a run started
+# with this script. The output of `eole train` is appended to "launch/attempt-1.log", which
+# `rinchen train launch` reads for a NaN or an early stop when it takes the run over.
+set -euo pipefail
+export OMP_NUM_THREADS=2
+export MKL_NUM_THREADS=2
+export CUDA_VISIBLE_DEVICES=''
+cd /work
+mkdir -p /runs/t1/launch
+[ -f /runs/t1/vocab.src ] || /venv/bin/eole build_vocab -config /runs/t1/launch/train-1.yaml -n_sample -1 2>&1 | tee -a /runs/t1/launch/build_vocab.log
+/venv/bin/eole train -config /runs/t1/launch/train-1.yaml 2>&1 | tee -a /runs/t1/launch/attempt-1.log
+"""
+
 GPU_NOT_REQUESTED = """\
 #!/usr/bin/env bash
 # Written by `rinchen train launch` for attempt 1 of the run in "/runs/t1".
@@ -146,6 +165,43 @@ def test_a_resume_names_its_step_and_its_own_attempt_config_and_log() -> None:
     )
 
     assert text == RESUME
+
+
+def test_the_first_attempt_of_a_continuation_names_its_source_exactly() -> None:
+    text = render(continues=Path("/runs/teacher/ckpt/step_200"))
+
+    assert text == CONTINUES
+
+
+def test_a_continuation_says_nothing_about_starting_from_scratch() -> None:
+    text = render(continues=Path("/runs/teacher/ckpt/step_200"))
+
+    assert "from scratch" not in text
+    assert "It resumes from" not in text
+
+
+def test_the_script_of_a_plain_attempt_is_not_changed_by_the_continuation_argument() -> (
+    None
+):
+    assert render(continues=None) == CPU_FRESH
+
+
+def test_an_attempt_resumes_or_continues_but_not_both() -> None:
+    with pytest.raises(ValueError, match="resumes or continues"):
+        render(resumes_from=150, continues=Path("/runs/teacher/ckpt/step_200"))
+
+
+def test_a_relative_source_is_refused() -> None:
+    with pytest.raises(ValueError, match="absolute"):
+        render(continues=Path("teacher/ckpt/step_200"))
+
+
+def test_a_line_break_in_the_source_stays_inside_the_comment_that_names_it() -> None:
+    text = render(continues=Path("/runs/a\nrm -rf x"))
+
+    header = text.split("set -euo pipefail")[0].splitlines()
+    assert all(line.startswith("#") for line in header if line)
+    assert '"/runs/a\\nrm -rf x"' in "\n".join(header)
 
 
 def test_devices_nobody_asked_for_are_left_to_the_environment() -> None:
@@ -289,6 +345,7 @@ def write(tmp_path: Path, text: str) -> Path:
         {},
         {"threads": 4, "cuda_visible_devices": "0,1,2,3,4,5,6,7"},
         {"attempt": 3, "resumes_from": 150},
+        {"continues": Path("/runs/teacher/ckpt/step_200")},
         {"cuda_visible_devices": None},
         {"run": Path("/runs/it's here")},
         {"run": Path("/runs/багш тест")},

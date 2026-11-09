@@ -26,7 +26,8 @@ The config file given is never changed. Each attempt has its own config and log,
 ran is on disk, and an earlier attempt's log is never read as a later one's.
 
 The order of the work: read and validate the config, apply the GPU rules (`gpu_rules`),
-take the identity of the run, take the lock of the run, look at the checkpoints
+take the identity of the run, take the lock of the run, (for a continuation, verify the
+source and check that the config may continue it) look at the checkpoints
 (`checkpoints.latest_complete`), write the attempt's files and `launch.json`, then
 (unless `write_only`) build the vocabulary when its file is missing, add the reserved symbols
 it lacks (`eole_run.add_reserved_symbols`: the file `eole build_vocab` writes holds only the
@@ -42,6 +43,25 @@ the layers, the heads, ...) is not resumed from either: it is skipped like an in
 one, and when no directory is left the launch is refused, naming the key and both values.
 That is a guard against a checkpoint copied in from another run; it cannot prove where a
 checkpoint of the same architecture came from.
+
+A CONTINUATION (`continue_from`, D9) is a new run that starts from one of our own
+checkpoints: the final step of a finished run or an averaged model whose manifest vouches
+for its files (`rinchen.train.continuation`, which also decides whether the config may
+continue it). Its first attempt's config is the effective config plus `training.train_from:
+<source>` and `training.reset_optim: all` (the weights only, a fresh optimizer that counts
+steps from 1), and nothing else about it differs from a fresh start. Every later attempt
+resumes the run's OWN newest complete step like any run, with `reset_optim: none` stated:
+the checkpoints of the run record `reset_optim: all` and Eole fills a key the resume config
+omits from that record, so leaving it out would restart the count at step 1 and repeat the
+warm-up (measured with the real Eole). The source is not read by Eole again and its step
+numbers mean nothing to the run. `launch.json`
+(schema version 2) records the source and the run's identity covers it, so the same run
+directory cannot be pointed at another source or continued without `continue_from`. A run
+that began from random init is never a continuation, and a continuation is never a plain
+run. The source is verified (hashed) before anything is written and again before any
+resume, extension or `write_only` of a run that has step directories; a run found finished
+is judged by its record and needs no source (it may be gone). The launcher never writes into
+the source, and refuses a source that holds or lies in the new run.
 
 `write_only` writes `command.sh`, the attempt's config and `launch.json` and runs
 nothing. The record is what lets a run that an operator started by hand from `command.sh`
@@ -95,6 +115,7 @@ without the lock after a crash of the parent); the run stays resumable after any
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import re
 from collections.abc import Callable, Mapping, Sequence
@@ -115,8 +136,17 @@ from rinchen.train.checkpoints import (
     read_launch_record,
     write_launch_record,
 )
+from rinchen.train.continuation import (
+    SourceProvenance,
+    check_continuation,
+    require_source_apart,
+    source_path,
+    verify_source,
+)
 from rinchen.train.curves import TrainCurve, parse_train_log
 from rinchen.train.eole_cfg import (
+    CONTINUATION_RESET_OPTIM,
+    CONTINUATION_RESUME_RESET_OPTIM,
     dump_config,
     merge,
     read_config,
@@ -169,6 +199,9 @@ class LaunchResult:
     incomplete_skipped: the steps of the step directories above the resume point that
         cannot be resumed from (incomplete, or of another model), which Eole overwrites
         if the run reaches them again.
+    continued_from: the checkpoint of ours the run was started from, None for a run
+        that continues none. Verified now when the launch ran or wrote something; for a
+        run found finished it is what the run recorded (its files are not read).
     """
 
     status: LaunchStatus
@@ -179,6 +212,7 @@ class LaunchResult:
     log: Path | None
     attempt: int
     incomplete_skipped: tuple[int, ...]
+    continued_from: SourceProvenance | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,6 +225,15 @@ class _Plan:
     src_vocab: Path
     train_steps: int
     identity: str
+    continued: SourceProvenance | None = None
+
+    def continuing(self, source: SourceProvenance) -> _Plan:
+        """This plan as the continuation of `source`: its identity covers the source."""
+        return dataclasses.replace(
+            self,
+            continued=source,
+            identity=identity_of(self.cfg, continued_from=source.as_record()),
+        )
 
 
 def launch(
@@ -206,6 +249,7 @@ def launch(
     cuda_visible_devices: str | None = None,
     extra_env: Mapping[str, str] | None = None,
     before_writing: Callable[[], None] | None = None,
+    continue_from: Path | None = None,
 ) -> LaunchResult:
     """Start, resume or finish the training of the config at `cfg_path` in `run_dir`.
 
@@ -224,6 +268,9 @@ def launch(
     refused and not for a run found finished, which write nothing. A caller that keeps a
     record of the run's final state uses it to drop the old record at the last moment
     (`manifest.stage.begin_commit`). What it raises propagates, with nothing written.
+    `continue_from` makes the run a continuation of the checkpoint of ours it names (see
+    the module's text): a step directory or an averaged model, never a link. A run that
+    has step directories must have begun as a continuation of the same source files.
 
     Raises:
         ConfigError: the config is unusable (see `eole_cfg.validate_train_config`), it
@@ -234,10 +281,15 @@ def launch(
             (only `training.train_steps` may change), `train_steps` is below the
             newest complete step, no step directory is of the config's model while
             some are of another one (see above), or another launch holds the run (its
-            lock file is named; also for `write_only`).
+            lock file is named; also for `write_only`); for a continuation also: the source
+            holds `$` or a glob character, holds or lies in the new run (nothing is
+            written then), is not vouched for by its manifest, or the config may not
+            continue it (`continuation.check_continuation`), the run has step directories
+            but did not begin as a continuation of this source (the lock file may have
+            been left), or the source of a run that is not finished no longer exists.
         DataError: `launch.json` is not a launch record, or the checkpoint directory
             cannot be listed, or the vocabulary file cannot be read (`eole build_vocab`
-            left none).
+            left none), or the manifest or run record of the source cannot be read.
         ValueError: `threads` is less than 1.
         UpstreamError: `eole` is not installed, a command exits non-zero (unless the run
             early-stopped) or runs past `timeout`, `eole train` exits 0 without
@@ -246,7 +298,10 @@ def launch(
     """
     reject_dollar("config path", cfg_path)
     reject_dollar("run directory", run_dir)
+    source = None if continue_from is None else source_path(continue_from)
     plan = _plan(cfg_path, run_dir, world_size, gpu_ranks)
+    if source is not None:
+        require_source_apart(source, run_dir=run_dir, vocabulary=plan.src_vocab)
     devices = _devices(cuda_visible_devices, plan.settings)
     command = eole if eole is not None else eole_command()
     env = _environment(threads, plan.settings, devices, extra_env)
@@ -260,6 +315,7 @@ def launch(
         devices=devices,
         write_only=write_only,
         before_writing=before_writing,
+        continue_from=source,
     )
     lock = run_dir / LAUNCH_DIR / LOCK_FILE
     if write_only:
@@ -282,6 +338,7 @@ class _Work:
     devices: str | None
     write_only: bool
     before_writing: Callable[[], None] | None
+    continue_from: Path | None  # absolute, free of `$` and glob characters
 
 
 def _launch_guarded(work: _Work, lock_fds: tuple[int, ...]) -> LaunchResult:
@@ -292,6 +349,10 @@ def _launch_guarded(work: _Work, lock_fds: tuple[int, ...]) -> LaunchResult:
     timeout, write_only = work.timeout, work.write_only
     record = read_launch_record(run_dir)
     point = _resume_point(plan)
+    begun = point.directory is not None or bool(point.incomplete_newer)
+    source = work.continue_from
+    if source is not None:
+        plan = _continuation_plan(plan, source, run_dir, record, begun)
     _require_the_same_run(plan, run_dir, record, point)
     _refuse_checkpoints_of_another_model(plan, point)
     skipped = tuple(directory.step for directory in point.incomplete_newer)
@@ -308,6 +369,11 @@ def _launch_guarded(work: _Work, lock_fds: tuple[int, ...]) -> LaunchResult:
         if newest.step == plan.train_steps or _early_stopped_at(previous, newest):
             return _finished(newest, skipped, plan)
 
+    if source is not None and begun:
+        # About to extend or resume a run that exists: the source it continues must still
+        # be the one it started from. Another source is another run's identity.
+        plan = plan.continuing(verify_source(source))
+        _require_the_same_run(plan, run_dir, record, point)
     resume_step = None if newest is None else newest.step
     if work.before_writing is not None:
         work.before_writing()
@@ -330,6 +396,7 @@ def _launch_guarded(work: _Work, lock_fds: tuple[int, ...]) -> LaunchResult:
             log=None,
             attempt=attempt.number,
             incomplete_skipped=skipped,
+            continued_from=plan.continued,
         )
 
     if not plan.src_vocab.exists():
@@ -393,6 +460,7 @@ def _prepare_attempt(
         cuda_visible_devices=exported_devices,
         attempt=number,
         resumes_from=resume_step,
+        continues=_continued_path(plan, resume_step),
     )
     replace_file(run_dir / COMMAND_FILE, script.encode("utf-8"))
     return _Attempt(number, config, _attempt_log(launch_dir, number))
@@ -524,6 +592,55 @@ def _environment(
     return env
 
 
+def _continuation_plan(
+    plan: _Plan,
+    source: Path,
+    run_dir: Path,
+    record: RunIdentity | None,
+    begun: bool,
+) -> _Plan:
+    """`plan` as the continuation of `source`.
+
+    A run with no step directory starts now: the source is verified and the config
+    checked against it (T6), and the plan's identity covers what was verified. A run that
+    has some began earlier, and only a continuation of a source may be taken up again:
+    its identity is taken from the source its record names (its files are read before an
+    attempt is prepared, not here, so a finished run needs none). A run with step
+    directories and no record is left to `_require_the_same_run` to refuse."""
+    if not begun:
+        provenance = verify_source(source)
+        check_continuation(plan.cfg, provenance)
+        return plan.continuing(provenance)
+    if record is None:
+        return plan
+    if record.continued_from is None:
+        raise ConfigError(
+            f"the run in {run_dir} was not started as a continuation ({run_dir / LAUNCH_FILE} "
+            f"records no source) and a run that began from random init is not pointed "
+            f"at a source afterwards: use a new run directory for {source}"
+        )
+    return plan.continuing(SourceProvenance.from_record(record.continued_from))
+
+
+def _source_note(plan: _Plan, record: RunIdentity) -> str:
+    """The sentence that adds the sources of both sides to a refusal, empty when neither
+    continues one."""
+    recorded, now = record.continued_from, plan.continued
+    if recorded is None and now is None:
+        return ""
+    was = "continues nothing" if recorded is None else f"continues {recorded.path}"
+    is_now = "continues nothing" if now is None else f"continues {now.path}"
+    return f" The run {was}; this launch {is_now}."
+
+
+def _continued_path(plan: _Plan, resume_step: int | None) -> Path | None:
+    """The source the attempt starts from: that of a continuation that has no step of its
+    own to resume from, else None."""
+    if resume_step is not None or plan.continued is None:
+        return None
+    return plan.continued.path
+
+
 def _require_the_same_run(
     plan: _Plan, run_dir: Path, record: RunIdentity | None, point: ResumePoint
 ) -> None:
@@ -543,7 +660,8 @@ def _require_the_same_run(
             f"the config is not the one this run was started with ({record_file}): "
             f"recorded: world_size {record.world_size}, gpu_ranks "
             f"{list(record.gpu_ranks)}; this launch: world_size "
-            f"{plan.settings.world_size}, gpu_ranks {list(plan.settings.gpu_ranks)}. "
+            f"{plan.settings.world_size}, gpu_ranks {list(plan.settings.gpu_ranks)}."
+            f"{_source_note(plan, record)} "
             "Only training.train_steps may change when a run is resumed: Eole keeps "
             "the optimiser options of the checkpoint and ignores new ones, and a "
             "different GPU count is a different batch. Restore the original config or "
@@ -630,6 +748,7 @@ def _finished(
         log=None,
         attempt=0,
         incomplete_skipped=skipped,
+        continued_from=plan.continued,
     )
 
 
@@ -657,13 +776,37 @@ def _attempt_log(launch_dir: Path, attempt: int) -> Path:
 
 
 def _attempt_config(plan: _Plan, resume_step: int | None) -> dict[str, Any]:
-    if resume_step is None:
+    if resume_step is not None:
+        return _resume_config(plan, resume_step)
+    source = _continued_path(plan, resume_step)
+    if source is None:
         return plan.cfg
-    resume = merge(
+    # The run has no step of its own yet: it starts from the source with a fresh
+    # optimizer. Once it has one, the attempts resume it (`_resume_config`).
+    first = merge(
         plan.cfg,
-        {"training": {"train_from": str(plan.model_path / f"step_{resume_step}")}},
+        {
+            "training": {
+                "train_from": str(source),
+                "reset_optim": CONTINUATION_RESET_OPTIM,
+            }
+        },
     )
-    validate_train_config(resume, resumes=True)
+    validate_train_config(first, continues=source)
+    return first
+
+
+def _resume_config(plan: _Plan, resume_step: int) -> dict[str, Any]:
+    training = {"train_from": str(plan.model_path / f"step_{resume_step}")}
+    if plan.continued is None:
+        resume = merge(plan.cfg, {"training": training})
+        validate_train_config(resume, resumes=True)
+        return resume
+    # The checkpoints of a continuation record `reset_optim: all`, and Eole fills a key the
+    # config omits from the checkpoint's record: stated, not left out.
+    training["reset_optim"] = CONTINUATION_RESUME_RESET_OPTIM
+    resume = merge(plan.cfg, {"training": training})
+    validate_train_config(resume, resumes=True, resumes_continuation=True)
     return resume
 
 
@@ -678,6 +821,9 @@ def _record_the_run(run_dir: Path, plan: _Plan, record: RunIdentity | None) -> N
             world_size=plan.settings.world_size,
             gpu_ranks=plan.settings.gpu_ranks,
             created=datetime.now(UTC).isoformat(timespec="seconds"),
+            continued_from=None
+            if plan.continued is None
+            else plan.continued.as_record(),
         ),
     )
 
@@ -731,4 +877,5 @@ def _ended(
         log=log,
         attempt=attempt.number,
         incomplete_skipped=skipped,
+        continued_from=plan.continued,
     )
