@@ -118,9 +118,9 @@ the interpreter.
 7. With `--write-only`: stop. Otherwise build the vocabulary when the `src_vocab` file is missing, add the
    reserved symbols it lacks (D9, `eole_run.add_reserved_symbols`: the file `eole build_vocab` writes holds
    only the tokens the data showed; runbook 09, "The vocabulary invariant"), run `eole train`, and decide
-   from its log and the step directories how it ended. (D9 also refuses, in step 1, a config that states a
-   `src_vocab_size` below its SentencePiece model's pieces plus one, and, for `--continue-from`, verifies the
-   source and checks the config against it between steps 4 and 5; runbook 09.)
+   from its log and the step directories how it ended. (D9 also refuses, in step 1, a config whose `src_vocab_size`,
+   stated or left to Eole's default of 32,768, is below its SentencePiece model's pieces plus one, and, for
+   `--continue-from`, verifies the source and checks the config against it between steps 4 and 5; runbook 09.)
 
 ### Outcomes
 
@@ -932,8 +932,9 @@ one line in the log):
 `configs/eole/teacher.yaml` holds NO per-run value (`data: {}`; `src_vocab`, `training.model_path`,
 `transforms_configs.sentencepiece`, `data` and `seed` come from `--prepare-only`, which since D9 also sets
 `src_vocab_size` to the SentencePiece model's pieces plus one: `teacher.yaml` states none, and a config that
-reaches `launch` without it would get Eole's default of 32,768 tokens, which would cut a 128,000-piece
-vocabulary and the reserved symbols appended at its end; see runbook 09). **No value was
+reaches `launch` without it gets Eole's default of 32,768 tokens, which would cut a 128,000-piece
+vocabulary and the reserved symbols appended at its end, so `launch` refuses it and names the value to state
+(D9 re-review, M1; see runbook 09)). **No value was
 measured; each is a prior.** Master plan = `docs/research/2026-10-29-rinchen-dev-agent-prompt.md`, lines
 511 to 516 (the comments of the config cite 511 to 514; the dropout, `train_steps`, `valid_steps` and
 `early_stopping` of the plan are on 515 and the metrics on 516).

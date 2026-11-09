@@ -2552,3 +2552,53 @@ numbers are identical. The spike's figure of 232 entries for a vocabulary with `
 two symbols; with all 118 it is 344. The plan's and the spec's "1,000 steps" for the gate do not hold for the windows
 `docify` cuts; the checked-in config trains 2,500. The runbooks 07 and 08, STATE.md and the D9 spec carry the old
 values as history beside the new ones.
+
+## 2026-11-09: D9 re-review - the verdict, the minors fixed and the limits recorded
+
+The scoped re-review of the first fix wave (an independent reviewer, read-only, `98e42d1..c2d46b5`) approved it with
+minors: no Critical and no Important finding. The records of Task 6 were written while it ran and said nothing of it
+(the end of the entry "D9 review - corrections and fixes" above says so, and stays as written); this entry and the
+matching edits of the runbook, STATE.md and CLAUDE.md close that. A second small fix wave
+(`135e9f9`, `D9: re-review minors`, tests first, every new test mutation-checked) fixed:
+
+- M1: the pre-flight of `launch` (`vocabulary_size.require_sizes_to_fit`, formerly `require_stated_sizes_to_fit`)
+  skipped an unstated `src_vocab_size` or `tgt_vocab_size` on the premise that Eole's default is large. It is 32,768
+  (`eole/config/data.py`, `VocabConfig`; one named constant, `EOLE_DEFAULT_VOCABULARY_SIZE`, and a test that compares it
+  with the installed Eole). The inputter cuts the vocabulary file at load and the reserved symbols are its last lines,
+  so a config with a model of more than 32,767 pieces and no size would have lost them. The pre-flight now refuses it
+  with a `ConfigError` that names the key and the value to state (for the 128,000-piece model: "state
+  `src_vocab_size: 128001` at the top level of the config"). **Decision: `launch` does not inject the value.** It has no per-run override
+  but `--world-size` and `--gpu-ranks`, and a silent injection would change what a config says; the operator states
+  the size (`ablate --prepare-only` already does; for `docify --config` it goes in the base file, and
+  `configs/eole/teacher_doc.yaml` says so in its header). `tgt_vocab_size` is not asked for when `share_vocab: true`
+  (Eole ignores it then, every shipped config shares, and `ablate` states `src_vocab_size` alone); an unstated size whose
+  model is not a file is left to Eole, which names the missing model when it builds the vocabulary (the many tests that
+  name `spm/toy.model` without writing it rely on that); a model that is a file and does not load is a `ConfigError`. The test support gained `tests/support/sized_spm.py` (a model of an exact number of pieces, written
+  as a protocol buffer, no training) and the fabricated model of `step_dirs.py` is now one that loads.
+- M3: `docify(..., split="test")` on rows read without that split reported every row as `no_doc_id` and made no window,
+  silently, and `read_corpus_rows(splits="train")` iterated the characters of the string and loaded nothing. `docify`
+  refuses a split outside `("train", "dev")` (`ValueError`, before it reads the SentencePiece model), `classify_rows`
+  refuses rows whose rows of the split are ALL empty apart from `split` (`DataError`; one empty row among real ones is
+  still counted, not refused) and `read_corpus_rows` refuses a bare string (`TypeError`, the idiom the linter asks for
+  an argument of the wrong type).
+- M6 and the wording of the `average` guard: stale docstrings (`docify.py`, `launch.py`, whose text said that
+  `eole build_vocab` accepting `training.train_from` "is not measured"), two comment lines of 125 and 145 columns, and
+  the module-level import of `tests.support.step_dirs` in `tests/conftest.py`. The docstrings, the module text of
+  `cli/train_runs.py` and the refusal message of `average` said that only the checkpoints of a run `launch` wrote are
+  averaged. What is checked is a `launch.json` that parses within three parent directories of the step directories; a
+  hand-made `step_<N>` placed inside a real run directory passes. The text now says that, and the guard is as before a
+  guard against a mistake, not against forgery.
+
+Recorded as limits, not fixed (runbook 09, "Known limits" 15 to 17): M2, the `average` guard sees only the three
+lexical parents of the checkpoint directory as given (a symlinked `ckpt` outside any run directory and a `model_path`
+nested three or more levels inside the run are refused; the same lookup serves `verify_source`; pass the real path);
+M4, the fix of C1 keys documents per `corpus` label and not per file, and D4's `mine` sets `doc_id` to the stem of the
+source file, so two files with the same label and stem still share a key and only the counted `duplicate_seg_idx`
+signals it (make D4's document ids unique per file, or read that count); M5, the pre-flight runs on every plan, also
+for `--write-only` and a finished run, and with a stated size needs the SentencePiece model readable from the working
+directory of the launcher. The size-4 margin of the gate is unchanged (.9406 against 0.9, one seed; 3,000 steps
+measured worse, .9356, so 2,500 stays); if the gate flakes on another machine, raise `train_steps` further, never lower
+the gate.
+
+Gate after the second fix wave: 8252 passed, 1 skipped, 10 deselected (1,217 s). The tiny doc integration test (`tests/integration/test_train_tiny_doc.py`, real
+Eole on the CPU, GPU hidden) passed: 29 tests in 219 s.

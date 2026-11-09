@@ -155,8 +155,13 @@ them) and added the vocabulary invariant: every vocabulary now holds every reser
 D8 tiny-run number (the old values are kept as history in the runbooks). A combined review of the code ran: ready with
 fixes, one Critical (a document keyed without its corpus), five Important and twelve Minor findings; its fix wave
 (six `D9: fix ...` commits and `D9: review minors`, gate 8214 passed, 1 skipped, 10 deselected) fixed them and left
-six findings open on purpose (`docs/runbooks/09_document_level.md`, "Known limits"); a scoped re-review was running
-when the records were written. Next up: D10 (Distillation & students). See `STATE.md`,
+six findings open on purpose (`docs/runbooks/09_document_level.md`, "Known limits"); a scoped re-review of that fix
+wave approved it with minors (no Critical or Important finding) and a second fix wave (`D9: re-review minors`, gate
+8252 passed, 1 skipped, 10 deselected) fixed an unstated vocabulary size that Eole's default would cut (`launch` now
+refuses it and names the value to state), `docify` on a split that makes no windows or on rows read without it, and
+the wording of the `average` guard; three limits stay documented (the `average` guard sees three lexical parents only,
+documents are keyed per `corpus` label and not per file, the `launch` pre-flight needs the SentencePiece model
+readable from the working directory when a size is stated). Next up: D10 (Distillation & students). See `STATE.md`,
 `docs/runbooks/08_teacher.md` and `docs/runbooks/09_document_level.md`.
 
 ## Evidence and full plan

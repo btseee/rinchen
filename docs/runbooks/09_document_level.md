@@ -48,16 +48,17 @@ this runbook on 2026-11-09 ("Measured numbers"); a number that was not obtained 
 What was checked: the unit and property tests (every new test mutation-checked by hand during the build),
 `tests/integration/test_train_tiny_doc.py` (the STOP gate, real `rinchen`, real Eole, CPU), a combined review of
 Tasks 1 to 5 (`993f32c..98e42d1`: ready with fixes, one Critical, five Important and twelve Minor findings) and its
-fix wave (`D9: fix ...` x 6 and `D9: review minors`, `98e42d1..c2d46b5`), and the real binary for this runbook. A
-scoped re-review of the fix wave ran in parallel with these records; nothing from it is in this runbook.
+fix wave (`D9: fix ...` x 6 and `D9: review minors`, `98e42d1..c2d46b5`), a scoped re-review of that fix wave (approved
+with minors, no Critical and no Important finding; "The scoped re-review and the second fix wave" below), a second small
+fix wave (`D9: re-review minors`) and the real binary for this runbook.
 
 ## Architecture
 
 | Module | Job |
 |---|---|
 | `rinchen/train/eole_run.py` (extended) | `add_reserved_symbols`; `run_training(reserved_symbols=())`; `predict_tokens(max_length, max_length_ratio)` |
-| `rinchen/train/vocabulary_size.py` | `needed_vocabulary_size` (pieces plus one), `require_vocabulary_size`, `require_stated_sizes_to_fit` (the `launch` pre-flight) |
-| `rinchen/train/doc_source.py` | `read_corpus_rows` (the lazy split filter), `classify_rows`, the exclusion reasons |
+| `rinchen/train/vocabulary_size.py` | `needed_vocabulary_size` (pieces plus one), `require_vocabulary_size`, `require_sizes_to_fit` and `require_unstated_size_to_fit` (the `launch` pre-flight), `EOLE_DEFAULT_VOCABULARY_SIZE` |
+| `rinchen/train/doc_source.py` | `read_corpus_rows` (the lazy split filter), `classify_rows`, `require_windowed_split`, the exclusion reasons |
 | `rinchen/train/doc_pack.py` | per-document runs of consecutive `seg_idx`, the seeded window sizes, the piece budget, the window frame |
 | `rinchen/train/docify.py` | `docify`, `DocWindows`, `DocStats`: the two above and the counts |
 | `rinchen/train/doc_corpus.py` | the doc corpora files, the doc `data` section, the validation windows, the weights, the rendered continuation config |
@@ -114,9 +115,27 @@ $W/ws/in/spm/toy.model needs (640 pieces and Eole's pad token): Eole would cut t
 the end of its vocabulary file
 ```
 
-  A config that states NO size goes to Eole's default of 32,768 in `launch`: only the ablation path sets one, so a
-  teacher config written by hand for a 128,000-piece model must state `src_vocab_size: 128001` itself (nothing checks
-  its absence). The D5 converter configs state sizes equal to their piece count (`converter.yaml` 512,
+  A config that states NO size gets Eole's default, 32,768 (`vocabulary_size.EOLE_DEFAULT_VOCABULARY_SIZE`, taken from
+  `eole/config/data.py`, `VocabConfig`; a test compares it with the installed Eole), and since the re-review (M1,
+  `D9: re-review minors`) `launch` refuses that too when the model needs more: a `ConfigError` that names the key and
+  the value to state, before anything is written (the real binary, 2026-11-09, a model of 128,000 pieces, path
+  shortened):
+
+```
+error: invalid Eole config: src_vocab_size: not stated, so Eole's default of 32768 applies, which is below 128001, what the
+vocabulary of the SentencePiece model $W/spm/big.model needs (128000 pieces and Eole's pad token): Eole would cut the
+reserved symbols that are added at the end of its vocabulary file; state `src_vocab_size: 128001` at the top level of
+the config
+```
+
+  `launch` never sets the size itself, and has no option for it (its per-run values are `--world-size` and
+  `--gpu-ranks` only): the operator states it at the top level of the config it passes. `ablate --prepare-only` already
+  does; for a config written by hand, or made by `docify --config`, it goes in the base file (a copy of
+  `configs/eole/teacher_doc.yaml`, whose header says so). `tgt_vocab_size` is not asked for when `share_vocab: true`
+  (Eole builds the target vocabulary from the source one then, and every shipped config shares). An unstated size whose
+  model is not a file is left to Eole, which names the missing model when it builds the vocabulary (this keeps the many
+  tests that name `spm/toy.model` without writing it); a model that is a file and cannot be loaded is a `ConfigError`,
+  as it is for a stated size. The D5 converter configs state sizes equal to their piece count (`converter.yaml` 512,
   `converter_tiny.yaml` 200); they run through `run_training` and never through `launch`, and must stay off it.
 
 **What it changed.** The tiny runs of D7 and D8 changed, because their vocabularies grew and the sizes follow. Measured
@@ -291,7 +310,7 @@ source is only read (its tree digest is the same afterwards). The messages are, 
 - A teacher whose `vocab.json` lacks `<doc>` (made by rewriting the file and its manifest hash so only this check can fire): `error: cannot continue from $W/sources/no_doc/averaged: vocab.json of the source lacks <doc>: the teacher predates the vocabulary invariant (a vocabulary file made since then holds every reserved symbol), so it would read them as <unk>`
 - A config that omits an architecture key: `error: cannot continue from $TEACHER/averaged: model.heads is not stated in the config: a continuation must say which architecture it believes it continues`
 - A config whose SentencePiece model is another file than the teacher's copy (a toy model of 500 pieces against the 640 of the source), reported for both sides: `error: cannot continue from $TEACHER/averaged: transforms_configs.sentencepiece.src_subword_model ($W/other_spm/toy.model, SHA-256 466adbb07c3c...) is not the SentencePiece model the source was trained with (toy.model in the source, SHA-256 8d5496f62c11...): the vocabulary of the source is the pieces that model gave its data, and a piece it lacks would be read as <unk>; transforms_configs.sentencepiece.tgt_subword_model (...)`
-- Two step directories laid out by hand, averaged: `error: cannot average $W/foreign/ckpt: no launch.json within 3 levels above its step directories, so it is not the checkpoint directory of a run that `rinchen train launch` wrote; only those are averaged, because an average is accepted as the model to continue from`; nothing was written.
+- Two step directories laid out by hand, averaged: `` error: cannot average $W/foreign/ckpt: no launch.json within 3 levels above its step directories; only a checkpoint directory inside a run directory that has one (`rinchen train launch` writes it) is averaged, because an average is accepted as the model to continue from ``; nothing was written. (Before the second fix wave the message went on "so it is not the checkpoint directory of a run that `rinchen train launch` wrote; only those are averaged", which claimed more than the guard checks.)
 - `docify --max-pieces 500` over the tiny base: `error: --max-pieces 500 is above what the base config keeps: filtertoolong drops a source over src_seq_length 128 and a target over tgt_seq_length 128 minus 2, so a window may have at most 126 pieces; the longer ones would be dropped without a word`
 
 ## Document windows (`docify`)
@@ -387,10 +406,11 @@ our own commands are the only evidence of origin there is.
 ### The `average` guard
 
 `rinchen train average` is the one command that can turn several step directories into a source, so it refuses a
-checkpoint directory that is not inside a run directory with a readable `launch.json` within three parents of its steps
-(review I2; exit 2, nothing written, see "Refusals"). Without it two step directories laid out by hand became a valid
-`--continue-from` source after one command. It too is a guard against a mistake: someone who writes `launch.json` by
-hand passes it.
+checkpoint directory with no `launch.json` that parses within three parent directories of its step directories (review
+I2; exit 2, nothing written, see "Refusals"). Without it two step directories laid out by hand became a valid
+`--continue-from` source after one command. **That file is all that is checked**: a hand-made `step_<N>` placed inside a
+real run directory passes, and so does a `launch.json` written by hand; the guard is against a mistake, not against
+forgery. The parents are those of the path as given (`os.path.abspath`, no link is followed), see "Known limits" 15.
 
 ### What is recorded
 
@@ -616,8 +636,10 @@ The steps are the ones the tiny gate ran; the numbers in the config are the ones
    first `--continue-from`; there is no way to continue it, it has to be trained again.
 2. **Average the last checkpoints** (`rinchen train average --checkpoint-dir <run>/ckpt --last N`), or continue from the
    final step directory itself (then `optimizer.pt`, 8.8 GB for the real teacher, is read for nothing).
-3. **Cut the windows.** `rinchen train docify --corpus <D4 mine output> ... --spm-model <the teacher's model> --config
-   configs/eole/teacher_doc.yaml --out-dir <O> --dry-run` first, and read the statistics: `windows of size n`, every
+3. **Cut the windows.** Make a copy of `configs/eole/teacher_doc.yaml` that states `src_vocab_size: 128001` (the pieces
+   of the 128,000-piece model and Eole's pad token; `launch` refuses a config that leaves it to Eole's default of
+   32,768). `rinchen train docify --corpus <D4 mine output> ... --spm-model <the teacher's model> --config <the copy>
+   --out-dir <O> --dry-run` first, and read the statistics: `windows of size n`, every
    `excluded <reason>` (a large `gap_single` or `tail` says the documents are fragmented by the filters, a large
    `too_long` that the budget is too small for real sentences), the piece counts, the weights. Then without
    `--dry-run`. The SentencePiece model must be the teacher's (the launch refuses another).
@@ -684,21 +706,39 @@ Findings of the reviews that were parked and not fixed, and limits of the build,
    the symbol, in `docify` and at inference. (Review M11.)
 6. **`<doc>` and `<sep>` are defined three times** (`spm.symbols`, `train.doc_source`, `infer.doc_chunker`) because the
    inference side must not import the training side; a unit test pins the three equal. (Review M9.)
-7. **The `average` guard and the provenance rule guard against mistakes, not against forgery**: a record or manifest
-   written by hand passes. The source hash is not atomic with Eole's own read of the files.
+7. **The `average` guard and the provenance rule guard against mistakes, not against forgery**: the `average` guard
+   looks for a `launch.json` that parses within three parent directories of the step directories and nothing else, so a
+   hand-made `step_<N>` inside a real run directory passes; a record or manifest written by hand passes the provenance
+   rule. The source hash is not atomic with Eole's own read of the files.
 8. **The SentencePiece comparison reads the model path as given**: a relative path in the config is read from the
    working directory of `rinchen`. The manifest does not vouch for the copy in the source directory and `launch.json`
    does not record its hash.
-9. **`launch` refuses a STATED vocabulary size below the pieces plus one** (and the D5 converter configs state sizes equal
-   to their piece count, so they stay off `launch`), but a config that states none gets Eole's default of 32,768 and
-   nothing says so.
+9. **`launch` checks the vocabulary size against the SentencePiece model** (fixed by the re-review, M1): it refuses a
+   STATED size below the pieces plus one and an UNSTATED one when Eole's default, 32,768, is below it (the D5 converter
+   configs state sizes equal to their piece count, so they stay off `launch`). It does not set the size.
 10. **`command.sh` does not add the reserved symbols** (the next `launch` does, too late for what the hand run trained).
 11. **Files near the 900-line limit**: `launch.py` has 886 lines, `continuation.py` 777, `eole_cfg.py` 856 (it had
     976 before `eole_cfg_keys.py`, 147 lines of key lists, was split from it). The next change to `launch.py` has to move something.
-12. **The gate's size-4 margin** is thin and the training is repeatable only on the machine and thread count it was
-    measured on (above).
+12. **The gate's size-4 margin** is thin (.9406 against the 0.9 gate, one seed) and the training is repeatable only on
+    the machine and thread count it was measured on (above). A run of 3,000 steps measured worse for that size (.9356), so
+    `teacher_doc_tiny.yaml` stays at 2,500. If the gate flakes on another machine, raise `train_steps` further; never
+    lower the gate.
 13. **`TRAINING_KEYS` has no `adam_beta1` or `adam_eps`**: they stay Eole's defaults, which the teacher trained with.
 14. **An ablation run made before D9 retrains** (its config gained `src_vocab_size`, so its fingerprint changed).
+15. **The `average` guard sees only the three lexical parents** of the checkpoint directory as given (re-review M2). A
+    `ckpt` that is a symbolic link to a place outside any run directory is refused although the run is real, and so is a
+    `training.model_path` nested three or more levels inside the run directory (`<run>/a/b/ckpt`: the record is four
+    parents up; `<run>/a/ckpt` is accepted). The same lookup (`checkpoints.run_directory_above`) serves `verify_source`
+    for a step directory given to `--continue-from`: pass the real path.
+16. **Documents are keyed per `corpus` label, not per file** (re-review M4; C1 is fixed at that level). D4's `mine` sets
+    `doc_id` to the stem of the source file (`cli/mine.py`), so two files that carry the same `corpus` label and have
+    the same stem still share a document key, and their sentences can be joined into one window. Only the counted
+    exclusion `duplicate_seg_idx` signals it (the rows of the second file repeat the `seg_idx` of the first). Make D4's
+    document ids unique per file before real documents are windowed, or read that count of every dry run.
+17. **The `launch` pre-flight runs on every plan** (re-review M5): also with `--write-only` and when the run is already
+    finished. With a stated vocabulary size it needs the SentencePiece model readable from the launcher's working
+    directory (a relative path in the config is read from there, as Eole reads it); a model that is not a file is
+    refused for a stated size and left to Eole for an unstated one.
 
 ### The review (Tasks 1 to 5) and what its fix wave did
 
@@ -726,6 +766,37 @@ written under `data/` or `models/`). Its fix wave, one commit each with a failin
 Gate after the fix wave: 8214 passed, 1 skipped, 10 deselected (929 s), against 7187 at the end of D8 (7279 after Task
 1, 7446 after Task 2, 7799 after Task 3, 8024 after Task 4, 8075 after Task 5). Left open on purpose: the items of
 "Known limits" marked as review findings (M2, M5, M6, M8, M9, M11).
+
+### The scoped re-review and the second fix wave
+
+A scoped re-review of that fix wave (an independent reviewer, read-only, `98e42d1..c2d46b5`) approved it **with minors:
+no Critical and no Important finding**. A second small fix wave (`135e9f9`, `D9: re-review minors`) fixed what needed
+code:
+
+- M1: the pre-flight of `launch` skipped an UNSTATED `src_vocab_size` or `tgt_vocab_size` on the premise that Eole's
+  default is large. It is 32,768 (`eole/config/data.py`, read in the installed Eole), the inputter cuts the vocabulary
+  file at load, and the reserved symbols are its last lines: a hand-written config with a model of more than 32,767
+  pieces and no size, launched through `launch`, would have lost them. `launch` now refuses it (see "The vocabulary
+  invariant"). No shipped path hit it, because `ablate` sets the size; `launch` with `teacher.yaml` and the 128,000-piece
+  model would have, and now says which value to state. `require_stated_sizes_to_fit` became `require_sizes_to_fit`.
+- M3: `docify(rows, split="test")` on rows read without that split reported every row as `no_doc_id` and made no
+  window, and `read_corpus_rows(splits="train")` iterated the characters of the string and loaded nothing. `docify`
+  refuses a split outside `("train", "dev")` (`ValueError`) before it reads the SentencePiece model, `classify_rows`
+  refuses rows whose rows of the split are all empty apart from their `split` (`DataError`, naming
+  `read_corpus_rows(splits=...)`), and `read_corpus_rows` refuses a bare string (`TypeError`).
+- M6 and the guard's wording: stale docstrings of `docify.py` and `launch.py` (the latter said that `eole build_vocab`
+  accepting `training.train_from` "is not measured"; it was, runbook 08 and the spike), two comment lines of 125 and 145
+  columns, and the import of `tests.support.step_dirs` at the top of `tests/conftest.py` (now inside the one fixture
+  that needs it). The docstrings and the message of the `average` guard said that only the checkpoints of a run that
+  `launch` wrote are averaged, which overclaims: what is checked is a `launch.json` that parses within three parent
+  directories of the step directories ("The `average` guard").
+
+Left as limits, not fixed (Known limits 15 to 17): M2 (the guard sees only three lexical parents), M4 (documents are
+keyed per `corpus` label, not per file), M5 (the pre-flight runs on every plan and needs the SentencePiece model
+readable from the working directory when a size is stated). The reviewer's estimate of the size-4 margin of the gate
+(.9406 against 0.9, one seed) stands, with the measurement that 3,000 steps are worse (.9356): see limit 12.
+
+Gate after the second fix wave: 8252 passed, 1 skipped, 10 deselected (1,217 s).
 
 ## Measured numbers
 
@@ -776,5 +847,5 @@ eole_cfg_shared,eole_run,launch,launch_command,mixture,validation_corpus,write_c
 ablation_config}.py`, `test_infer_doc_chunker.py`, `test_cli_train_{docify,docify_refusals,launch,average}.py`,
 `test_support_tiny_documents.py`, `test_utils_part_file.py` and `test_eole_configs_shipped.py`; property tests
 `tests/property/test_{train_docify,infer_doc_chunker}_property.py`; `tests/integration/test_train_tiny_doc.py` (the
-STOP gate, scenarios T, D, C, A, K, R, S, B); and the helpers `tests/support/{doc_cli,doc_rows,step_dirs,fake_launch,
+STOP gate, scenarios T, D, C, A, K, R, S, B); and the helpers `tests/support/{doc_cli,doc_rows,sized_spm,step_dirs,fake_launch,
 tiny_parallel,tiny_variant}.py`.

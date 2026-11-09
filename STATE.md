@@ -694,9 +694,10 @@ the runbook, the spike (`spike-findings.md`) and the review reports, 2026-11-08,
 continuing the averaged tiny teacher on windows of 2 to 4 sentences joined with `<sep>`, decodes `<sep>`-aligned
 output for at least 90 % of held-out dev windows of each size, and the chunker returns exactly one translation per
 input sentence for every toy test document) is met locally.** The branch is stacked on `d8-teacher-training` (cut
-from it at `993f32c` on 2026-11-09), is not merged and not pushed, and no CI run covers it. It is 13 commits above
-`d8-teacher-training` and 75 above `main` as of the code tip `c2d46b5` (`D9: review minors`); the commit that carries
-these records follows it (14 and 76). It is machinery, not a result: the only data it ever ran on is the templated
+from it at `993f32c` on 2026-11-09), is not merged and not pushed, and no CI run covers it. It is 16 commits above
+`d8-teacher-training` and 78 above `main` as of its tip (the last code commit is `135e9f9`, `D9: re-review minors`;
+the earlier code tip was `c2d46b5`, `D9: review minors`; the records are `6746ac5` and, after `135e9f9`, `D9: record
+the re-review`). It is machinery, not a result: the only data it ever ran on is the templated
 toy documents of `tests/support/tiny_parallel.py` (documents of 4 to 8 sentences from 37 nouns), no real document
 corpus exists, **no GPU was used** (the owner did not authorise it; every Eole process of D9 had
 `CUDA_VISIBLE_DEVICES=""` and `gpu_ranks: []`), and `configs/eole/teacher_doc.yaml` is a table of unmeasured priors
@@ -726,11 +727,28 @@ the teacher's; an empty `vocab.src` became 118 reserved symbols and nothing else
 review minors`) fixed all of them, the Minor ones that were cheap, and left open on purpose the five that
 `docs/runbooks/09_document_level.md` lists under "Known limits" (only five optimiser options are checked, the
 chunker's budget counts the source only, a `<sep>` in a fallback translation passes, resuming needs the source, a
-literal `<doc>` in a sentence is not guarded). A scoped re-review of the fix wave (`98e42d1..c2d46b5`) was running when
-these records were written, and nothing from it is in them. Gates, run for real on Linux, CPython 3.14.10: `ruff
+literal `<doc>` in a sentence is not guarded). **A scoped re-review of the fix wave (`98e42d1..c2d46b5`, an
+independent reviewer, read-only) approved it with minors: no Critical and no Important finding.** A second small fix
+wave (`D9: re-review minors`) fixed: M1 (the pre-flight of `launch` skipped an unstated `src_vocab_size` and
+`tgt_vocab_size`, but Eole's default is 32,768 and the reserved symbols are the last lines of the vocabulary file, so
+a config with a model of more than 32,767 pieces and no size would lose them; `launch` now refuses it and names the
+value to state, never setting it itself), M3 (`docify` refuses a split outside `train` and `dev`, `classify_rows`
+refuses rows read without the split, `read_corpus_rows` refuses a bare string for `splits`), M6 (stale docstrings, two
+over-long comment lines, the module-level import in `tests/conftest.py`) and the wording of the `average` guard, which
+checks only that a `launch.json` that parses exists within three parent directories of the step directories (a
+hand-made `step_<N>` inside a real run directory passes). Limits left open and documented (runbook 09, "Known limits"
+15 to 17): M2 (the `average` guard and the `verify_source` lookup see only the three lexical parents: a symlinked
+`ckpt` outside any run directory and a `model_path` nested three or more levels inside the run are refused; pass the
+real path), M4 (C1 is fixed per `corpus` label, not per file: D4 sets `doc_id` to the stem of the source file, so two
+files with the same label and stem still share a document key and only the counted `duplicate_seg_idx` signals it), M5
+(the `launch` pre-flight runs on every plan, `--write-only` and a finished-run relaunch included, and needs the
+SentencePiece model readable from the working directory when a size is stated). The size-4 margin of the gate stays
+thin (.9406 against 0.9, one seed; 3,000 steps measured worse, .9356, so 2,500 stays; if it flakes elsewhere raise
+`train_steps`, never lower the gate). Gates, run for real on Linux, CPython 3.14.10: `ruff
 format --check .`, `ruff check .` and `mypy src` clean and `pytest -m "not network" -q` -- 7279 passed after Task 1,
 7446 after Task 2, 7799 after Task 3, 8024 after Task 4, 8075 after Task 5 (1,090 s) and **8214
-passed, 1 skipped, 10 deselected** after the fix wave (`D9: review minors`, 929 s), against 7187 at the end of D8;
+passed, 1 skipped, 10 deselected** after the fix wave (`D9: review minors`, 929 s), **8252 passed, 1 skipped, 10
+deselected** after the second fix wave (`D9: re-review minors`, 1,217 s), against 7187 at the end of D8;
 the D5, D7 and D8 regression sets stayed green. Mutation checks by hand, one mutant at a time, as recorded per task:
 Task 1 31, Task 2 about 73, Task 3 109, Task 4 68 for the chunker and 110 for the CLI (10 survivors of the first CLI
 pass got tests).
@@ -786,7 +804,7 @@ training is repeatable only on the machine it was measured on: if CI flakes, rai
 gate. NOT verified: any run on a GPU or a real corpus, a different SentencePiece model inside Eole, `read_corpus_rows`
 beyond toy scale, Windows and macOS. [EVIDENCE: the gate chain, the integration test module, the real-binary runs and
 the measurement scripts of the runbook, the spike (`spike-findings.md`) and the review reports, 2026-11-08 to
-2026-11-09, commits `580871d` through `c2d46b5`.]
+2026-11-09, commits `580871d` through `135e9f9`.]
 
 Branch status (updated 2026-11-09, after the D9 build): `main` holds D3, the D3 research follow-up, D4
 and D5, and is at `0d534a3` (the commit that records the D5 merge; `862e176` is the D5 merge tip,
@@ -795,11 +813,13 @@ no `d3-research-followup`, `d4-filtering-mining` or `d5-script-converter` ref re
 branch, `d6-synthetic-data`, cut from `main` at `0d534a3`; D7 lives on `d7-multilingual-ablations`, stacked
 on it (cut from `d6-synthetic-data` at `9973319`); D8 lives on `d8-teacher-training`, stacked on D7 (cut from
 `d7-multilingual-ablations` at `b1a8a47`); D9 lives on `d9-document-level`, stacked on D8 (cut from
-`d8-teacher-training` at `993f32c`; its code tip is `c2d46b5` and the commit after it carries the records). None
+`d8-teacher-training` at `993f32c`; its last code commit is `135e9f9`, `D9: re-review minors`, and the records are
+`6746ac5` and the commit `D9: record the re-review`). None
 of the four is merged into `main` and none is pushed; merging D9 means merging D6, D7 and D8 first. At the D5 merge `main` was 81 commits ahead of `origin/main`
 (`9e7b0ec`); it is unpushed, and no CI run covers D3, D4, D5, D6, D7, D8 or D9. The full local gate was last run
-on the D9 branch: 8214 passed, 1 skipped, 10 deselected (D6 to D9 included), on `D9: review minors` (`c2d46b5`; 8075
-after Task 5, 7187 at the end of D8); on the D8 branch it gave 7114 passed, 1 skipped, 10 deselected (D6, D7 and D8 included), on `D8: review minors of the
+on the D9 branch: 8252 passed, 1 skipped, 10 deselected (D6 to D9 included), on `D9: re-review minors` (`135e9f9`;
+8214 on `D9: review minors`, `c2d46b5`; 8075 after Task 5, 7187 at the end of D8); on the D8 branch it gave 7114
+passed, 1 skipped, 10 deselected (D6, D7 and D8 included), on `D8: review minors of the
 launcher` (`3e357ae`; 7020 after Task 5, 5968 on D7's last commit, `D7: re-review minors`) and again, with the final
 review's fixes, on `D8: final review fixes` (`0378265`): 7187 passed, 1 skipped, 10 deselected; on D6's last
 commit (`D6: re-review minors`) it gave 4331 passed; on the merged D5 tree `main` gave 2833 passed. The
