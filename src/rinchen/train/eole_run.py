@@ -19,6 +19,7 @@ from __future__ import annotations
 import math
 import os
 import shutil
+import stat
 import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -156,9 +157,12 @@ def add_reserved_symbols(vocab_file: Path, symbols: Sequence[str]) -> tuple[str,
     re-terminated (a CRLF file keeps its CRLF, and the lines appended end in LF, which
     Eole reads beside them), and an LF is added before the first symbol only when the
     file does not end with one. Nothing is rewritten when no symbol is missing. The
-    file is written whole through a temporary file and a rename, so a failure leaves
-    the original. The symbols go at the END of the file, where a `src_vocab_size` below
-    the number of tokens would cut them (`ablation_config` sets it so it does not).
+    file is written whole through a temporary file and a rename, so a failure leaves the
+    original, and the file keeps its permission bits. A vocabulary that is a symbolic
+    link is replaced by a regular file (the rename replaces the link, which leaves the
+    file it points to as it was) with the mode of the file it pointed to. The symbols go
+    at the END of the file, where a `src_vocab_size` below the number of tokens would
+    cut them (`ablation_config` sets it so it does not).
 
     Two calls at once on one file with different symbols can lose one's symbols to the
     other's rename; a run is one process.
@@ -173,6 +177,7 @@ def add_reserved_symbols(vocab_file: Path, symbols: Sequence[str]) -> tuple[str,
     wanted = _distinct_symbols(symbols)
     try:
         content = vocab_file.read_bytes()
+        mode = stat.S_IMODE(vocab_file.stat().st_mode)
     except OSError as exc:
         raise DataError(f"cannot read the vocabulary file {vocab_file}: {exc}") from exc
     lines = _vocabulary_lines(content)
@@ -190,7 +195,7 @@ def add_reserved_symbols(vocab_file: Path, symbols: Sequence[str]) -> tuple[str,
     ending = b"" if not content or content.endswith(b"\n") else b"\n"
     suffix = b"\t1" if counted else b""
     added = b"".join(symbol.encode() + suffix + b"\n" for symbol in missing)
-    replace_file(vocab_file, content + ending + added)
+    replace_file(vocab_file, content + ending + added, mode=mode)
     return missing
 
 

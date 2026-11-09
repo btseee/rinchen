@@ -127,7 +127,6 @@ _SENTENCEPIECE_KEYS: Final = ("src_subword_model", "tgt_subword_model")
 _ANGLE_TOKEN: Final = re.compile(r"<[^<>\s]+>")
 _PREFIXES: Final = ("src_prefix", "tgt_prefix")
 _VOCABULARY_SIDES: Final = ("src", "tgt")
-_ABSENT: Final = object()
 
 
 @dataclass(frozen=True, slots=True)

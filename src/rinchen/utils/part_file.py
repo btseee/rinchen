@@ -16,12 +16,16 @@ def unique_part_path(path: Path) -> Path:
     return path.with_name(f"{path.name}.{uuid.uuid4().hex}.part")
 
 
-def replace_file(path: Path, content: bytes) -> None:
+def replace_file(path: Path, content: bytes, *, mode: int | None = None) -> None:
     """Write `content` so that `path` appears whole: it is written to a temporary file
-    beside it and renamed over it, and a failure leaves any earlier file."""
+    beside it and renamed over it, and a failure leaves any earlier file. The new file
+    has the permission bits `mode` when it is given (set before the rename, so the file
+    never shows another mode), else those an ordinary new file gets from the umask."""
     part_path = unique_part_path(path)
     try:
         part_path.write_bytes(content)
+        if mode is not None:
+            part_path.chmod(mode)
         part_path.replace(path)
     finally:
         part_path.unlink(missing_ok=True)

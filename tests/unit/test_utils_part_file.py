@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -59,6 +60,46 @@ def test_replace_file_writes_the_bytes_as_given(tmp_path: Path) -> None:
     replace_file(target, content)
 
     assert target.read_bytes() == content
+
+
+@pytest.mark.parametrize("mode", [0o640, 0o600, 0o444, 0o755])
+def test_replace_file_gives_the_file_the_mode_it_is_asked_for(
+    tmp_path: Path, mode: int
+) -> None:
+    target = tmp_path / "vocab.src"
+
+    replace_file(target, b"a\n", mode=mode)
+
+    assert target.stat().st_mode & 0o7777 == mode
+    assert target.read_bytes() == b"a\n"
+    assert [path.name for path in tmp_path.iterdir()] == ["vocab.src"]
+
+
+def test_replace_file_without_a_mode_leaves_it_to_the_umask(tmp_path: Path) -> None:
+    previous = os.umask(0o027)
+    try:
+        replace_file(tmp_path / "plain", b"x")
+    finally:
+        os.umask(previous)
+
+    assert (tmp_path / "plain").stat().st_mode & 0o7777 == 0o640
+
+
+def test_the_mode_is_set_before_the_rename_so_the_file_never_shows_another(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[int] = []
+    real_replace = Path.replace
+
+    def recording_replace(self: Path, destination: Any) -> Path:
+        seen.append(self.stat().st_mode & 0o7777)
+        return real_replace(self, destination)
+
+    monkeypatch.setattr(Path, "replace", recording_replace)
+
+    replace_file(tmp_path / "vocab.src", b"a\n", mode=0o600)
+
+    assert seen == [0o600]
 
 
 def test_replace_file_into_a_missing_directory_is_an_os_error(tmp_path: Path) -> None:

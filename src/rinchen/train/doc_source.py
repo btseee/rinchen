@@ -10,8 +10,9 @@ the rows of the other split, the filtered ones and the ones of an excluded origi
 row with no document id or no `seg_idx` has no place in a document; a sentence that
 holds the literal `<sep>` would be a false boundary in a window.
 
-The reasons that need the other rows of a document (`duplicate_seg_idx`, `too_long`,
-`gap_single`, `tail`) are `doc_pack`'s.
+The reasons that need the other rows of a document or the piece counts
+(`duplicate_seg_idx`, `too_long`, `gap_single`, `tail`) are `docify`'s, from what
+`doc_pack` leaves over.
 """
 
 from __future__ import annotations

@@ -121,11 +121,26 @@ def test_the_kinds_follow_the_blanks_the_budget_and_the_size_limit(
 
 
 @given(documents(), sizes, budgets)
+def test_a_window_is_made_of_neighbours_and_the_chunks_come_in_order(
+    sentences: list[str], max_sentences: int, max_pieces: int
+) -> None:
+    found = chunks(sentences, max_sentences, max_pieces)
+
+    for chunk in found:
+        first = chunk.positions[0]
+        assert chunk.positions == tuple(range(first, first + len(chunk.positions)))
+    assert [chunk.positions[0] for chunk in found] == sorted(
+        chunk.positions[0] for chunk in found
+    )
+
+
+@given(documents(), sizes, budgets)
 def test_the_chunks_are_cut_greedily(
     sentences: list[str], max_sentences: int, max_pieces: int
 ) -> None:
     """A window or single is followed by a sentence that could not have joined it: the
-    window was full or the next sentence would have passed the budget."""
+    window was full, the next sentence would have passed the budget, or a blank sentence
+    came between them."""
     runs = [
         chunk
         for chunk in chunks(sentences, max_sentences, max_pieces)
@@ -138,7 +153,10 @@ def test_the_chunks_are_cut_greedily(
         texts = [sentences[position] for position in before.positions]
         following = sentences[after.positions[0]]
         full = len(texts) == max_sentences
-        assert full or cost([*texts, following]) > max_pieces, (before, after)
+        between = sentences[before.positions[-1] + 1 : after.positions[0]]
+        assert (
+            full or any(map(blank, between)) or cost([*texts, following]) > max_pieces
+        ), (before, after)
 
 
 @given(documents(), sizes, budgets)

@@ -525,8 +525,15 @@ def _measure_alignment(
     total: dict[int, int] = dict.fromkeys(WINDOW_SIZES, 0)
     for window, text in zip(windows, decoded, strict=True):
         total[window.size] += 1
-        aligned[window.size] += split_output(text, window.size) is not None
+        aligned[window.size] += _is_aligned(text, window.size)
     return Alignment(aligned, total, seconds)
+
+
+def _is_aligned(output: str, size: int) -> bool:
+    """The chunker's own definition: one segment per sentence, none of them empty (a
+    sentence that has text and no translation is a sentence lost)."""
+    segments = split_output(output, size)
+    return segments is not None and all(segments)
 
 
 @dataclass(frozen=True)
@@ -1096,6 +1103,26 @@ def test_the_launch_record_and_the_manifest_name_the_source(
     assert manifest.metrics["steps"] == float(CONTINUATION_STEPS)
     for item in [*manifest.inputs, *manifest.outputs]:
         assert item.sha256 == _sha256(Path(item.path)), item.path
+
+
+@pytest.mark.parametrize(
+    ("output", "size", "aligned"),
+    [
+        ("a <sep> b", 2, True),
+        ("a <sep> b <sep> c", 3, True),
+        ("a <sep> b <sep> c", 2, False),
+        ("a", 2, False),
+        ("a <sep>", 2, False),
+        ("<sep> b", 2, False),
+        ("a <sep> <sep> c", 3, False),
+        ("", 1, False),
+        ("a", 1, True),
+    ],
+)
+def test_a_window_is_aligned_with_one_non_empty_segment_per_sentence(
+    output: str, size: int, aligned: bool
+) -> None:
+    assert _is_aligned(output, size) is aligned
 
 
 # A: the gate.

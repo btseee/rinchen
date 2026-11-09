@@ -227,12 +227,71 @@ def test_empty_and_blank_sentences_are_chunks_of_their_own_and_left_out_of_windo
     )
     sentences = ("a b", blanks[0], blanks[1], "c d e", *blanks[2:], "f")
 
-    # The three sentences with text are one window around the blanks, which stay where
-    # they were and each have a chunk of their own.
+    # Each blank has a chunk of its own and keeps the three sentences with text apart:
+    # none of them has a neighbour to make a window with.
     assert chunks_of(sentences) == [
-        ("window", (0, 3, 10)),
-        *(("empty", (position,)) for position in (1, 2, 4, 5, 6, 7, 8, 9)),
+        ("single", (0,)),
+        ("empty", (1,)),
+        ("empty", (2,)),
+        ("single", (3,)),
+        *(("empty", (position,)) for position in (4, 5, 6, 7, 8, 9)),
+        ("single", (10,)),
     ]
+
+
+# A blank sentence ends the window it is in, as `docify` ends a run at any sentence it
+# leaves out: the model is never asked about two sentences that were not neighbours.
+
+
+def test_a_blank_sentence_ends_the_window_it_is_in() -> None:
+    sentences = ("a b", "c d e", "", "g h", "i j k l")
+
+    assert chunks_of(sentences) == [
+        ("window", (0, 1)),
+        ("empty", (2,)),
+        ("window", (3, 4)),
+    ]
+
+
+def test_a_blank_between_two_sentences_leaves_two_singles() -> None:
+    assert chunks_of(("a b", "", "c d e")) == [
+        ("single", (0,)),
+        ("empty", (1,)),
+        ("single", (2,)),
+    ]
+
+
+def test_a_window_closes_at_a_blank_even_when_it_has_room_for_more() -> None:
+    # Without the blank the four would be one window of four sentences.
+    sentences = ("a", "b", "  ", "c", "d")
+
+    assert chunks_of(sentences, max_sentences=4) == [
+        ("window", (0, 1)),
+        ("empty", (2,)),
+        ("window", (3, 4)),
+    ]
+
+
+def test_blanks_at_the_ends_and_in_a_row_leave_the_windows_between_them_whole() -> None:
+    sentences = ("", "a b", "c d e", "", chr(0x3000), "f", "g h", "")
+
+    assert chunks_of(sentences) == [
+        ("empty", (0,)),
+        ("window", (1, 2)),
+        ("empty", (3,)),
+        ("empty", (4,)),
+        ("window", (5, 6)),
+        ("empty", (7,)),
+    ]
+
+
+def test_a_blank_does_not_change_how_the_sentences_before_it_are_cut() -> None:
+    sentences = ("a b", "c d e", "f", "g h", "i j k l")
+
+    with_blank = chunks_of((*sentences, ""), max_sentences=2)
+
+    assert with_blank[:-1] == chunks_of(sentences, max_sentences=2)
+    assert with_blank[-1] == ("empty", (5,))
 
 
 def test_a_document_of_blanks_only_is_all_empty_chunks() -> None:
@@ -241,10 +300,14 @@ def test_a_document_of_blanks_only_is_all_empty_chunks() -> None:
 
 def test_the_chunks_are_immutable_values_in_order_of_their_first_sentence() -> None:
     chunks = chunk_document(
-        ("a b", "", "c d"), count_pieces=words, max_sentences=4, max_pieces=100
+        ("a b", "c d", "", "e f"), count_pieces=words, max_sentences=4, max_pieces=100
     )
 
-    assert chunks == (Chunk("window", (0, 2)), Chunk("empty", (1,)))
+    assert chunks == (
+        Chunk("window", (0, 1)),
+        Chunk("empty", (2,)),
+        Chunk("single", (3,)),
+    )
     with pytest.raises(AttributeError):
         chunks[0].kind = "single"  # type: ignore[misc]
 
@@ -639,10 +702,25 @@ def test_one_translation_per_sentence_with_empty_sentences_passed_through() -> N
 
     result = translate(("a b", "", "c d e", "  ", "f"), log)
 
-    assert result.translations == ("a b", "", "c d e", "", "f")
-    assert log.calls == [("window", "a b <sep> c d e <sep> f")]
+    assert result.translations == ("S[a b]", "", "S[c d e]", "", "S[f]")
+    assert log.calls == [("sentence", "a b"), ("sentence", "c d e"), ("sentence", "f")]
     assert result.stats.empty == 2
+    assert result.stats.singles == 3
     assert result.stats.sentences == 5
+
+
+def test_a_blank_sentence_keeps_its_neighbours_apart_when_translating() -> None:
+    log = Log()
+
+    result = translate(("a b", "", "c d e", "  ", "f", "g h"), log)
+
+    assert result.translations == ("S[a b]", "", "S[c d e]", "", "f", "g h")
+    assert log.calls == [
+        ("sentence", "a b"),
+        ("sentence", "c d e"),
+        ("window", "f <sep> g h"),
+    ]
+    assert (result.stats.windows, result.stats.singles, result.stats.empty) == (1, 2, 2)
 
 
 def test_a_document_of_blank_sentences_calls_nothing() -> None:

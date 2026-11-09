@@ -19,8 +19,9 @@ holds the two in step.
 How a document is cut:
 
 - A sentence that is empty or only whitespace (Python's `str.strip`) is passed through
-  with an empty translation, calls no translator and is left out of the windows: the
-  other sentences are chunked as if it were not there.
+  with an empty translation, calls no translator, is left out of the windows and ends
+  the window it is in, as `docify` ends a run at any sentence it leaves out: the
+  sentences on either side of it are never in one window.
 - A sentence is one line. Its whitespace, line breaks included, becomes single spaces
   (`one_line`), in the window and for the sentence-level translator, so a window never
   spans lines of a file Eole reads.
@@ -197,6 +198,7 @@ def chunk_document(
 
     for position, sentence in enumerate(sentences):
         if not sentence.strip():
+            close()
             chunks.append(Chunk("empty", (position,)))
         elif not fits([position]):
             close()
@@ -208,7 +210,7 @@ def chunk_document(
                 close()
             current.append(position)
     close()
-    return tuple(sorted(chunks, key=lambda chunk: chunk.positions[0]))
+    return tuple(chunks)
 
 
 def translate_document(

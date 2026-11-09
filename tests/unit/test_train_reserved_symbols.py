@@ -67,6 +67,34 @@ def test_nothing_missing_leaves_the_file_unwritten(
     assert (after.st_ino, after.st_mtime_ns) == (before.st_ino, before.st_mtime_ns)
 
 
+@pytest.mark.parametrize("mode", [0o640, 0o600, 0o444, 0o664])
+def test_the_file_keeps_its_permissions(vocab: Path, mode: int) -> None:
+    _write(vocab, b"a\t5\n")
+    vocab.chmod(mode)
+
+    add_reserved_symbols(vocab, ["<x>"])
+
+    assert vocab.stat().st_mode & 0o7777 == mode
+    assert vocab.read_bytes() == b"a\t5\n<x>\t1\n"
+
+
+def test_a_vocabulary_that_is_a_link_becomes_a_regular_file_with_its_targets_mode(
+    vocab: Path, tmp_path: Path
+) -> None:
+    # The rename replaces the link, not the file it points to, which is left as it was.
+    target = _write(tmp_path / "elsewhere" / "vocab.txt", b"a\t5\n")
+    target.chmod(0o640)
+    vocab.parent.mkdir(parents=True)
+    vocab.symlink_to(target)
+
+    add_reserved_symbols(vocab, ["<x>"])
+
+    assert not vocab.is_symlink()
+    assert vocab.stat().st_mode & 0o7777 == 0o640
+    assert vocab.read_bytes() == b"a\t5\n<x>\t1\n"
+    assert target.read_bytes() == b"a\t5\n"
+
+
 def test_a_second_call_appends_nothing(vocab: Path) -> None:
     _write(vocab, b"a\t5\n")
     add_reserved_symbols(vocab, ["<x>", "<y>"])

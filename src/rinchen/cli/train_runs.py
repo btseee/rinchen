@@ -137,8 +137,6 @@ from rinchen.train.launch import (
 from rinchen.train.launch import launch as launch_run
 from rinchen.utils.integers import is_strict_int
 
-_LAUNCH_STAGE = LAUNCH_STAGE
-_AVERAGE_STAGE = AVERAGE_STAGE
 _DEFAULT_THREADS = 2
 _LAUNCH_PACKAGES = ("eole", "torch", "safetensors", "sentencepiece")
 _AVERAGE_PACKAGES = ("safetensors", "numpy")
@@ -248,7 +246,7 @@ def launch_command(
         # The config is hashed before the launcher reads it, so that the manifest
         # vouches for the bytes the run started from.
         config_file = hash_input(config, what=_CONFIG, missing=ConfigError)
-        refuse_foreign_manifest(run_dir, _LAUNCH_STAGE)
+        refuse_foreign_manifest(run_dir, LAUNCH_STAGE)
         require_out_apart_from_inputs(run_dir, [config], option="--run-dir")
         seed = _config_seed(config)
         try:
@@ -383,7 +381,7 @@ def _config_seed(config: Path) -> int:
 
 def _drop_the_manifest(run_dir: Path) -> Callable[[], None]:
     def begin() -> None:
-        begin_commit(run_dir, _LAUNCH_STAGE)
+        begin_commit(run_dir, LAUNCH_STAGE)
 
     return begin
 
@@ -415,7 +413,7 @@ def _record_the_run(
             return store.manifest_path(run_dir)
     return write_manifest(
         run_dir,
-        stage=_LAUNCH_STAGE,
+        stage=LAUNCH_STAGE,
         config_sha256=config_file.sha256,
         seed=seed,
         inputs=inputs,
@@ -464,7 +462,7 @@ def _vouches_for(
     outputs: list[ManifestFile],
 ) -> bool:
     return (
-        manifest.stage == _LAUNCH_STAGE
+        manifest.stage == LAUNCH_STAGE
         and manifest.config_sha256 == config_file.sha256
         and manifest.inputs == inputs
         and manifest.outputs == outputs
@@ -609,7 +607,7 @@ def _write_average_manifest(averaged: AveragedModel, *, last: int) -> Path:
     ]
     return write_manifest(
         averaged.directory,
-        stage=_AVERAGE_STAGE,
+        stage=AVERAGE_STAGE,
         config_sha256=_parameters_sha256({"last": last, "steps": steps}),
         seed=0,
         inputs=inputs,

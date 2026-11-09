@@ -22,7 +22,7 @@ from rinchen.config.loader import REPO_ROOT
 from rinchen.errors import ConfigError
 from rinchen.script_conv import config as converter_config
 from rinchen.script_conv import train as converter_train
-from rinchen.train import eole_cfg, eole_run
+from rinchen.train import eole_cfg, eole_cfg_keys, eole_run
 
 SOURCE_ROOT = REPO_ROOT / "src" / "rinchen"
 
@@ -53,6 +53,43 @@ def test_the_forbidden_keys_are_the_sixteen_field_names_d5_listed() -> None:
 
 def test_the_position_encoding_is_the_sinusoidal_interleaved_one() -> None:
     assert eole_cfg.POSITION_ENCODING == "SinusoidalInterleaved"
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        name
+        for name in vars(eole_cfg_keys)
+        if name.isupper() and not name.startswith("_")
+    ],
+)
+def test_every_allow_list_is_still_a_name_of_eole_cfg(name: str) -> None:
+    # They moved to `eole_cfg_keys` to keep `eole_cfg` short; callers and the drift
+    # tests still read them as `eole_cfg.<NAME>`.
+    assert getattr(eole_cfg, name) is getattr(eole_cfg_keys, name)
+
+
+def test_the_allow_lists_are_those_the_module_of_keys_holds() -> None:
+    assert {
+        name
+        for name in vars(eole_cfg_keys)
+        if name.isupper() and not name.startswith("_")
+    } == {
+        "TOP_LEVEL_KEYS",
+        "CORPUS_KEYS",
+        "TRANSFORMS_CONFIGS_KEYS",
+        "SENTENCEPIECE_KEYS",
+        "FILTERTOOLONG_KEYS",
+        "MODEL_KEYS",
+        "ENCODER_KEYS",
+        "DECODER_KEYS",
+        "EMBEDDINGS_KEYS",
+        "TRAINING_KEYS",
+        "RESUME_TRAINING_KEYS",
+        "CONTINUATION_TRAINING_KEYS",
+        "CONTINUATION_RESET_OPTIM",
+        "CONTINUATION_RESUME_RESET_OPTIM",
+    }
 
 
 # ---- reject_dollar ---------------------------------------------------------------

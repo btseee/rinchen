@@ -145,14 +145,16 @@ from rinchen.train.continuation import (
 )
 from rinchen.train.curves import TrainCurve, parse_train_log
 from rinchen.train.eole_cfg import (
-    CONTINUATION_RESET_OPTIM,
-    CONTINUATION_RESUME_RESET_OPTIM,
     dump_config,
     merge,
     read_config,
     reject_dollar,
     reject_glob_characters,
     validate_train_config,
+)
+from rinchen.train.eole_cfg_keys import (
+    CONTINUATION_RESET_OPTIM,
+    CONTINUATION_RESUME_RESET_OPTIM,
 )
 from rinchen.train.eole_run import (
     add_reserved_symbols,
