@@ -1,5 +1,6 @@
-"""The rows document windows are cut from (D9): reading the corpus files whole and
-saying, row by row, why a row cannot be in a window.
+"""The rows document windows are cut from (D9): reading the corpus files (the rows of
+the train and dev splits, never the text of the others) and saying, row by row, why a
+row cannot be in a window.
 
 The classification follows `mixture`: the first reason that applies decides, so every row
 is counted once, and the empty and line-break rules are D7's (`mixture.blank_text`,
@@ -15,7 +16,7 @@ The reasons that need the other rows of a document (`duplicate_seg_idx`, `too_lo
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
@@ -47,6 +48,8 @@ REQUIRED_COLUMNS: Final = (
     "doc_id",
     "seg_idx",
 )
+# The splits that make windows (the training ones) or validation windows.
+WINDOWED_SPLITS: Final = ("train", "dev")
 # The columns the corpus table types as enums, which docify compares as text.
 _ENUM_COLUMNS: Final = ("origin", "split")
 _REASON: Final = "reason"
@@ -80,9 +83,17 @@ class ClassifiedRows:
     reasons: dict[str, int]
 
 
-def read_corpus_rows(paths: Sequence[Path]) -> pl.DataFrame:
+def read_corpus_rows(
+    paths: Sequence[Path], *, splits: Collection[str] = WINDOWED_SPLITS
+) -> pl.DataFrame:
     """Every row of the corpus files, with the columns `docify` reads (`origin` and
-    `split` as text). The files are read whole and by name, never as a glob.
+    `split` as text). The files are read by name, never as a glob.
+
+    Only the rows of `splits` are loaded: the split filter is part of the lazy plan, as
+    D7's is, so the text of the other rows (test, holdout) is never decoded, and the
+    frame holds no cell of it. Each of those rows is still one row of the frame, with its
+    `split` and nothing else (every other column is null), so that `docify` counts it
+    under `not_<split>` and `rows_read` is the number of rows of the files.
 
     Raises:
         DataError: no file is given; a file is missing, cannot be read or is not a
@@ -95,14 +106,7 @@ def read_corpus_rows(paths: Sequence[Path]) -> pl.DataFrame:
     frames = []
     for path in paths:
         try:
-            frames.append(
-                scan_corpus(path)
-                .select(
-                    pl.col(name).cast(pl.String) if name in _ENUM_COLUMNS else name
-                    for name in REQUIRED_COLUMNS
-                )
-                .collect()
-            )
+            frames.append(_read_file(path, list(splits)))
         except DataError:
             raise
         except (
@@ -112,6 +116,25 @@ def read_corpus_rows(paths: Sequence[Path]) -> pl.DataFrame:
         ) as exc:
             raise DataError(f"cannot read corpus file {path}: {exc}") from exc
     return pl.concat(frames)
+
+
+def _read_file(path: Path, splits: list[str]) -> pl.DataFrame:
+    lazy = scan_corpus(path)
+    loaded = pl.col("split").cast(pl.String).is_in(splits).fill_null(False)
+    kept = lazy.filter(loaded).select(
+        pl.col(name).cast(pl.String) if name in _ENUM_COLUMNS else name
+        for name in REQUIRED_COLUMNS
+    )
+    # Only the `split` column of the other rows is ever read.
+    left_out = lazy.filter(loaded.not_()).select(pl.col("split").cast(pl.String))
+    frame = kept.collect()
+    placeholders = left_out.collect().select(
+        pl.lit(None, dtype=frame.schema[name]).alias(name)
+        if name != "split"
+        else pl.col("split")
+        for name in REQUIRED_COLUMNS
+    )
+    return pl.concat([frame, placeholders])
 
 
 def classify_rows(rows: pl.DataFrame, split: str) -> ClassifiedRows:
