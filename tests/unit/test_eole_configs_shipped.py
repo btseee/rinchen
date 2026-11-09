@@ -2,7 +2,8 @@
 `multilingual_tiny.yaml` (the spike's CPU recipe), `multilingual_proxy.yaml` (a GPU
 shaped model whose every value is an unmeasured prior), `teacher.yaml` (the 8-GPU
 teacher, every value an unmeasured prior), `teacher_tiny.yaml` (the CPU teacher gate
-of D8), and the matrices `ablation_tiny.yaml` (2 variants) and `ablation_priors.yaml`
+of D8), `teacher_doc.yaml` and `teacher_doc_tiny.yaml` (the document-level continuations
+of the two teachers, D9), and the matrices `ablation_tiny.yaml` (2 variants) and `ablation_priors.yaml`
 (24).
 
 A base holds no per-run value (`src_vocab`, the checkpoint path, the SentencePiece
@@ -35,6 +36,8 @@ TINY_BASE = EOLE_DIR / "multilingual_tiny.yaml"
 PROXY_BASE = EOLE_DIR / "multilingual_proxy.yaml"
 TEACHER_BASE = EOLE_DIR / "teacher.yaml"
 TEACHER_TINY_BASE = EOLE_DIR / "teacher_tiny.yaml"
+TEACHER_DOC_BASE = EOLE_DIR / "teacher_doc.yaml"
+TEACHER_DOC_TINY_BASE = EOLE_DIR / "teacher_doc_tiny.yaml"
 TINY_MATRIX = EOLE_DIR / "ablation_tiny.yaml"
 PRIORS_MATRIX = EOLE_DIR / "ablation_priors.yaml"
 
@@ -43,6 +46,8 @@ BASES = [
     pytest.param(PROXY_BASE, id="proxy"),
     pytest.param(TEACHER_BASE, id="teacher"),
     pytest.param(TEACHER_TINY_BASE, id="teacher-tiny"),
+    pytest.param(TEACHER_DOC_BASE, id="teacher-doc"),
+    pytest.param(TEACHER_DOC_TINY_BASE, id="teacher-doc-tiny"),
 ]
 
 
@@ -488,3 +493,213 @@ def test_the_tiny_teacher_keeps_every_checkpoint_of_its_four_saves() -> None:
     assert training["train_steps"] // training["save_checkpoint_steps"] == 4
     assert training["keep_checkpoint"] == 4
     assert training["valid_steps"] == training["save_checkpoint_steps"]
+
+
+# --- the document-level continuation bases (D9) -------------------------------------
+
+DOC_BASES = [
+    pytest.param(TEACHER_DOC_BASE, TEACHER_BASE, id="teacher-doc"),
+    pytest.param(TEACHER_DOC_TINY_BASE, TEACHER_TINY_BASE, id="teacher-doc-tiny"),
+]
+# Eole fills an option a continuation leaves out from the config of the checkpoint it
+# continues, so a continuation base states every option of the optimiser a Rinchen config
+# may set (`adam_beta1` and `adam_eps` are not among them: they stay Eole's defaults).
+OPTIMIZER_OPTIONS = (
+    "optim",
+    "adam_beta2",
+    "weight_decay",
+    "learning_rate",
+    "decay_method",
+    "warmup_steps",
+)
+# Keys only the launcher's continuation attempt may carry.
+LAUNCHER_ONLY_KEYS = ("train_from", "reset_optim", "update_vocab", "keep_states")
+
+
+@pytest.mark.parametrize(("path", "teacher"), DOC_BASES)
+def test_a_doc_base_continues_the_architecture_of_its_teacher(
+    path: Path, teacher: Path
+) -> None:
+    # `continuation.check_continuation` compares this section with the source's
+    # `config.json`: a continuation says which architecture it believes it continues.
+    assert _base(path)["model"] == _base(teacher)["model"]
+
+
+@pytest.mark.parametrize(("path", "teacher"), DOC_BASES)
+def test_a_doc_base_states_every_optimizer_option_itself(
+    path: Path, teacher: Path
+) -> None:
+    training = _base(path)["training"]
+
+    for option in OPTIMIZER_OPTIONS:
+        assert option in training, option
+
+
+@pytest.mark.parametrize(("path", "teacher"), DOC_BASES)
+def test_a_doc_base_holds_no_key_of_the_launchers_continuation_attempt(
+    path: Path, teacher: Path
+) -> None:
+    base = _base(path)
+    keys = {key for _, key, _ in _entries(base) if isinstance(key, str)}
+
+    assert not keys & set(LAUNCHER_ONLY_KEYS)
+    # `launch --continue-from` adds `train_from` and `reset_optim`; a base that holds one
+    # is refused like any other.
+    for key in ("train_from", "reset_optim"):
+        with pytest.raises(ConfigError, match=key):
+            validate_train_config(
+                merge(_complete(path), {"training": {key: "run/ckpt/step_5"}})
+            )
+
+
+@pytest.mark.parametrize(("path", "teacher"), DOC_BASES)
+def test_a_doc_base_is_a_valid_continuation_base_with_no_corpora_of_its_own(
+    path: Path, teacher: Path
+) -> None:
+    from rinchen.train.doc_corpus import check_continuation_base
+
+    checked = check_continuation_base(path)
+
+    assert checked["data"] == {}
+    assert checked["model"] == _base(path)["model"]
+
+
+@pytest.mark.parametrize(("path", "teacher"), DOC_BASES)
+def test_a_doc_base_allows_windows_longer_than_the_teachers_sentences(
+    path: Path, teacher: Path
+) -> None:
+    lengths = _base(path)["transforms_configs"]["filtertoolong"]
+    teachers = _base(teacher)["transforms_configs"]["filtertoolong"]
+
+    assert lengths["src_seq_length"] == lengths["tgt_seq_length"]
+    assert lengths["src_seq_length"] > teachers["src_seq_length"]
+
+
+def test_the_tiny_doc_base_is_the_tiny_teacher_continued_for_2500_steps() -> None:
+    base = _base(TEACHER_DOC_TINY_BASE)
+    teacher = _base(TEACHER_TINY_BASE)
+
+    assert base["report_every"] == 50
+    assert base["seed"] == teacher["seed"] == 1234
+    assert base["transforms_configs"] == {
+        "filtertoolong": {"src_seq_length": 128, "tgt_seq_length": 128}
+    }
+    assert base["training"] == {
+        **teacher["training"],
+        "adam_beta2": 0.999,
+        "weight_decay": 0.0,
+        "train_steps": 2500,
+        "valid_steps": 500,
+        "save_checkpoint_steps": 500,
+        "keep_checkpoint": 5,
+    }
+
+
+def test_the_tiny_doc_base_keeps_the_schedule_that_was_measured_on_the_toy() -> None:
+    # The spike continued the tiny teacher with these values (learning rate 0.5, 100
+    # warm-up steps, Noam, AdamW) and measured the alignment 0.97, 0.92 and 0.99 at 600,
+    # 800 and 1000 steps (on overlapping windows).
+    training = _base(TEACHER_DOC_TINY_BASE)["training"]
+
+    assert training["optim"] == "adamw"
+    assert training["decay_method"] == "noam"
+    assert training["learning_rate"] == 0.5
+    assert training["warmup_steps"] == 100
+    assert training["compute_dtype"] == "fp32"
+    assert training["world_size"] == 1
+    assert training["gpu_ranks"] == []
+    assert training["dropout"] == [0.0]
+    assert training["attention_dropout"] == [0.0]
+
+
+def test_the_tiny_doc_base_keeps_every_checkpoint_of_its_five_saves() -> None:
+    training = _base(TEACHER_DOC_TINY_BASE)["training"]
+
+    assert training["train_steps"] // training["save_checkpoint_steps"] == 5
+    assert training["keep_checkpoint"] == 5
+    assert training["valid_steps"] == training["save_checkpoint_steps"]
+    assert training.get("early_stopping", 0) == 0
+
+
+def test_the_tiny_doc_base_leaves_the_data_and_the_run_paths_to_the_run() -> None:
+    base = _base(TEACHER_DOC_TINY_BASE)
+
+    assert base["data"] == {}
+    assert "src_vocab" not in base
+    assert "model_path" not in base["training"]
+    assert "sentencepiece" not in base["transforms_configs"]
+    assert "tensorboard" not in base
+
+
+def test_the_doc_base_is_the_teachers_hardware_and_batch_with_a_continuation_schedule() -> (
+    None
+):
+    base = _base(TEACHER_DOC_BASE)
+    teacher = _base(TEACHER_BASE)["training"]
+    training = base["training"]
+
+    for key in (
+        "batch_type",
+        "batch_size",
+        "accum_count",
+        "dropout",
+        "label_smoothing",
+        "compute_dtype",
+        "world_size",
+        "gpu_ranks",
+        "gpu_backend",
+        "timeout",
+        "batch_size_multiple",
+        "optim",
+        "adam_beta2",
+        "decay_method",
+    ):
+        assert training[key] == teacher[key], key
+    assert base["tensorboard"] is True
+    # A fresh optimiser on weights that already trained: a peak below the teacher's,
+    # which the master plan's numbers give as 2.0 with 8000 warm-up steps.
+    assert training["learning_rate"] < teacher["learning_rate"]
+    assert training["warmup_steps"] > 0
+    assert training["valid_steps"] == training["save_checkpoint_steps"]
+    assert training["keep_checkpoint"] >= training["early_stopping"] + 1
+
+
+def test_the_doc_base_is_accepted_by_eoles_own_schema_with_its_8_gpu_settings() -> None:
+    import torch
+    from eole.config.run import TrainConfig
+
+    config = TrainConfig(**_complete(TEACHER_DOC_BASE))
+
+    assert config.training.compute_dtype == torch.bfloat16
+    assert config.training.world_size == 8
+    assert config.training.gpu_ranks == [0, 1, 2, 3, 4, 5, 6, 7]
+    assert (
+        config.training.learning_rate
+        == _base(TEACHER_DOC_BASE)["training"]["learning_rate"]
+    )
+    assert config.training.decay_method == "noam"
+
+
+def test_the_tiny_doc_base_is_accepted_by_eoles_own_schema_on_the_cpu() -> None:
+    from eole.config.run import TrainConfig
+
+    config = TrainConfig(**_complete(TEACHER_DOC_TINY_BASE))
+
+    assert config.training.gpu_ranks == []
+    assert config.training.train_steps == 2500
+    assert config.training.adam_beta2 == 0.999
+    assert config.report_every == 50
+
+
+@pytest.mark.parametrize("path", [TEACHER_DOC_BASE, TEACHER_DOC_TINY_BASE])
+def test_a_doc_base_cites_the_spike_and_calls_its_unmeasured_values_priors(
+    path: Path,
+) -> None:
+    comments = " ".join(_comment_lines(path)).lower()
+
+    assert "continuation" in comments
+    assert "alignment" in comments
+    assert "1,000" in comments
+    if path == TEACHER_DOC_BASE:
+        assert "every value" in comments
+        assert "unmeasured prior" in comments

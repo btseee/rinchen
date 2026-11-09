@@ -1,0 +1,85 @@
+# Base Eole config of the tiny document-level model (D9): the CPU gate of the document
+# continuation. It continues the tiny teacher (teacher_tiny.yaml: a 64-wide transformer with
+# 2+2 layers, 200 steps) on windows of 2 to 4 consecutive sentences joined with <sep>, with
+# `rinchen train launch --continue-from <the averaged teacher>`; the launcher starts that
+# run from the teacher's weights with a fresh optimiser (reset_optim: all) and resumes an
+# interrupted one from its own newest checkpoint. Neither `train_from` nor `reset_optim` is
+# a key of this file: the launcher adds them, and a base that holds one is refused.
+#
+# The model section repeats the teacher's: a continuation says which architecture it
+# believes it continues, and the launcher compares it with the teacher's config.json. Every
+# optimiser option is stated, because Eole fills an option a continuation leaves out from
+# the config of the checkpoint it continues: learning rate 0.5, 100 warm-up steps, Noam and
+# AdamW are what the spike continued the teacher with. (The Adam beta1 and epsilon are not
+# keys a Rinchen config may set; they stay Eole's defaults, which the teacher trained with.)
+#
+# 2,500 steps, because that is what the toy needs on the windows `rinchen train docify`
+# cuts. The spike continued the teacher on windows that overlap (7,260 of them) and reached
+# a <sep> alignment of 0.97, 0.92 and 0.99 at 600, 800 and 1,000 steps on one seed (0.77 at
+# best within 400). `docify` cuts each document into windows that do not overlap (1,194 on
+# the same toy data), and on those the alignment of the dev windows of 2, 3 and 4 sentences
+# was 0.955, 0.847 and 0.886 after 1,000 steps (below the 0.9 the gate requires), 0.973,
+# 0.966 and 0.916 after 1,500, and at least 0.916 for every size at every checkpoint of a
+# 3,000-step run from 1,500 on (CPU, 2 threads, one seed; the training is bit-for-bit
+# repeatable there). The gate test (tests/integration/test_train_tiny_doc.py) requires 0.9
+# for each window size after the 2,500 steps of this file, and measured 0.982, 0.978 and
+# 0.941. The toy documents are templated, so this measures that the structure is learned,
+# never the quality of a translation. A report every 50 steps, a validation and a save every
+# 500, all five checkpoints kept.
+#
+# This file holds no per-run value. `rinchen train docify --config` merges these in, and
+# the merged config is validated before Eole sees it:
+#   src_vocab, training.model_path         the run directory
+#   transforms_configs.sentencepiece       the SentencePiece model, both sides
+#   data                                   the document corpora and their tag prefixes
+seed: 1234
+share_vocab: true
+overwrite: true
+report_every: 50
+data: {}
+transforms_configs:
+  filtertoolong:
+    # A window of 4 toy sentences is up to about 55 pieces with its tag; the limit leaves
+    # room for the 126 pieces `rinchen train docify` allows with it (a target counts two
+    # more tokens against tgt_seq_length).
+    src_seq_length: 128
+    tgt_seq_length: 128
+model:
+  architecture: transformer
+  hidden_size: 64
+  encoder:
+    layers: 2
+  decoder:
+    layers: 2
+  heads: 4
+  transformer_ff: 128
+  embeddings:
+    # Equal to hidden_size: Eole's default of 512 breaks a smaller model.
+    word_vec_size: 64
+    position_encoding_type: SinusoidalInterleaved
+  share_embeddings: true
+  share_decoder_embeddings: true
+training:
+  batch_type: tokens
+  batch_size: 2048
+  accum_count: [1]
+  dropout: [0.0]
+  attention_dropout: [0.0]
+  optim: adamw
+  adam_beta2: 0.999
+  weight_decay: 0.0
+  decay_method: noam
+  learning_rate: 0.5
+  warmup_steps: 100
+  label_smoothing: 0.1
+  world_size: 1
+  train_steps: 2500
+  valid_steps: 500
+  save_checkpoint_steps: 500
+  keep_checkpoint: 5
+  compute_dtype: fp32
+  gpu_ranks: []
+  # Eole's defaults (262144 and 200) made a short run take twice as long on the CPU.
+  bucket_size: 1024
+  prefetch_factor: 8
+  num_workers: 1

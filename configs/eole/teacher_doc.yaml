@@ -1,0 +1,96 @@
+# Base Eole config of the document-level continuation of the teacher (D9): the run an
+# operator starts, once a real teacher and real documents exist, with
+# `rinchen train docify --config configs/eole/teacher_doc.yaml ...` and then
+# `rinchen train launch --continue-from <the averaged teacher>`. It continues OUR OWN
+# teacher on windows of 2 to 4 consecutive sentences joined with <sep>; the launcher starts
+# the run from the teacher's weights with a fresh optimiser (reset_optim: all). Neither
+# `train_from` nor `reset_optim` is a key of this file.
+#
+# EVERY VALUE BELOW IS AN UNMEASURED PRIOR. No real document corpus and no GPU was
+# available when this was written, so nothing here has been trained, timed or tuned. What
+# was measured is the toy only (configs/eole/teacher_doc_tiny.yaml): continuing the tiny
+# teacher on templated documents, the <sep> alignment of the output reached 0.9 after
+# about 1,000 continuation steps on overlapping windows and about 1,500 on the windows
+# `rinchen train docify` cuts (one seed; 0.77 at best within 400). How many steps a real
+# model needs, which window sizes and which mix with sentence-level data are open; the
+# schema tests only show that Eole accepts the file.
+#
+# The model, the hardware and the batch are the teacher's (teacher.yaml), repeated here
+# because a continuation says which architecture it believes it continues and the launcher
+# compares it with the config.json of the source: 8 GPUs, bf16, batches of 16384 tokens
+# with an accumulation of 8, dropout 0.1. Every optimiser option is stated, because Eole
+# fills an option a continuation leaves out from the config of the checkpoint it
+# continues (the Adam beta1 and epsilon are not keys a Rinchen config may set; they stay
+# Eole's defaults, which the teacher trained with). The schedule is the choice of the D9 design: a fresh Adam state with a peak
+# learning rate near what the teacher's Noam decay reaches late in its run (the teacher's
+# 2.0 with 8000 warm-up steps peaks at about 5.7e-4 and decays from there; 0.25 with 2000
+# steps peaks at about 1.4e-4), 20000 steps, a validation and a save every 2000 with early
+# stopping after 6 validations without improvement.
+#
+# Windows are longer than the teacher's sentences, so the length limit is raised from the
+# teacher's 256 to 512 pieces (the same prior; `rinchen train docify` cuts windows to fit
+# it, and a target counts two more tokens against `tgt_seq_length`).
+#
+# This file holds no per-run value. `rinchen train docify --config` merges them in:
+#   src_vocab, training.model_path         the run directory
+#   transforms_configs.sentencepiece       the SentencePiece model, both sides
+#   data                                   the document corpora and their tag prefixes
+seed: 1234
+share_vocab: true
+overwrite: true
+data: {}
+# Training curves for the operator (loss, perplexity, accuracy, learning rate).
+tensorboard: true
+transforms_configs:
+  filtertoolong:
+    src_seq_length: 512
+    tgt_seq_length: 512
+model:
+  architecture: transformer
+  hidden_size: 1536
+  encoder:
+    layers: 24
+  decoder:
+    layers: 12
+  heads: 16
+  transformer_ff: 4096
+  embeddings:
+    # Equal to hidden_size: Eole's default of 512 breaks a bigger model too.
+    word_vec_size: 1536
+    position_encoding_type: SinusoidalInterleaved
+  share_embeddings: true
+  share_decoder_embeddings: true
+training:
+  batch_type: tokens
+  batch_size: 16384
+  # Constant lists: a scheduled value would restart at its first entry after a resume.
+  accum_count: [8]
+  dropout: [0.1]
+  label_smoothing: 0.1
+  # As the teacher: Adam with beta2 0.998 and Noam decay, every option stated.
+  optim: adam
+  adam_beta2: 0.998
+  weight_decay: 0.0
+  decay_method: noam
+  learning_rate: 0.25
+  warmup_steps: 2000
+  compute_dtype: bf16
+  # One node, 8 GPUs. Eole spawns one process per entry of gpu_ranks itself.
+  world_size: 8
+  gpu_ranks: [0, 1, 2, 3, 4, 5, 6, 7]
+  gpu_backend: nccl
+  # Rank 0 alone validates and saves while the others wait at the next collective, so
+  # the validation and a save of several GB must fit in this many seconds (Eole's
+  # default is 60).
+  timeout: 7200
+  # Eole's own rule of 8 for half precision is dead code in 0.6.4, so it is set here.
+  batch_size_multiple: 8
+  train_steps: 20000
+  # A validation at every save, and early stopping on one criterion. Eole keeps the
+  # last keep_checkpoint checkpoints, never the best one: more than the patience, so
+  # the best of the last validations is still on disk when the stop comes.
+  valid_steps: 2000
+  save_checkpoint_steps: 2000
+  keep_checkpoint: 8
+  early_stopping: 6
+  early_stopping_criteria: ppl
