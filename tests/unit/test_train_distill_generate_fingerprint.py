@@ -32,7 +32,7 @@ PINNED_DIGESTS = {
     "shared_vocabulary.json": "b" * 64,
     "config.json": "c" * 64,
     "spm.model": "d" * 64,
-    "export.json": "e" * 64,
+    "rinchen.json": "e" * 64,
 }
 SHARD_SIZE = 512
 
@@ -113,9 +113,9 @@ def test_the_digest_of_each_file_of_the_teacher_is_in_the_fingerprint(export, na
 
 
 def test_the_digest_of_the_record_is_not_a_separate_ingredient(export):
-    # `export.json` says where the export came from; what the teacher IS is its four files
+    # `rinchen.json` says where the export came from; what the teacher IS is its four files
     # and its tag placement.
-    assert _fingerprint(_with_digest(export, "export.json")) == _fingerprint(export)
+    assert _fingerprint(_with_digest(export, "rinchen.json")) == _fingerprint(export)
 
 
 def test_the_tag_placement_is_in_the_fingerprint(export):

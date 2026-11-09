@@ -84,6 +84,7 @@ from rinchen.cli.train_common import (
 from rinchen.config.synth import SYNTH_CONFIG_PATH, SelectionConfig, load_synth_config
 from rinchen.corpus.writers import write_corpus
 from rinchen.errors import ConfigError, DataError
+from rinchen.export.verified import VerifiedExport, verify_export
 from rinchen.filter import qe
 from rinchen.filter.qe import QEScorer
 from rinchen.filter.qe_eole import EoleMetricXQEScorer
@@ -92,7 +93,6 @@ from rinchen.manifest.model import ManifestFile
 from rinchen.manifest.stage import begin_commit, output_file, refuse_foreign_manifest
 from rinchen.mine.embed import Releasable
 from rinchen.train.distill_corpus import GENERATE_STAGE
-from rinchen.train.distill_export import VerifiedExport, verify_export
 from rinchen.train.distill_generate import (
     KdResult,
     KdTranslator,

@@ -11,8 +11,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from rinchen.config.synth import SelectionConfig
+from rinchen.export.verified import VerifiedExport
 from rinchen.synth.shards import ShardStore, plan_shards, shard_directory
-from rinchen.train.distill_export import VerifiedExport
 from rinchen.train.distill_generate import kd_fingerprint
 from rinchen.train.distill_sources import KdSources
 from rinchen.train.distill_teacher import TeacherOptions

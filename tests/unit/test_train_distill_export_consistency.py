@@ -2,12 +2,11 @@
 
 The record states `vocabulary_entries`, the length of the checkpoint's source vocabulary. The
 converter writes `shared_vocabulary.json` from the checkpoint itself, so the two must agree:
-the export refuses a converter whose file does not (nothing is left but its log), and
-`verify_export` refuses a directory whose record and file disagree, because a vocabulary of
-another length maps the pieces to the wrong ids without a word. A file that is not a list of
-strings is not this check's to report: the reader of the file (the teacher) says so, with the
-same error as before. A checkpoint whose saved config names one SentencePiece model for the
-source and another for the target cannot be exported with one `spm.model`.
+the export refuses a converter whose file does not (nothing is left but its log). The reader
+that refuses a directory whose record and file disagree moved to `rinchen.export.verified`
+(D11) with its tests (`test_export_verified.py`). A checkpoint whose saved config names one
+SentencePiece model for the source and another for the target cannot be exported with one
+`spm.model`.
 
 The converter is `tests.support.distill_exports.fake_converter`: nothing starts a process.
 """
@@ -19,12 +18,11 @@ from pathlib import Path
 
 import pytest
 
-from rinchen.errors import ConfigError, DataError, UpstreamError
+from rinchen.errors import ConfigError, UpstreamError
 from rinchen.export.eole_ct2 import export_log_path
-from rinchen.train import distill_export
-from rinchen.train.distill_export import export_checkpoint, verify_export
-from rinchen.train.distill_export_files import shared_vocabulary
-from tests.support.distill_exports import FakeConverter, fake_converter, write_export
+from rinchen.train.distill_export import export_checkpoint
+from tests.support.distill_cli import STATED_DIRECTIONS
+from tests.support.distill_exports import FakeConverter, fake_converter
 from tests.support.step_dirs import (
     SOURCE_VOCABULARY,
     FabricatedRun,
@@ -77,7 +75,11 @@ def test_a_converter_whose_vocabulary_has_another_length_is_refused_with_nothing
 
     with pytest.raises(UpstreamError) as raised:
         export_checkpoint(
-            teacher.final, out_dir, spm_model=spm_model, tag_placement="src"
+            teacher.final,
+            out_dir,
+            spm_model=spm_model,
+            tag_placement="src",
+            directions=STATED_DIRECTIONS,
         )
 
     message = str(raised.value)
@@ -104,7 +106,11 @@ def test_a_converter_vocabulary_that_is_not_a_list_of_strings_is_refused(
 
     with pytest.raises(UpstreamError) as raised:
         export_checkpoint(
-            teacher.final, out_dir, spm_model=spm_model, tag_placement="src"
+            teacher.final,
+            out_dir,
+            spm_model=spm_model,
+            tag_placement="src",
+            directions=STATED_DIRECTIONS,
         )
 
     assert f"{out_dir / 'shared_vocabulary.json'} is not a JSON list of strings" in str(
@@ -122,76 +128,17 @@ def test_a_converter_vocabulary_of_the_right_length_is_exported(
     fake_converter(monkeypatch)
 
     record = export_checkpoint(
-        teacher.final, out_dir, spm_model=spm_model, tag_placement="src"
+        teacher.final,
+        out_dir,
+        spm_model=spm_model,
+        tag_placement="src",
+        directions=STATED_DIRECTIONS,
     ).record
 
     assert record.vocabulary_entries == len(SOURCE_VOCABULARY)
     assert len(json.loads((out_dir / "shared_vocabulary.json").read_text("utf-8"))) == (
         record.vocabulary_entries
     )
-
-
-# ---- in verify_export -----------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("stated", [123, 125])
-def test_a_record_that_states_another_vocabulary_length_than_the_file_is_refused(
-    tmp_path: Path, stated: int
-) -> None:
-    write_export(tmp_path / "export", record_vocabulary_entries=stated)
-
-    with pytest.raises(ConfigError) as raised:
-        verify_export(tmp_path / "export")
-
-    message = str(raised.value)
-    assert f"cannot use the export {tmp_path / 'export'}" in message
-    assert f"records {stated} vocabulary entries" in message
-    assert (
-        f"{tmp_path / 'export' / 'shared_vocabulary.json'} has {len(SOURCE_VOCABULARY)}"
-        in (message)
-    )
-
-
-def test_a_record_and_a_file_that_agree_are_verified(tmp_path: Path) -> None:
-    write_export(tmp_path / "export")
-
-    assert verify_export(tmp_path / "export").record.vocabulary_entries == len(
-        SOURCE_VOCABULARY
-    )
-
-
-@pytest.mark.parametrize(
-    "content",
-    [b"not json", b'{"a": 1}', b'["a", 2]', b"[]"],
-    ids=["not json", "object", "non-string", "empty"],
-)
-def test_a_vocabulary_that_is_not_a_list_of_strings_is_left_to_its_reader(
-    tmp_path: Path, content: bytes
-) -> None:
-    write_export(tmp_path / "export", vocabulary_bytes=content)
-
-    export = verify_export(tmp_path / "export")
-
-    with pytest.raises(DataError, match=r"shared_vocabulary\.json"):
-        shared_vocabulary(export)
-
-
-def test_the_vocabulary_is_read_as_the_bytes_that_were_hashed(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    write_export(tmp_path / "export")
-    file = tmp_path / "export" / "shared_vocabulary.json"
-    real = distill_export.verified_content
-
-    def swapping(path: Path, digest: str) -> bytes:
-        if path == file:
-            path.write_bytes(vocabulary_of(3))
-        return real(path, digest)
-
-    monkeypatch.setattr(distill_export, "verified_content", swapping)
-
-    with pytest.raises(ConfigError, match=r"shared_vocabulary\.json changed after"):
-        verify_export(tmp_path / "export")
 
 
 # ---- one SentencePiece model for both sides --------------------------------------------------
@@ -205,10 +152,14 @@ def test_a_checkpoint_with_two_sentencepiece_models_is_refused_before_the_conver
     digest = tree_digest(run.run_dir)
 
     with pytest.MonkeyPatch.context() as patched:
-        patched.setattr("rinchen.train.distill_export.export_ct2", converter)
+        patched.setattr("rinchen.export.ct2.export_ct2", converter)
         with pytest.raises(ConfigError) as raised:
             export_checkpoint(
-                run.final, out_dir, spm_model=spm_model, tag_placement="src"
+                run.final,
+                out_dir,
+                spm_model=spm_model,
+                tag_placement="src",
+                directions=STATED_DIRECTIONS,
             )
 
     message = str(raised.value)

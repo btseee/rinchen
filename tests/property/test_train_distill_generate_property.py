@@ -15,7 +15,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from rinchen.train.distill_export import VerifiedExport
+from rinchen.export.verified import VerifiedExport
 from tests.support.corpus_rows import EN_MN
 from tests.support.distill_teachers import verified_export
 from tests.support.planted_kd import ScriptedTeacher, kd_run, sources_of

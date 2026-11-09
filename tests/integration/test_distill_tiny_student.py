@@ -98,6 +98,7 @@ from tests.support.distill_gate_stages import (
     Student,
     Teacher,
     Workspace,
+    assert_model_record_facts,
     evaluate_checkpoint,
     export_checkpoint,
     generate_kd,
@@ -264,7 +265,7 @@ def test_the_teacher_export_holds_the_five_files_and_a_manifest_that_vouches_for
     assert sorted(path.name for path in directory.iterdir()) == sorted(
         [*EXPORT_FILES, "manifest.json"]
     )
-    assert manifest.stage == "distill_export"
+    assert manifest.stage == "export"
     assert manifest.status["export"] == "ok"
     assert manifest.status["tag_placement_check"] == "checked"
     assert {Path(item.path).name for item in manifest.outputs} == set(EXPORT_FILES)
@@ -282,6 +283,7 @@ def test_the_teacher_export_record_says_where_the_model_came_from(
     averaged = manifest_of(teacher.averaged)
 
     assert record["tag_placement"] == "src"
+    assert_model_record_facts(teacher_export, DIRECTIONS)
     assert (record["encoder_layers"], record["decoder_layers"]) == (2, 2)
     assert record["hidden_size"] == 64
     assert record["vocabulary_entries"] == 344
@@ -720,13 +722,14 @@ def test_the_student_export_records_a_two_one_layer_model_made_from_the_final_st
     )
     assert (record["encoder_layers"], record["decoder_layers"]) == (2, 1)
     assert record["tag_placement"] == "src"
+    assert_model_record_facts(student_export, DIRECTIONS)
     assert checkpoint["kind"] == "step"
     assert checkpoint["step"] == STEPS
     assert checkpoint["manifest_stage"] == "train_launch"
     assert checkpoint["weights_sha256"] == listed_digest(
         student.launch_manifest, WEIGHTS
     )
-    assert student_export.manifest.stage == "distill_export"
+    assert student_export.manifest.stage == "export"
     for name in EXPORT_FILES:
         assert listed_digest(student_export.manifest, name) == sha256_of(
             directory / name

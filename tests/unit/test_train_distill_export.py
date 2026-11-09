@@ -1,5 +1,6 @@
 """Tests for `rinchen.train.distill_export`: turning a checkpoint of OURS into a CTranslate2
-model directory with a record of where it came from (D10), and reading such a directory back.
+model directory with a record of where it came from (D10; the record, its reader and the
+staging moved to `rinchen.export` in D11 and have tests of their own there).
 
 `export_checkpoint` accepts exactly what `continuation.verify_source` accepts (the final step
 of a run `rinchen train launch` finished, an averaged model `rinchen train average` wrote),
@@ -12,6 +13,7 @@ converter runs in the integration test of the distillation gate).
 
 from __future__ import annotations
 
+import importlib.metadata
 import json
 import shutil
 import subprocess
@@ -22,19 +24,19 @@ from typing import Any
 import pytest
 
 from rinchen.errors import ConfigError, DataError, UpstreamError
+from rinchen.export import ct2
 from rinchen.export.eole_ct2 import export_log_path
-from rinchen.train import distill_export
-from rinchen.train.distill_export import (
+from rinchen.export.record import (
     CT2_FILES,
-    EXPORT_FILES,
-    EXPORT_STAGE,
     RECORD_FILE,
     SPM_FILE,
     CheckpointRecord,
-    ExportRecord,
-    export_checkpoint,
+    ModelRecord,
 )
+from rinchen.train import distill_export
+from rinchen.train.distill_export import export_checkpoint
 from rinchen.utils import logged_process
+from tests.support.distill_cli import STATED_DIRECTIONS
 from tests.support.distill_exports import FakeConverter, fake_converter
 from tests.support.fake_process import LONG_POLL_S, FakeProcess
 from tests.support.sized_spm import sized_spm_bytes
@@ -98,12 +100,13 @@ def export(
     *,
     placement: Any = "src",
     timeout: float | None = None,
-) -> ExportRecord:
+) -> ModelRecord:
     return export_checkpoint(
         checkpoint,
         target,
         spm_model=spm_model,
         tag_placement=placement,
+        directions=STATED_DIRECTIONS,
         timeout=timeout,
     ).record
 
@@ -138,8 +141,15 @@ def test_the_final_step_of_a_run_is_exported_with_a_record_of_where_it_came_from
 
     record = export(teacher.final, out_dir, spm_model)
 
-    assert record == ExportRecord(
+    assert record == ModelRecord(
+        name="rinchen-07148803f29a",
+        rinchen_version=importlib.metadata.version("rinchen"),
         tag_placement="src",
+        directions=STATED_DIRECTIONS,
+        languages=("eng_Latn", "khk_Cyrl"),
+        tags={"eng_Latn": "<2eng_Latn>", "khk_Cyrl": "<2khk_Cyrl>"},
+        document_level=False,
+        quantization="float32",
         checkpoint=CheckpointRecord(
             kind="step",
             step=200,
@@ -157,12 +167,13 @@ def test_the_final_step_of_a_run_is_exported_with_a_record_of_where_it_came_from
     )
     assert sorted(path.name for path in out_dir.iterdir()) == [
         "config.json",
-        "export.json",
+        "manifest.json",
         "model.bin",
+        "rinchen.json",
         "shared_vocabulary.json",
         "spm.model",
     ]
-    assert (out_dir / "export.json").read_bytes() == record.to_bytes()
+    assert (out_dir / "rinchen.json").read_bytes() == record.to_bytes()
     assert (out_dir / "spm.model").read_bytes() == spm_model.read_bytes()
     assert converter.calls[0].checkpoint == teacher.final
     # The converter writes into a child of a private directory beside the output, which is
@@ -187,7 +198,7 @@ def test_an_averaged_model_is_exported_as_such(
         manifest_sha256=sha256(averaged / "manifest.json"),
         manifest_stage="train_average",
     )
-    assert (out_dir / "export.json").read_bytes() == record.to_bytes()
+    assert (out_dir / "rinchen.json").read_bytes() == record.to_bytes()
 
 
 def test_the_shape_is_read_from_the_checkpoints_config_not_assumed(
@@ -730,29 +741,17 @@ def test_a_failure_writing_the_files_beside_the_models_leaves_no_directory(
     monkeypatch: pytest.MonkeyPatch,
     name: str,
 ) -> None:
-    real = distill_export.replace_file
+    real = ct2.replace_file
 
     def full_disk(path: Path, content: bytes, **options: Any) -> None:
         if path.name == name:
             raise OSError(28, "No space left on device")
         real(path, content, **options)
 
-    monkeypatch.setattr(distill_export, "replace_file", full_disk)
+    monkeypatch.setattr(ct2, "replace_file", full_disk)
 
     with pytest.raises(OSError, match="No space left"):
         export(teacher.final, out_dir, spm_model)
 
     assert len(converter.calls) == 1
     assert not out_dir.exists()
-
-
-def test_the_export_files_are_the_five_the_manifest_lists() -> None:
-    assert CT2_FILES == ("model.bin", "shared_vocabulary.json", "config.json")
-    assert EXPORT_FILES == (
-        "model.bin",
-        "shared_vocabulary.json",
-        "config.json",
-        "spm.model",
-        "export.json",
-    )
-    assert EXPORT_STAGE == "distill_export"

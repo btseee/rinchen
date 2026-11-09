@@ -1,6 +1,9 @@
 """`rinchen distill export`: what it prints and writes (the five files of an export and the
 manifest that vouches for them), what it records of the checkpoint it came from, and each
-refusal of `export_checkpoint` as the exit code the command documents.
+refusal of `export_checkpoint` as the exit code the command documents. D11 made the command
+the same function as `rinchen export convert` (`test_cli_export.py`) with a new record
+(`rinchen.json`), stage (`export`) and printed lines; D10's expectations are kept here with
+those changes.
 
 The converter is `tests.support.distill_exports.fake_converter` and the runs are fabricated
 by `tests.support.step_dirs`, so nothing starts a process. What the library checks is in
@@ -20,13 +23,11 @@ from click.testing import Result
 
 from rinchen.cli import train_common
 from rinchen.errors import UpstreamError
+from rinchen.export import ct2
+from rinchen.export.record import EXPORT_FILES, ModelRecord
+from rinchen.export.verified import verify_export
 from rinchen.manifest import stage, store
 from rinchen.manifest.model import Manifest
-from rinchen.train.distill_export import (
-    EXPORT_FILES,
-    ExportRecord,
-    verify_export,
-)
 from tests.support.distill_cli import (
     ExportWorkspace,
     invoke,
@@ -44,14 +45,15 @@ from tests.support.step_dirs import (
 )
 
 CHECKPOINT_FILES = ("model.00.safetensors", "config.json", "vocab.json")
-# The SHA-256 of the canonical JSON `{"tag_placement":"src"}` and of the one for `tgt`.
-SRC_CONFIG_SHA256 = "4307033aca624ba5f9468b04cc39a3548307673a45f71a2745cb8cfde9dafe09"
-TGT_CONFIG_SHA256 = "e32a8d964094bdcfbb00810e80610a21d2f6bf5fc7de217f65b9c7497fc9ac40"
+# The SHA-256 of the canonical JSON `{"quantization":"float32","tag_placement":"src"}` and of
+# the one for `tgt`.
+SRC_CONFIG_SHA256 = "42d06047b312429f6fe21256c25647fee455b790f1b05f2445380cf89c0af323"
+TGT_CONFIG_SHA256 = "d9ca68b457cfcc0fa5d06181b1a15706d17e99c4ea86c2f111a704ce8ba46ffc"
 WRITTEN = (
     "config.json",
-    "export.json",
     "manifest.json",
     "model.bin",
+    "rinchen.json",
     "shared_vocabulary.json",
     "spm.model",
 )
@@ -132,7 +134,10 @@ def test_a_run_prints_where_it_exported_to_the_record_and_the_manifest(
     assert result.stdout.splitlines() == [
         f"exported to {workspace.out_dir}",
         "tag placement: stated, not recorded in the checkpoint",
-        f"record: {workspace.out_dir}/export.json",
+        "directions: stated (2)",
+        "document level: stated (false)",
+        "quantization: float32",
+        f"record: {workspace.out_dir}/rinchen.json",
         f"manifest: {workspace.out_dir}/manifest.json",
     ]
 
@@ -164,7 +169,7 @@ def test_the_record_holds_the_placement_and_the_shape_of_the_checkpoint(
 ) -> None:
     run_ok(workspace.args(tag_placement="tgt"))
 
-    record = ExportRecord.from_bytes(workspace.record.read_bytes())
+    record = ModelRecord.from_bytes(workspace.record.read_bytes())
     assert record.tag_placement == "tgt"
     assert (record.encoder_layers, record.decoder_layers) == (2, 1)
     assert record.hidden_size == 64
@@ -196,7 +201,7 @@ def test_the_manifest_lists_the_five_files_with_their_digests_and_no_row_counts(
     run_ok(workspace.args())
 
     manifest = manifest_of(workspace)
-    assert manifest.stage == "distill_export"
+    assert manifest.stage == "export"
     assert [Path(item.path) for item in manifest.outputs] == [
         workspace.out_dir / name for name in EXPORT_FILES
     ]
@@ -227,17 +232,24 @@ def test_the_command_hashes_only_the_files_it_wrote(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     hashed: list[Path] = []
-    real = stage.sha256_of
+    real_convert = ct2.sha256_of
+    real_stage = stage.sha256_of
 
     def spying(path: Path) -> str:
         hashed.append(path)
-        return real(path)
+        return real_convert(path)
 
-    monkeypatch.setattr(stage, "sha256_of", spying)
+    def spying_stage(path: Path) -> str:
+        hashed.append(path)
+        return real_stage(path)
+
+    monkeypatch.setattr(ct2, "sha256_of", spying)
+    monkeypatch.setattr(stage, "sha256_of", spying_stage)
 
     run_ok(workspace.args())
 
-    assert sorted(hashed) == sorted(workspace.out_dir / name for name in EXPORT_FILES)
+    # `convert` hashes each file once, in the private directory it renames onto the output.
+    assert sorted(path.name for path in hashed) == sorted(EXPORT_FILES)
 
 
 def test_the_metrics_status_and_seed_are_those_of_an_export(
@@ -256,14 +268,17 @@ def test_the_metrics_status_and_seed_are_those_of_an_export(
     assert manifest.status == {
         "export": "ok",
         "tag_placement": "src",
+        "quantization": "float32",
         "checkpoint_kind": "step",
         "tag_placement_check": "stated",
+        "directions_check": "stated",
+        "document_level_check": "stated",
     }
     assert manifest.seed == -1
     assert manifest.config_sha256 == SRC_CONFIG_SHA256
 
 
-def test_the_config_digest_stands_for_the_tag_placement(
+def test_the_config_digest_stands_for_the_tag_placement_and_the_quantisation(
     workspace: ExportWorkspace, converter: FakeConverter
 ) -> None:
     run_ok(workspace.args(tag_placement="tgt"))
@@ -280,7 +295,7 @@ def test_the_manifest_records_the_installed_tools(
 
     assert manifest_of(workspace).tool_versions == {
         package: importlib.metadata.version(package)
-        for package in ("ctranslate2", "eole", "torch")
+        for package in ("ctranslate2", "eole")
     }
 
 
@@ -295,13 +310,16 @@ def test_an_averaged_model_is_exported_and_recorded_as_one(
     assert manifest.status == {
         "export": "ok",
         "tag_placement": "tgt",
+        "quantization": "float32",
         "checkpoint_kind": "averaged",
         "tag_placement_check": "stated",
+        "directions_check": "stated",
+        "document_level_check": "stated",
     }
     assert [Path(item.path) for item in manifest.inputs[:3]] == [
         workspace.checkpoint / name for name in CHECKPOINT_FILES
     ]
-    record = ExportRecord.from_bytes(workspace.record.read_bytes())
+    record = ModelRecord.from_bytes(workspace.record.read_bytes())
     assert (record.checkpoint.kind, record.checkpoint.step) == ("averaged", None)
     assert record.checkpoint.manifest_stage == "train_average"
 
@@ -337,14 +355,16 @@ def test_the_manifest_is_written_after_every_file_it_lists(
     converter: FakeConverter,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    seen: list[tuple[list[bool], list[str]]] = []
+    # `convert` writes it into the private directory that is renamed onto the output, so the
+    # output appears whole, manifest included, or not at all.
+    seen: list[tuple[list[str], bool]] = []
     real_write = train_common.store.write
 
     def looking(out_dir: Path, manifest: Manifest) -> Path:
         seen.append(
             (
-                [Path(item.path).is_file() for item in manifest.outputs],
                 sorted(path.name for path in out_dir.iterdir()),
+                workspace.out_dir.exists(),
             )
         )
         return real_write(out_dir, manifest)
@@ -353,9 +373,10 @@ def test_the_manifest_is_written_after_every_file_it_lists(
 
     run_ok(workspace.args())
 
-    ((exist, names),) = seen
-    assert all(exist)
+    ((names, output_exists),) = seen
     assert names == sorted(name for name in WRITTEN if name != "manifest.json")
+    assert not output_exists
+    assert sorted(workspace.written()) == sorted(WRITTEN)
 
 
 @pytest.mark.parametrize(
@@ -710,12 +731,18 @@ CHECKED_LINE = "tag placement: checked against the saved config"
 STATED_LINE = "tag placement: stated, not recorded in the checkpoint"
 
 
-def lines_of_a_run(workspace: ExportWorkspace) -> list[str]:
-    return [
-        f"exported to {workspace.out_dir}",
-        f"record: {workspace.out_dir}/export.json",
+def placement_frame(result: Result, workspace: ExportWorkspace) -> list[str]:
+    """The lines of a run that frame the one about the tag placement: the first, that
+    line itself and the last two (the lines between them are about the directions, the
+    document level and the quantisation, which `test_cli_export.py` checks in full)."""
+    lines = result.stdout.splitlines()
+    assert len(lines) == 7, lines
+    assert lines[0] == f"exported to {workspace.out_dir}"
+    assert lines[-2:] == [
+        f"record: {workspace.out_dir}/rinchen.json",
         f"manifest: {workspace.out_dir}/manifest.json",
     ]
+    return [lines[1]]
 
 
 @pytest.mark.parametrize("placement", ["src", "tgt"])
@@ -726,8 +753,7 @@ def test_a_placement_the_saved_config_records_is_reported_as_checked(
 
     result = run_ok(workspace.args(tag_placement=placement))
 
-    expected = lines_of_a_run(workspace)
-    assert result.stdout.splitlines() == [expected[0], CHECKED_LINE, *expected[1:]]
+    assert placement_frame(result, workspace) == [CHECKED_LINE]
     assert manifest_of(workspace).status["tag_placement_check"] == "checked"
 
 
@@ -747,8 +773,7 @@ def test_a_placement_the_checkpoint_does_not_record_is_reported_as_stated(
 
     result = run_ok(workspace.args(tag_placement=placement))
 
-    expected = lines_of_a_run(workspace)
-    assert result.stdout.splitlines() == [expected[0], STATED_LINE, *expected[1:]]
+    assert placement_frame(result, workspace) == [STATED_LINE]
     assert manifest_of(workspace).status["tag_placement_check"] == "stated"
 
 

@@ -9,6 +9,10 @@ against the saved config (which was hashed before it was read), and a disagreeme
 before anything is made. A saved config without a `data` section, or without a direction tag
 in it, leaves the caller's statement as the only source.
 
+The saved config also names the directions of the model (D11): the runs here either carry the
+corpora of the launcher, whose directions the export derives, or say nothing, and then the
+test states the directions (`STATED_DIRECTIONS`).
+
 The runs are fabricated by `tests.support.step_dirs` (`launcher_data`) and the converter is
 `tests.support.distill_exports.fake_converter`: nothing starts a process.
 """
@@ -23,6 +27,7 @@ import pytest
 
 from rinchen.errors import ConfigError, DataError
 from rinchen.train.distill_export import export_checkpoint
+from tests.support.distill_cli import STATED_DIRECTIONS
 from tests.support.distill_exports import FakeConverter, fake_converter
 from tests.support.step_dirs import (
     eole_model_section,
@@ -82,9 +87,11 @@ def run_with(tmp_path: Path, data: dict[str, Any] | None) -> Path:
     return make_finished_run(tmp_path / "teacher", model=MODEL, data=data).final
 
 
-def exported(checkpoint: Path, target: Path, spm_model: Path, placement: Any) -> Any:
+def exported(
+    checkpoint: Path, target: Path, spm_model: Path, placement: Any, **options: Any
+) -> Any:
     return export_checkpoint(
-        checkpoint, target, spm_model=spm_model, tag_placement=placement
+        checkpoint, target, spm_model=spm_model, tag_placement=placement, **options
     )
 
 
@@ -219,7 +226,7 @@ def test_the_record_written_does_not_say_whether_the_placement_was_checked(
 
     exported(checkpoint, out_dir, spm_model, "src")
 
-    document = json.loads((out_dir / "export.json").read_text(encoding="utf-8"))
+    document = json.loads((out_dir / "rinchen.json").read_text(encoding="utf-8"))
     assert "placement_check" not in document
     assert "checked" not in json.dumps(document)
 
@@ -318,7 +325,9 @@ def test_a_saved_config_without_a_direction_tag_leaves_the_callers_statement(
 ) -> None:
     checkpoint = run_with(tmp_path, data)
 
-    outcome = exported(checkpoint, out_dir, spm_model, placement)
+    outcome = exported(
+        checkpoint, out_dir, spm_model, placement, directions=STATED_DIRECTIONS
+    )
 
     assert outcome.record.tag_placement == placement
     assert outcome.placement_check == "stated"

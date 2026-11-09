@@ -35,11 +35,11 @@ import polars as pl
 from rinchen.config.synth import SelectionConfig
 from rinchen.corpus.schema import make_row_id
 from rinchen.corpus.writers import write_corpus
+from rinchen.export.verified import VerifiedExport
 from rinchen.filter.qe import QEScorer
 from rinchen.manifest import store
 from rinchen.manifest.model import Manifest, ManifestFile
 from rinchen.manifest.stage import output_file
-from rinchen.train.distill_export import VerifiedExport
 from rinchen.train.distill_generate import KdResult, KdTranslator, generate_kd
 from rinchen.train.distill_sources import KdSources
 from rinchen.train.distill_teacher import TeacherOptions

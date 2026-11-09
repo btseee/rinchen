@@ -26,7 +26,7 @@ against what the library does silently (measured in the D10 spike):
 `source_too_long` and `empty_source` (texts not sent), `truncated`, `line_break` and
 `reserved_symbol` (hypotheses dropped, each under the first reason that applies, in that
 order). A failed call adds nothing. The files read at construction are checked against the
-SHA-256 `verify_export` took (`distill_export_files`); `model.bin` is loaded by CTranslate2.
+SHA-256 `verify_export` took (`rinchen.export.verified`); `model.bin` is loaded by CTranslate2.
 
 No GPU was used and none is claimed: the device is `cpu` by default, `cuda` is an explicit
 operator choice that was never run (`auto` is refused: it would pick the GPU), and everything
@@ -43,16 +43,16 @@ from typing import Any, Final, Literal, Protocol
 from rinchen.config.ablation import TagPlacement, require_placement
 from rinchen.config.languages import direction_tag, known_language_codes
 from rinchen.errors import ConfigError, DataError, UpstreamError
-from rinchen.spm.symbols import user_defined_symbols
-from rinchen.synth._candidates import clean_candidates
-from rinchen.synth._texts import require_encodable
-from rinchen.train.distill_export import SPM_FILE, VerifiedExport
-from rinchen.train.distill_export_files import (
-    VOCABULARY_FILE,
+from rinchen.export.record import CT2_FILES, SPM_FILE
+from rinchen.export.verified import (
+    VerifiedExport,
     end_token,
     shared_vocabulary,
     verified_bytes,
 )
+from rinchen.spm.symbols import user_defined_symbols
+from rinchen.synth._candidates import clean_candidates
+from rinchen.synth._texts import require_encodable
 from rinchen.train.mixture import LINE_BREAK_CHARACTERS
 from rinchen.train.validation_corpus import load_processor, require_one_piece
 from rinchen.utils.integers import is_strict_int
@@ -65,6 +65,8 @@ COUNTER_KEYS: Final = (
     "line_break",
     "reserved_symbol",
 )
+
+_VOCABULARY_FILE: Final = CT2_FILES[1]
 
 # CTranslate2's `max_input_length` is 1,024 and cuts a longer source silently; a tag in the
 # source takes one place of it.
@@ -298,7 +300,7 @@ class TeacherTranslator:
         if tag not in self._vocabulary:
             raise ConfigError(
                 f"the direction tag {tag} is not an entry of "
-                f"{self._export.directory / VOCABULARY_FILE}: CTranslate2 would turn "
+                f"{self._export.directory / _VOCABULARY_FILE}: CTranslate2 would turn "
                 "it into <unk> and translate into the wrong language without a word"
             )
         require_one_piece(self._processor, tag, self._export.directory / SPM_FILE)

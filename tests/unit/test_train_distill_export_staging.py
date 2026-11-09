@@ -6,6 +6,8 @@ only that: a directory someone else made at the output path in the meantime is r
 never touched, which a cleanup that removes "the output directory" could not promise.
 
 The converter is `tests.support.distill_exports.fake_converter`: nothing starts a process.
+The staging itself moved to `rinchen.export.ct2.convert` in D11 (`test_export_convert*.py`);
+these tests keep D10's expectations of it through `export_checkpoint`.
 """
 
 from __future__ import annotations
@@ -18,9 +20,11 @@ from typing import Any
 import pytest
 
 from rinchen.errors import ConfigError, UpstreamError
+from rinchen.export import ct2
 from rinchen.export.eole_ct2 import export_log_path
-from rinchen.train import distill_export
-from rinchen.train.distill_export import ExportRecord, export_checkpoint
+from rinchen.export.record import ModelRecord
+from rinchen.train.distill_export import export_checkpoint
+from tests.support.distill_cli import STATED_DIRECTIONS
 from tests.support.distill_exports import FakeConverter, fake_converter
 from tests.support.step_dirs import (
     FabricatedRun,
@@ -54,9 +58,13 @@ def out_dir(tmp_path: Path) -> Path:
     return tmp_path / "export"
 
 
-def export(teacher: FabricatedRun, target: Path, spm_model: Path) -> ExportRecord:
+def export(teacher: FabricatedRun, target: Path, spm_model: Path) -> ModelRecord:
     return export_checkpoint(
-        teacher.final, target, spm_model=spm_model, tag_placement="src"
+        teacher.final,
+        target,
+        spm_model=spm_model,
+        tag_placement="src",
+        directions=STATED_DIRECTIONS,
     ).record
 
 
@@ -113,7 +121,8 @@ def test_a_successful_export_leaves_the_directory_and_its_log_and_nothing_else(
         "shared_vocabulary.json",
         "config.json",
         "spm.model",
-        "export.json",
+        "rinchen.json",
+        "manifest.json",
     }
     assert export_log_path(out_dir).read_text(encoding="utf-8") == "converter log\n"
 
@@ -158,7 +167,7 @@ def racing_converter(
         make_theirs()
         return inner(ckpt_dir, built, **options)
 
-    monkeypatch.setattr(distill_export, "export_ct2", racing)
+    monkeypatch.setattr(ct2, "export_ct2", racing)
     return inner
 
 
@@ -365,4 +374,4 @@ def test_a_private_directory_that_cannot_be_removed_after_the_rename_does_not_fa
         record = export(teacher, out_dir, spm_model)
 
     assert record.tag_placement == "src"
-    assert (out_dir / "export.json").is_file()
+    assert (out_dir / "rinchen.json").is_file()

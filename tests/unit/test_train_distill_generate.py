@@ -18,8 +18,8 @@ from rinchen.config.filters import QeConfig
 from rinchen.config.synth import SelectionConfig
 from rinchen.corpus.schema import CORPUS_SCHEMA, make_row_id
 from rinchen.errors import ConfigError, DataError, UpstreamError
+from rinchen.export.verified import verify_export
 from rinchen.synth.select import COUNT_KEYS
-from rinchen.train.distill_export import verify_export
 from rinchen.train.distill_generate import KdResult, ShardProgress
 from rinchen.train.distill_teacher import TeacherOptions
 from tests.support.corpus_rows import EN_MN, RU_MN

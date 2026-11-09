@@ -13,10 +13,11 @@ from typing import Final
 
 from rinchen.cli.distill_generate_plan import GeneratePlan
 from rinchen.cli.train_common import numbers_under
+from rinchen.export.record import EXPORT_FILES
+from rinchen.export.verified import VerifiedExport
 from rinchen.manifest import store
 from rinchen.manifest.model import ManifestFile
 from rinchen.synth.select import COUNT_KEYS
-from rinchen.train.distill_export import EXPORT_FILES, VerifiedExport
 from rinchen.train.distill_generate import KdResult
 
 KD_FILE: Final = "kd.parquet"

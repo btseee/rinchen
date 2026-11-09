@@ -4,7 +4,10 @@ seams the commands call replaced by fakes. No model, converter, process or GPU i
 
 `ExportWorkspace` is a checkpoint a run of ours finished (or an averaged model), its
 SentencePiece model and an output directory that does not exist; the converter is
-`tests.support.distill_exports.fake_converter`.
+`tests.support.distill_exports.fake_converter`. Its command line states the two directions of
+`tests.support.step_dirs.LAUNCHER_CORPORA` (`STATED_DIRECTIONS`): a checkpoint fabricated
+without a `data` section names none, and one fabricated with the launcher's names exactly
+these two, so the statement is accepted either way.
 
 `GenerateWorkspace` is the planted corpus of `tests.support.planted_kd`, a complete export
 (`write_export`) as the teacher and an output directory that does not exist. The planted
@@ -46,10 +49,10 @@ from rinchen.cli import distill_evaluate, distill_generate
 from rinchen.cli.main import app
 from rinchen.config.synth import SelectionConfig
 from rinchen.corpus.schema import corpus_frame
+from rinchen.export.verified import VerifiedExport
 from rinchen.filter.qe import QEScorer
 from rinchen.manifest import store
 from rinchen.manifest.model import Manifest
-from rinchen.train.distill_export import VerifiedExport
 from rinchen.train.distill_teacher import TeacherOptions, TeacherTranslator
 from tests.support.corpus_rows import write_rows
 from tests.support.distill_exports import WrittenExport, write_export
@@ -75,6 +78,8 @@ runner = CliRunner()
 
 # `rinchen-` and the first 12 hex characters of the SHA-256 of the fabricated `model.bin`.
 DEFAULT_NAME = "rinchen-07148803f29a"
+# The directions of the corpora `launcher_data` writes by default.
+STATED_DIRECTIONS = ("eng_Latn-khk_Cyrl", "khk_Cyrl-eng_Latn")
 
 
 def invoke(args: Sequence[str]) -> Result:
@@ -132,7 +137,7 @@ class ExportWorkspace:
 
     @property
     def record(self) -> Path:
-        return self.out_dir / "export.json"
+        return self.out_dir / "rinchen.json"
 
     @property
     def log(self) -> Path:
@@ -145,13 +150,15 @@ class ExportWorkspace:
         spm_model: Path | None = None,
         tag_placement: str | None = "src",
         out_dir: Path | None = None,
+        directions: Sequence[str] | None = STATED_DIRECTIONS,
+        command: Sequence[str] = ("distill", "export"),
     ) -> list[str]:
-        """The command line of `rinchen distill export` with every required option, each
-        with the workspace's value unless given (`tag_placement=None` leaves it out), then
-        `extra`."""
+        """The command line of `rinchen distill export` (or the `command` given) with every
+        required option, each with the workspace's value unless given (`tag_placement=None`
+        leaves it out), one `--direction` for each of `directions` (None leaves them out),
+        then `extra`."""
         return [
-            "distill",
-            "export",
+            *command,
             "--checkpoint",
             str(self.checkpoint if checkpoint is None else checkpoint),
             "--spm-model",
@@ -159,6 +166,11 @@ class ExportWorkspace:
             *([] if tag_placement is None else ["--tag-placement", tag_placement]),
             "--out-dir",
             str(self.out_dir if out_dir is None else out_dir),
+            *(
+                part
+                for direction in (directions or ())
+                for part in ("--direction", direction)
+            ),
             *extra,
         ]
 

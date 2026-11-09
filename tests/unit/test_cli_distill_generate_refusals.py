@@ -17,8 +17,8 @@ import pytest
 
 from rinchen.cli import distill_generate, train_common
 from rinchen.errors import DataError
+from rinchen.export.record import EXPORT_FILES
 from rinchen.manifest import store
-from rinchen.train.distill_export import EXPORT_FILES
 from tests.support.corpus_rows import corpus_row
 from tests.support.distill_cli import (
     GenerateWorkspace,
@@ -86,7 +86,7 @@ def test_a_directory_with_the_manifest_of_another_stage_is_not_an_export(
     result = invoke(workspace.args())
 
     assert_one_error(result, 2, f"cannot use the export {workspace.teacher}: ")
-    assert "of stage 'synth', not of 'distill_export'" in result.stderr
+    assert "of stage 'synth', not of 'export'" in result.stderr
     assert_nothing_done(workspace, seam)
 
 

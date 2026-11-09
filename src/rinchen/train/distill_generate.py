@@ -41,6 +41,8 @@ import polars as pl
 from rinchen.config.synth import SelectionConfig
 from rinchen.corpus.schema import CORPUS_SCHEMA
 from rinchen.errors import ConfigError
+from rinchen.export.record import CT2_FILES, SPM_FILE
+from rinchen.export.verified import VerifiedExport
 from rinchen.filter.qe import QEScorer
 from rinchen.synth._candidates import has_alphanumeric
 from rinchen.synth.select import (
@@ -55,7 +57,6 @@ from rinchen.synth.select import (
 )
 from rinchen.synth.shards import Shard, ShardStore, plan_shards, shard_directory
 from rinchen.synth.translator import Translator
-from rinchen.train.distill_export import CT2_FILES, SPM_FILE, VerifiedExport
 from rinchen.train.distill_shards import REUSED, Sourced, shard_candidates
 from rinchen.train.distill_sources import KdSources
 from rinchen.train.distill_teacher import TeacherOptions

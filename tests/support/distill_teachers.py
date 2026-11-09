@@ -13,9 +13,9 @@ from pathlib import Path
 
 import pytest
 
-from rinchen.train.distill_export import VerifiedExport, verify_export
+from rinchen.export.verified import VerifiedExport, verify_export
 from rinchen.train.distill_teacher import TeacherOptions, TeacherTranslator
-from tests.support import distill_exports
+from tests.support import model_exports
 from tests.support.distill_exports import write_export
 from tests.support.fake_ct2 import FakeProcessor, Script, ScriptedCt2
 
@@ -45,12 +45,12 @@ def export_with_files(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, **files: bytes
 ) -> VerifiedExport:
     """A verified export whose converter files include `files` instead of the usual."""
-    usual = distill_exports.converter_files
+    usual = model_exports.converter_files
 
     def converter_files(tokens):
         return {**usual(tokens), **files}
 
-    monkeypatch.setattr(distill_exports, "converter_files", converter_files)
+    monkeypatch.setattr(model_exports, "converter_files", converter_files)
     return verified_export(tmp_path)
 
 

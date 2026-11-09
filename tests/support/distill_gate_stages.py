@@ -38,6 +38,7 @@ from tests.support.distill_gate import (
     ct2_greedy,
     read_json,
     run_rinchen,
+    sha256_of,
     succeeded,
 )
 from tests.support.distill_gate_refusals import digest_of
@@ -64,7 +65,7 @@ EXPORT_FILES: Final = (
     "shared_vocabulary.json",
     "config.json",
     "spm.model",
-    "export.json",
+    "rinchen.json",
 )
 SMOKE_SENTENCE: Final = "This is the star."
 
@@ -288,10 +289,27 @@ def export_checkpoint(
     return Exported(
         invocation=invocation,
         directory=out_dir,
-        record=read_json(out_dir / "export.json"),
+        record=read_json(out_dir / "rinchen.json"),
         manifest=manifest_of(out_dir),
         converter_log=out_dir.parent / f"{out_dir.name}.export.log",
     )
+
+
+def assert_model_record_facts(exported: Exported, directions: tuple[str, ...]) -> None:
+    """What D11 added to the record of an export of the toy model (and to its manifest): the
+    schema, the name made from `model.bin`, the `directions` the export derived from the
+    saved config of the checkpoint, a float32 sentence model, and how it was settled."""
+    record = exported.record
+    assert record["schema"] == "rinchen.model/1"
+    assert (
+        record["name"] == f"rinchen-{sha256_of(exported.directory / 'model.bin')[:12]}"
+    )
+    assert record["directions"] == list(directions)
+    assert record["quantization"] == "float32"
+    assert record["document_level"] is False
+    assert exported.manifest.status["quantization"] == "float32"
+    assert exported.manifest.status["directions_check"] == "derived"
+    assert exported.manifest.status["document_level_check"] == "derived"
 
 
 # ---- G: the KD corpus ------------------------------------------------------------------

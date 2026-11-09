@@ -36,7 +36,7 @@ import json
 import os
 import shutil
 import tempfile
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -78,6 +78,8 @@ _GLOB_CHARACTERS: Final = frozenset("[]*?")
 _UNKNOWN_VERSION: Final = "unknown"
 # The name a trial record carries before the model that gives the real one exists.
 _TRIAL_NAME: Final = default_name("0" * 64)
+# What `_manifest_of` says about every export; a caller's extra status adds to it.
+_OWN_STATUS_KEYS: Final = ("export", "tag_placement", "quantization", "checkpoint_kind")
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,6 +118,7 @@ def convert(
     inputs: Sequence[ManifestFile],
     name: str | None = None,
     timeout: float | None = None,
+    extra_status: Mapping[str, str] | None = None,
 ) -> ConvertResult:
     """Convert the checkpoint in `checkpoint` to an export directory `out_dir` (which must
     not exist) and return its record and the path of its manifest.
@@ -125,10 +128,13 @@ def convert(
     verified; `inputs` the manifest's inputs with the digests the caller took; `name` the
     model's name (default: `default_name` of the SHA-256 of `model.bin`); `timeout`
     (seconds) bounds the converter, which runs with the GPU hidden. The quantisation of
-    `facts` is passed to the converter and recorded.
+    `facts` is passed to the converter and recorded. `extra_status` are facts the caller
+    settled (how the tag placement, the directions and the document level were found out)
+    that the manifest carries beside its own status; the record does not hold them.
 
     Raises:
-        ValueError: the placement of `facts` is neither `src` nor `tgt`.
+        ValueError: the placement of `facts` is neither `src` nor `tgt`, or `extra_status`
+            names a key the status of an export already has.
         ConfigError: the quantisation is not offered, the directions or the name are not
             what a record holds, `checkpoint` or `out_dir` holds `$` or a glob character,
             or `out_dir` exists (also when it appears while the converter runs).
@@ -141,6 +147,7 @@ def convert(
             call made before it is raised.
     """
     _check_arguments(checkpoint, out_dir, facts, spm_bytes, name)
+    status = _status_with(extra_status)
     staging = _make_private_directory(out_dir)
     built = staging / _BUILT
     published = False
@@ -166,7 +173,9 @@ def convert(
         for file in EXPORT_FILES:
             if file not in digests:
                 digests[file] = sha256_of(built / file)
-        store.write(built, _manifest_of(built, out_dir, record, inputs, digests))
+        store.write(
+            built, _manifest_of(built, out_dir, record, inputs, digests, status)
+        )
         _publish(built, out_dir)
         published = True
         with contextlib.suppress(OSError):
@@ -177,6 +186,18 @@ def convert(
             shutil.rmtree(out_dir, ignore_errors=True)
         raise
     return ConvertResult(record, store.manifest_path(out_dir))
+
+
+def _status_with(extra_status: Mapping[str, str] | None) -> dict[str, str]:
+    """The `extra_status` as a dict; a key the status of an export has is a mistake of the
+    caller, and an extra status never replaces `export: ok`."""
+    extra = dict(extra_status or {})
+    for key in _OWN_STATUS_KEYS:
+        if key in extra:
+            raise ValueError(
+                f"extra_status holds {key!r}, which the status of an export already has"
+            )
+    return extra
 
 
 def _check_arguments(
@@ -308,6 +329,7 @@ def _manifest_of(
     record: ModelRecord,
     inputs: Sequence[ManifestFile],
     digests: dict[str, str],
+    extra_status: Mapping[str, str],
 ) -> Manifest:
     """The manifest of the export in `built`, which is about to become `out_dir`: the five
     files are named by the path they will have there, with the digests taken once."""
@@ -338,6 +360,7 @@ def _manifest_of(
             "tag_placement": record.tag_placement,
             "quantization": record.quantization,
             "checkpoint_kind": record.checkpoint.kind,
+            **extra_status,
         },
     )
 

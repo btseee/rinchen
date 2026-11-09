@@ -8,13 +8,18 @@ thing and leave the rest valid.
 
 `fake_convert_converter` replaces the converter call of `rinchen.export.ct2` by a function
 that writes what CTranslate2's converter writes for an Eole checkpoint (the three files of
-`tests.support.distill_exports.converter_files`) into the output directory and the log beside
-it, records the call (the quantisation included) and can fail the way the real one does,
-with or without a partial `model.bin`. Nothing starts a process.
+`converter_files`) into the output directory and the log beside it, records the call (the
+quantisation included) and can fail the way the real one does, with or without a partial
+`model.bin`. Nothing starts a process.
+
+The names that D10's tests know (`converter_files`, `MODEL_BYTES`, the digests of a fabricated
+checkpoint) are defined here; `tests.support.distill_exports` is a thin wrapper that keeps
+D10's keyword API over this module.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -42,15 +47,26 @@ from rinchen.export.record import (
 from rinchen.manifest import store
 from rinchen.manifest.model import Manifest, ManifestFile
 from rinchen.utils.part_file import replace_file
-from tests.support.distill_exports import (
-    CHECKPOINT_MANIFEST_SHA256,
-    CONFIG_SHA256,
-    VOCAB_SHA256,
-    WEIGHTS_SHA256,
-    converter_files,
-    sha256_of_bytes,
-)
 from tests.support.step_dirs import SOURCE_VOCABULARY, SPM_BYTES
+
+MODEL_BYTES: Final = b"fabricated ctranslate2 weights"
+# What CTranslate2 4.8.4's Eole converter writes into `config.json` (spike, D10).
+CONVERTER_CONFIG: Final = {
+    "add_source_bos": False,
+    "add_source_eos": False,
+    "bos_token": "<s>",
+    "decoder_start_token": "<s>",
+    "eos_token": "</s>",
+    "layer_norm_epsilon": 1e-06,
+    "multi_query_attention": False,
+    "unk_token": "<unk>",
+}
+# Digests of the checkpoint a fabricated export says it was made from: they vouch for no
+# file, and differ from one another so that a test sees which one it reads.
+WEIGHTS_SHA256: Final = "1" * 64
+CONFIG_SHA256: Final = "2" * 64
+VOCAB_SHA256: Final = "3" * 64
+CHECKPOINT_MANIFEST_SHA256: Final = "4" * 64
 
 # The directions of the toy teacher, sorted as a record holds them.
 TOY_DIRECTIONS: Final = (
@@ -61,6 +77,19 @@ TOY_DIRECTIONS: Final = (
 )
 RINCHEN_VERSION: Final = "0.0.0"
 _NOW: Final = "2026-11-09T10:00:00+00:00"
+
+
+def sha256_of_bytes(content: bytes) -> str:
+    return hashlib.sha256(content).hexdigest()
+
+
+def converter_files(tokens: Sequence[str]) -> dict[str, bytes]:
+    """The three files the converter writes for a model whose vocabulary is `tokens`."""
+    return {
+        "model.bin": MODEL_BYTES,
+        "shared_vocabulary.json": json.dumps(list(tokens)).encode("utf-8"),
+        "config.json": json.dumps(CONVERTER_CONFIG, sort_keys=True).encode("utf-8"),
+    }
 
 
 def checkpoint_record(

@@ -24,9 +24,9 @@ import pytest
 from rinchen.cli import train_common
 from rinchen.config.synth import SYNTH_CONFIG_PATH
 from rinchen.corpus.schema import make_row_id, validate_corpus_schema
+from rinchen.export.verified import verify_export
 from rinchen.manifest import store
 from rinchen.manifest.model import Manifest
-from rinchen.train.distill_export import verify_export
 from rinchen.train.distill_generate import kd_fingerprint
 from rinchen.train.distill_teacher import TeacherOptions
 from tests.support.corpus_rows import EN_MN, RU_MN
@@ -569,7 +569,7 @@ def test_the_manifest_vouches_for_every_input_with_the_digest_it_had_before_it_w
                 "shared_vocabulary.json",
                 "config.json",
                 "spm.model",
-                "export.json",
+                "rinchen.json",
             )
         ),
         (workspace.teacher / "manifest.json", export.manifest_sha256),

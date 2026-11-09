@@ -13,8 +13,13 @@ A saved config without a `data` section, or whose prefixes hold no direction tag
 nothing, and the caller's statement stands. A saved config that is not what Eole writes, or
 whose corpora place the tag differently, is a `DataError`: no statement can be right.
 
-The bytes of a file are read ONCE, by `verified_content`, and only when their SHA-256 is
-the one taken before (hash before read); `json_object` parses them.
+The same `data` section also says which DIRECTIONS the model was trained for (a corpus is
+named `<src>-<tgt>.<group>`: `saved_directions`) and whether it decodes `<doc>` windows (a
+whole word `<doc>` in the `src_prefix` of a corpus: `saved_document_level`), which the
+vocabulary does not (D11, `export_checkpoint`).
+
+The bytes of a file are read ONCE, by `verified_content` (`rinchen.export.verified`), and only
+when their SHA-256 is the one taken before (hash before read); `json_object` parses them.
 
 `distill evaluate` accepts models of any origin, so the corpus names and the prefixes of a
 saved config are untrusted text: a message quotes them escaped on one line (`repr`) and cut to
@@ -23,8 +28,6 @@ saved config are untrusted text: a message quotes them escaped on one line (`rep
 
 from __future__ import annotations
 
-import hashlib
-import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -32,10 +35,16 @@ from pathlib import Path
 from typing import Any, Final, Literal
 
 from rinchen.config.ablation import TagPlacement
+from rinchen.config.languages import known_language_codes
 from rinchen.errors import ConfigError, DataError
+from rinchen.export.verified import json_object, verified_content
 
 # One whole word of a prefix, as `direction_tag` writes it: `<2khk_Cyrl>`.
 _DIRECTION_TAG: Final = re.compile(r"<2[^\s<>]+>")
+# The name of a training corpus, `<src>-<tgt>.<group>` (`train/corpus_files.corpus_name`).
+_CORPUS_DIRECTION: Final = re.compile(r"([^-.\s]+)-([^-.\s]+)\.[a-z]+")
+# The marker `train/doc_corpus.py` adds to the `src_prefix` of a window corpus.
+_DOCUMENT_MARKER: Final = "<doc>"
 _SIDES: Final[tuple[tuple[str, TagPlacement], ...]] = (
     ("src_prefix", "src"),
     ("tgt_prefix", "tgt"),
@@ -58,41 +67,6 @@ class _Evidence:
     key: str
     prefix: str
     placement: TagPlacement
-
-
-def verified_content(file: Path, digest: str) -> bytes:
-    """The bytes of `file`, read once, only when they are the bytes with SHA-256 `digest`:
-    what is parsed is what was hashed.
-
-    Raises:
-        DataError: the file cannot be read.
-        ConfigError: its SHA-256 is not `digest` (it changed after it was hashed).
-    """
-    try:
-        content = file.read_bytes()
-    except OSError as error:
-        raise DataError(f"cannot read {file}: {error.strerror}") from error
-    if hashlib.sha256(content).hexdigest() != digest:
-        raise ConfigError(
-            f"{file} changed after it was hashed, so what would be read is not what "
-            "was vouched for"
-        )
-    return content
-
-
-def json_object(content: bytes, file: Path) -> dict[str, Any]:
-    """The JSON object in `content`, the bytes of `file`.
-
-    Raises:
-        DataError: the bytes are not JSON or not an object; the message never quotes them.
-    """
-    try:
-        document = json.loads(content)
-    except (ValueError, RecursionError) as error:
-        raise DataError(f"{file}: is not valid JSON") from error
-    if not isinstance(document, dict):
-        raise DataError(f"{file}: is not a JSON object")
-    return document
 
 
 def saved_tag_placement(config: Mapping[str, Any], file: Path) -> TagPlacement | None:
@@ -145,6 +119,64 @@ def require_saved_placement(
     """
     config = json_object(verified_content(file, digest), file)
     return require_stated_placement(config, file, stated)
+
+
+def saved_directions(config: Mapping[str, Any]) -> tuple[str, ...] | None:
+    """The sorted `<src>-<tgt>` directions the corpora of the saved config `config` name,
+    None when the config holds no `data` section or no corpus named like one.
+
+    A corpus is named `<src>-<tgt>.<group>` (`auth`, `bt`, `kd`, any lowercase group), so a
+    back-translated or distilled corpus of a direction adds nothing new. An entry whose name
+    is anything else (`valid`), whose codes are not both in the language registry or whose
+    two codes are one language is not a direction and is ignored.
+
+    Raises:
+        DataError: `data` is not an object.
+    """
+    known = known_language_codes()
+    found: set[str] = set()
+    for name in _data_section(config) or {}:
+        parts = _CORPUS_DIRECTION.fullmatch(name)
+        if parts is None:
+            continue
+        source, target = parts.group(1), parts.group(2)
+        if source != target and {source, target} <= known:
+            found.add(f"{source}-{target}")
+    return tuple(sorted(found)) or None
+
+
+def saved_document_level(config: Mapping[str, Any]) -> bool | None:
+    """Whether the corpora of the saved config `config` are windows of documents: True when
+    the `src_prefix` of some corpus holds the whole word `<doc>`, False when the config has
+    corpora (entries with a `src_prefix`) and none does, None when it has none (no `data`
+    section, an empty one, or `valid` alone).
+
+    Raises:
+        DataError: `data` is not an object, a corpus entry is not an object or a
+            `src_prefix` is not text.
+    """
+    prefixes: list[str] = []
+    for name, corpus in (_data_section(config) or {}).items():
+        if not isinstance(corpus, Mapping):
+            raise DataError(f"the saved config's {_entry(name)} is not an object")
+        prefix = corpus.get("src_prefix")
+        if prefix is None:
+            continue
+        if not isinstance(prefix, str):
+            raise DataError(f"the saved config's {_entry(name)}.src_prefix is not text")
+        prefixes.append(prefix)
+    if not prefixes:
+        return None
+    return any(_DOCUMENT_MARKER in prefix.split() for prefix in prefixes)
+
+
+def _data_section(config: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    data = config.get("data")
+    if data is None:
+        return None
+    if not isinstance(data, Mapping):
+        raise DataError("the saved config's 'data' is not an object, as Eole saves it")
+    return data
 
 
 def _evidence(config: Mapping[str, Any], file: Path) -> _Evidence | None:
