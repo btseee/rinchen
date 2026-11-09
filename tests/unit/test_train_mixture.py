@@ -22,6 +22,8 @@ from rinchen.errors import ConfigError, DataError
 from rinchen.train.mixture import (
     LINE_BREAK_CHARACTERS,
     TrainingRows,
+    blank_text,
+    has_line_break,
     load_dev_rows,
     load_training_rows,
     source_collision_rate,
@@ -977,3 +979,41 @@ def test_the_dev_statistics_are_json_ready(tmp_path: Path) -> None:
     document = json.loads(json.dumps(_dev(path).stats.to_dict()))
 
     assert document["lines_by_direction"] == {EN_MN: 1}
+
+
+# --- the text rules the document windows share -------------------------------------
+
+
+@pytest.mark.parametrize(
+    "text, blank",
+    [
+        (None, True),
+        ("", True),
+        (" ", True),
+        (" \t\n ", True),
+        (chr(0x3000), True),
+        (chr(0x1C), True),
+        ("a", False),
+        (" a ", False),
+        ("0", False),
+    ],
+)
+def test_blank_text_is_null_empty_or_only_whitespace(
+    text: str | None, blank: bool
+) -> None:
+    frame = pl.DataFrame({"text": [text]}, schema={"text": pl.String})
+
+    assert frame.select(blank_text("text")).item() is blank
+
+
+@pytest.mark.parametrize("separator", LINE_BREAK_CHARACTERS)
+def test_has_line_break_sees_every_character_that_splitlines_splits_at(
+    separator: str,
+) -> None:
+    frame = pl.DataFrame({"text": [f"a{separator}b", "a b", "a" + chr(0x2003)]})
+
+    assert frame.select(has_line_break("text"))["text"].to_list() == [
+        True,
+        False,
+        False,
+    ]

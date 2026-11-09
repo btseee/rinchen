@@ -146,11 +146,13 @@ class DevRows:
 # --- reading the corpus files ------------------------------------------------------
 
 
-def _blank(column: str) -> pl.Expr:
+def blank_text(column: str) -> pl.Expr:
+    """Whether the text in `column` is null, empty or only whitespace (Python's `str.strip`)."""
     return pl.col(column).is_null() | pl.col(column).str.contains(_BLANK_PATTERN)
 
 
-def _has_line_break(column: str) -> pl.Expr:
+def has_line_break(column: str) -> pl.Expr:
+    """Whether the text in `column` holds a character `str.splitlines` splits at."""
     return pl.col(column).str.contains_any(list(LINE_BREAK_CHARACTERS))
 
 
@@ -160,9 +162,9 @@ def _training_reason() -> pl.Expr:
         .then(pl.lit("filtered"))
         .when(pl.col("origin").is_in(EXCLUDED_ORIGINS))
         .then(pl.lit("excluded_origin"))
-        .when(_blank("src") | _blank("tgt"))
+        .when(blank_text("src") | blank_text("tgt"))
         .then(pl.lit("empty"))
-        .when(_has_line_break("src") | _has_line_break("tgt"))
+        .when(has_line_break("src") | has_line_break("tgt"))
         .then(pl.lit("line_break"))
         .otherwise(pl.lit(None, dtype=pl.String))
         .alias(_REASON)
@@ -173,9 +175,9 @@ def _dev_reason() -> pl.Expr:
     return (
         pl.when(pl.col("filter_reason").is_not_null())
         .then(pl.lit("filtered"))
-        .when(_blank("src") | _blank("tgt"))
+        .when(blank_text("src") | blank_text("tgt"))
         .then(pl.lit("empty"))
-        .when(_has_line_break("src") | _has_line_break("tgt"))
+        .when(has_line_break("src") | has_line_break("tgt"))
         .then(pl.lit("line_break"))
         .otherwise(pl.lit(None, dtype=pl.String))
         .alias(_REASON)

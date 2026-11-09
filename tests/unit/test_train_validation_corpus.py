@@ -20,6 +20,7 @@ from rinchen.train.validation_corpus import (
     dev_line_ranges,
     dev_token_lines,
     require_direction_tags,
+    require_one_piece,
     validation_paths,
     write_validation,
 )
@@ -439,3 +440,37 @@ def test_dev_token_lines_refuses_what_write_validation_refuses(
         dev_token_lines({}, toy_spm, "src")
     with pytest.raises(ConfigError, match="SentencePiece model"):
         dev_token_lines(_toy_dev(), tmp_path / "missing.model", "src")
+
+
+# --- require_one_piece -------------------------------------------------------------
+
+
+def test_a_symbol_that_is_one_piece_passes(toy_spm: Path) -> None:
+    processor = sentencepiece.SentencePieceProcessor(model_file=str(toy_spm))
+
+    for symbol in ("<2khk_Cyrl>", "<doc>", "<sep>", "<bt>"):
+        require_one_piece(processor, symbol, toy_spm)
+
+
+@pytest.mark.parametrize("symbol", ["<nosuch>", "<doc><sep>", "word", ""])
+def test_a_symbol_that_is_not_one_piece_is_a_config_error_naming_it_and_the_model(
+    toy_spm: Path, symbol: str
+) -> None:
+    processor = sentencepiece.SentencePieceProcessor(model_file=str(toy_spm))
+
+    with pytest.raises(ConfigError) as info:
+        require_one_piece(processor, symbol, toy_spm)
+
+    assert str(info.value) == (
+        f"the direction tag {symbol} is not one piece of the SentencePiece model "
+        f"{toy_spm}"
+    )
+
+
+def test_the_message_names_what_the_symbol_is_when_the_caller_says(
+    toy_spm: Path,
+) -> None:
+    processor = sentencepiece.SentencePieceProcessor(model_file=str(toy_spm))
+
+    with pytest.raises(ConfigError, match="the document symbol <nosuch> is not one"):
+        require_one_piece(processor, "<nosuch>", toy_spm, what="document symbol")

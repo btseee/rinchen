@@ -111,11 +111,13 @@ def build_corpora(
         back_translated = parts.get((direction, BT_GROUP))
         if authentic is not None:
             corpora.append(
-                _write_corpus(authentic, auth_directory, direction, AUTH_GROUP)
+                write_corpus_files(authentic, auth_directory, direction, AUTH_GROUP)
             )
         if back_translated is not None and direction_usage.bt_used:
             sample = _smallest_hashes(back_translated, direction_usage.bt_used, seed)
-            corpora.append(_write_corpus(sample, bt_directory, direction, BT_GROUP))
+            corpora.append(
+                write_corpus_files(sample, bt_directory, direction, BT_GROUP)
+            )
     return BuiltCorpora(corpora=tuple(corpora), bt_by_direction=usage)
 
 
@@ -162,7 +164,7 @@ def planned_corpus_sizes(rows: TrainingRows, bt_ratio: float) -> list[CorpusSize
     """
     return [
         CorpusSize(
-            _corpus_name(planned.direction, planned.group),
+            corpus_name(planned.direction, planned.group),
             planned.direction,
             planned.rows,
         )
@@ -188,7 +190,7 @@ def planned_corpus_files(
     )
     files: list[PlannedFiles] = []
     for direction, group, row_count in planned:
-        name = _corpus_name(direction, group)
+        name = corpus_name(direction, group)
         directory = _corpus_directory(data_dir, group, bt_ratio, seed)
         src_path, tgt_path, _ = _corpus_paths(directory, name)
         files.append(
@@ -225,7 +227,7 @@ def _planned_groups(rows: TrainingRows, bt_ratio: float) -> list[_PlannedGroup]:
     return planned
 
 
-def _corpus_name(direction: str, group: str) -> str:
+def corpus_name(direction: str, group: str) -> str:
     """The name of the corpus of `group` rows in `direction`: `<direction>.<group>`."""
     return f"{direction}.{group}"
 
@@ -278,10 +280,14 @@ def _smallest_hashes(frame: pl.DataFrame, count: int, seed: int) -> pl.DataFrame
     )
 
 
-def _write_corpus(
+def write_corpus_files(
     frame: pl.DataFrame, directory: Path, direction: str, group: str
 ) -> CorpusFiles:
-    name = _corpus_name(direction, group)
+    """Write the corpus of `group` rows in `direction` into `directory`: the rows of
+    `frame` (columns `id`, `src`, `tgt`, `src_lang`, `tgt_lang`) sorted by id, source and
+    target as `<name>.src` and `<name>.tgt`, then the sidecar `<name>.json`; files that
+    already are what would be written are left as they are (`CorpusFiles.reused`)."""
+    name = corpus_name(direction, group)
     ordered = frame.sort("id", "src", "tgt")
     src_bytes = lines_as_bytes(ordered["src"])
     tgt_bytes = lines_as_bytes(ordered["tgt"])

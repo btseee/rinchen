@@ -67,13 +67,22 @@ def load_processor(spm_model: Path) -> sentencepiece.SentencePieceProcessor:
         ) from exc
 
 
-def _require_one_piece(
-    processor: sentencepiece.SentencePieceProcessor, tag: str, spm_model: Path
+def require_one_piece(
+    processor: sentencepiece.SentencePieceProcessor,
+    symbol: str,
+    spm_model: Path,
+    *,
+    what: str = "direction tag",
 ) -> None:
-    piece_id = processor.piece_to_id(tag)
-    if piece_id == processor.unk_id() or processor.id_to_piece(piece_id) != tag:
+    """Check that `symbol` is one piece of the model (`what` names it in the message).
+
+    Raises:
+        ConfigError: it is not.
+    """
+    piece_id = processor.piece_to_id(symbol)
+    if piece_id == processor.unk_id() or processor.id_to_piece(piece_id) != symbol:
         raise ConfigError(
-            f"the direction tag {tag} is not one piece of the SentencePiece model "
+            f"the {what} {symbol} is not one piece of the SentencePiece model "
             f"{spm_model}"
         )
 
@@ -87,7 +96,7 @@ def require_direction_tags(spm_model: Path, dev: Mapping[str, DevSet]) -> None:
     """
     processor = load_processor(spm_model)
     for direction in sorted(dev):
-        _require_one_piece(processor, direction_tag(dev[direction].tgt_lang), spm_model)
+        require_one_piece(processor, direction_tag(dev[direction].tgt_lang), spm_model)
 
 
 def dev_token_lines(
@@ -112,7 +121,7 @@ def dev_token_lines(
     for direction in sorted(dev):
         dev_set = dev[direction]
         tag = direction_tag(dev_set.tgt_lang)
-        _require_one_piece(processor, tag, spm_model)
+        require_one_piece(processor, tag, spm_model)
         sources = processor.encode(list(dev_set.src), out_type=str)
         targets = processor.encode(list(dev_set.tgt), out_type=str)
         for source, target in zip(sources, targets, strict=True):

@@ -21,16 +21,24 @@ What `build_toy` returns:
 
 No sentence of one group is in another, in any language (the generator asserts it).
 Nothing is read or written here but through the functions that take a path.
+
+`build_toy_documents` (D9) cuts the same items into documents of 4 to 8 consecutive
+sentences, with `doc_id` and `seg_idx`, for en-mn and ru-mn in both directions, split by
+document: the train, dev and test documents are made of the train, dev and test items, so
+no document id and no sentence is in two of them. A document is the same sentences in
+the same order in the two directions of its language pair (`doc-<n>`, `seg_idx` from 0).
+The sentences are templated and independent of each other, so the documents test
+structure (windows, `<sep>`), not translation quality.
 """
 
 from __future__ import annotations
 
 import random
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from itertools import permutations
+from itertools import count, permutations
 from pathlib import Path
 from typing import Any
 
@@ -116,6 +124,12 @@ _HELD_OUT_TRIPLES = 44
 _CREATED = datetime(2026, 11, 8, 12, 0, 0, tzinfo=UTC)
 
 ToyRow = dict[str, str]
+# A row of a toy document: a `ToyRow` with `doc_id` and `seg_idx` (an integer).
+DocRow = dict[str, Any]
+
+# Documents are 4 to 8 consecutive sentences.
+DOC_MIN_SENTENCES = 4
+DOC_MAX_SENTENCES = 8
 
 
 @dataclass(frozen=True, slots=True)
@@ -294,6 +308,111 @@ def build_toy(seed: int = DEFAULT_SEED) -> ToyData:
     )
     _check_no_shared_sentence(data)
     return data
+
+
+@dataclass(frozen=True, slots=True)
+class ToyDocuments:
+    """Rows of the toy documents, per split; a document's rows of one direction come
+    together, in `seg_idx` order, and its other direction follows."""
+
+    train: tuple[DocRow, ...]
+    dev: tuple[DocRow, ...]
+    test: tuple[DocRow, ...]
+
+
+def build_toy_documents(seed: int = DEFAULT_SEED) -> ToyDocuments:
+    """The toy documents for `seed`: the sentences are those of `build_toy(seed)` (the
+    same seed, the same items), grouped into documents and ordered by a generator seeded
+    with `seed` too. The same seed gives the same documents.
+
+    Every language pair (en-mn, ru-mn) of a split is cut into documents of 4 to 8
+    sentences, in a random order of its items; the two directions of the pair share the
+    documents. Document numbers run over the train, dev and test documents in turn, so
+    an id is in one document of one pair only.
+    """
+    toy = build_toy(seed)
+    rng = random.Random(seed)
+    numbers = count()
+    documents = ToyDocuments(
+        train=_documents(toy.train, rng, numbers),
+        dev=_documents(toy.dev, rng, numbers),
+        test=_documents(toy.test, rng, numbers),
+    )
+    _check_documents(documents)
+    return documents
+
+
+def _documents(
+    rows: Sequence[ToyRow], rng: random.Random, numbers: Iterator[int]
+) -> tuple[DocRow, ...]:
+    """The rows of one split as documents. `rows` list each direction of a language pair
+    as a block, the reverse of the first block's direction next to it, item for item."""
+    blocks: dict[tuple[str, str], list[ToyRow]] = {}
+    for row in rows:
+        blocks.setdefault((row["src_lang"], row["tgt_lang"]), []).append(row)
+    out: list[DocRow] = []
+    for (source, target), forward in blocks.items():
+        backward = blocks.get((target, source))
+        if backward is None or (target, source) < (source, target):
+            continue  # a reverse direction is written with its forward one
+        _check_mirror(forward, backward)
+        order = list(range(len(forward)))
+        rng.shuffle(order)
+        lengths = _document_lengths(rng, len(forward))
+        position = 0
+        for length in lengths:
+            doc_id = f"doc-{next(numbers)}"
+            members = order[position : position + length]
+            position += length
+            for block in (forward, backward):
+                for seg_idx, item in enumerate(members):
+                    out.append({**block[item], "doc_id": doc_id, "seg_idx": seg_idx})
+    return tuple(out)
+
+
+def _document_lengths(rng: random.Random, total: int) -> list[int]:
+    """Lengths of 4 to 8 that add up to `total`: each draw leaves at least 4."""
+    if total < DOC_MIN_SENTENCES:
+        raise ValueError(f"{total} sentences are too few for a document")
+    lengths: list[int] = []
+    left = total
+    while left > DOC_MAX_SENTENCES:
+        length = rng.randint(
+            DOC_MIN_SENTENCES, min(DOC_MAX_SENTENCES, left - DOC_MIN_SENTENCES)
+        )
+        lengths.append(length)
+        left -= length
+    lengths.append(left)
+    return lengths
+
+
+def _check_mirror(forward: Sequence[ToyRow], backward: Sequence[ToyRow]) -> None:
+    assert len(forward) == len(backward)
+    for first, second in zip(forward, backward, strict=True):
+        assert (first["src"], first["tgt"]) == (second["tgt"], second["src"])
+
+
+def _check_documents(documents: ToyDocuments) -> None:
+    groups = {
+        "train": documents.train,
+        "dev": documents.dev,
+        "test": documents.test,
+    }
+    ids = {name: {row["doc_id"] for row in rows} for name, rows in groups.items()}
+    sentences: dict[str, dict[str, set[str]]] = {
+        name: {language: set() for language in LANGUAGES} for name in groups
+    }
+    for name, rows in groups.items():
+        for row in rows:
+            sentences[name][row["src_lang"]].add(row["src"])
+            sentences[name][row["tgt_lang"]].add(row["tgt"])
+    names = list(groups)
+    for index, first in enumerate(names):
+        for second in names[index + 1 :]:
+            assert not ids[first] & ids[second], (first, second)
+            for language in LANGUAGES:
+                shared = sentences[first][language] & sentences[second][language]
+                assert not shared, (language, first, second, sorted(shared)[:3])
 
 
 def _held_out_rows(items: Sequence[_Item], split: str) -> tuple[ToyRow, ...]:
