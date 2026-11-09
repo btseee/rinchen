@@ -1,0 +1,27 @@
+# Serve config for a small CPU edge box (D11): four cores, an int8 export, one process.
+# EVERY VALUE BELOW IS AN UNMEASURED PRIOR. No real model was served and no timing was taken
+# on such a machine; the shape follows the one measurement the design spike made, a toy
+# model on a shared 20-core CPU, where throughput grew with `inter_threads` and a single
+# sentence was fastest with a small `intra_threads`. Start from `inter_threads` times
+# `intra_threads` no larger than the cores given to the process, and measure before trusting
+# any of it. Latency and throughput limits of a real model are unmeasured. The model is not a
+# key of this file: it is `--model` or `RINCHEN_MODEL`.
+host: 127.0.0.1
+port: 8000
+device: cpu
+compute_type: default
+inter_threads: 2
+intra_threads: 2
+beam_size: 4
+max_decoding_length: 256
+max_source_pieces: 256
+script_mask: retry
+max_batch_sentences: 8
+max_wait_ms: 10
+max_queue_sentences: 128
+max_texts: 16
+max_text_chars: 2000
+max_body_bytes: 262144
+request_timeout_seconds: 60
+shutdown_timeout_seconds: 30
+log_level: info

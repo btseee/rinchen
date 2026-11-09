@@ -1,0 +1,24 @@
+# Serve config of the tiny export (D11): the toy model of the tests and of the serving gate.
+# It is not a deployment. The toy translates templated sentences, ranks nothing, and every
+# number below only has to be small enough for a laptop CPU and large enough for the gate's
+# 64 concurrent requests: none of them was tuned. The model is not a key of this file: it
+# is `--model` or `RINCHEN_MODEL`.
+host: 127.0.0.1
+port: 8000
+device: cpu
+compute_type: default
+inter_threads: 2
+intra_threads: 1
+beam_size: 4
+max_decoding_length: 128
+max_source_pieces: 256
+script_mask: retry
+max_batch_sentences: 32
+max_wait_ms: 5
+max_queue_sentences: 512
+max_texts: 16
+max_text_chars: 2000
+max_body_bytes: 262144
+request_timeout_seconds: 30
+shutdown_timeout_seconds: 20
+log_level: info

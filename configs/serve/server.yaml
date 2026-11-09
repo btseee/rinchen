@@ -1,0 +1,26 @@
+# Serve config for a GPU server (D11): one CUDA device, a float16 or int8_float16 export.
+# EVERY VALUE BELOW IS AN UNMEASURED PRIOR. No GPU was used in D11: the machine that wrote
+# this has one the owner did not authorise any use of, so `device: cuda`, the stored
+# float16 types, the batch limits and the thread counts here have never run, and the real
+# optimum for a real model is unknown. `compute_type: default` loads what the export stores.
+# The model is not a key of this file: it is `--model` or `RINCHEN_MODEL`. The service has no
+# authentication: bind the loopback, or put a gateway in front.
+host: 127.0.0.1
+port: 8000
+device: cuda
+compute_type: default
+inter_threads: 4
+intra_threads: 1
+beam_size: 4
+max_decoding_length: 256
+max_source_pieces: 512
+script_mask: retry
+max_batch_sentences: 64
+max_wait_ms: 10
+max_queue_sentences: 4096
+max_texts: 64
+max_text_chars: 5000
+max_body_bytes: 1048576
+request_timeout_seconds: 30
+shutdown_timeout_seconds: 20
+log_level: info
