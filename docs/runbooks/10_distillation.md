@@ -11,7 +11,7 @@ and lay out the data and the config of a student of another shape, with its own 
 student configs (`configs/eole/student_{server,edge,tiny}.yaml`) and the tiny student that is the STOP gate. Training
 is D8's `rinchen train launch`, unchanged. The design, with the rulings T1 to T16 and a section of the amendments made
 while building, is `docs/superpowers/specs/2026-11-09-d10-distillation-design.md`; the decisions are condensed in the
-2026-11-09 entries "D10 distillation" and "D10 review" of `DECISIONS.md`; the upstream facts are in `docs/VERIFY.md`
+2026-11-09 entries "D10 distillation", "D10 review" and "D10 re-review" of `DECISIONS.md`; the upstream facts are in `docs/VERIFY.md`
 (section "D10 findings"). The CTranslate2 and Eole facts come from a spike made before the design
 (`.superpowers/sdd/2026-11-09-d10-distillation/spike-findings.md`; Eole 0.6.4, CTranslate2 4.8.4, CPU, toy data).
 
@@ -62,17 +62,17 @@ What was checked: the unit and property tests (every new test mutation-checked b
 109, 87 and 65 mutants for Tasks 1 to 6 and the gate's ten classes), `tests/integration/test_distill_tiny_student.py`
 (the STOP gate, real `rinchen`, real Eole, real CTranslate2, CPU, 44 tests), a combined review of Tasks 1 to 7
 (`e5ff644..e67b05e`: ready with fixes, no Critical finding, two Important and nine groups of Minor findings), its fix
-wave (`D10: fix ...` x 4 and `D10: review minors`, `e67b05e..cc917e2`), and the real binary for this runbook. A scoped
-re-review of the fix wave (`e67b05e..cc917e2`) was dispatched at the same time as this runbook was written; its verdict
-is NOT recorded here.
+wave (`D10: fix ...` x 4 and `D10: review minors`, `e67b05e..cc917e2`), the real binary for this runbook, and a
+scoped re-review of the fix wave (`e67b05e..cc917e2`: approved with minors, 0 Critical, 0 Important, six Minor findings;
+"The re-review and its wave" below), whose three code-sized minors were fixed in `233ba33` (`D10: re-review minors`).
 
 ## Architecture
 
 | Module | Job |
 |---|---|
-| `rinchen/export/eole_ct2.py` (new package `export`) | `export_environment`, `export_log_path`, `export_ct2(checkpoint, out_dir, *, timeout, log_path)`: the converter call, MOVED from `script_conv/export.py` (which re-exports the three names and keeps `parity`) |
-| `rinchen/train/distill_export.py` | `ExportRecord`, `CheckpointRecord`, `VerifiedExport`, `export_checkpoint`, `verify_export`: the provenance checks, the staging directory, the record |
-| `rinchen/train/distill_saved_config.py` | the tag placement read back from the checkpoint's saved `config.json` and the refusal of a statement that disagrees |
+| `rinchen/export/eole_ct2.py` (new package `export`) | `export_environment`, `export_log_path`, `export_ct2(checkpoint, out_dir, *, timeout, log_path, reported_dir)`: the converter call, MOVED from `script_conv/export.py` (which re-exports the three names and keeps `parity`) |
+| `rinchen/train/distill_export.py` | `ExportRecord`, `CheckpointRecord`, `VerifiedExport`, `ExportOutcome` (the record and whether the placement was checked), `export_checkpoint`, `verify_export`: the provenance checks, the staging directory, the record |
+| `rinchen/train/distill_saved_config.py` | the tag placement read back from the checkpoint's saved `config.json`, the refusal of a statement that disagrees and `PlacementCheck` (`checked` or `stated`): what a message quotes of that file is escaped and cut to 80 characters |
 | `rinchen/train/distill_export_files.py` | `verified_bytes`, `shared_vocabulary`, `end_token`: the files of an export read only as the bytes that were hashed |
 | `rinchen/train/distill_teacher.py` | `TeacherTranslator`, `TeacherOptions`, `ct2_source_tokens`, `COUNTER_KEYS`: CTranslate2 behind D6's `Translator` |
 | `rinchen/train/distill_sources.py` | `KdSources`, `kd_sources`: one source per direction and text, from the authentic training rows |
@@ -102,6 +102,7 @@ train average --last 2`); everything below starts from that directory.
 rinchen distill export --checkpoint $W/teacher_out/variants/t0.5_bt0.5_src_s1234/run/averaged \
   --spm-model $W/in/spm/toy.model --tag-placement src --out-dir $W/teacher_ct2
 exported to $W/teacher_ct2
+tag placement: checked against the saved config
 record: $W/teacher_ct2/export.json
 manifest: $W/teacher_ct2/manifest.json
 ```
@@ -230,6 +231,7 @@ chrF mean: 98.20
 chrF min: 97.79
 tag leaks: 0
 dev lines in training: 0
+tag placement: checked against the saved config
 result: $W/eval_teacher/result.json
 manifest: $W/eval_teacher/manifest.json
 ```
@@ -293,7 +295,8 @@ The record, `export.json` (sorted keys, two-space indent, one final LF; schema `
 refuses a record of another shape: another schema, a missing or extra key, a repeated JSON key, a count that is not a
 positive integer, a digest that is not 64 hex characters, a kind that disagrees with its step.
 
-The manifest's status is `export: ok`, `tag_placement` and `checkpoint_kind`; its metrics `encoder_layers`,
+The manifest's status is `export: ok`, `tag_placement`, `checkpoint_kind` and `tag_placement_check` (`checked` or
+`stated`: "The tag placement and its check"); its metrics `encoder_layers`,
 `decoder_layers`, `hidden_size`, `vocabulary_entries` and `model_bytes`; its inputs are the checkpoint's weights,
 `config.json` and `vocab.json` and the SentencePiece model, each with the SHA-256 the verification took before it read
 the file (the command never hashes them again); its outputs are the five files with the SHA-256 they have now. Its seed
@@ -345,9 +348,13 @@ trained on
 same message, exit 2, 1 s, **measured**). What the check does not cover:
 
 - A saved config WITHOUT a `data` section, or whose prefixes hold no direction tag, says nothing: the statement stands and
-  is recorded. **The record does not say whether the placement was derived or stated**, and an export made before the
-  check (D10's own gate exports were made with the right value) cannot be re-verified afterwards: the saved config is not
-  in the export directory. A schema bump would have refused every existing record, so the record is unchanged.
+  is recorded, and **the run says so** (re-review, below): `export` and `evaluate` print one line, `tag placement: checked
+  against the saved config` when the saved config records the placement and it is the stated one, `tag placement: stated,
+  not recorded in the checkpoint` when it records none, and the manifest's status holds the same fact as
+  `tag_placement_check: checked|stated`. **The record does not say which** (a schema bump would have refused every existing
+  record, so the record is unchanged: the fact is the command's, in the manifest, not the file's). An export made before the
+  check holds no saved config and cannot be re-checked afterwards (D10's own gate exports were made with the right
+  value); re-export is the remedy.
 - A saved config whose `data` section is not what Eole writes, or whose corpora place the tag differently (a tag in the
   source prefix of one corpus and in the target prefix of another, or on both sides of one), is a `DataError`, exit 3: no
   statement can be right.
@@ -367,11 +374,17 @@ version removed whatever sat there, review M1). A `rename` onto an EMPTY directo
 still replace it, and nothing else: that window is stated in the code and left. The manifest is written after the
 rename; a failure writing it removes `--out-dir`.
 
-**A crash may leave `.<name>.<random>` behind** (a kill that Python cannot catch cannot run the cleanup). **Measured**: a
+**A hard kill (SIGKILL, an out-of-memory kill, power loss) leaves `.<name>.<random>` behind**, since a kill that Python
+cannot catch cannot run the cleanup; SIGINT (exit 130) and SIGTERM (exit 143) do clean it up (**measured** by the re-review on a
+real export). The hidden directory holds the converter's files, so it is as large as the model (and the two files beside the
+model when the export got that far); it is safe to delete when no export is running, and NOTHING SWEEPS IT: a sweep could not
+tell a dead export's directory from the one of an export in progress. **Measured**: a
 SIGKILL of `rinchen distill export` 1.2 s after the private directory appeared left `.crash_export.r8szb_ft/export/` holding
 the converter's three files (the converter, a process of its own, ran on and finished: a SIGKILL of `rinchen` does not
 reach it, `D-LOGGED-TERM`), `crash_export.export.log` beside it and NO `crash_export` directory. The private directory is not an
-output and nothing reads it; delete it by hand. **The converter's log, `<O>.export.log`, stays beside `--out-dir`**
+output and nothing reads it; delete it by hand. A converter that exits 0 and leaves no `model.bin`, or an empty one, is
+reported as an `UpstreamError` that names `--out-dir` and the log (the private directory is gone when the message is read;
+the first version named it, re-review minor 2). **The converter's log, `<O>.export.log`, stays beside `--out-dir`**
 (`export_log_path(out_dir)`), also when the export failed: it is the place to read a converter failure (the exception's
 message ends with its last lines).
 
@@ -858,7 +871,7 @@ above and writes `result.json` (the scores per direction, `chrf_mean`, `chrf_min
 `checkpoint`, `spm_sha256`, `placement` and `max_lines`; sorted keys, two-space indent, LF; the same inputs give the same
 bytes), `hyp.<direction>.txt`, Eole's own `dev.*` files and, last, `manifest.json` (stage `distill_evaluate`; metrics
 `chrf_mean`, `chrf_min`, `tag_leaks`, `dev_in_train`, `lines.<direction>`, `chrf.<direction>`, `bleu.<direction>`,
-`count.dev.*`; status `evaluate: ok` and `tag_placement`). The old manifest and result are removed before the prediction
+`count.dev.*`; status `evaluate: ok`, `tag_placement` and `tag_placement_check`). The old manifest and result are removed before the prediction
 starts, so a failed run leaves none. The checkpoint need not have a manifest (a baseline or a foreign model may be scored;
 the command records the SHA-256 of its `config.json`, `vocab.json` and weights, taken before the prediction).
 
@@ -1024,9 +1037,9 @@ Findings of the reviews that were parked and not fixed, and limits of the build,
    applies to multi-parallel sources under `--tag-placement tgt`. (Review M8.)
 6. **`distill evaluate` on an unparseable or non-Eole `config.json` exits 3** (it was 4 before the placement check read the
    file: found by the fix wave, not changed).
-7. **Files near the 900-line limit**: `src/rinchen/train/distill_export.py` 754 lines, `eole_cfg.py` 860 (856 in D9), `launch.py`
-   886, `continuation.py` 777; the gate `tests/integration/test_distill_tiny_student.py` has 893 lines (it grew from 892 in
-   the fix wave) and `tests/unit/test_cli_distill_generate.py` 827: the next test for the gate goes in a module of its own, the
+7. **Files near the 900-line limit**: `src/rinchen/train/distill_export.py` 775 lines (754 before the re-review wave), `eole_cfg.py` 860 (856 in D9), `launch.py`
+   886, `continuation.py` 777; the gate `tests/integration/test_distill_tiny_student.py` has 895 lines (it grew from 892 in
+   the fix wave and by two assertions in the re-review wave) and `tests/unit/test_cli_distill_generate.py` 827: the next test for the gate goes in a module of its own, the
    next change to `launch.py` has to move something. (Review.)
 8. **The toy ranks nothing**: three seeds of one student span 1.9 chrF (98.58, 98.59, 96.68), the originals-only student sits
    inside the spread. Do not cite the gate as evidence that KD helps.
@@ -1035,12 +1048,12 @@ Findings of the reviews that were parked and not fixed, and limits of the build,
 10. **The wording debt of `verify_source`**: a checkpoint it refuses is reported as "cannot continue from ..." although the
     command is an export (D9's function, left as it is).
 11. **Every GPU-side claim is unmeasured** (see "What was not verified").
-12. **The export record does not say whether the placement was derived or stated**, and an export made before the check
-    cannot be re-verified (the saved config is not in the export directory). A saved config without a `data` section or a
-    direction tag leaves the statement unchecked.
+12. **The export record does not say whether the placement was derived or stated** (the manifest's `tag_placement_check` and
+    the printed line do, since the re-review wave), and an export made before the check cannot be re-checked: see limit 19.
+    A saved config without a `data` section or a direction tag leaves the statement unchecked, and the run says so.
 13. **An export's digests are trusted, not re-hashed, by the commands that read it**: `generate` uses the ones `verify_export`
-    took, and the weights are read by the converter after the checkpoint's digest was taken. A kill can leave
-    `.<name>.<random>` beside `--out-dir`.
+    took, and the weights are read by the converter after the checkpoint's digest was taken. A hard kill can leave
+    `.<name>.<random>` beside `--out-dir`: see limit 18.
 14. **A failing preflight leaves an empty output directory** (`generate` creates it early, as D6 does): a teacher without a
     tag it needs (`check_directions`) or a failing teacher build; the gate's vocabulary-without-a-tag case is found AFTER the
     directory is made and leaves it empty.
@@ -1051,7 +1064,25 @@ Findings of the reviews that were parked and not fixed, and limits of the build,
 17. **No Python 3.14 assertion in the new CLI modules** (none of the existing CLI modules has one: `requires-python` in
     `pyproject.toml` pins `==3.14.*`).
 
-### The review and what its fix wave did
+Left open by the re-review (below), recorded the same way:
+
+18. **A hard kill of an export (SIGKILL, an out-of-memory kill, power loss) leaves a hidden `.<name>.<random>/export/`
+    directory beside `--out-dir`**, as large as the model. It is safe to delete when no export is running; nothing sweeps it,
+    on purpose (a sweep cannot tell a dead export from one in progress). SIGINT and SIGTERM clean it up. (Re-review finding 1.)
+19. **Exports made before the placement check hold no saved config and cannot be re-checked**: the export directory has the
+    record's placement, which is what was stated, and nothing that says what the checkpoint recorded. Re-export is the
+    remedy (about 5 s for the tiny teacher). (Re-review finding 5.)
+20. **Shards generated before `cc917e2` were made without the reserved-symbol filter, and the fingerprint has no rule version**,
+    so a rerun with the same inputs REUSES them (`reused 10/10` with their rows as they were). Delete the `shards-*`
+    directories made before that commit, or pass `--force` (which ignores the shards), before trusting such a KD corpus; the
+    fingerprint was left as it is on purpose (a documentation note only). (Re-review finding 6.)
+21. **Nits, not changed**: `saved_tag_placement` is used by tests only (the commands use the return value of
+    `require_stated_placement`); `verified_content` and `json_object`, two generic file readers, live in `distill_saved_config.py`,
+    a module named for the placement check; the reserved set of a teacher is built after the model is loaded; and
+    an interrupt in the instant between the rename and the `published` flag of `_build_export` would leave an output directory
+    without a manifest (not exercised; the next export refuses an existing directory, remove it by hand).
+
+### The review, its fix wave and the re-review
 
 An independent combined review of Tasks 1 to 7 (`e5ff644..e67b05e`, read-only; it ran the integration gate, 44 passed in
 240 s with the numbers above, and probed through the real `rinchen`) found: **ready with fixes, 0 Critical, 2 Important
@@ -1082,8 +1113,50 @@ converter's output directory (a child of a private directory beside `--out-dir`)
 skipped, 10 deselected** (20:57), against 9439 before it and 8252 at the end of D9 (8517 after Task 1, 8676 after Task 2,
 8808 after Task 3, 9064 after Task 4, 9220 after Task 5, 9395 after Task 6); the integration module 44 passed twice (180 to
 190 s). Left open on purpose: the Minor findings M3, M4, M5, M7, M8 and the length of the gate's test file (Known limits 1 to 5,
-7). A scoped re-review of the fix wave (`e67b05e..cc917e2`) was running when this runbook was written; its verdict and any
-finding it made are not recorded here.
+7).
+
+#### The re-review and its wave
+
+A scoped re-review of the fix wave (an independent reviewer, read-only, `e67b05e..cc917e2`) **approved it with minors: 0
+Critical, 0 Important, six Minor findings and a few nits.** The records of Task 8 were written while it ran and said so;
+this section closes that. Its probes ran on real artifacts (CPU, GPU hidden):
+
+- a WRONG tag placement is refused with exit 2 and leaves nothing: no output directory, no private directory, no converter
+  log, in `export` and in `evaluate`; the student's export (5.4 s) succeeded;
+- SIGINT during an export exits 130 and SIGTERM 143, both with the private directory removed; SIGKILL leaves the hidden
+  `.<name>.<random>/export/` directory (finding 1);
+- the placement rule read the saved configs of 323 launcher-written `src` runs and 8 `tgt` runs and derived the right
+  placement of every one: no false refusal;
+- ten real sources through the teacher with beam 4 and `n` 4 gave `reserved_symbol` 0 (the rule still has no real positive).
+
+Its findings and what became of them: (1) a hard-killed export leaves a hidden staging directory, documented (limit 18);
+(2) the "exited 0 but left no `model.bin`" message named the private directory that no longer exists, FIXED; (3) the refusals
+of `distill_saved_config.py` quoted corpus names and prefixes unbounded and unescaped, FIXED; (4) an export or evaluation
+without a `data` section or a direction tag was silently unchecked, FIXED (the printed line and the manifest status);
+(5) exports made before the check cannot be re-checked, documented (limit 19); (6) shards generated before `cc917e2` are
+reused by the same fingerprint, documented (limit 20); the nits are limit 21. The wave is ONE commit, `233ba33`
+(`D10: re-review minors`), tests first, every new test mutation-checked:
+
+- **Minor 2**: `export_ct2` takes an optional `reported_dir`, the path its "no `model.bin`" message names (default: its
+  `out_dir`, so D5's messages and tests are unchanged); the staged export passes `--out-dir`. The message names the log too.
+- **Minor 3**: a corpus name that is a plain word (letters, digits, `_`, `.`, `-`, at most 80 characters) is named as it was
+  (`data.corpus.src_prefix`); any other name is `data[<repr>]`; a quoted prefix is its `repr`; both are cut to 80 characters
+  with `...` after the closing quote. A name with a line break and an ANSI escape, or a prefix of 3 KB, is one short clean
+  line (`distill evaluate` accepts models of any origin).
+- **Minor 4**: `require_stated_placement` and `require_saved_placement` return `PlacementCheck`; `export_checkpoint` returns an
+  `ExportOutcome` (the record and the check) instead of the record; `distill export` prints `tag placement: checked against
+  the saved config` or `tag placement: stated, not recorded in the checkpoint` as its second line and `distill evaluate` as
+  the line after `dev lines in training`, and both write `tag_placement_check` (`checked` or `stated`) into the manifest's
+  status. The export record is UNCHANGED (`test_cli_distill_export.py` pins that its keys do not hold it).
+
+Edits to existing tests, all forced by the three changes: the converter fake of `tests/support/distill_exports.py` accepts
+and records `reported_dir`; the printed lines and the pinned manifest status of `distill export` (3 assertions) and of
+`distill evaluate` (the `expected_lines` helper and 1 assertion) gained the new line and key; the spy of
+`test_cli_distill_evaluate_placement.py` returns the check; the helpers that call `export_checkpoint` read `.record` (4
+files); `test_train_distill_saved_config.py` asserts the returned values (one test renamed, one assertion added);
+`test_train_distill_export_placement.py` asserts `stated` for a config without a direction tag; the integration module gained
+two assertions (895 lines). Gate after the wave: **9750 passed, 1 skipped, 10 deselected** (20:29), against 9706 passed, 1 skipped, 10 deselected before it; the integration module
+44 passed in 269 s.
 
 ## Measured numbers
 
@@ -1111,7 +1184,7 @@ than an idle machine's** (the gate's times are in parentheses); the numbers that
 | a SIGKILL of `distill export` 1.2 s after its private directory appeared | `.crash_export.<random>/export/` with the converter's three files, the converter's log beside, no output directory |
 | parameters (ARITHMETIC, `s11_params.py`) | tiny teacher 187,738 and tiny student 138,201 (V 344, exact); teacher 1,102,982,164, `student_server` 190,845,963, `student_edge` 79,006,218 |
 | `ruff format --check .`, `ruff check .`, `mypy src` | clean (449 files formatted; 175 source files) on this tree |
-| the full gate | not re-run for this record: only documents differ from `cc917e2`, whose gate gave 9706 passed, 1 skipped, 10 deselected (the unit tests read no document) |
+| the full gate | not re-run for this record: only documents differ from `233ba33`, whose gate gave 9750 passed, 1 skipped, 10 deselected (20:29); `cc917e2` gave 9706 passed, 1 skipped, 10 deselected (the unit tests read no document) |
 
 **The numbers agree between the spike, the gate and this run** wherever they are not times: the 3,599 rows, the 3,583
 matches (1,200, 1,191, 597, 595), the weights, chrF 98.20 and 98.58 with the per-direction scores, the 200 of 200, the byte

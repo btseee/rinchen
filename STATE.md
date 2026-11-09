@@ -812,10 +812,10 @@ toy training sources is generated, a tiny student of 2 encoder and 1 decoder lay
 initialisation on KD text mixed 1:1 with the originals, its dev chrF is at least 95.0 and at least the teacher's minus
 3.0, and its own CTranslate2 export decodes what Eole decodes on at least 95 % of 200 dev sentences) is met locally.**
 The branch is stacked on `d9-document-level` (cut from it at `7d0c166` on 2026-11-09), is not merged and not pushed, and
-no CI run covers it. It is 13 commits above `d9-document-level` and 91 above `main` at its code tip, and one more with the
-records (the design commit is `e5ff644`; the code tip is `cc917e2`, `D10: fix the vocabulary padding that a teacher
-hypothesis could hold`; the earlier code tip, the gate, is `e67b05e`; the records are `D10: runbook, spec amendments and
-state and decision records`). It is machinery, not a distillation result: the only data it ever ran on is the templated
+no CI run covers it. It is 16 commits above `d9-document-level` and 94 above `main` (the design commit is `e5ff644`; the code tip
+is `233ba33`, `D10: re-review minors`; the code tip before it is `cc917e2`, `D10: fix the vocabulary padding that a teacher
+hypothesis could hold`; the gate is `e67b05e`; the records are `D10: runbook, spec amendments and state and decision
+records` and `D10: record the re-review`). It is machinery, not a distillation result: the only data it ever ran on is the templated
 toy sentences of `tests/support/tiny_parallel.py`, no real corpus and no real teacher exist, **no GPU was used** (the owner
 did not authorise it; every Eole process had `CUDA_VISIBLE_DEVICES=""` and `gpu_ranks: []`, every CTranslate2 translator
 was built on `device="cpu"`, the converter runs with the device hidden), and `configs/eole/student_server.yaml` and
@@ -836,8 +836,8 @@ controller's two rulings (partial KD coverage scales the originals of a directio
 every input once) are condensed in DECISIONS.md ("2026-11-09: D10 distillation - the rulings, made without a review
 round"), made by the builders and the controller without a review round of their own (none is an approved decision, each lists
 what it costs if wrong). Built task by task with tests first after a spike on the real Eole and CTranslate2 (Tasks 1 to
-7, then ONE combined review, a fix wave and these records; the scoped re-review of the fix wave was running when the
-records were written and is NOT recorded here). **The combined review (an independent reviewer, read-only, Tasks 1 to 7,
+7, then ONE combined review, a fix wave, a scoped re-review with a small wave of its own, and the records). **The
+combined review (an independent reviewer, read-only, Tasks 1 to 7,
 `e5ff644..e67b05e`) found: ready with fixes, 0 Critical, 2 Important and nine groups of Minor findings.** The Important
 ones: the tag placement of an export was the operator's word and never checked although the checkpoint's saved
 `config.json` records it (a source-tag teacher exported with `--tag-placement tgt` exited 0 with a vouching manifest, and
@@ -850,12 +850,13 @@ private directory beside the output and renamed into place; the vocabulary entry
 headers; a message) and left open on purpose the ones that `docs/runbooks/10_distillation.md` lists under "Known limits"
 (`generate` exits 0 with few or no rows; a resumed generation reports this process's teacher counters only; "exact" means
 exact weights; memory and scale; no collision rate printed for the `tgt` placement; the gate's test file of 893 lines).
+**The scoped re-review of the fix wave (an independent reviewer, read-only, `e67b05e..cc917e2`) approved it with minors: 0 Critical, 0 Important, six Minor findings and a few nits.** Its probes on real artifacts (CPU, GPU hidden): a wrong tag placement is refused with exit 2 and leaves nothing (no output directory, no private directory, no log), for `export` and `evaluate`; SIGINT during an export exits 130 and SIGTERM 143, both removing the private directory, while a SIGKILL leaves the hidden `.<name>.<random>/export/` directory; the placement rule derived the right placement of 323 launcher-written `src` configs and 8 `tgt` ones (no false refusal); ten real sources through the teacher with beam 4 and `n` 4 gave `reserved_symbol` 0. The minors fixed in ONE commit (`233ba33`, `D10: re-review minors`, tests first, 21 mutants): the converter's "exited 0 but left no `model.bin`" message now names `--out-dir`, not the private directory that is gone (`export_ct2` takes an optional `reported_dir`); the refusals of `distill_saved_config.py` quote corpus names and prefixes escaped and cut to 80 characters; and `distill export` and `distill evaluate` print one line, `tag placement: checked against the saved config` or `tag placement: stated, not recorded in the checkpoint`, and write `tag_placement_check` (`checked` or `stated`) into the manifest status (the export record is unchanged). Documented, not fixed: a hard kill (SIGKILL, an out-of-memory kill, power loss) of an export leaves a hidden `.<name>.<random>/export/` directory beside the output, as large as the model, safe to delete when no export is running and swept by nothing; exports made before the check hold no saved config and cannot be re-checked (re-export is the remedy); shards generated before `cc917e2` were made without the reserved-symbol filter and the fingerprint has no rule version, so the same inputs reuse them (delete the `shards-*` directories made before it, or use `--force`); and the nits (`saved_tag_placement` is used by tests only, the two file readers live in `distill_saved_config.py`, the reserved set is built after the model load, an interrupt between the rename and the `published` flag). 
 Gates, run for real on Linux, CPython 3.14.10: `ruff format --check .`, `ruff check .` and `mypy src` clean and
 `pytest -m "not network" -q` -- 8517 passed after Task 1, 8676 after Task 2, 8808 after Task 3, 9064 after Task 4, 9220
-after Task 5, 9395 after Task 6, 9439 after Task 7 (21:08) and **9706 passed, 1 skipped, 10 deselected** after the fix
-wave (`cc917e2`, 20:57), against 8252 at the end of D9; the D5 to D9 regression sets stayed green. Mutation checks by hand,
+after Task 5, 9395 after Task 6, 9439 after Task 7 (21:08), 9706 passed, 1 skipped, 10 deselected after the fix
+wave (`cc917e2`, 20:57) and **9750 passed, 1 skipped, 10 deselected** after the re-review wave (`233ba33`, 20:29), against 8252 at the end of D9; the D5 to D9 regression sets stayed green. Mutation checks by hand,
 one mutant at a time, as recorded per task: 63, 88 (2 equivalent survivors), 95 (and 22 fingerprint mutants), 109, 87 and 65
-for Tasks 1 to 6, ten classes for the gate and 23 for the placement fix.
+for Tasks 1 to 6, ten classes for the gate, 23 for the placement fix and 21 for the re-review wave.
 Evidence of the STOP gate, through the real `rinchen` binary on the CPU with the GPU hidden (2 threads), measured by the
 gate and again for the runbook on 2026-11-09 (Intel Core Ultra 7 265K, 20 cores, 46 GiB; the machine was loaded by other
 work, so the times are longer than idle; every count and score below was the same in the spike, in the gate and in the
@@ -896,13 +897,14 @@ Known and open: the limits listed in the runbook (`generate` exits 0 with few or
 process's counters only and the manifest key `teacher.name` is the KD corpus name; "exact" means exact weights, `num_workers`
 above 1 with weights was not run and `--mix 10000:9999` has no guard; memory and scale unmeasured; no collision rate printed by
 `prepare`; `distill evaluate` on an unparseable `config.json` exits 3; the export record does not say whether the placement was
-derived or stated; the "cannot continue from" wording of `verify_source`); `distill_export.py` has 754 lines, `eole_cfg.py` 860,
-`launch.py` 886 and the gate's test file 893 (the limit is 900); the student gate's margin (95.0 against 98.58, the lowest seed
+derived or stated, which the manifest and a printed line now do; the "cannot continue from" wording of `verify_source`;
+the hidden directory a hard-killed export leaves; exports made before the check; shards generated before `cc917e2`);
+`distill_export.py` has 775 lines, `eole_cfg.py` 860, `launch.py` 886 and the gate's test file 895 (the limit is 900); the student gate's margin (95.0 against 98.58, the lowest seed
 96.68): if it flakes elsewhere raise `train_steps`, never lower the gate. NOT verified: any run on a GPU or a real corpus,
 CTranslate2 on another device, float16 or int8, `num_workers` above 1 with weights, the `tgt` placement for a real student,
 KeyboardInterrupt with a real CTranslate2 call, Windows and macOS. [EVIDENCE: the gate chain, the integration test module, the
 real-binary runs and the measurement scripts of the runbook (`scratchpad/d10-t8/`), the spike (`spike-findings.md`) and the
-review report, 2026-11-09, commits `e5ff644` through `cc917e2`.]
+review reports, 2026-11-09, commits `e5ff644` through `233ba33`.]
 
 Branch status (updated 2026-11-09, after the D10 build): `main` holds D3, the D3 research follow-up, D4
 and D5, and is at `0d534a3` (the commit that records the D5 merge; `862e176` is the D5 merge tip,
@@ -913,12 +915,12 @@ on it (cut from `d6-synthetic-data` at `9973319`); D8 lives on `d8-teacher-train
 `d7-multilingual-ablations` at `b1a8a47`); D9 lives on `d9-document-level`, stacked on D8 (cut from
 `d8-teacher-training` at `993f32c`; its last code commit is `135e9f9`, `D9: re-review minors`, and the records are
 `6746ac5` and the commit `D9: record the re-review`); D10 lives on `d10-distillation`, stacked on D9 (cut from
-`d9-document-level` at `7d0c166`; its last code commit is `cc917e2`, `D10: fix the vocabulary padding that a teacher
-hypothesis could hold`, and the records are the commit `D10: runbook, spec amendments and state and decision records`). None
+`d9-document-level` at `7d0c166`; its last code commit is `233ba33`, `D10: re-review minors`, and the records are the commits `D10: runbook, spec amendments and
+state and decision records` and `D10: record the re-review`). None
 of the five is merged into `main` and none is pushed; merging D10 means merging D6, D7, D8 and D9 first. At the D5 merge `main` was 81 commits ahead of `origin/main`
 (`9e7b0ec`); it is unpushed, and no CI run covers D3, D4, D5, D6, D7, D8, D9 or D10. The full local gate was last run
-on the D10 branch: 9706 passed, 1 skipped, 10 deselected (D6 to D10 included), on `D10: fix the vocabulary padding that a
-teacher hypothesis could hold` (`cc917e2`; 9439 on `D10: the tiny student gate`, `e67b05e`; 8517 after Task 1); on the D9
+on the D10 branch: 9750 passed, 1 skipped, 10 deselected (D6 to D10 included), on `D10: re-review minors` (`233ba33`; 9706 on `D10: fix the vocabulary
+padding that a teacher hypothesis could hold`, `cc917e2`; 9439 on `D10: the tiny student gate`, `e67b05e`; 8517 after Task 1); on the D9
 branch it gave 8252 passed, 1 skipped, 10 deselected on `D9: re-review minors` (`135e9f9`;
 8214 on `D9: review minors`, `c2d46b5`; 8075 after Task 5, 7187 at the end of D8); on the D8 branch it gave 7114
 passed, 1 skipped, 10 deselected (D6, D7 and D8 included), on `D8: review minors of the

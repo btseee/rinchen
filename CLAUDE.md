@@ -168,7 +168,7 @@ refuses it and names the value to state), `docify` on a split that makes no wind
 the wording of the `average` guard; three limits stay documented (the `average` guard sees three lexical parents only,
 documents are keyed per `corpus` label and not per file, the `launch` pre-flight needs the SentencePiece model
 readable from the working directory when a size is stated). D10 (Distillation & students) is done locally on branch
-`d10-distillation`, stacked on `d9-document-level` (cut from it at `7d0c166`; code tip `cc917e2`), not merged and not pushed,
+`d10-distillation`, stacked on `d9-document-level` (cut from it at `7d0c166`; code tip `233ba33`), not merged and not pushed,
 and no CI run covers it: its STOP gate (through the real `rinchen distill` commands, `rinchen train launch` and the real Eole
 and CTranslate2 on the CPU, a tiny teacher of 2,000 steps is exported, its KD corpus of the toy training sources is generated,
 a tiny student of 2 encoder and 1 decoder layers trains from random initialisation on that text mixed 1:1 with the originals,
@@ -185,7 +185,11 @@ drops 5.2 % of the examples when KD rows are mixed in untagged and 0 % with the 
 ready with fixes, no Critical finding and two Important ones (the tag placement of an export was never checked; a KD hypothesis
 with an unknown or reserved piece passed the selection); its fix wave (`D10: fix ...` x 4 and `D10: review minors`, gate 9706
 passed, 1 skipped, 10 deselected) fixed both and left open on purpose the limits that `docs/runbooks/10_distillation.md` lists
-under "Known limits"; a scoped re-review of the fix wave was running when the records were written and is not recorded.
+under "Known limits"; a scoped re-review of the fix wave approved it with minors (no Critical or Important finding) and a
+small wave of its own (`D10: re-review minors`, gate 9750 passed, 1 skipped, 10 deselected) fixed three of them (a message that named a private path that no
+longer exists, a saved config quoted unbounded and unescaped in a message, and a tag placement that nothing could check going
+unreported: `export` and `evaluate` now print whether it was checked or only stated) and documented the rest (the hidden
+directory a hard-killed export leaves, exports made before the check, shards made before `cc917e2`).
 Next up: D11 (Export, quantization, serving, CLI, package). See `STATE.md`, `docs/runbooks/08_teacher.md`,
 `docs/runbooks/09_document_level.md` and `docs/runbooks/10_distillation.md`.
 
