@@ -36,6 +36,7 @@ from tests.support.launch_cli import assert_one_error, snapshot
 from tests.support.step_dirs import (
     eole_model_section,
     flip_one_byte,
+    launcher_data,
     sha256,
     tree_digest,
 )
@@ -639,3 +640,58 @@ def test_an_output_directory_with_another_stages_manifest_is_refused_untouched(
     assert_one_error(result, 2, f"{workspace.out_dir} exists: remove it")
     assert snapshot(workspace.out_dir) == before
     assert converter.calls == []
+
+
+# --- the tag placement against the saved config of the checkpoint ------------------------------
+
+
+def test_a_placement_the_saved_config_contradicts_is_refused_with_nothing_made(
+    tmp_path: Path, converter: FakeConverter
+) -> None:
+    workspace = make_export_workspace(tmp_path, data=launcher_data("src"))
+    digest = tree_digest(tmp_path / "teacher")
+
+    result = invoke(workspace.args(tag_placement="tgt"))
+
+    assert_refused(
+        result,
+        workspace,
+        converter,
+        exit_code=2,
+        message="the tag placement 'tgt' is not the one the checkpoint was trained with",
+        digest=digest,
+    )
+    assert "pass --tag-placement src" in result.stderr
+    assert not workspace.log.exists()
+
+
+@pytest.mark.parametrize("placement", ["src", "tgt"])
+def test_the_placement_the_saved_config_records_is_exported_and_stated_in_the_manifest(
+    tmp_path: Path, converter: FakeConverter, placement: str
+) -> None:
+    workspace = make_export_workspace(tmp_path, data=launcher_data(placement))
+
+    run_ok(workspace.args(tag_placement=placement))
+
+    assert manifest_of(workspace).status["tag_placement"] == placement
+    assert verify_export(workspace.out_dir).record.tag_placement == placement
+
+
+def test_a_saved_config_whose_corpora_disagree_is_a_data_error(
+    tmp_path: Path, converter: FakeConverter
+) -> None:
+    data = launcher_data("src")
+    data["eng_Latn-khk_Cyrl.bt"] = launcher_data("tgt")["eng_Latn-khk_Cyrl.bt"]
+    workspace = make_export_workspace(tmp_path, data=data)
+    digest = tree_digest(tmp_path / "teacher")
+
+    result = invoke(workspace.args())
+
+    assert_refused(
+        result,
+        workspace,
+        converter,
+        exit_code=3,
+        message=f"{workspace.checkpoint / 'config.json'}: the corpora place the direction tag",
+        digest=digest,
+    )

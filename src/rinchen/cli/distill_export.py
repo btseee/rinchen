@@ -12,8 +12,11 @@ or a directory `rinchen train average` wrote, in either case with the manifest t
 wrote, which must vouch for the files as they are now. `--spm-model` must be the SentencePiece
 model the checkpoint was trained with: its SHA-256 must be that of the copy Eole saved into
 the checkpoint. `--tag-placement` (no default) says where the direction tag goes, in the
-source (`src`) or as a forced prefix of the target (`tgt`): neither the checkpoint nor
-CTranslate2's files hold it, so the export records what the caller says. `--out-dir` must not
+source (`src`) or as a forced prefix of the target (`tgt`): CTranslate2's files do not hold
+it, so the export records what the caller says. The saved config.json of a checkpoint our
+launcher wrote records it in the prefixes of its `data` section, and a placement that
+disagrees is refused (exit 2) before anything is made; a saved config without a `data`
+section, or without a direction tag in it, leaves the statement unchecked. `--out-dir` must not
 exist (the converter refuses a directory that exists); the converter's log is `<O>.export.log`
 beside it, and `--timeout` (seconds) bounds the converter.
 
@@ -38,9 +41,10 @@ digest that of the canonical JSON `{"tag_placement": ...}`. A failure while it i
 removes the output directory, as a failure of the converter does.
 
 Exit codes: 0; 2 for a bad option, a checkpoint our manifest does not vouch for, a
-SentencePiece model that is not the checkpoint's, an output directory that exists or holds `$`
-or a glob character; 3 for a checkpoint or manifest that cannot be read or whose `config.json`
-or `vocab.json` lacks what an export records; 4 when the converter fails or leaves a file out;
+SentencePiece model that is not the checkpoint's, a tag placement the checkpoint's saved
+config contradicts, an output directory that exists or holds `$` or a glob character; 3 for a
+checkpoint or manifest that cannot be read or whose `config.json` or `vocab.json` lacks what
+an export records or contradicts itself about the tag placement; 4 when the converter fails or leaves a file out;
 1 when the output cannot be written; 130 when interrupted.
 """
 
@@ -104,7 +108,8 @@ def export_command(
             "--tag-placement",
             help=(
                 "Where the direction tag goes: in the source (src) or as a forced "
-                "prefix of the target (tgt). The export records it."
+                "prefix of the target (tgt). The export records it; it is refused "
+                "when the checkpoint's saved config records the other placement."
             ),
         ),
     ],

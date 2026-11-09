@@ -10,9 +10,12 @@ group by `rinchen.cli.distill`.
 `ckpt` directory of a run: a model directory with `config.json`, `vocab.json` and
 `model.*.safetensors`. It is scored with `--spm-model`, which must be ITS OWN SentencePiece
 model (a student and its teacher may have different ones), and with the tag placement it was
-trained with. The checkpoint need not have a manifest: a baseline or a foreign model may be
-evaluated; what the command records of it is the SHA-256 of those files, taken before the
-prediction. Teacher against student is two runs with the same `--corpus` files and
+trained with: when the checkpoint's saved config.json records the placement (the prefixes of
+its `data` section, as our launcher writes them), a `--tag-placement` that disagrees is
+refused before anything is written, and a config without a `data` section or a direction tag
+leaves the statement as it is. The checkpoint need not have a manifest: a baseline or a
+foreign model may be evaluated; what the command records of it is the SHA-256 of those files,
+taken before the prediction. Teacher against student is two runs with the same `--corpus` files and
 `--max-lines`, which score the same dev rows.
 
 The dev rows are those of the corpus files for the directions their train rows have (the
@@ -40,10 +43,11 @@ SentencePiece model and the checkpoint's `config.json`, `vocab.json` and weights
 prediction starts, so a failed run leaves none.
 
 Exit codes: 0; 2 for a bad option, a checkpoint directory without the files Eole loads or
-whose path holds `$` or a glob character (Eole globs it), a SentencePiece model that lacks a
-direction tag, an output directory that holds `$` or is the directory of an input; 3 for a
-missing or unreadable corpus, no row to train on or no dev row for a direction and another
-stage's manifest in the output directory; 4 when the prediction fails; 1 when the output
+whose path holds `$` or a glob character (Eole globs it), a tag placement its saved config
+contradicts, a SentencePiece model that lacks a direction tag, an output directory that holds
+`$` or is the directory of an input; 3 for a missing or unreadable corpus, a saved config that
+is not what Eole writes, no row to train on or no dev row for a direction and another stage's
+manifest in the output directory; 4 when the prediction fails; 1 when the output
 cannot be written; 130 when interrupted.
 """
 
@@ -73,6 +77,7 @@ from rinchen.errors import ConfigError, DataError
 from rinchen.manifest.model import ManifestFile
 from rinchen.manifest.stage import begin_commit, output_file, refuse_foreign_manifest
 from rinchen.train.checkpoints import CONFIG_FILE, VOCAB_FILE, WEIGHTS_FILE
+from rinchen.train.distill_saved_config import require_saved_placement
 from rinchen.train.eole_cfg import reject_dollar, reject_glob_characters
 from rinchen.train.eole_run import predict_tokens
 from rinchen.train.evaluate import DevResult, evaluate_variant, hypothesis_path
@@ -98,6 +103,7 @@ class _Hashed(NamedTuple):
 
     entries: list[ManifestFile]
     spm_sha256: str
+    config_sha256: str
     sources: list[Path]
 
 
@@ -135,7 +141,8 @@ def evaluate_command(
             "--tag-placement",
             help=(
                 "Where the direction tag goes: in the source (src) or as a forced "
-                "prefix of the target (tgt); the one the checkpoint was trained with."
+                "prefix of the target (tgt); the one the checkpoint was trained with "
+                "(refused when its saved config records the other)."
             ),
         ),
     ],
@@ -184,6 +191,9 @@ def evaluate_command(
         hashed = _hash_inputs(corpus, spm_model, source)
         require_out_apart_from_inputs(out_dir, hashed.sources, option="--out-dir")
         refuse_foreign_manifest(target, _STAGE)
+        require_saved_placement(
+            source / CONFIG_FILE, hashed.config_sha256, tag_placement
+        )
         training = load_training_rows(corpus)
         dev = load_dev_rows(
             corpus,
@@ -243,6 +253,7 @@ def _hash_inputs(corpus: Sequence[Path], spm_model: Path, source: Path) -> _Hash
     return _Hashed(
         entries=[*corpora, model, config, vocabulary, *weights],
         spm_sha256=model.sha256,
+        config_sha256=config.sha256,
         sources=[
             *corpus,
             spm_model,

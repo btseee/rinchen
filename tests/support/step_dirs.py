@@ -223,6 +223,43 @@ def eole_vocabulary(tokens: Sequence[str]) -> dict[str, Any]:
     }
 
 
+# The corpora of a toy run as (name, tag of the target language, marker of the origin): an
+# authentic corpus has no marker, a back-translated one has `<bt>`.
+LAUNCHER_CORPORA: tuple[tuple[str, str, str | None], ...] = (
+    ("eng_Latn-khk_Cyrl.auth", "<2khk_Cyrl>", None),
+    ("khk_Cyrl-eng_Latn.auth", "<2eng_Latn>", None),
+    ("eng_Latn-khk_Cyrl.bt", "<2khk_Cyrl>", "<bt>"),
+)
+
+
+def launcher_data(
+    placement: str,
+    corpora: Sequence[tuple[str, str, str | None]] = LAUNCHER_CORPORA,
+) -> dict[str, Any]:
+    """The `data` section that `rinchen train launch` leaves in the saved `config.json`
+    (Eole keeps every key the launcher wrote and adds `path_align`): with `placement` `src`
+    the tag of the target language, then the origin marker, is `src_prefix` and `tgt_prefix`
+    is empty; with `tgt` the marker alone is `src_prefix` (empty when there is none) and the
+    tag is `tgt_prefix`. The `valid` entry holds paths only."""
+    section: dict[str, Any] = {}
+    for name, tag, marker in corpora:
+        if placement == "src":
+            src_prefix, tgt_prefix = (f"{tag} {marker}" if marker else tag), ""
+        else:
+            src_prefix, tgt_prefix = (marker or ""), tag
+        section[name] = {
+            "path_src": f"/data/{name}.src",
+            "path_tgt": f"/data/{name}.tgt",
+            "transforms": ["sentencepiece", "prefix", "filtertoolong"],
+            "weight": 7,
+            "src_prefix": src_prefix,
+            "tgt_prefix": tgt_prefix,
+            "path_align": None,
+        }
+    section["valid"] = {"path_src": "/data/valid.src", "path_tgt": "/data/valid.tgt"}
+    return section
+
+
 def make_step_dir(
     model_path: Path,
     step: int,
@@ -235,6 +272,7 @@ def make_step_dir(
     spm_bytes: bytes = SPM_BYTES,
     record_spm: bool = True,
     spm_name: str = SPM_ARTIFACT,
+    data: Any = None,
 ) -> Path:
     """Create `model_path/step_<step>` as a COMPLETE step directory and return it.
 
@@ -246,7 +284,9 @@ def make_step_dir(
     the whole content of that file; without either the file is a small stub.
     `model_path` is created when missing. The SentencePiece model copy has the bytes
     `spm_bytes` and the file name `spm_name`, and the saved `config.json` records it as
-    Eole does (`${MODEL_PATH}/` and its name) unless `record_spm` is false.
+    Eole does (`${MODEL_PATH}/` and its name) unless `record_spm` is false. `data` is the
+    `data` section the saved config holds (`launcher_data`, or whatever a test damages
+    it to); without it the config has none.
     """
     from safetensors.numpy import save_file
 
@@ -291,6 +331,8 @@ def make_step_dir(
         }
     if model is not None:
         saved_config["model"] = dict(model)
+    if data is not None:
+        saved_config["data"] = copy.deepcopy(data)
     (step_dir / CONFIG_FILE).write_text(json.dumps(saved_config), encoding="utf-8")
     return step_dir
 
@@ -449,13 +491,14 @@ def make_finished_run(
     spm_bytes: bytes = SPM_BYTES,
     record_spm: bool = True,
     spm_name: str = SPM_ARTIFACT,
+    data: Any = None,
 ) -> FabricatedRun:
     """A finished run in `root/run`: complete step directories for `steps` (the model of
     `eole_model_section` unless `model` says), a real `launch.json`, a `command.sh` and,
     when `manifest`, a manifest of `stage` that lists the files named in `listed` of the
     step `listed_step` (the final one unless said), the other two outputs of a launch
     being `launch.json` and `command.sh`. `spm_bytes`, `record_spm` and `spm_name` are
-    those of `make_step_dir`."""
+    those of `make_step_dir`, as is `data`."""
     run_dir = root / "run"
     model_path = run_dir / "ckpt"
     for step in steps:
@@ -468,6 +511,7 @@ def make_finished_run(
             spm_bytes=spm_bytes,
             record_spm=record_spm,
             spm_name=spm_name,
+            data=data,
         )
     write_run_record(run_dir)
     (run_dir / "command.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
@@ -516,6 +560,7 @@ def make_averaged_dir(
     record_text: str | None = None,
     spm_bytes: bytes = SPM_BYTES,
     record_spm: bool = True,
+    data: Any = None,
 ) -> Path:
     """What `rinchen train average` leaves in `directory`: the weights, the config and
     vocabulary of the last step, the SentencePiece artifact (never `optimizer.pt`),
@@ -525,7 +570,8 @@ def make_averaged_dir(
     the SHA-256 of the weights (`recorded_weights_sha256`, default the real one); the
     manifest lists the weights of the sources `inputs` (default the recorded ones), as
     the command writes them, so the two agree unless a test says otherwise.
-    `record_text` is the whole content of `averaged_from.json` instead."""
+    `record_text` is the whole content of `averaged_from.json` instead; `data` is the `data`
+    section of the saved config (`launcher_data`)."""
     scratch = directory.parent / f".{directory.name}.steps"
     step = make_step_dir(
         scratch,
@@ -535,6 +581,7 @@ def make_averaged_dir(
         vocab_document=vocab_document,
         spm_bytes=spm_bytes,
         record_spm=record_spm,
+        data=data,
     )
     directory.mkdir(parents=True)
     for name in (WEIGHTS_FILE, CONFIG_FILE, VOCAB_FILE, SPM_ARTIFACT):

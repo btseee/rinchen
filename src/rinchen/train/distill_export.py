@@ -12,11 +12,15 @@ directory `rinchen train average` wrote, into a directory CTranslate2 loads:
 The checkpoint must be one `continuation.verify_source` vouches for (its manifest lists
 the files and their SHA-256 are those on disk), and the SentencePiece model must be the
 one the checkpoint was trained with: its SHA-256 must equal that of the copy Eole saved in
-the checkpoint directory. The tag placement is neither in the checkpoint nor in
-CTranslate2's files, so the caller states it and the record keeps it. Nothing is read from
-`config.json` or `vocab.json` before its bytes matched the digest `verify_source` took,
-and the checkpoint is never written: any failure after the checks removes the output
-directory this call made (the converter's log beside it stays).
+the checkpoint directory. The tag placement is not in CTranslate2's files, so the caller
+states it and the record keeps it; the saved `config.json` of a checkpoint our launcher
+wrote does hold it (the prefixes of its `data` section, `distill_saved_config`), and a
+statement that disagrees is refused before anything is made. A saved config without a
+`data` section, or without a direction tag in it, leaves the statement unchecked and the
+record cannot tell which of the two it was. Nothing is read from `config.json` or
+`vocab.json` before its bytes matched the digest `verify_source` took, and the checkpoint
+is never written: any failure after the checks removes the output directory this call
+made (the converter's log beside it stays).
 
 `verify_export` is the reader of such a directory, for everything that trusts one (the
 teacher that translates, the generation that fingerprints it): the manifest must be of
@@ -51,6 +55,11 @@ from rinchen.manifest.model import Manifest
 from rinchen.manifest.stage import sha256_of
 from rinchen.train.checkpoints import CONFIG_FILE, VOCAB_FILE, ContinuationKind
 from rinchen.train.continuation import SourceProvenance, verify_source
+from rinchen.train.distill_saved_config import (
+    json_object,
+    require_stated_placement,
+    verified_content,
+)
 from rinchen.train.eole_cfg import reject_dollar, reject_glob_characters
 from rinchen.utils.integers import is_strict_int
 from rinchen.utils.part_file import replace_file
@@ -120,7 +129,8 @@ class ExportRecord:
     """`export.json`: what the export directory says about itself.
 
     `tag_placement` is where the direction tag goes (`src`: in the source, `tgt`: a forced
-    prefix of the target) and is the caller's statement; `spm_sha256` the SHA-256 of
+    prefix of the target): the caller's statement, which the export refused when the saved
+    config of the checkpoint places the tag elsewhere; `spm_sha256` the SHA-256 of
     `spm.model`; the layer counts, `hidden_size` and `vocabulary_entries` (the length of
     the checkpoint's source vocabulary, which is the length of `shared_vocabulary.json`)
     are read from the checkpoint's saved `config.json` and `vocab.json`.
@@ -202,7 +212,8 @@ def export_checkpoint(
     (which must not exist) with `spm.model` and `export.json`, and return the record.
 
     `spm_model` must be the SentencePiece model the checkpoint was trained with;
-    `tag_placement` says where its direction tag goes; `timeout` (seconds) bounds the
+    `tag_placement` says where its direction tag goes (it must be the one the saved config
+    of the checkpoint records, when that records one); `timeout` (seconds) bounds the
     converter. The converter runs as a subprocess with the GPU hidden. No manifest is
     written: the command that calls this writes it, last.
 
@@ -210,16 +221,18 @@ def export_checkpoint(
         ValueError: `tag_placement` is neither `src` nor `tgt`.
         ConfigError: a path holds `$` (or, for the checkpoint and `out_dir`, a glob
             character), `spm_model` is not a file or not the model of the checkpoint,
-            `out_dir` exists, or the checkpoint is not one our manifest vouches for
+            `tag_placement` is not the one the saved config records, `out_dir` exists, or
+            the checkpoint is not one our manifest vouches for
             (`continuation.verify_source`).
         DataError: the checkpoint's `config.json` or `vocab.json` does not say what an
-            export records, or a file cannot be read.
+            export records (a `data` section that is not what Eole writes or whose corpora
+            place the tag differently included), or a file cannot be read.
         UpstreamError: the converter fails or leaves a file out. After the checks,
             any failure removes `out_dir` before it is raised.
     """
     _check_arguments(checkpoint, out_dir, spm_model, tag_placement)
     provenance = verify_source(checkpoint)
-    saved = _saved_model(provenance, spm_model)
+    saved = _saved_model(provenance, spm_model, tag_placement)
     spm_bytes = _sentencepiece_trained_with(spm_model, saved.spm_copy)
     record = ExportRecord(
         tag_placement=tag_placement,
@@ -281,11 +294,15 @@ class _SavedModel:
     spm_copy: Path
 
 
-def _saved_model(provenance: SourceProvenance, spm_model: Path) -> _SavedModel:
+def _saved_model(
+    provenance: SourceProvenance, spm_model: Path, tag_placement: TagPlacement
+) -> _SavedModel:
     """Read `config.json` and `vocab.json` of the checkpoint, each only when its bytes
-    are those `verify_source` hashed."""
+    are those `verify_source` hashed, and refuse a `tag_placement` the saved config
+    contradicts."""
     config_file = provenance.path / CONFIG_FILE
     config = _saved_json(config_file, provenance.config_sha256)
+    require_stated_placement(config, config_file, tag_placement)
     vocab_file = provenance.path / VOCAB_FILE
     vocabulary = _saved_json(vocab_file, provenance.vocab_sha256)
     return _SavedModel(
@@ -312,17 +329,7 @@ def _checkpoint_of(provenance: SourceProvenance) -> CheckpointRecord:
 def _saved_json(file: Path, digest: str) -> dict[str, Any]:
     """The JSON object in `file`, read once and only when its bytes are those with
     SHA-256 `digest`."""
-    return _json_object(_verified_content(file, digest), file)
-
-
-def _json_object(content: bytes, file: Path) -> dict[str, Any]:
-    try:
-        document = json.loads(content)
-    except (ValueError, RecursionError) as error:
-        raise DataError(f"{file}: is not valid JSON") from error
-    if not isinstance(document, dict):
-        raise DataError(f"{file}: is not a JSON object")
-    return document
+    return json_object(verified_content(file, digest), file)
 
 
 def _count_at(document: Mapping[str, Any], path: tuple[str, ...], file: Path) -> int:
@@ -561,23 +568,8 @@ def _hashed(file: Path) -> str:
         raise DataError(f"cannot read {file}: {error.strerror}") from error
 
 
-def _verified_content(file: Path, digest: str) -> bytes:
-    """The bytes of `file`, read once, only when they are the bytes with SHA-256
-    `digest`: what is parsed is what was hashed."""
-    try:
-        content = file.read_bytes()
-    except OSError as error:
-        raise DataError(f"cannot read {file}: {error.strerror}") from error
-    if hashlib.sha256(content).hexdigest() != digest:
-        raise ConfigError(
-            f"{file} changed after it was hashed, so what would be read is not what "
-            "was vouched for"
-        )
-    return content
-
-
 def _vouching_manifest(path: Path, manifest_file: Path, digest: str) -> Manifest:
-    content = _verified_content(manifest_file, digest)
+    content = verified_content(manifest_file, digest)
     try:
         manifest = Manifest.model_validate_json(content)
     except ValueError as error:
@@ -629,7 +621,7 @@ def _require_a_regular_file(path: Path, file: Path) -> None:
 
 
 def _record_in(file: Path, digest: str) -> ExportRecord:
-    content = _verified_content(file, digest)
+    content = verified_content(file, digest)
     try:
         return ExportRecord.from_bytes(content)
     except DataError as error:
