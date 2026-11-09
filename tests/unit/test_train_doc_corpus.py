@@ -23,13 +23,16 @@ from rinchen.manifest.stage import sha256_of
 from rinchen.train.corpus_files import CorpusFiles
 from rinchen.train.doc_corpus import (
     build_doc_corpora,
+    check_continuation_base,
     doc_data_section,
     doc_weights,
+    planned_doc_corpora,
     render_continuation_config,
     write_doc_validation,
 )
 from rinchen.train.docify import DocWindows, docify
 from rinchen.train.eole_cfg import read_config, validate_train_config
+from rinchen.train.sampling import CorpusSize
 from rinchen.train.validation_corpus import ValidPaths
 from tests.support.corpus_rows import file_lines
 from tests.support.doc_rows import EN_MN, JOIN, MN_EN, SENTENCES, document, rows_frame
@@ -146,6 +149,42 @@ def test_an_unchanged_corpus_is_reused_and_a_changed_or_damaged_one_is_written_a
     assert fourth[0].rows == 3
 
 
+def test_the_planned_corpora_are_the_ones_the_build_writes_without_writing_them(
+    both_directions: DocWindows, tmp_path: Path
+) -> None:
+    planned = planned_doc_corpora(both_directions)
+
+    assert [(size.name, size.direction, size.rows) for size in planned] == [
+        (EN_MN_NAME, "eng_Latn-khk_Cyrl", 2),
+        (MN_EN_NAME, "khk_Cyrl-eng_Latn", 2),
+    ]
+    assert list(tmp_path.iterdir()) == []
+    built = build_doc_corpora(both_directions, tmp_path)
+    assert [(c.name, c.direction, c.rows) for c in built] == [
+        (size.name, size.direction, size.rows) for size in planned
+    ]
+    assert doc_weights(planned, temperature=0.5) == doc_weights(built, temperature=0.5)
+
+
+def test_planned_corpora_follow_the_window_counts_of_each_direction(
+    toy_spm: Path,
+) -> None:
+    rows = document("d1", range(6)) + document("d1", range(4), languages=MN_EN)
+    windows = windows_of(rows, toy_spm)
+
+    planned = planned_doc_corpora(windows)
+
+    assert [(size.name, size.rows) for size in planned] == [
+        (EN_MN_NAME, 3),
+        (MN_EN_NAME, 2),
+    ]
+
+
+def test_no_window_means_no_planned_corpus(toy_spm: Path) -> None:
+    with pytest.raises(DataError, match="no document windows"):
+        planned_doc_corpora(windows_of(document("d1", [0]), toy_spm))
+
+
 def test_no_window_is_a_data_error(toy_spm: Path, tmp_path: Path) -> None:
     empty = windows_of(document("d1", [0]), toy_spm)
 
@@ -190,6 +229,8 @@ def test_the_weights_follow_the_window_counts_through_the_temperature(
         EN_MN_NAME: 6,
         MN_EN_NAME: 2,
     }
+    sizes = [CorpusSize(c.name, c.direction, c.rows) for c in corpora]
+    assert doc_weights(sizes, temperature=0.5) == {EN_MN_NAME: 63, MN_EN_NAME: 37}
 
 
 def test_weights_that_cannot_be_made_are_refused(tmp_path: Path) -> None:
@@ -530,3 +571,44 @@ def test_a_config_that_does_not_validate_writes_nothing(
 def test_the_config_is_not_written_over_the_base(toy_spm: Path, tmp_path: Path) -> None:
     with pytest.raises(ConfigError, match="base"):
         _render(tmp_path, toy_spm, out=BASE)
+
+
+# ---- the base config of a continuation, checked on its own ---------------------------------
+
+
+def test_the_base_config_is_returned_valid_and_as_it_is() -> None:
+    cfg = check_continuation_base(BASE)
+
+    assert cfg == read_config(BASE, "base")
+    assert cfg["transforms_configs"]["filtertoolong"] == {
+        "src_seq_length": 64,
+        "tgt_seq_length": 64,
+    }
+
+
+def test_the_base_check_refuses_what_the_render_refuses(tmp_path: Path) -> None:
+    held = read_config(BASE, "base")
+    held["training"]["reset_optim"] = "all"
+    path = tmp_path / "held.yaml"
+    path.write_text(yaml.safe_dump(held), encoding="utf-8")
+    with pytest.raises(ConfigError, match="reset_optim"):
+        check_continuation_base(path)
+
+    corpora = read_config(BASE, "base")
+    corpora["data"] = {
+        "other.auth": {
+            "path_src": "a.src",
+            "path_tgt": "a.tgt",
+            "transforms": [],
+            "weight": 1,
+            "src_prefix": "",
+            "tgt_prefix": "",
+        }
+    }
+    path = tmp_path / "corpora.yaml"
+    path.write_text(yaml.safe_dump(corpora), encoding="utf-8")
+    with pytest.raises(ConfigError, match=r"other\.auth"):
+        check_continuation_base(path)
+
+    with pytest.raises(ConfigError, match="not found"):
+        check_continuation_base(tmp_path / "absent.yaml")

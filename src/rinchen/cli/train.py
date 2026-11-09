@@ -1,9 +1,9 @@
 """`rinchen train ablate`: expand an ablation matrix into variants, train each one from
 random initialisation and score its development sets, and record the run in a
 manifest. Parsing, file I/O and the manifest only; the work happens in
-`rinchen.train`. The group's other commands, `launch` and `average`, live in
-`rinchen.cli.train_runs` and are registered here; the checks both modules share are in
-`rinchen.cli.train_common`.
+`rinchen.train`. The group's other commands, `launch` and `average` (in
+`rinchen.cli.train_runs`) and `docify` (in `rinchen.cli.train_docify`), are registered
+here; the checks the modules share are in `rinchen.cli.train_common`.
 
 The variants are resumable work under the output directory (`variants/<id>/`), not
 outputs of the run: the outputs are the three result tables, the rendered Eole config
@@ -21,19 +21,22 @@ directory (`refuse_foreign_manifest`).
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated
 
 import typer
 
-from rinchen.cli import train_runs
+from rinchen.cli import train_docify, train_runs
 from rinchen.cli.errors import rinchen_errors_as_exit_codes
 from rinchen.cli.train_common import (
+    corpus_manifest_files,
     create_out_dir,
     exit_cannot_write,
     hash_input,
+    numbers_under,
+    reject_repeated_corpora,
     require_file,
     require_out_apart_from_inputs,
     require_usable_timeout,
@@ -56,13 +59,13 @@ from rinchen.train.ablation_plan import AblationPlan, plan_ablation
 from rinchen.train.ablation_prepare import PreparedVariant, prepare_variant
 from rinchen.train.ablation_records import AblationResult, VariantProgress
 from rinchen.train.ablation_report import result_files
-from rinchen.train.corpus_files import corpus_sidecar_path
 from rinchen.train.eole_run import run_training
 from rinchen.train.evaluate import evaluate_variant
 
 app = typer.Typer(no_args_is_help=True)
 app.command("launch")(train_runs.launch_command)
 app.command("average")(train_runs.average_command)
+app.command("docify")(train_docify.docify_command)
 
 _STAGE_NAME = "train_ablate"
 _PREPARE_STAGE = "train_prepare"
@@ -178,7 +181,7 @@ def ablate(
     every variant and prints one line per variant: `prepared <id>: <config.yaml>`."""
     with rinchen_errors_as_exit_codes():
         require_usable_timeout(timeout)
-        _reject_repeated_corpora(corpus)
+        reject_repeated_corpora(corpus)
         if prepare_only:
             # Refused for a dry run too: it must not be followed by a refusal for it.
             _reject_options_that_prepare_ignores(force=force, timeout=timeout)
@@ -335,22 +338,8 @@ def _prepared_files(prepared: Sequence[PreparedVariant]) -> list[ManifestFile]:
             if path not in listed:
                 listed[path] = output_file(path, None)
         for built in variant.corpora.corpora:
-            for path, digest in (
-                (built.src_path, built.src_sha256),
-                (built.tgt_path, built.tgt_sha256),
-            ):
-                listed.setdefault(
-                    path,
-                    ManifestFile(
-                        path=str(path),
-                        sha256=digest,
-                        bytes=path.stat().st_size,
-                        rows=built.rows,
-                    ),
-                )
-            sidecar = corpus_sidecar_path(built)
-            if sidecar not in listed:
-                listed[sidecar] = output_file(sidecar, None)
+            for file in corpus_manifest_files(built):
+                listed.setdefault(Path(file.path), file)
     return list(listed.values())
 
 
@@ -363,27 +352,13 @@ def _prepare_metrics(
         built.src_path for variant in prepared for built in variant.corpora.corpora
     }
     return {
-        **_numbers("count", plan.training.stats.to_dict()),
-        **_numbers("count.dev", plan.dev.stats.to_dict()),
+        **numbers_under("count", plan.training.stats.to_dict()),
+        **numbers_under("count.dev", plan.dev.stats.to_dict()),
         "variants.total": float(len(prepared)),
         "corpora.files": float(len(corpora)),
         "threads": float(threads),
         **{f"seed.{n}": float(seed) for n, seed in enumerate(plan.matrix.seeds)},
     }
-
-
-def _reject_repeated_corpora(paths: Sequence[Path]) -> None:
-    """A corpus file given twice (whatever the spelling or link) would be read twice
-    and double every row of it."""
-    given: dict[Path, Path] = {}
-    for path in paths:
-        resolved = path.resolve()
-        if resolved in given:
-            raise ConfigError(
-                f"--corpus {path} names the same file as --corpus {given[resolved]}: "
-                "it was given twice and would count every row of it twice"
-            )
-        given[resolved] = path
 
 
 def _load_checked_matrix(
@@ -539,8 +514,8 @@ def _metrics(result: AblationResult) -> dict[str, float]:
     plan = result.plan
     counts = _outcome_counts(result)
     return {
-        **_numbers("count", plan.training.stats.to_dict()),
-        **_numbers("count.dev", plan.dev.stats.to_dict()),
+        **numbers_under("count", plan.training.stats.to_dict()),
+        **numbers_under("count.dev", plan.dev.stats.to_dict()),
         "variants.total": float(len(result.variants)),
         "variants.trained": float(counts["trained"]),
         "variants.evaluated": float(counts["evaluated"]),
@@ -548,16 +523,3 @@ def _metrics(result: AblationResult) -> dict[str, float]:
         "threads": float(result.threads),
         **{f"seed.{n}": float(seed) for n, seed in enumerate(plan.matrix.seeds)},
     }
-
-
-def _numbers(prefix: str, document: Mapping[str, Any]) -> dict[str, float]:
-    """The numbers of a statistics document under dotted keys, `prefix.key` and
-    `prefix.key.subkey`."""
-    numbers: dict[str, float] = {}
-    for key, value in document.items():
-        name = f"{prefix}.{key}"
-        if isinstance(value, Mapping):
-            numbers.update(_numbers(name, value))
-        else:
-            numbers[name] = float(value)
-    return numbers

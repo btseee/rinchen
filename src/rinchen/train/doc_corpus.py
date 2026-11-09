@@ -29,9 +29,9 @@ import polars as pl
 
 from rinchen.config.languages import direction_tag
 from rinchen.errors import ConfigError, DataError
-from rinchen.train.corpus_files import CorpusFiles, write_corpus_files
+from rinchen.train.corpus_files import CorpusFiles, corpus_name, write_corpus_files
 from rinchen.train.docify import DOC_MARKER, DocWindows
-from rinchen.train.eole_cfg import read_config, render
+from rinchen.train.eole_cfg import merged_config, read_config, render
 from rinchen.train.eole_data import data_section
 from rinchen.train.sampling import CorpusSize, integer_weights, mixing_probabilities
 from rinchen.train.validation_corpus import (
@@ -57,25 +57,47 @@ def build_doc_corpora(windows: DocWindows, data_dir: Path) -> list[CorpusFiles]:
         DataError: there is no window.
         OSError: a directory or file cannot be created or written.
     """
-    frame = windows.frame
-    if frame.is_empty():
-        raise DataError("no document windows to write")
     directory = data_dir / DOC_GROUP
-    by_direction = frame.with_columns(
-        (pl.col("src_lang") + "-" + pl.col("tgt_lang")).alias("direction")
-    ).partition_by("direction", as_dict=True)
     return [
         write_corpus_files(part, directory, direction, DOC_GROUP)
-        for (direction,), part in sorted(by_direction.items())
+        for direction, part in _by_direction(windows)
     ]
 
 
+def planned_doc_corpora(windows: DocWindows) -> list[CorpusSize]:
+    """The corpora `build_doc_corpora` writes for `windows`, with their window counts,
+    sorted by direction, without writing anything: what a dry run weighs.
+
+    Raises:
+        DataError: there is no window.
+    """
+    return [
+        CorpusSize(corpus_name(direction, DOC_GROUP), direction, part.height)
+        for direction, part in _by_direction(windows)
+    ]
+
+
+def _by_direction(windows: DocWindows) -> list[tuple[str, pl.DataFrame]]:
+    """The windows of each direction (`<src_lang>-<tgt_lang>`), sorted by direction."""
+    frame = windows.frame
+    if frame.is_empty():
+        raise DataError("no document windows to write")
+    by_direction = frame.with_columns(
+        (pl.col("src_lang") + "-" + pl.col("tgt_lang")).alias("direction")
+    ).partition_by("direction", as_dict=True)
+    return [(direction, part) for (direction,), part in sorted(by_direction.items())]
+
+
 def doc_weights(
-    corpora: Sequence[CorpusFiles], *, temperature: float, total: int = 100
+    corpora: Sequence[CorpusFiles | CorpusSize],
+    *,
+    temperature: float,
+    total: int = 100,
 ) -> dict[str, int]:
-    """The integer weights of the corpora as D7 mixes them (`sampling`): the
-    probability of a direction is its window count to the power of `temperature`, and
-    the weights are whole numbers of at least 1 that add up to `total`.
+    """The integer weights of the corpora (written ones, or the sizes
+    `planned_doc_corpora` lists) as D7 mixes them (`sampling`): the probability of a
+    direction is its window count to the power of `temperature`, and the weights are
+    whole numbers of at least 1 that add up to `total`.
 
     Raises:
         ValueError: the temperature is not a positive finite number or is so large that
@@ -183,13 +205,7 @@ def render_continuation_config(
             raises: a path that holds `$`, which Eole would expand as a variable, `out`
             is the base or a directory, ...).
     """
-    corpora = _corpora_of(read_config(base, "base Eole config"))
-    if corpora:
-        raise ConfigError(
-            f"invalid base Eole config {base}: data: holds the corpora {sorted(corpora)}, "
-            "and a continuation trains on the document windows alone: leave `data` "
-            "empty in the base"
-        )
+    _require_no_corpora(base)
     spm = spm_model.as_posix()
     overrides: dict[str, Any] = {
         "src_vocab": src_vocab.as_posix(),
@@ -200,6 +216,29 @@ def render_continuation_config(
         "training": {"model_path": model_path.as_posix()},
     }
     return render(base, overrides, out)
+
+
+def check_continuation_base(base: Path) -> dict[str, Any]:
+    """The base config of a continuation, checked before anything is written: it reads,
+    holds no corpora of its own (the continuation trains on the document windows alone)
+    and is valid as it stands (no `train_from`, no `reset_optim`). Returns it.
+
+    Raises:
+        ConfigError: the base is missing, unreadable or not valid (what
+            `eole_cfg.merged_config` raises), or its `data` names corpora.
+    """
+    _require_no_corpora(base)
+    return merged_config(base, {})
+
+
+def _require_no_corpora(base: Path) -> None:
+    corpora = _corpora_of(read_config(base, "base Eole config"))
+    if corpora:
+        raise ConfigError(
+            f"invalid base Eole config {base}: data: holds the corpora {sorted(corpora)}, "
+            "and a continuation trains on the document windows alone: leave `data` "
+            "empty in the base"
+        )
 
 
 def _corpora_of(base: object) -> Mapping[Any, Any]:

@@ -1,11 +1,12 @@
 """What the `rinchen train` commands share: the checks and the exits that come before and
 after a stage writes, and the manifest of a stage.
 
-`ablate` (`rinchen.cli.train`), `launch` and `average` (`rinchen.cli.train_runs`) each
-hash their inputs before they read them, refuse an output directory that is an input's,
-create the output directory early, exit with a clear message when it cannot be written,
-and write a manifest last. The pieces live here once; what a command does with them, and
-the words of its own messages, stay with the command.
+`ablate` (`rinchen.cli.train`), `launch` and `average` (`rinchen.cli.train_runs`) and
+`docify` (`rinchen.cli.train_docify`) each hash their inputs before they read them, refuse
+an output directory that is an input's, create the output directory early, exit with a
+clear message when it cannot be written, and write a manifest last. The pieces live here
+once; what a command does with them, and the words of its own messages, stay with the
+command.
 """
 
 from __future__ import annotations
@@ -14,13 +15,19 @@ import math
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import NoReturn
+from typing import Any, NoReturn
 
 from rinchen.cli.errors import FAILURE_EXIT_CODE, exit_with_error
 from rinchen.errors import ConfigError, DataError
 from rinchen.manifest import store
 from rinchen.manifest.model import Manifest, ManifestFile
-from rinchen.manifest.stage import build_inputs, code_version, tool_versions
+from rinchen.manifest.stage import (
+    build_inputs,
+    code_version,
+    output_file,
+    tool_versions,
+)
+from rinchen.train.corpus_files import CorpusFiles, corpus_sidecar_path
 
 
 def require_usable_timeout(timeout: float | None) -> None:
@@ -65,6 +72,55 @@ def require_out_apart_from_inputs(
                 f"{option} {out_dir} is the directory of the input file {source}; "
                 f"pass a different {option}"
             )
+
+
+def reject_repeated_corpora(paths: Sequence[Path]) -> None:
+    """A corpus file given twice (whatever the spelling or link) would be read twice
+    and double every row of it."""
+    given: dict[Path, Path] = {}
+    for path in paths:
+        resolved = path.resolve()
+        if resolved in given:
+            raise ConfigError(
+                f"--corpus {path} names the same file as --corpus {given[resolved]}: "
+                "it was given twice and would count every row of it twice"
+            )
+        given[resolved] = path
+
+
+def numbers_under(prefix: str, document: Mapping[str, Any]) -> dict[str, float]:
+    """The numbers of a statistics document under dotted keys, `prefix.key` and
+    `prefix.key.subkey`, for the metrics of a manifest."""
+    numbers: dict[str, float] = {}
+    for key, value in document.items():
+        name = f"{prefix}.{key}"
+        if isinstance(value, Mapping):
+            numbers.update(numbers_under(name, value))
+        else:
+            numbers[name] = float(value)
+    return numbers
+
+
+def corpus_manifest_files(corpus: CorpusFiles) -> list[ManifestFile]:
+    """The manifest entries of a corpus on disk: its two text files, with the digests and
+    the row count the build recorded or checked against the files (not read again), then
+    its sidecar record."""
+    texts = (
+        (corpus.src_path, corpus.src_sha256),
+        (corpus.tgt_path, corpus.tgt_sha256),
+    )
+    return [
+        *(
+            ManifestFile(
+                path=str(path),
+                sha256=digest,
+                bytes=path.stat().st_size,
+                rows=corpus.rows,
+            )
+            for path, digest in texts
+        ),
+        output_file(corpus_sidecar_path(corpus), None),
+    ]
 
 
 def create_out_dir(out_dir: Path, *, what: str) -> None:
