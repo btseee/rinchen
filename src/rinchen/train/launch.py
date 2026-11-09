@@ -100,12 +100,12 @@ last attempt early-stopped at the newest complete step) runs nothing. Neither do
 launch of a run whose last attempt logged a NaN at or before its newest complete step:
 that checkpoint holds the damage, so it is refused instead of resumed or called finished.
 
-Not done: a live abort on NaN. The vocabulary is built on the attempt's own config, a
-resume config included (only needed when the vocabulary file is missing at a resume; that
-`eole build_vocab` accepts `training.train_from` in it is not measured). `command.sh` builds
-the vocabulary but does not add the reserved symbols: a run started by hand from it trains
-on the vocabulary as Eole wrote it, and the next `launch` of that run adds them to the file
-(a checkpoint keeps the vocabulary it was trained with, so that is too late for it).
+Not done: a live abort on NaN. The vocabulary is built on the attempt's own config, a resume
+config included (only needed when the vocabulary file is missing at a resume; `eole
+build_vocab` accepts `training.train_from` in it: runbook 08, the D9 spike). `command.sh`
+builds the vocabulary but does not add the reserved symbols: a run started by hand from it
+trains on the vocabulary as Eole wrote it, and the next `launch` of that run adds them to the
+file (a checkpoint keeps the vocabulary it was trained with, so that is too late for it).
 
 Eole is reached only through `run_logged`, which runs it in a process group of its own
 and kills the group on Ctrl-C, SIGTERM, SIGHUP, a timeout, and when Eole's leader exits
@@ -165,7 +165,7 @@ from rinchen.train.eole_run import (
 from rinchen.train.gpu_rules import GpuSettings, check_gpu_rules
 from rinchen.train.launch_command import render_command_sh
 from rinchen.train.run_lock import holding_the_run, refuse_a_held_run
-from rinchen.train.vocabulary_size import require_stated_sizes_to_fit
+from rinchen.train.vocabulary_size import require_sizes_to_fit
 from rinchen.utils.integers import is_strict_int
 from rinchen.utils.logged_process import run_logged
 from rinchen.utils.part_file import replace_file
@@ -276,21 +276,21 @@ def launch(
     has step directories must have begun as a continuation of the same source files.
 
     Raises:
-        ConfigError: the config is unusable (see `eole_cfg.validate_train_config`), it
-            states a vocabulary size below its SentencePiece model's (`vocabulary_size`),
-            sets no positive `training.train_steps` or a `training.model_path` outside
-            `run_dir`, the GPU rules or the device list are broken, the path or the
-            text holds `$` (or the checkpoint directory a glob character), the run's
-            step directories have no `launch.json` or the config is not the run's
-            (only `training.train_steps` may change), `train_steps` is below the
-            newest complete step, no step directory is of the config's model while
-            some are of another one (see above), or another launch holds the run (its
-            lock file is named; also for `write_only`); for a continuation also: the source
-            holds `$` or a glob character, holds or lies in the new run (nothing is
-            written then), is not vouched for by its manifest, or the config may not
-            continue it (`continuation.check_continuation`), the run has step directories
-            but did not begin as a continuation of this source (the lock file may have
-            been left), or the source of a run that is not finished no longer exists.
+        ConfigError: the config is unusable (see `eole_cfg.validate_train_config`), it has a
+            vocabulary size, stated or Eole's default, below its SentencePiece model's
+            (`vocabulary_size`), sets no positive `training.train_steps` or a
+            `training.model_path` outside `run_dir`, the GPU rules or the device list are
+            broken, the path or the text holds `$` (or the checkpoint directory a glob
+            character), the run's step directories have no `launch.json` or the config is not
+            the run's (only `training.train_steps` may change), `train_steps` is below the
+            newest complete step, no step directory is of the config's model while some are of
+            another one (see above), or another launch holds the run (its lock file is named;
+            also for `write_only`); for a continuation also: the source holds `$` or a glob
+            character, holds or lies in the new run (nothing is written then), is not vouched
+            for by its manifest, or the config may not continue it
+            (`continuation.check_continuation`), the run has step directories but did not
+            begin as a continuation of this source (the lock file may have been left), or the
+            source of a run that is not finished no longer exists.
         DataError: `launch.json` is not a launch record, or the checkpoint directory
             cannot be listed, or the vocabulary file cannot be read (`eole build_vocab`
             left none), or the manifest or run record of the source cannot be read.
@@ -478,7 +478,7 @@ def _plan(
 ) -> _Plan:
     cfg = read_config(cfg_path, _WHAT)
     validate_train_config(cfg)
-    require_stated_sizes_to_fit(cfg)
+    require_sizes_to_fit(cfg)
     model_path = model_path_inside(cfg, run_dir, _WHAT)
     reject_glob_characters("checkpoint directory", model_path)
     if ".." in model_path.parts:

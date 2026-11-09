@@ -64,11 +64,12 @@ average
 Averages the newest N (at least 2) COMPLETE `step_<k>` directories of the checkpoint
 directory D (the run's `training.model_path`, not the run directory: its name is the
 config's choice and the config is not read here) into the new directory O, by default
-`averaged` beside D. An existing O is refused, and so is a D that is not inside a run
-directory with a readable `launch.json` (at most three levels above the steps): an average
-is accepted by `launch --continue-from`, so only the checkpoints of a run `launch` wrote
-are averaged (a guard against a mistake, not against someone who writes the record
-too). Prints
+`averaged` beside D. An existing O is refused, and so is a D with no `launch.json` that parses
+within three parent directories of its step directories (the path as given, lexically: a link
+is not followed). An average is accepted by `launch --continue-from`, so step directories laid
+out by hand would otherwise become a model it accepts in a single command. The file is all
+that is checked: a hand-made `step_<k>` placed inside a real run directory passes. It guards
+against a mistake, not against someone who writes the record or the steps too. Prints
 
     averaged: <n> checkpoints (steps <a>, <b>, ...)
     output: <O>
@@ -305,7 +306,9 @@ def average_command(
 
     A plain mean of each floating-point tensor, written with the config and vocabulary
     of the newest checkpoint and a record of the sources (averaged_from.json). The
-    result is for translating, not a checkpoint to resume from."""
+    result is for translating, not a checkpoint to resume from. A checkpoint directory
+    with no launch.json that parses within three parent directories of its steps is
+    refused (a guard against a mistake: that file is all that is checked)."""
     with rinchen_errors_as_exit_codes():
         if last < _MIN_AVERAGED:
             raise ConfigError(
@@ -552,12 +555,13 @@ def _newest_complete(
 
 
 def _require_a_launched_run(checkpoint_dir: Path, step: StepDirectory) -> None:
-    """Refuse a checkpoint directory that is not inside a run directory with a readable
-    `launch.json`, so that only the checkpoints of a run `rinchen train launch` wrote are
-    averaged. `launch --continue-from` accepts any averaged model a `train_average`
+    """Refuse a checkpoint directory with no `launch.json` that parses within three parent
+    directories of its step directories (`rinchen train launch` writes one in its run
+    directory). `launch --continue-from` accepts any averaged model a `train_average`
     manifest vouches for, and step directories laid out by hand would otherwise become one
-    after a single command: a guard against that mistake, not against someone who also
-    writes the launch record.
+    after a single command. Only that file is checked, so a hand-made step directory placed
+    inside a real run directory passes: a guard against that mistake, not against someone
+    who also writes the launch record or the steps.
 
     Raises:
         ConfigError: no run directory holds a `launch.json` near enough above the steps.
@@ -567,10 +571,10 @@ def _require_a_launched_run(checkpoint_dir: Path, step: StepDirectory) -> None:
     if run is None:
         raise ConfigError(
             f"cannot average {checkpoint_dir}: no {LAUNCH_FILE} within "
-            f"{RUN_DIRECTORY_LEVELS} levels above its step directories, so it is not "
-            "the checkpoint directory of a run that `rinchen train launch` wrote; only "
-            "those are averaged, because an average is accepted as the model to "
-            "continue from"
+            f"{RUN_DIRECTORY_LEVELS} levels above its step directories; only a "
+            "checkpoint directory inside a run directory that has one (`rinchen train "
+            "launch` writes it) is averaged, because an average is accepted as the "
+            "model to continue from"
         )
     try:
         read_launch_record(run)

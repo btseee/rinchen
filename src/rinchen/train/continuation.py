@@ -377,7 +377,7 @@ def _step_origin(path: Path) -> _Origin:
 
 
 def _run_directory_above(path: Path) -> Path:
-    """The run directory of a checkpoint that `rinchen train launch` wrote."""
+    """The nearest directory within three levels above `path` that holds `launch.json`."""
     run = run_directory_above(path)
     if run is None:
         raise _refuse(

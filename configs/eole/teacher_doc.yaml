@@ -21,11 +21,12 @@
 # with an accumulation of 8, dropout 0.1. Every optimiser option is stated, because Eole
 # fills an option a continuation leaves out from the config of the checkpoint it
 # continues (the Adam beta1 and epsilon are not keys a Rinchen config may set; they stay
-# Eole's defaults, which the teacher trained with). The schedule is the choice of the D9 design: a fresh Adam state with a peak
-# learning rate near what the teacher's Noam decay reaches late in its run (the teacher's
-# 2.0 with 8000 warm-up steps peaks at about 5.7e-4 and decays from there; 0.25 with 2000
-# steps peaks at about 1.4e-4), 20000 steps, a validation and a save every 2000 with early
-# stopping after 6 validations without improvement.
+# Eole's defaults, which the teacher trained with). The schedule is the choice of the D9
+# design: a fresh Adam state with a peak learning rate near what the teacher's Noam decay
+# reaches late in its run (the teacher's 2.0 with 8000 warm-up steps peaks at about 5.7e-4
+# and decays from there; 0.25 with 2000 steps peaks at about 1.4e-4), 20000 steps, a
+# validation and a save every 2000 with early stopping after 6 validations without
+# improvement.
 #
 # Windows are longer than the teacher's sentences, so the length limit is raised from the
 # teacher's 256 to 512 pieces (the same prior; `rinchen train docify` cuts windows to fit
@@ -35,6 +36,10 @@
 #   src_vocab, training.model_path         the run directory
 #   transforms_configs.sentencepiece       the SentencePiece model, both sides
 #   data                                   the document corpora and their tag prefixes
+# `src_vocab_size` is left out too, and `rinchen train launch` refuses a config that leaves it
+# to Eole's default (32,768) when its SentencePiece model needs more. For the 128,000-piece
+# model of configs/spm/teacher_128k.yaml, state `src_vocab_size: 128001` (the pieces and
+# Eole's pad token) in the copy of this file that `docify --config` is given.
 seed: 1234
 share_vocab: true
 overwrite: true

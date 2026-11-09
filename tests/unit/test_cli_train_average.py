@@ -257,6 +257,37 @@ def test_checkpoints_that_no_launch_wrote_are_refused_and_nothing_is_written(
     assert snapshot(tmp_path) == before
 
 
+def test_the_refusal_says_what_is_looked_for_and_not_that_a_launch_wrote_the_steps(
+    tmp_path: Path,
+) -> None:
+    foreign = tmp_path / "foreign" / "ckpt"
+    step_dirs.make_run(foreign, (10, 20))
+
+    result = runner.invoke(app, args(foreign, "--last", "2"))
+
+    message = next(
+        line for line in result.stderr.splitlines() if line.startswith("error:")
+    )
+    assert message.endswith(
+        "no launch.json within 3 levels above its step directories; only a checkpoint "
+        "directory inside a run directory that has one (`rinchen train launch` writes "
+        "it) is averaged, because an average is accepted as the model to continue from"
+    )
+
+
+def test_steps_laid_out_by_hand_inside_a_run_directory_with_a_record_are_averaged(
+    tmp_path: Path,
+) -> None:
+    # The guard looks for the file and no more: it is a guard against a mistake.
+    run = tmp_path / "run"
+    step_dirs.make_run(run / "ckpt", (10, 20))
+    step_dirs.write_run_record(run)
+
+    result = run_ok(args(run / "ckpt", "--last", "2"))
+
+    assert result.stdout.startswith("averaged: 2 checkpoints")
+
+
 def test_the_launch_record_may_be_up_to_three_levels_above_the_steps(
     tmp_path: Path,
 ) -> None:

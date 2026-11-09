@@ -97,11 +97,17 @@ def read_corpus_rows(
     under `not_<split>` and `rows_read` is the number of rows of the files.
 
     Raises:
+        TypeError: `splits` is one string, which would be read as a collection of its
+            characters.
         DataError: no file is given; a file is missing, cannot be read or is not a
             corpus table. A damaged file can make the Parquet reader panic, which polars
             raises as a BaseException (docs/VERIFY.md, D-POLARS-PANIC): it is a bad file
             too.
     """
+    if isinstance(splits, str):
+        raise TypeError(
+            f"splits must be a collection of split names, not the string {splits!r}"
+        )
     if not paths:
         raise DataError("no corpus file was given")
     frames = []
@@ -138,6 +144,17 @@ def _read_file(path: Path, splits: list[str]) -> pl.DataFrame:
     return pl.concat([frame, placeholders])
 
 
+def require_windowed_split(split: object) -> None:
+    """Refuse a `split` that makes no windows: the continuation windows the rows of the
+    training and the validation splits and no others.
+
+    Raises:
+        ValueError: `split` is not one of `WINDOWED_SPLITS`.
+    """
+    if split not in WINDOWED_SPLITS:
+        raise ValueError(f"split must be one of {WINDOWED_SPLITS}, got {split!r}")
+
+
 def classify_rows(rows: pl.DataFrame, split: str) -> ClassifiedRows:
     """Sort the rows of `rows` (the columns `read_corpus_rows` returns, in any order) into
     those that can be in a window of the `split` and those that cannot, and count the
@@ -145,12 +162,15 @@ def classify_rows(rows: pl.DataFrame, split: str) -> ClassifiedRows:
     `excluded_origin`, `no_doc_id`, `no_seg_idx`, `empty`, `line_break`, `contains_sep`.
 
     Raises:
-        DataError: `rows` lacks a column; a row that can be in a window has no id,
-            language or origin.
+        DataError: `rows` lacks a column; the rows of the `split` are placeholders, read
+            without it (`read_corpus_rows(splits=...)`), which would count all of them
+            under `no_doc_id`; a row that can be in a window has no id, language or
+            origin.
     """
     missing = [name for name in REQUIRED_COLUMNS if name not in rows.columns]
     if missing:
         raise DataError(f"the corpus rows lack the columns {missing}")
+    _require_loaded(rows, split)
     classified = rows.select(REQUIRED_COLUMNS).with_columns(_reason(split))
     candidates = classified.filter(pl.col(_REASON).is_null())
     for column in ("id", "src_lang", "tgt_lang", "corpus", "origin"):
@@ -167,6 +187,21 @@ def classify_rows(rows: pl.DataFrame, split: str) -> ClassifiedRows:
             for reason, count in left_out.group_by(_REASON).len().iter_rows()
         },
     )
+
+
+def _require_loaded(rows: pl.DataFrame, split: str) -> None:
+    """Refuse `rows` whose rows of `split` are all empty apart from their `split`: what
+    `read_corpus_rows` leaves of the rows of a split it was not asked to load."""
+    of_split = rows.filter(pl.col("split").cast(pl.String) == split)
+    others = [name for name in REQUIRED_COLUMNS if name != "split"]
+    placeholders = of_split.filter(
+        pl.all_horizontal(pl.col(name).is_null() for name in others)
+    )
+    if placeholders.height and placeholders.height == of_split.height:
+        raise DataError(
+            f"every {split} row is empty apart from its split: the rows were read "
+            f"without that split (`read_corpus_rows(splits=...)`)"
+        )
 
 
 def _reason(split: str) -> pl.Expr:

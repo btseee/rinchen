@@ -43,6 +43,7 @@ from tests.support.launch_cli import (
     make_launch_workspace,
     snapshot,
 )
+from tests.support.sized_spm import write_sized_spm
 
 runner = CliRunner()
 
@@ -272,6 +273,27 @@ def test_a_gpu_run_needs_ranks_and_a_world_size_that_agree(
 
     assert_one_error(only_world, 2, "invalid Eole config: training.gpu_ranks")
     assert_one_error(only_ranks, 2, "invalid Eole config: training.world_size")
+    assert not workspace.run_dir.exists()
+    assert fake.calls == []
+
+
+def test_an_unstated_vocabulary_size_that_would_be_cut_is_refused_and_says_what_to_state(
+    workspace: LaunchWorkspace, fake: LinkingFakeEole, tmp_path: Path
+) -> None:
+    big = write_sized_spm(tmp_path / "big.model", 128_000)
+    cfg = yaml.safe_load(workspace.config.read_text(encoding="utf-8"))
+    cfg["transforms_configs"]["sentencepiece"] = {
+        "src_subword_model": str(big),
+        "tgt_subword_model": str(big),
+    }
+    workspace.config.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+
+    result = runner.invoke(app, workspace.args())
+
+    assert_one_error(result, 2, "invalid Eole config: src_vocab_size: not stated")
+    assert "state `src_vocab_size: 128001` at the top level of the config" in (
+        result.stderr
+    )
     assert not workspace.run_dir.exists()
     assert fake.calls == []
 

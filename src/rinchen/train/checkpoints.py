@@ -483,9 +483,10 @@ def write_launch_record(run_dir: Path, record: RunIdentity) -> Path:
 
 def run_directory_above(path: Path) -> Path | None:
     """The nearest of the `RUN_DIRECTORY_LEVELS` parents of `path` (a checkpoint
-    directory) that holds `launch.json`: the run directory of a checkpoint that `rinchen
-    train launch` wrote, or None when there is none. Only the presence of the file is
-    looked at (`read_launch_record` reads it)."""
+    directory, taken as given: a link is not followed) that holds `launch.json`, or None
+    when there is none. `rinchen train launch` writes the file in its run directory, but
+    nothing here shows that it wrote `path`. Only the presence of the file is looked at
+    (`read_launch_record` reads it)."""
     for parent in path.parents[:RUN_DIRECTORY_LEVELS]:
         if os.path.lexists(parent / LAUNCH_FILE):
             return parent

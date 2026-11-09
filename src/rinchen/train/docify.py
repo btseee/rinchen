@@ -1,19 +1,20 @@
 """Document windows (D9): the sentences of a document as runs of 2 to 4 consecutive
 sentences, each side joined with ` <sep> `, which a document-level model trains on.
 
-`docify` takes the corpus rows (`read_corpus_rows` reads them whole) and, for one split,
+`docify` takes the corpus rows (`read_corpus_rows` reads the rows of the train and dev
+splits and leaves the others empty, so that they are only counted) and, for one split,
 cuts the rows that can be in a window (`doc_source.classify_rows`: authentic rows of the
 split with a document id, a `seg_idx` and usable text) into windows per `(src_lang,
 tgt_lang, corpus, doc_id)` (`doc_pack`: consecutive `seg_idx` only, never across two
-corpora, sizes drawn by a seeded hash, shortened to a piece budget). The windows do not depend on the order of the rows or of
-the files.
+corpora, sizes drawn by a seeded hash, shortened to a piece budget). The windows do not
+depend on the order of the rows or of the files.
 
 Every row of the input is counted once, in a window or under the reason it is in none
 (`rows_read = rows_in_windows + the sum of the reasons`); nothing is dropped without a
 count. `docify` is called once per split (`split="train"`, and `"dev"` with
-`DEV_WINDOW_SEED` for the validation windows). The windows are cut with the
-SentencePiece model of the run, which must have `<doc>`, `<sep>` and the direction tags
-as single pieces.
+`DEV_WINDOW_SEED` for the validation windows; no other split makes windows). The windows
+are cut with the SentencePiece model of the run, which must have `<doc>`, `<sep>` and the
+direction tags as single pieces.
 """
 
 from __future__ import annotations
@@ -41,6 +42,7 @@ from rinchen.train.doc_source import (
     classify_rows,
     exclusion_reasons,
     read_corpus_rows,
+    require_windowed_split,
 )
 from rinchen.train.validation_corpus import load_processor, require_one_piece
 from rinchen.utils.integers import is_strict_int
@@ -131,14 +133,16 @@ def docify(
 
     Raises:
         ValueError: `min_size` is below 1 or above `max_size`; `max_pieces` or `seed` is
-            not an integer; `max_pieces` is below 1.
-        DataError: `rows` lacks a column; a row of the split has no id, language or
-            origin.
+            not an integer; `max_pieces` is below 1; `split` is not `"train"` or `"dev"`.
+        DataError: `rows` lacks a column; `rows` were read without the split (its rows
+            are empty apart from their `split`); a row of the split has no id,
+            language, corpus or origin.
         ConfigError: the SentencePiece model cannot be loaded or lacks `<doc>`, `<sep>`
             or the tag of a target language as one piece; a target language is not in
             the registry.
     """
     _require_arguments(min_size, max_size, max_pieces, seed)
+    require_windowed_split(split)
     processor = load_processor(spm_model)
     for symbol in (DOC_MARKER, SEGMENT_SEPARATOR):
         require_one_piece(processor, symbol, spm_model, what="document symbol")

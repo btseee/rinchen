@@ -6,8 +6,9 @@ the rarest of them to `<unk>`, and the reserved symbols that
 `eole_run.add_reserved_symbols` appends at the END of the file would be cut first. So the
 size has to be at least the model's pieces plus Eole's own pad token (`<blank>`, which is
 no piece). The ablations set it themselves (`ablation_config`); a launch refuses a config
-that states a smaller one (`require_stated_sizes_to_fit`), and one that states none is
-left to Eole's default.
+that states a smaller one and one that states none while Eole's default is smaller than the
+size needed (`require_sizes_to_fit`). It never sets a size itself: the operator states it
+in the config, and the refusal says which value.
 """
 
 from __future__ import annotations
@@ -24,6 +25,10 @@ from rinchen.utils.integers import is_strict_int
 # model has no such piece (it has no pad piece), so a vocabulary of all the pieces holds
 # one token more than the model has pieces.
 EOLE_EXTRA_TOKENS: Final = 1
+# What Eole uses when a config states no size: the default of `src_vocab_size` and of
+# `tgt_vocab_size` in `eole.config.data.VocabConfig` (Eole 0.6.4); a drift test compares it
+# with the installed Eole.
+EOLE_DEFAULT_VOCABULARY_SIZE: Final = 32768
 VOCABULARY_SIZE_KEYS: Final = ("src_vocab_size", "tgt_vocab_size")
 # The model each size is compared with: the one that cuts the text of its side.
 _MODEL_KEY: Final = {
@@ -65,14 +70,47 @@ def require_vocabulary_size(
         )
 
 
-def require_stated_sizes_to_fit(cfg: Mapping[str, Any]) -> None:
-    """Refuse a config that states `src_vocab_size` or `tgt_vocab_size` below what the
-    SentencePiece model of its side needs (`transforms_configs.sentencepiece`
-    `src_subword_model` or `tgt_subword_model`). A size the config leaves out is Eole's
-    default and is not checked, nor is one with no model stated to compare it with.
+def require_unstated_size_to_fit(key: str, needed: int, spm_model: Path) -> None:
+    """Refuse an unstated `key` when Eole's default size is below `needed`, the size
+    `needed_vocabulary_size(spm_model)` gave: the message names the value to state.
 
     Raises:
-        ConfigError: a stated size is not a positive integer or is too small, or the model
+        ConfigError: as above; the message names the key, both numbers and the model.
+    """
+    if EOLE_DEFAULT_VOCABULARY_SIZE >= needed:
+        return
+    pieces = needed - EOLE_EXTRA_TOKENS
+    raise ConfigError(
+        f"invalid Eole config: {key}: not stated, so Eole's default of "
+        f"{EOLE_DEFAULT_VOCABULARY_SIZE} applies, which is below {needed}, what the "
+        f"vocabulary of the SentencePiece model {spm_model} needs ({pieces} pieces and "
+        "Eole's pad token): Eole would cut the reserved symbols that are added at the "
+        f"end of its vocabulary file; state `{key}: {needed}` at the top level of the "
+        "config"
+    )
+
+
+def _is_left_to_eole(cfg: Mapping[str, Any], key: str, spm_model: Path) -> bool:
+    """Whether an unstated `key` has nothing to be compared with: Eole ignores
+    `tgt_vocab_size` when the vocabulary is shared (the target one is the source one),
+    and names a model that is not a file itself, when it builds the vocabulary."""
+    shared_target = key == "tgt_vocab_size" and cfg.get("share_vocab") is True
+    return shared_target or not spm_model.is_file()
+
+
+def require_sizes_to_fit(cfg: Mapping[str, Any]) -> None:
+    """Refuse a config whose `src_vocab_size` or `tgt_vocab_size` is below what the
+    SentencePiece model of its side needs (`transforms_configs.sentencepiece`
+    `src_subword_model` or `tgt_subword_model`): a size it states, or Eole's default when
+    it states none. A side with no model stated has nothing to compare its size with, and
+    neither has an unstated size whose model is not a file (Eole reports that itself, when
+    it builds the vocabulary) or an unstated `tgt_vocab_size` of a shared vocabulary
+    (`share_vocab: true`, which Eole ignores it for); a stated size needs a model that
+    loads.
+
+    Raises:
+        ConfigError: a stated size is not a positive integer or is too small, an
+            unstated one is below what the model needs, or a model that is needed
             cannot be loaded.
     """
     configs = cfg.get("transforms_configs")
@@ -81,7 +119,13 @@ def require_stated_sizes_to_fit(cfg: Mapping[str, Any]) -> None:
     for key in VOCABULARY_SIZE_KEYS:
         size = cfg.get(key)
         model = models.get(_MODEL_KEY[key])
-        if size is None or not isinstance(model, str) or not model:
+        if not isinstance(model, str) or not model:
             continue
         spm_model = Path(model)
-        require_vocabulary_size(key, size, needed_vocabulary_size(spm_model), spm_model)
+        if size is None and _is_left_to_eole(cfg, key, spm_model):
+            continue
+        needed = needed_vocabulary_size(spm_model)
+        if size is None:
+            require_unstated_size_to_fit(key, needed, spm_model)
+        else:
+            require_vocabulary_size(key, size, needed, spm_model)

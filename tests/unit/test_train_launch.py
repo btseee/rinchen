@@ -43,6 +43,7 @@ from tests.support.fake_launch import (
     launch_config,
     write_config,
 )
+from tests.support.sized_spm import write_sized_spm
 from tests.support.tiny_parallel import train_toy_spm
 
 FAILED = "eole train failed: exit code 1; log: x; last 20 lines:\nboom"
@@ -293,6 +294,68 @@ def test_a_stated_vocabulary_size_is_checked_when_the_launch_only_writes(
         go(config, run_dir, write_only=True)
 
     assert not run_dir.exists()
+
+
+def _with_unstated_vocabulary_size(base: dict[str, Any], spm: Path) -> dict[str, Any]:
+    cfg = _with_stated_vocabulary_size(base, spm, 1)
+    del cfg["src_vocab_size"]
+    return cfg
+
+
+def test_an_unstated_vocabulary_size_that_eoles_default_would_cut_is_refused_first(
+    tmp_path: Path, run_dir: Path, base_cfg: dict[str, Any], fake: FakeEole
+) -> None:
+    # 40,000 pieces against Eole's default of 32,768: the reserved symbols, the last
+    # lines of the vocabulary file, would be the first to go.
+    big = write_sized_spm(tmp_path / "big.model", 40_000)
+    config = write_config(
+        tmp_path / "unstated.yaml", _with_unstated_vocabulary_size(base_cfg, big)
+    )
+
+    with pytest.raises(ConfigError) as raised:
+        go(config, run_dir)
+
+    assert "src_vocab_size: not stated" in str(raised.value)
+    assert "state `src_vocab_size: 40001`" in str(raised.value)
+    assert fake.calls == []
+    assert not run_dir.exists()
+
+
+def test_the_vocabulary_size_the_refusal_names_is_accepted_by_the_launch(
+    tmp_path: Path, run_dir: Path, base_cfg: dict[str, Any], fake: FakeEole
+) -> None:
+    big = write_sized_spm(tmp_path / "big.model", 40_000)
+    cfg = _with_unstated_vocabulary_size(base_cfg, big)
+    cfg["src_vocab_size"] = 40_001
+    config = write_config(tmp_path / "stated.yaml", cfg)
+
+    result = go(config, run_dir)
+
+    assert result.status == "completed"
+
+
+def test_an_unstated_vocabulary_size_is_checked_when_the_launch_only_writes(
+    tmp_path: Path, run_dir: Path, base_cfg: dict[str, Any], fake: FakeEole
+) -> None:
+    big = write_sized_spm(tmp_path / "big.model", 40_000)
+    config = write_config(
+        tmp_path / "unstated.yaml", _with_unstated_vocabulary_size(base_cfg, big)
+    )
+
+    with pytest.raises(ConfigError, match="src_vocab_size: not stated"):
+        go(config, run_dir, write_only=True)
+
+    assert not run_dir.exists()
+
+
+def test_an_unstated_vocabulary_size_with_a_model_that_is_not_a_file_is_left_to_eole(
+    config_path: Path, run_dir: Path, fake: FakeEole
+) -> None:
+    # The D7 test config names `spm/toy.model`, which is not there: there is nothing to
+    # compare, and Eole's own build of the vocabulary names the missing model.
+    result = go(config_path, run_dir)
+
+    assert result.status == "completed"
 
 
 def test_an_empty_vocabulary_is_refused_before_eole_trains_on_it(

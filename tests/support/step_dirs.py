@@ -40,6 +40,7 @@ from rinchen.manifest import store
 from rinchen.manifest.model import Manifest, ManifestFile
 from rinchen.spm.symbols import user_defined_symbols
 from rinchen.train.checkpoints import LAUNCH_FILE, RunIdentity, write_launch_record
+from tests.support.sized_spm import sized_spm_bytes
 
 WEIGHTS_FILE = "model.00.safetensors"
 OPTIMIZER_FILE = "optimizer.pt"
@@ -48,8 +49,9 @@ VOCAB_FILE = "vocab.json"
 SPM_ARTIFACT = "toy.model"
 # The bytes of the SentencePiece model every fabricated step directory holds a copy of
 # (Eole copies the model into each step directory); a config that continues one of them
-# must state a file with these bytes (`write_spm_model`).
-SPM_BYTES = b"sentencepiece model of the toy corpus"
+# must state a file with these bytes (`write_spm_model`). A model that loads, of a few
+# pieces, because the launcher reads the pieces of the model a config states.
+SPM_BYTES = sized_spm_bytes(12)
 # A member of `optimizer.pt` whose name is not ASCII (Mongolian "state").
 UTF8_MEMBER = "optimizer/төлөв.pkl"
 

@@ -13,6 +13,7 @@ import polars as pl
 import pytest
 
 from rinchen.corpus.schema import corpus_frame
+from rinchen.errors import DataError
 from rinchen.train.docify import docify, read_corpus_rows
 from tests.support.corpus_rows import write_frame, write_rows
 from tests.support.doc_rows import SENTENCES, document, rows_frame
@@ -179,3 +180,106 @@ def test_the_splits_that_are_loaded_can_be_named(tmp_path: Path) -> None:
     assert loaded["split"].to_list() == ["test"] * 2
     assert all(TEST_MARKER in text for text in loaded["src"])
     assert rows.height == 10
+
+
+# ---- a split that was not loaded --------------------------------------------------
+
+
+def windows_of_split(rows: pl.DataFrame, spm: Path, split: str) -> Any:
+    return docify(
+        rows,
+        spm_model=spm,
+        min_size=2,
+        max_size=2,
+        max_pieces=BUDGET,
+        seed=3,
+        split=split,
+    )
+
+
+@pytest.mark.parametrize("split", ["test", "holdout", "Train", "", "train "])
+def test_docify_refuses_a_split_that_makes_no_windows(
+    toy_spm: Path, split: str
+) -> None:
+    rows = rows_frame(document("d1", range(4)) + document("t1", range(4), split="test"))
+
+    with pytest.raises(ValueError, match=r"split must be one of \('train', 'dev'\)"):
+        windows_of_split(rows, toy_spm, split)
+
+
+def test_docify_refuses_a_split_that_makes_no_windows_before_it_reads_the_model(
+    tmp_path: Path,
+) -> None:
+    rows = rows_frame(document("d1", range(4)))
+
+    with pytest.raises(ValueError, match="split must be one of"):
+        windows_of_split(rows, tmp_path / "absent.model", "test")
+
+
+@pytest.mark.parametrize(
+    ("loaded", "split"),
+    [(("train",), "dev"), (("dev",), "train"), (("test",), "train")],
+)
+def test_docify_refuses_rows_that_were_read_without_the_split(
+    toy_spm: Path, tmp_path: Path, loaded: tuple[str, ...], split: str
+) -> None:
+    path = write_rows(tmp_path, "rows", rows_of_four_splits())
+    rows = read_corpus_rows([path], splits=loaded)
+
+    with pytest.raises(DataError) as raised:
+        windows_of_split(rows, toy_spm, split)
+
+    message = str(raised.value)
+    assert message.startswith(f"every {split} row is empty apart from its split")
+    assert "read_corpus_rows(splits=" in message
+
+
+@pytest.mark.parametrize("loaded", [("train",), ("train", "dev"), ("dev", "train")])
+def test_docify_accepts_rows_that_were_read_with_the_split(
+    toy_spm: Path, tmp_path: Path, loaded: tuple[str, ...]
+) -> None:
+    path = write_rows(tmp_path, "rows", rows_of_four_splits())
+    rows = read_corpus_rows([path], splits=loaded)
+
+    windows = windows_of_split(rows, toy_spm, "train")
+
+    assert windows.stats.windows == 2
+    assert windows.stats.excluded["not_train"] == 6
+
+
+def test_one_empty_row_among_real_ones_is_counted_and_is_not_a_split_not_loaded(
+    toy_spm: Path,
+) -> None:
+    # Only a split whose rows are ALL empty apart from `split` was left unread.
+    others = [name for name in rows_frame([]).columns if name != "split"]
+    rows = rows_frame(document("d1", range(5))).with_columns(
+        pl.when(pl.col("seg_idx") == 4).then(None).otherwise(pl.col(name)).alias(name)
+        for name in others
+    )
+
+    windows = windows_of_split(rows, toy_spm, "train")
+
+    assert windows.stats.excluded["no_doc_id"] == 1
+    assert windows.stats.windows == 2
+
+
+def test_a_split_with_no_rows_at_all_is_not_a_split_that_was_not_loaded(
+    toy_spm: Path, tmp_path: Path
+) -> None:
+    path = write_rows(tmp_path, "rows", document("d1", range(4)))
+    rows = read_corpus_rows([path])
+
+    windows = windows_of_split(rows, toy_spm, "dev")
+
+    assert windows.stats.windows == 0
+    assert windows.stats.excluded["not_dev"] == 4
+
+
+@pytest.mark.parametrize("splits", ["train", "dev", "train,dev", ""])
+def test_read_corpus_rows_refuses_one_string_for_the_splits(
+    tmp_path: Path, splits: str
+) -> None:
+    path = write_rows(tmp_path, "rows", rows_of_four_splits())
+
+    with pytest.raises(TypeError, match="splits must be a collection of split names"):
+        read_corpus_rows([path], splits=splits)

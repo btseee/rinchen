@@ -25,9 +25,10 @@
 # for each window size after the 2,500 steps of this file, and measured 0.982, 0.978 and
 # 0.941 (a window is aligned when it has one segment per sentence and none is empty, as the
 # chunker counts). A run of 3,000 steps ended at 0.982, 0.974 and 0.936, no better for the
-# size that is closest to the limit, so the file stays at 2,500. The toy documents are templated, so this measures that the structure is learned,
-# never the quality of a translation. A report every 50 steps, a validation and a save every
-# 500, all five checkpoints kept.
+# size that is closest to the limit, so the file stays at 2,500. The toy documents are
+# templated, so this measures that the structure is learned, never the quality of a
+# translation. A report every 50 steps, a validation and a save every 500, all five
+# checkpoints kept.
 #
 # This file holds no per-run value. `rinchen train docify --config` merges these in, and
 # the merged config is validated before Eole sees it:

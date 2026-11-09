@@ -10,7 +10,6 @@ import pytest
 from hypothesis import settings
 
 from tests.support.signal_handlers import DEFAULT_HANDLERS, handlers_installed
-from tests.support.step_dirs import SPM_ARTIFACT, write_spm_model
 
 settings.register_profile("rinchen", derandomize=True, deadline=None, max_examples=200)
 settings.load_profile("rinchen")
@@ -43,6 +42,9 @@ def spm_model_in_the_cwd(
     directory holds (`tests.support.step_dirs`). A config that continues one of those
     steps must state the model the source was trained with, and a relative path is read
     from the working directory, as Eole reads it."""
+    # Imported here: `step_dirs` costs about a second, which most tests need not pay.
+    from tests.support.step_dirs import SPM_ARTIFACT, write_spm_model
+
     write_spm_model(tmp_path / "spm")
     monkeypatch.chdir(tmp_path)
     yield tmp_path / "spm" / SPM_ARTIFACT
