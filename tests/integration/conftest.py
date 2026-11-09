@@ -6,11 +6,18 @@ checkpoint to CTranslate2. Every test of the session that needs a trained or
 exported model takes these two, so the run is paid for once. Everything is written
 under pytest's temporary directories. Each Eole or CTranslate2 command is bounded
 by `COMMAND_TIMEOUT_SECONDS`.
+
+The `d11_*` fixtures are the D11 gates': `d11_gpu_hidden` hides every device for the
+session, `d11_workspace` is the toy corpus and SentencePiece model, `d11_teacher` the two
+tiny teachers (tag in the source, tag as the forced target prefix), `d11_exports` their
+CTranslate2 exports and `d11_document_model` a document model continued from the first
+teacher and exported. Each runs its stage once per session, the first time a test asks.
 """
 
 from __future__ import annotations
 
 import time
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -24,6 +31,15 @@ from rinchen.script_conv.config import (
 from rinchen.script_conv.data import build_corpus, read_pairs_tsv
 from rinchen.script_conv.export import export_ct2
 from rinchen.script_conv.train import predict, run_training
+from tests.support.d11_gate import (
+    Exports,
+    Teachers,
+    converted_exports,
+    trained_teachers,
+)
+from tests.support.d11_gate_doc import DocumentModel, build_document_model
+from tests.support.distill_gate_stages import Workspace, make_workspace
+from tests.support.engines import SilentLog
 from tests.support.script_reference import FIXTURE_DIR
 from tests.support.tiny_converter import (
     COMMAND_TIMEOUT_SECONDS,
@@ -95,3 +111,45 @@ def tiny_ct2(tiny_run: TinyRun, tmp_path_factory: pytest.TempPathFactory) -> Pat
         tmp_path_factory.mktemp("converter_ct2") / "model",
         timeout=COMMAND_TIMEOUT_SECONDS,
     )
+
+
+@pytest.fixture(scope="session")
+def d11_gpu_hidden() -> Iterator[None]:
+    """No device is visible to any process of the D11 gates: Eole, the converter and the
+    CTranslate2 translators of the tests inherit the empty list."""
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("CUDA_VISIBLE_DEVICES", "")
+        yield
+
+
+@pytest.fixture(scope="module")
+def d11_quiet_engine_log() -> Iterator[None]:
+    """The engine's first log line would configure the root logger for the rest of the
+    session, and `test_logging` expects to be the first to do so: silence it for the module."""
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr("rinchen.utils.logging.get", lambda name: SilentLog())
+        yield
+
+
+@pytest.fixture(scope="session")
+def d11_workspace(
+    d11_gpu_hidden: None, tmp_path_factory: pytest.TempPathFactory
+) -> Workspace:
+    return make_workspace(tmp_path_factory.mktemp("d11_gate"))
+
+
+@pytest.fixture(scope="session")
+def d11_teacher(d11_workspace: Workspace) -> Teachers:
+    return trained_teachers(d11_workspace)
+
+
+@pytest.fixture(scope="session")
+def d11_exports(d11_workspace: Workspace, d11_teacher: Teachers) -> Exports:
+    return converted_exports(d11_workspace, d11_teacher)
+
+
+@pytest.fixture(scope="session")
+def d11_document_model(
+    d11_workspace: Workspace, d11_teacher: Teachers
+) -> DocumentModel:
+    return build_document_model(d11_workspace, d11_teacher.source)

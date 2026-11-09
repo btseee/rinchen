@@ -18,6 +18,7 @@ from typing import Any, Final
 import sentencepiece
 import yaml
 
+from rinchen.config.ablation import TagPlacement
 from rinchen.config.languages import direction_tag
 from rinchen.config.loader import REPO_ROOT
 from rinchen.corpus.readers import scan_corpus
@@ -47,7 +48,7 @@ from tests.support.tiny_variant import ToyInputs, build_toy_inputs
 
 TEACHER_BASE: Final = REPO_ROOT / "configs" / "eole" / "teacher_tiny.yaml"
 STUDENT_BASE: Final = REPO_ROOT / "configs" / "eole" / "student_tiny.yaml"
-VARIANT_ID: Final = "t0.5_bt0.5_src_s1234"
+VARIANT_ID_TEMPLATE: Final = "t0.5_bt0.5_{placement}_s1234"
 DEV_LINES: Final = 100
 STEPS: Final = 2000
 SAVE_EVERY: Final = 500
@@ -183,12 +184,15 @@ class Teacher:
     saved_steps: list[int]
 
 
-def train_teacher(workspace: Workspace) -> Teacher:
-    """`teacher_tiny.yaml` with 2,000 steps (a save every 500, all four kept), placement
-    `src`, through `train ablate --prepare-only`, `train launch` and `train average`."""
+def train_teacher(
+    workspace: Workspace, *, placement: TagPlacement = "src", steps: int = STEPS
+) -> Teacher:
+    """`teacher_tiny.yaml` with `steps` steps (2,000 unless said; a save every 500, all
+    kept), the direction tag in `placement` (`src` unless said), through `train ablate
+    --prepare-only`, `train launch` and `train average`."""
     base = read_config(TEACHER_BASE, "teacher base config")
     base["training"].update(
-        train_steps=STEPS,
+        train_steps=steps,
         valid_steps=SAVE_EVERY,
         save_checkpoint_steps=SAVE_EVERY,
         keep_checkpoint=4,
@@ -202,7 +206,7 @@ def train_teacher(workspace: Workspace) -> Teacher:
                 "name": "distill_gate_teacher",
                 "base": str(base_copy),
                 "axes": {
-                    "tag_placement": ["src"],
+                    "tag_placement": [placement],
                     "temperature": [0.5],
                     "bt_ratio": [0.5],
                 },
@@ -231,7 +235,7 @@ def train_teacher(workspace: Workspace) -> Teacher:
             THREADS,
         )
     )
-    paths = variant_paths(out_dir, VARIANT_ID)
+    paths = variant_paths(out_dir, VARIANT_ID_TEMPLATE.format(placement=placement))
     trained = succeeded(launch(paths.config, paths.run_dir))
     average = succeeded(
         run_rinchen(
