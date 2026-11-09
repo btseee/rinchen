@@ -17,7 +17,9 @@ it, so the export records what the caller says. The saved config.json of a check
 launcher wrote records it in the prefixes of its `data` section, and a placement that
 disagrees is refused (exit 2) before anything is made; a saved config without a `data`
 section, or without a direction tag in it, leaves the statement unchecked. `--out-dir` must not
-exist (the converter refuses a directory that exists); the converter's log is `<O>.export.log`
+exist (the converter refuses a directory that exists, so it works in a private directory made
+beside `--out-dir`, which is renamed onto it when the export is complete; a directory someone
+else makes there in the meantime is refused and kept); the converter's log is `<O>.export.log`
 beside it, and `--timeout` (seconds) bounds the converter.
 
 A run prints
@@ -44,7 +46,8 @@ Exit codes: 0; 2 for a bad option, a checkpoint our manifest does not vouch for,
 SentencePiece model that is not the checkpoint's, a tag placement the checkpoint's saved
 config contradicts, an output directory that exists or holds `$` or a glob character; 3 for a
 checkpoint or manifest that cannot be read or whose `config.json` or `vocab.json` lacks what
-an export records or contradicts itself about the tag placement; 4 when the converter fails or leaves a file out;
+an export records or contradicts itself about the tag placement; 4 when the converter fails,
+leaves a file out or writes a vocabulary with another number of entries than the checkpoint's;
 1 when the output cannot be written; 130 when interrupted.
 """
 

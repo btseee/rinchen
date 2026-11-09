@@ -150,7 +150,9 @@ def test_the_converter_is_called_once_with_the_checkpoint_and_the_output_directo
 
     (call,) = converter.calls
     assert call.checkpoint == workspace.checkpoint
-    assert call.out_dir == workspace.out_dir
+    # A child of a private directory beside the output, renamed onto it; the log is beside it.
+    assert call.out_dir.parent.parent == workspace.out_dir.parent
+    assert call.log_path == workspace.log
     assert call.timeout is None
 
 

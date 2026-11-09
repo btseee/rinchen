@@ -79,26 +79,34 @@ class ConverterCall:
     checkpoint: Path
     out_dir: Path
     timeout: float | None
+    log_path: Path | None = None
 
 
 @dataclass
 class FakeConverter:
     """Stands in for `export_ct2`. It makes `out_dir` (and fails, as the converter does,
-    when it exists), writes the log beside it, `model.bin` and, unless `error` is set,
-    the other two files, then returns `out_dir`. With `error` it writes `partial_model`
-    (nothing when None) as `model.bin` and raises `error`. `skip` names files it leaves
-    out of a successful conversion."""
+    when it exists), writes the log (`log_path`, else the one beside `out_dir`),
+    `model.bin` and, unless `error` is set, the other two files, then returns `out_dir`.
+    With `error` it writes `partial_model` (nothing when None) as `model.bin` and raises
+    `error`. `skip` names files it leaves out of a successful conversion; `replace` gives
+    the bytes of files it writes instead of the usual ones."""
 
     calls: list[ConverterCall] = field(default_factory=list)
     error: BaseException | None = None
     partial_model: bytes | None = b"cut"
     skip: tuple[str, ...] = ()
+    replace: Mapping[str, bytes] = field(default_factory=dict)
 
     def __call__(
-        self, ckpt_dir: Path, out_dir: Path, *, timeout: float | None = None
+        self,
+        ckpt_dir: Path,
+        out_dir: Path,
+        *,
+        timeout: float | None = None,
+        log_path: Path | None = None,
     ) -> Path:
-        self.calls.append(ConverterCall(ckpt_dir, out_dir, timeout))
-        log = export_log_path(out_dir)
+        self.calls.append(ConverterCall(ckpt_dir, out_dir, timeout, log_path))
+        log = export_log_path(out_dir) if log_path is None else log_path
         log.parent.mkdir(parents=True, exist_ok=True)
         log.write_text("converter log\n", encoding="utf-8")
         out_dir.mkdir()
@@ -109,7 +117,7 @@ class FakeConverter:
         vocabulary = json.loads((ckpt_dir / "vocab.json").read_text(encoding="utf-8"))
         for name, content in converter_files(vocabulary["src"]).items():
             if name not in self.skip:
-                (out_dir / name).write_bytes(content)
+                (out_dir / name).write_bytes(self.replace.get(name, content))
         return out_dir
 
 
@@ -163,6 +171,8 @@ def write_export(
     spm_bytes: bytes = SPM_BYTES,
     record_text: bytes | None = None,
     record_spm_sha256: str | None = None,
+    record_vocabulary_entries: int | None = None,
+    vocabulary_bytes: bytes | None = None,
     stage: str = EXPORT_STAGE,
     status: Mapping[str, str] | None = None,
     listed: Sequence[str] = EXPORT_FILES,
@@ -175,9 +185,13 @@ def write_export(
 
     `record_text` is the whole content of `export.json` instead of the record's;
     `record_spm_sha256` is the SentencePiece digest the record states instead of
-    `spm.model`'s. The manifest vouches for whatever bytes the files have."""
+    `spm.model`'s; `record_vocabulary_entries` the entry count the record states instead
+    of `len(tokens)`; `vocabulary_bytes` the content of `shared_vocabulary.json` instead
+    of the tokens'. The manifest vouches for whatever bytes the files have."""
     directory.mkdir(parents=True, exist_ok=True)
     contents = converter_files(tokens)
+    if vocabulary_bytes is not None:
+        contents["shared_vocabulary.json"] = vocabulary_bytes
     contents[SPM_FILE] = spm_bytes
     record = ExportRecord(
         tag_placement=tag_placement,
@@ -188,7 +202,9 @@ def write_export(
         encoder_layers=encoder_layers,
         decoder_layers=decoder_layers,
         hidden_size=hidden_size,
-        vocabulary_entries=len(tokens),
+        vocabulary_entries=len(tokens)
+        if record_vocabulary_entries is None
+        else record_vocabulary_entries,
     )
     contents[RECORD_FILE] = record.to_bytes() if record_text is None else record_text
     for name in CT2_FILES + (SPM_FILE, RECORD_FILE):

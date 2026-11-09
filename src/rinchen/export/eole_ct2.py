@@ -33,22 +33,30 @@ def export_log_path(out_dir: Path) -> Path:
     return Path(f"{out_dir}.export.log")
 
 
-def export_ct2(ckpt_dir: Path, out_dir: Path, *, timeout: float | None = None) -> Path:
+def export_ct2(
+    ckpt_dir: Path,
+    out_dir: Path,
+    *,
+    timeout: float | None = None,
+    log_path: Path | None = None,
+) -> Path:
     """Convert the Eole checkpoint in `ckpt_dir` to a CTranslate2 model in `out_dir`
     (which must not exist yet) and return `out_dir`.
 
     The converter runs as `python -I -W ignore -m ctranslate2.converters.eole_ct2`
-    with `export_environment()`; its combined output goes to `export_log_path(out_dir)`.
-    `timeout` (seconds) bounds it; a converter that runs past it is killed with
-    everything it started. A failed export can leave a partial `out_dir`, which must
-    be removed before retrying: the converter refuses an existing directory.
+    with `export_environment()`; its combined output goes to `log_path`, by default
+    `export_log_path(out_dir)`. `timeout` (seconds) bounds it; a converter that runs past
+    it is killed with everything it started. A failed export can leave a partial
+    `out_dir`, which must be removed before retrying: the converter refuses an existing
+    directory.
 
     Raises:
         UpstreamError: the converter exits non-zero or runs past `timeout`, or exits
             zero but leaves no `model.bin` or an empty one; the message ends with the
             last lines of the log.
     """
-    log_path = export_log_path(out_dir)
+    if log_path is None:
+        log_path = export_log_path(out_dir)
     run_logged(
         [
             sys.executable,

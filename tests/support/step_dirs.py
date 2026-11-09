@@ -273,6 +273,7 @@ def make_step_dir(
     record_spm: bool = True,
     spm_name: str = SPM_ARTIFACT,
     data: Any = None,
+    tgt_spm_name: str | None = None,
 ) -> Path:
     """Create `model_path/step_<step>` as a COMPLETE step directory and return it.
 
@@ -286,7 +287,8 @@ def make_step_dir(
     `spm_bytes` and the file name `spm_name`, and the saved `config.json` records it as
     Eole does (`${MODEL_PATH}/` and its name) unless `record_spm` is false. `data` is the
     `data` section the saved config holds (`launcher_data`, or whatever a test damages
-    it to); without it the config has none.
+    it to); without it the config has none. `tgt_spm_name` is the file the saved config
+    names as the SentencePiece model of the target side when it is not `spm_name`.
     """
     from safetensors.numpy import save_file
 
@@ -326,7 +328,7 @@ def make_step_dir(
         saved_config["transforms_configs"] = {
             "sentencepiece": {
                 "src_subword_model": f"${{MODEL_PATH}}/{spm_name}",
-                "tgt_subword_model": f"${{MODEL_PATH}}/{spm_name}",
+                "tgt_subword_model": f"${{MODEL_PATH}}/{tgt_spm_name or spm_name}",
             }
         }
     if model is not None:
@@ -492,13 +494,14 @@ def make_finished_run(
     record_spm: bool = True,
     spm_name: str = SPM_ARTIFACT,
     data: Any = None,
+    tgt_spm_name: str | None = None,
 ) -> FabricatedRun:
     """A finished run in `root/run`: complete step directories for `steps` (the model of
     `eole_model_section` unless `model` says), a real `launch.json`, a `command.sh` and,
     when `manifest`, a manifest of `stage` that lists the files named in `listed` of the
     step `listed_step` (the final one unless said), the other two outputs of a launch
     being `launch.json` and `command.sh`. `spm_bytes`, `record_spm` and `spm_name` are
-    those of `make_step_dir`, as is `data`."""
+    those of `make_step_dir`, as are `data` and `tgt_spm_name`."""
     run_dir = root / "run"
     model_path = run_dir / "ckpt"
     for step in steps:
@@ -512,6 +515,7 @@ def make_finished_run(
             record_spm=record_spm,
             spm_name=spm_name,
             data=data,
+            tgt_spm_name=tgt_spm_name,
         )
     write_run_record(run_dir)
     (run_dir / "command.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")

@@ -143,6 +143,19 @@ def test_export_ct2_writes_the_combined_log_beside_the_output_directory(
     assert fake_converter.calls[0][1]["stderr"] == subprocess.STDOUT
 
 
+def test_export_ct2_writes_the_log_where_it_is_told_to(
+    fake_converter: FakeConverter, tmp_path: Path
+) -> None:
+    fake_converter.log_lines = ("one",)
+    out_dir = tmp_path / "ct2"
+    elsewhere = tmp_path / "logs" / "mine.log"
+
+    export_ct2(tmp_path / "ckpt", out_dir, log_path=elsewhere)
+
+    assert elsewhere.read_text(encoding="utf-8") == "one\n"
+    assert not export_log_path(out_dir).exists()
+
+
 def test_export_ct2_bounds_the_converter_by_the_timeout_only_when_asked(
     fake_converter: FakeConverter, tmp_path: Path
 ) -> None:

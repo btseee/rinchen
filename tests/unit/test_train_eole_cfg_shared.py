@@ -130,6 +130,26 @@ def test_reject_glob_characters_names_the_path_and_the_character(char: str) -> N
     )
 
 
+def test_reject_glob_characters_says_the_callers_reason_instead_of_eoles() -> None:
+    with pytest.raises(ConfigError) as raised:
+        eole_cfg.reject_glob_characters(
+            "output directory", "runs/a[b", reason="which this path rule refuses"
+        )
+
+    assert str(raised.value) == (
+        "the output directory runs/a[b holds '[', which this path rule refuses"
+    )
+
+
+def test_reject_dollar_says_the_callers_reason_instead_of_eoles() -> None:
+    with pytest.raises(ConfigError) as raised:
+        eole_cfg.reject_dollar(
+            "output directory", "runs/$HOME", reason="which a rule refuses"
+        )
+
+    assert str(raised.value) == "the output directory holds '$', which a rule refuses"
+
+
 def test_reject_glob_characters_names_the_first_one_in_the_text() -> None:
     with pytest.raises(ConfigError, match=r"holds '\]'"):
         eole_cfg.reject_glob_characters("output directory", "runs/a]b[c*d?e/ckpt")

@@ -107,6 +107,15 @@ from rinchen.train.mixture import load_training_rows
 from rinchen.utils.part_file import replace_file
 
 _OUTPUTS: Final = "KD corpus"
+# This command starts no Eole: the refusal is the project's path rule for outputs.
+_OUT_DIR_DOLLAR_REASON: Final = (
+    "which the project's path rule for outputs refuses (a tool that is given the path "
+    "later could expand it as a variable)"
+)
+_OUT_DIR_GLOB_REASON: Final = (
+    "which the project's path rule for outputs refuses (a tool that is given the path "
+    "later could read it as a glob pattern)"
+)
 _CORPUS: Final = "corpus file"
 _SELECTION_CONFIG: Final = "selection config file"
 _TOOL_PACKAGES: Final = (
@@ -309,8 +318,8 @@ def generate_command(
         )
         reject_repeated_corpora(corpus)
         target = Path(os.path.abspath(out_dir))
-        reject_dollar("output directory", out_dir)
-        reject_glob_characters("output directory", target)
+        reject_dollar("output directory", out_dir, reason=_OUT_DIR_DOLLAR_REASON)
+        reject_glob_characters("output directory", target, reason=_OUT_DIR_GLOB_REASON)
         # Each input is hashed before anything reads it, so that the manifest vouches for
         # the bytes the run started from (the teacher's files by `verify_export`).
         hashed = _Hashed(

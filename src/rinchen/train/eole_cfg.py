@@ -85,6 +85,10 @@ NORMALIZATIONS: Final = ("sents", "tokens")
 # name is a training corpus.
 _VALID: Final = "valid"
 _GLOB_CHARACTERS: Final = frozenset("[]*?")
+_DOLLAR_REASON: Final = "which Eole would expand as a variable"
+_GLOB_REASON: Final = (
+    "which Eole reads as a glob pattern when it loads a checkpoint from it"
+)
 _ARCHITECTURE: Final = "transformer"
 _TRAIN_FROM: Final = "train_from"
 _RESET_OPTIM: Final = "reset_optim"
@@ -141,19 +145,22 @@ class _ValueRule:
     must_be: str
 
 
-def reject_dollar(what: str, value: Path | str) -> None:
-    """Raise ConfigError, naming `what`, when `value` holds `$`."""
+def reject_dollar(
+    what: str, value: Path | str, *, reason: str = _DOLLAR_REASON
+) -> None:
+    """Raise ConfigError, naming `what`, when `value` holds `$`. `reason` says why, for a
+    caller that starts no Eole."""
     # Eole runs `os.path.expandvars` over the text of a config file, so a `$NAME`
     # in a path would be silently replaced by an environment variable's value.
     if "$" in str(value):
-        raise ConfigError(
-            f"the {what} holds '$', which Eole would expand as a variable"
-        )
+        raise ConfigError(f"the {what} holds '$', {reason}")
 
 
-def reject_glob_characters(what: str, value: Path | str) -> None:
+def reject_glob_characters(
+    what: str, value: Path | str, *, reason: str = _GLOB_REASON
+) -> None:
     """Raise ConfigError, naming `what`, the path and the character, when `value` holds
-    `[`, `]`, `*` or `?`."""
+    `[`, `]`, `*` or `?`. `reason` says why, for a caller that starts no Eole."""
     # Eole loads a checkpoint through `glob(<model_path>/model.*.safetensors)`
     # (eole/models/model.py, `_load_safetensors_shards`), so these characters in the
     # checkpoint directory make it match no shard, or the shards of its siblings
@@ -161,10 +168,7 @@ def reject_glob_characters(what: str, value: Path | str) -> None:
     text = str(value)
     found = next((char for char in text if char in _GLOB_CHARACTERS), None)
     if found is not None:
-        raise ConfigError(
-            f"the {what} {text} holds {found!r}, which Eole reads as a glob pattern "
-            "when it loads a checkpoint from it"
-        )
+        raise ConfigError(f"the {what} {text} holds {found!r}, {reason}")
 
 
 def read_config(path: Path, what: str) -> Any:

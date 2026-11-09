@@ -227,6 +227,27 @@ def test_an_output_directory_with_a_dollar_or_a_glob_character_is_refused(
     assert seam.built == []
 
 
+@pytest.mark.parametrize("character", ["$", "[", "]", "*", "?"])
+def test_the_refusal_of_such_a_character_gives_the_path_rule_not_a_reason_about_eole(
+    workspace: GenerateWorkspace, seam: TeacherSeam, character: str
+) -> None:
+    # This command starts no Eole: the reason is the project's path rule for outputs.
+    target = workspace.root / f"out{character}x"
+
+    result = invoke(workspace.args(out_dir=target))
+
+    assert_one_error(
+        result,
+        2,
+        f"the output directory {target} holds {character!r}"
+        if character != "$"
+        else "the output directory holds '$'",
+    )
+    assert "path rule for outputs" in result.stderr
+    assert "Eole" not in result.stderr
+    assert "loads a checkpoint" not in result.stderr
+
+
 def test_a_glob_character_in_the_working_directory_refuses_a_relative_directory(
     workspace: GenerateWorkspace,
     seam: TeacherSeam,

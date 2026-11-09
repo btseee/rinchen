@@ -17,16 +17,29 @@ states it and the record keeps it; the saved `config.json` of a checkpoint our l
 wrote does hold it (the prefixes of its `data` section, `distill_saved_config`), and a
 statement that disagrees is refused before anything is made. A saved config without a
 `data` section, or without a direction tag in it, leaves the statement unchecked and the
-record cannot tell which of the two it was. Nothing is read from `config.json` or
-`vocab.json` before its bytes matched the digest `verify_source` took, and the checkpoint
-is never written: any failure after the checks removes the output directory this call
-made (the converter's log beside it stays).
+record cannot tell which of the two it was. A saved config that names one SentencePiece
+model for the source and another for the target cannot be exported: an export holds one.
+Nothing is read from `config.json` or `vocab.json` before its bytes matched the digest
+`verify_source` took, and the checkpoint is never written. The converter reads the weights
+AFTER that digest was taken, as every command of this project reads an input after it
+hashed it: the digests in the record guard against a mistake or a stale checkpoint, not
+against a writer that swaps the weights in between.
+
+The converter refuses a directory that exists, so it writes into a child of a private
+directory this call makes beside the output, and the child is renamed onto the output only
+when the converter's three files are there, the vocabulary it wrote has the number of entries
+the record states and the two files beside them are written. Any failure removes the private
+directory, and the output only if this call put it there: a directory someone else makes at
+the output path in the meantime is refused and never touched (the converter's log beside
+the output stays).
 
 `verify_export` is the reader of such a directory, for everything that trusts one (the
 teacher that translates, the generation that fingerprints it): the manifest must be of
 stage `distill_export` with status `export: ok` and list each of the five files once by
 file name, every file's SHA-256, taken once and before the file is parsed, must be the one
-the manifest lists, and the record must state the SentencePiece model that is beside it. A
+the manifest lists, the record must state the SentencePiece model that is beside it and, when
+`shared_vocabulary.json` is a list of strings, the number of entries it has (a file that is
+anything else is refused by the reader that opens it). A
 directory that was moved is accepted: the manifest's paths are not compared, the names are.
 The verification is not atomic with the later load of `model.bin` by CTranslate2: it guards
 against a mistake or a stale directory, not against a writer that swaps a file after the
@@ -36,11 +49,13 @@ hash. Nothing about the GPU is claimed: the converter runs with the GPU hidden
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
 import re
 import shutil
+import tempfile
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
@@ -73,6 +88,9 @@ EXPORT_FILES: Final = (*CT2_FILES, SPM_FILE, RECORD_FILE)
 RECORD_SCHEMA: Final = "rinchen.distill_export/1"
 
 _STATUS_KEY: Final = "export"
+# The child of the private directory that the converter makes.
+_BUILT: Final = "export"
+_VOCABULARY_FILE: Final = CT2_FILES[1]
 _DIGEST_SHOWN: Final = 12
 _SHA256: Final = re.compile(r"[0-9a-f]{64}")
 _PLACEMENTS: Final = get_args(TagPlacement)
@@ -132,8 +150,9 @@ class ExportRecord:
     prefix of the target): the caller's statement, which the export refused when the saved
     config of the checkpoint places the tag elsewhere; `spm_sha256` the SHA-256 of
     `spm.model`; the layer counts, `hidden_size` and `vocabulary_entries` (the length of
-    the checkpoint's source vocabulary, which is the length of `shared_vocabulary.json`)
-    are read from the checkpoint's saved `config.json` and `vocab.json`.
+    the checkpoint's source vocabulary, which the export and `verify_export` check is the
+    length of `shared_vocabulary.json`) are read from the checkpoint's saved `config.json`
+    and `vocab.json`.
     """
 
     tag_placement: TagPlacement
@@ -221,14 +240,17 @@ def export_checkpoint(
         ValueError: `tag_placement` is neither `src` nor `tgt`.
         ConfigError: a path holds `$` (or, for the checkpoint and `out_dir`, a glob
             character), `spm_model` is not a file or not the model of the checkpoint,
-            `tag_placement` is not the one the saved config records, `out_dir` exists, or
-            the checkpoint is not one our manifest vouches for
+            `tag_placement` is not the one the saved config records, the saved config
+            names two SentencePiece models, `out_dir` exists (also when it appears while
+            the converter runs), or the checkpoint is not one our manifest vouches for
             (`continuation.verify_source`).
         DataError: the checkpoint's `config.json` or `vocab.json` does not say what an
             export records (a `data` section that is not what Eole writes or whose corpora
             place the tag differently included), or a file cannot be read.
-        UpstreamError: the converter fails or leaves a file out. After the checks,
-            any failure removes `out_dir` before it is raised.
+        UpstreamError: the converter fails, leaves a file out or writes a vocabulary
+            that is not a list of strings or has another number of entries than the
+            checkpoint's. After the checks, any failure removes what this call made
+            before it is raised.
     """
     _check_arguments(checkpoint, out_dir, spm_model, tag_placement)
     provenance = verify_source(checkpoint)
@@ -243,19 +265,67 @@ def export_checkpoint(
         hidden_size=saved.hidden_size,
         vocabulary_entries=saved.vocabulary_entries,
     )
-    # Hashing a real checkpoint takes a while and the first check is older than that. It
-    # stays outside the `try`: the cleanup removes `out_dir`, and a directory that someone
-    # else made in the meantime is not this call's to remove.
+    # Hashing a real checkpoint takes a while and the first check is older than that.
+    _require_no_directory(out_dir)
+    _build_export(provenance.path, out_dir, record, spm_bytes, timeout)
+    return record
+
+
+def _build_export(
+    checkpoint: Path,
+    out_dir: Path,
+    record: ExportRecord,
+    spm_bytes: bytes,
+    timeout: float | None,
+) -> None:
+    """Make `out_dir` from the converter's files, `spm_bytes` and `record`.
+
+    The converter refuses a directory that exists, so it writes into a child of a private
+    directory this call makes beside `out_dir`, and so do the two files beside the model;
+    only then is the child renamed onto `out_dir`. A failure removes the private directory,
+    and `out_dir` only if this call has put it in place: a directory someone else makes at
+    that path in the meantime is refused and never touched. The converter's log stays,
+    beside `out_dir`."""
+    staging = _make_private_directory(out_dir)
+    built = staging / _BUILT
+    published = False
+    try:
+        export_ct2(
+            checkpoint, built, timeout=timeout, log_path=export_log_path(out_dir)
+        )
+        _require_the_converters_files(built, out_dir)
+        _require_the_vocabulary_of(built / _VOCABULARY_FILE, out_dir, record)
+        replace_file(built / SPM_FILE, spm_bytes)
+        replace_file(built / RECORD_FILE, record.to_bytes())
+        _publish(built, out_dir)
+        published = True
+        with contextlib.suppress(OSError):
+            staging.rmdir()
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        if published:
+            shutil.rmtree(out_dir, ignore_errors=True)
+        raise
+
+
+def _make_private_directory(out_dir: Path) -> Path:
+    """A new directory beside `out_dir` that only this call knows (made, with the parents of
+    `out_dir`, as the converter would have made them)."""
+    out_dir.parent.mkdir(parents=True, exist_ok=True)
+    return Path(tempfile.mkdtemp(prefix=f".{out_dir.name}.", dir=out_dir.parent))
+
+
+def _publish(built: Path, out_dir: Path) -> None:
+    """Rename `built` onto `out_dir`, which must not exist. A rename also replaces an EMPTY
+    directory that appears between the check and the call (and nothing else); that is the
+    window that is left."""
     _require_no_directory(out_dir)
     try:
-        export_ct2(provenance.path, out_dir, timeout=timeout)
-        _require_the_converters_files(out_dir)
-        replace_file(out_dir / SPM_FILE, spm_bytes)
-        replace_file(out_dir / RECORD_FILE, record.to_bytes())
-    except BaseException:
-        shutil.rmtree(out_dir, ignore_errors=True)
+        os.rename(built, out_dir)
+    except OSError:
+        # Something took the path in the last instant: refuse in the usual words.
+        _require_no_directory(out_dir)
         raise
-    return record
 
 
 def _check_arguments(
@@ -366,6 +436,12 @@ def _saved_copy(config: Mapping[str, Any], config_file: Path, spm_model: Path) -
     recorded = (
         section.get("src_subword_model") if isinstance(section, Mapping) else None
     )
+    target = section.get("tgt_subword_model") if isinstance(section, Mapping) else None
+    if isinstance(recorded, str) and isinstance(target, str) and target != recorded:
+        raise ConfigError(
+            f"{config_file} records two SentencePiece models, {recorded} for the source "
+            f"and {target} for the target: an export holds one spm.model"
+        )
     name = PurePosixPath(recorded).name if isinstance(recorded, str) else ""
     if not name:
         raise ConfigError(
@@ -401,13 +477,45 @@ def _sentencepiece_trained_with(spm_model: Path, copy: Path) -> bytes:
     return content
 
 
-def _require_the_converters_files(out_dir: Path) -> None:
+def _require_the_converters_files(built: Path, out_dir: Path) -> None:
+    """The three files of the converter are in `built`; the message names `out_dir`,
+    where they will be."""
     for name in CT2_FILES:
-        if not (out_dir / name).is_file():
+        if not (built / name).is_file():
             raise UpstreamError(
                 f"the CTranslate2 export left no {name} in {out_dir} (the converter's "
                 f"log is {export_log_path(out_dir)})"
             )
+
+
+def _require_the_vocabulary_of(file: Path, out_dir: Path, record: ExportRecord) -> None:
+    """The converter wrote its vocabulary from the checkpoint's, so `file` must hold as
+    many entries as the record states; the message names `out_dir`, where it will be."""
+    shown = out_dir / file.name
+    try:
+        entries = _string_list(file.read_bytes())
+    except OSError as error:
+        raise UpstreamError(f"cannot read {shown}: {error.strerror}") from error
+    if entries is None:
+        raise UpstreamError(
+            f"{shown} is not a JSON list of strings, as the converter writes it"
+        )
+    if len(entries) != record.vocabulary_entries:
+        raise UpstreamError(
+            f"{shown} has {len(entries)} entries but the checkpoint's vocabulary has "
+            f"{record.vocabulary_entries}: the export would map pieces to the wrong ids"
+        )
+
+
+def _string_list(content: bytes) -> list[str] | None:
+    """The JSON list of strings in `content`, None when it is anything else."""
+    try:
+        document = json.loads(content)
+    except ValueError, RecursionError:
+        return None
+    if isinstance(document, list) and all(isinstance(item, str) for item in document):
+        return document
+    return None
 
 
 # ---- the record ----------------------------------------------------------------------
@@ -549,12 +657,30 @@ def verify_export(directory: Path) -> VerifiedExport:
             f"{digests[SPM_FILE][:_DIGEST_SHOWN]}...: the export holds another model "
             "than the one it says it was made with",
         )
+    _require_the_vocabulary_to_agree(path, record, digests[_VOCABULARY_FILE])
     return VerifiedExport(
         directory=path,
         record=record,
         sha256=MappingProxyType(digests),
         manifest_sha256=manifest_sha256,
     )
+
+
+def _require_the_vocabulary_to_agree(
+    path: Path, record: ExportRecord, digest: str
+) -> None:
+    """The record states how many entries the vocabulary has; a file of another length
+    maps the pieces to the wrong ids. A file that is not a non-empty list of strings is
+    left to its reader (`distill_export_files.shared_vocabulary`), which refuses it."""
+    file = path / _VOCABULARY_FILE
+    entries = _string_list(verified_content(file, digest))
+    if entries and len(entries) != record.vocabulary_entries:
+        raise _refuse(
+            path,
+            f"{path / RECORD_FILE} records {record.vocabulary_entries} vocabulary "
+            f"entries but {file} has {len(entries)}: the export holds another "
+            "vocabulary than the one it says it was made with",
+        )
 
 
 def _refuse(path: Path, problem: str) -> ConfigError:

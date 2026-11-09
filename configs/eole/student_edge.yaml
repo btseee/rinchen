@@ -5,10 +5,12 @@
 # 517: encoder 12, decoder 2, hidden 512, heads 8, feed-forward 2048); about 79.0
 # million parameters by the formula of docs/runbooks/08_teacher.md (ARITHMETIC, calibrated
 # on the two tiny checkpoints), against about 1,103 million for the teacher. The schedule is
-# the teacher's (teacher.yaml): the learning rate 2.0 with the Noam schedule and 8,000
-# warm-up steps peaks near 9.9e-4 at this width (2.0 x 512^-0.5 x 8000^-0.5), batches of
-# 16,384 tokens with an accumulation of 8 on 8 GPUs, validation every 5,000 steps and early
-# stopping on perplexity; a 2-layer decoder and 512 wide: the smallest shape for a phone or a CPU.
+# the teacher's (teacher.yaml) with one difference: this file states `attention_dropout:
+# [0.1]`, which the teacher's file does not state. The learning rate 2.0 with the Noam
+# schedule and 8,000 warm-up steps peaks near 9.9e-4 at this width (2.0 x 512^-0.5 x
+# 8000^-0.5), batches of 16,384 tokens with an accumulation of 8 on 8 GPUs, validation every
+# 5,000 steps and early stopping on perplexity; a 2-layer decoder and 512 wide: the smallest
+# shape for a phone or a CPU.
 #
 # The student is trained from random initialisation, always: `train_from` and `reset_optim`
 # are not keys of any config of this project, and `rinchen distill prepare` renders none.

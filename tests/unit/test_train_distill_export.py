@@ -165,7 +165,10 @@ def test_the_final_step_of_a_run_is_exported_with_a_record_of_where_it_came_from
     assert (out_dir / "export.json").read_bytes() == record.to_bytes()
     assert (out_dir / "spm.model").read_bytes() == spm_model.read_bytes()
     assert converter.calls[0].checkpoint == teacher.final
-    assert converter.calls[0].out_dir == out_dir
+    # The converter writes into a child of a private directory beside the output, which is
+    # renamed onto it (`test_train_distill_export_staging.py`); its log is beside the output.
+    assert converter.calls[0].out_dir.parent.parent == out_dir.parent
+    assert converter.calls[0].log_path == export_log_path(out_dir)
     assert tree_digest(teacher.run_dir) == before
 
 
@@ -249,11 +252,8 @@ def test_the_timeout_and_the_checkpoint_directory_reach_the_converter(
     export(teacher.final, out_dir, spm_model, timeout=12.5)
 
     (call,) = converter.calls
-    assert (call.checkpoint, call.out_dir, call.timeout) == (
-        teacher.final,
-        out_dir,
-        12.5,
-    )
+    assert (call.checkpoint, call.timeout) == (teacher.final, 12.5)
+    assert call.out_dir.parent.parent == out_dir.parent
 
 
 def test_a_relative_checkpoint_path_reaches_the_converter_made_absolute(
