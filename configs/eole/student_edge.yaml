@@ -1,0 +1,78 @@
+# Base Eole config of the edge student (D10): 12 encoder and 2 decoder layers, 512 wide.
+# EVERY VALUE BELOW IS AN UNMEASURED PRIOR: no real corpus, no teacher and no GPU was
+# available when this was written, so nothing here has been trained, timed or tuned. The
+# shape is the master plan's (docs/research/2026-10-29-rinchen-dev-agent-prompt.md, line
+# 517: encoder 12, decoder 2, hidden 512, heads 8, feed-forward 2048); about 79.0
+# million parameters by the formula of docs/runbooks/08_teacher.md (ARITHMETIC, calibrated
+# on the two tiny checkpoints), against about 1,103 million for the teacher. The schedule is
+# the teacher's (teacher.yaml): the learning rate 2.0 with the Noam schedule and 8,000
+# warm-up steps peaks near 9.9e-4 at this width (2.0 x 512^-0.5 x 8000^-0.5), batches of
+# 16,384 tokens with an accumulation of 8 on 8 GPUs, validation every 5,000 steps and early
+# stopping on perplexity; a 2-layer decoder and 512 wide: the smallest shape for a phone or a CPU.
+#
+# The student is trained from random initialisation, always: `train_from` and `reset_optim`
+# are not keys of any config of this project, and `rinchen distill prepare` renders none.
+# What the teacher gives it is TEXT (`rinchen distill generate`), mixed with the original
+# data by an exact integer ratio (`rinchen distill prepare --mix K:O`).
+#
+# The vocabulary is the student's own SentencePiece model (configs/spm/student_64k.yaml, 64,000
+# pieces). Eole's vocabulary is the pieces its data showed plus the reserved symbols, cut to
+# `src_vocab_size`, which must be at least the pieces plus Eole's pad token (`rinchen train
+# launch` refuses less): 64,001. The student and the teacher use different SentencePiece
+# models; the distillation corpus is text, which each model cuts for itself.
+#
+# This file holds no per-run value. `rinchen distill prepare` merges these in, and the merged
+# config is validated before Eole sees it:
+#   src_vocab, training.model_path         the run directory
+#   transforms_configs.sentencepiece       the student's SentencePiece model, both sides
+#   data                                   the corpora, their weights and tag prefixes
+#   seed                                   the run's seed (1234 here is the default)
+seed: 1234
+share_vocab: true
+overwrite: true
+src_vocab_size: 64001
+data: {}
+tensorboard: true
+transforms_configs:
+  filtertoolong:
+    src_seq_length: 256
+    tgt_seq_length: 256
+model:
+  architecture: transformer
+  hidden_size: 512
+  encoder:
+    layers: 12
+  decoder:
+    layers: 2
+  heads: 8
+  transformer_ff: 2048
+  embeddings:
+    # Equal to hidden_size (512 is Eole's default; stated so that the shape is explicit).
+    word_vec_size: 512
+    position_encoding_type: SinusoidalInterleaved
+  share_embeddings: true
+  share_decoder_embeddings: true
+training:
+  batch_type: tokens
+  batch_size: 16384
+  accum_count: [8]
+  dropout: [0.1]
+  attention_dropout: [0.1]
+  label_smoothing: 0.1
+  optim: adam
+  adam_beta2: 0.998
+  decay_method: noam
+  learning_rate: 2.0
+  warmup_steps: 8000
+  compute_dtype: bf16
+  world_size: 8
+  gpu_ranks: [0, 1, 2, 3, 4, 5, 6, 7]
+  gpu_backend: nccl
+  timeout: 7200
+  batch_size_multiple: 8
+  train_steps: 100000
+  valid_steps: 5000
+  save_checkpoint_steps: 5000
+  keep_checkpoint: 8
+  early_stopping: 6
+  early_stopping_criteria: ppl

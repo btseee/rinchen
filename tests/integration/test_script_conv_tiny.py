@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from rinchen.errors import UpstreamError
-from rinchen.script_conv import export
+from rinchen.export import eole_ct2
 from rinchen.script_conv.alphabet import FVS, MVS, NNBSP
 from rinchen.script_conv.eval import cer
 from rinchen.script_conv.export import export_ct2, parity
@@ -156,7 +156,7 @@ def test_the_converter_fails_when_a_cuda_device_is_visible(
 ) -> None:
     # Documents why `export_environment` hides the GPU: with a device visible the
     # converter segfaults on a CUDA pointer and leaves an empty model.bin.
-    monkeypatch.setattr(export, "export_environment", lambda: dict(os.environ))
+    monkeypatch.setattr(eole_ct2, "export_environment", lambda: dict(os.environ))
 
     with pytest.raises(UpstreamError, match="exit code -11"):
         export_ct2(tiny_run.ckpt_dir, tmp_path / "unhidden")

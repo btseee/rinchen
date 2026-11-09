@@ -1,0 +1,60 @@
+# Base Eole config of the tiny student (D10): the CPU gate of the distillation. A 64-wide
+# transformer with 2 encoder and 1 decoder layers (the teacher of the gate, teacher_tiny.yaml,
+# has 2+2: the student is smaller, with fewer decoder layers as the real students are), trained
+# from random initialisation on the teacher's text mixed with the original data
+# (`rinchen distill prepare`), with the optimiser recipe of teacher_tiny.yaml: AdamW, Noam,
+# learning rate 0.5, 100 warm-up steps, batches of 2,048 tokens. 2,000 steps, a report every 50,
+# a validation and a save every 500, all of them kept. The spike measured the dev chrF of this
+# student on KD text mixed 1:1 at 98.58, 98.59 and 96.68 for three seeds (the teacher: 98.20);
+# the gate (tests/integration/test_distill_tiny_student.py) requires 95.0 and at least the
+# teacher's minus 3.0. A 3-encoder, 1-decoder shape at this recipe did NOT converge in 2,000
+# steps (dev chrF 38): the depth needs its own recipe, so do not change the layers without
+# measuring. The sentences are templated: this is a plumbing gate, never a quality measure.
+#
+# This file holds no per-run value; `rinchen distill prepare` merges them in:
+#   src_vocab, training.model_path, transforms_configs.sentencepiece, data, seed,
+#   src_vocab_size (the pieces of the student's SentencePiece model plus one)
+seed: 1234
+share_vocab: true
+overwrite: true
+report_every: 50
+data: {}
+transforms_configs:
+  filtertoolong:
+    src_seq_length: 64
+    tgt_seq_length: 64
+model:
+  architecture: transformer
+  hidden_size: 64
+  encoder:
+    layers: 2
+  decoder:
+    layers: 1
+  heads: 4
+  transformer_ff: 128
+  embeddings:
+    word_vec_size: 64
+    position_encoding_type: SinusoidalInterleaved
+  share_embeddings: true
+  share_decoder_embeddings: true
+training:
+  batch_type: tokens
+  batch_size: 2048
+  accum_count: [1]
+  dropout: [0.0]
+  attention_dropout: [0.0]
+  optim: adamw
+  decay_method: noam
+  label_smoothing: 0.1
+  world_size: 1
+  train_steps: 2000
+  valid_steps: 500
+  save_checkpoint_steps: 500
+  keep_checkpoint: 5
+  learning_rate: 0.5
+  warmup_steps: 100
+  compute_dtype: fp32
+  gpu_ranks: []
+  bucket_size: 1024
+  prefetch_factor: 8
+  num_workers: 1

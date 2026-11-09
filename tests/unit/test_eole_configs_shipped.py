@@ -3,8 +3,9 @@
 shaped model whose every value is an unmeasured prior), `teacher.yaml` (the 8-GPU
 teacher, every value an unmeasured prior), `teacher_tiny.yaml` (the CPU teacher gate
 of D8), `teacher_doc.yaml` and `teacher_doc_tiny.yaml` (the document-level continuations
-of the two teachers, D9), and the matrices `ablation_tiny.yaml` (2 variants) and `ablation_priors.yaml`
-(24).
+of the two teachers, D9), `student_server.yaml`, `student_edge.yaml` and `student_tiny.yaml`
+(the students of the distillation, D10) and the matrices `ablation_tiny.yaml` (2 variants)
+and `ablation_priors.yaml` (24).
 
 A base holds no per-run value (`src_vocab`, the checkpoint path, the SentencePiece
 model, the corpora): the ablation run merges those in. These tests merge in the
@@ -38,6 +39,9 @@ TEACHER_BASE = EOLE_DIR / "teacher.yaml"
 TEACHER_TINY_BASE = EOLE_DIR / "teacher_tiny.yaml"
 TEACHER_DOC_BASE = EOLE_DIR / "teacher_doc.yaml"
 TEACHER_DOC_TINY_BASE = EOLE_DIR / "teacher_doc_tiny.yaml"
+STUDENT_SERVER_BASE = EOLE_DIR / "student_server.yaml"
+STUDENT_EDGE_BASE = EOLE_DIR / "student_edge.yaml"
+STUDENT_TINY_BASE = EOLE_DIR / "student_tiny.yaml"
 TINY_MATRIX = EOLE_DIR / "ablation_tiny.yaml"
 PRIORS_MATRIX = EOLE_DIR / "ablation_priors.yaml"
 
@@ -48,6 +52,9 @@ BASES = [
     pytest.param(TEACHER_TINY_BASE, id="teacher-tiny"),
     pytest.param(TEACHER_DOC_BASE, id="teacher-doc"),
     pytest.param(TEACHER_DOC_TINY_BASE, id="teacher-doc-tiny"),
+    pytest.param(STUDENT_SERVER_BASE, id="student-server"),
+    pytest.param(STUDENT_EDGE_BASE, id="student-edge"),
+    pytest.param(STUDENT_TINY_BASE, id="student-tiny"),
 ]
 
 

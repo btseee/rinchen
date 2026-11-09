@@ -2,26 +2,33 @@
 Eole.
 
 `export_ct2` converts an Eole checkpoint with CTranslate2's own converter in a
-subprocess; `parity` compares CTranslate2's greedy output with Eole's on the same
+subprocess; it lives in `rinchen.export.eole_ct2` since D10 (the distillation exports
+teachers through it) and is imported here with `export_environment` and
+`export_log_path`. `parity` compares CTranslate2's greedy output with Eole's on the same
 words. The two decoders can stop at different lengths on a rare degenerate
 repetition, so the gate on `ParityReport.agreement` is below 1.0 (0.99), not equal to it.
 """
 
 from __future__ import annotations
 
-import os
-import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 import ctranslate2
 
+from rinchen.export.eole_ct2 import export_ct2, export_environment, export_log_path
 from rinchen.script_conv.char_model import load_char_processor
-from rinchen.utils.logged_process import failure_with_log_tail, run_logged
+
+__all__ = [
+    "ParityReport",
+    "export_ct2",
+    "export_environment",
+    "export_log_path",
+    "parity",
+]
 
 _MAX_REPORTED_MISMATCHES = 10
-_MODEL_FILE = "model.bin"
 
 
 @dataclass(frozen=True)
@@ -42,65 +49,6 @@ class ParityReport:
         if self.total == 0:
             raise ValueError("the agreement of no lines is undefined")
         return self.agree / self.total
-
-
-def export_environment() -> dict[str, str]:
-    """A copy of the process environment for the CTranslate2 converter, with no CUDA
-    device visible. With one visible the converter reads a device pointer as host
-    memory, segfaults (exit code -11) and leaves an empty `model.bin`."""
-    env = dict(os.environ)
-    env["CUDA_VISIBLE_DEVICES"] = ""
-    return env
-
-
-def export_log_path(out_dir: Path) -> Path:
-    """The log of the export to `out_dir`: `<out_dir>.export.log`, beside the
-    directory because the converter refuses a directory that exists."""
-    return Path(f"{out_dir}.export.log")
-
-
-def export_ct2(ckpt_dir: Path, out_dir: Path, *, timeout: float | None = None) -> Path:
-    """Convert the Eole checkpoint in `ckpt_dir` to a CTranslate2 model in `out_dir`
-    (which must not exist yet) and return `out_dir`.
-
-    The converter runs as `python -I -W ignore -m ctranslate2.converters.eole_ct2`
-    with `export_environment()`; its combined output goes to `export_log_path(out_dir)`.
-    `timeout` (seconds) bounds it; a converter that runs past it is killed with
-    everything it started. A failed export can leave a partial `out_dir`, which must
-    be removed before retrying: the converter refuses an existing directory.
-
-    Raises:
-        UpstreamError: the converter exits non-zero or runs past `timeout`, or exits
-            zero but leaves no `model.bin` or an empty one; the message ends with the
-            last lines of the log.
-    """
-    log_path = export_log_path(out_dir)
-    run_logged(
-        [
-            sys.executable,
-            "-I",
-            "-W",
-            "ignore",
-            "-m",
-            "ctranslate2.converters.eole_ct2",
-            "--model_path",
-            str(ckpt_dir),
-            "--output_dir",
-            str(out_dir),
-        ],
-        env=export_environment(),
-        log_path=log_path,
-        what="the CTranslate2 export",
-        timeout=timeout,
-    )
-    model_file = out_dir / _MODEL_FILE
-    if not model_file.is_file() or model_file.stat().st_size == 0:
-        raise failure_with_log_tail(
-            f"the CTranslate2 export exited with exit code 0 but left no {_MODEL_FILE} "
-            f"in {out_dir}, or an empty one",
-            log_path,
-        )
-    return out_dir
 
 
 def parity(
