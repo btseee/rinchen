@@ -7,12 +7,14 @@ from rinchen.corpus.schema import ORIGINS
 from rinchen.errors import ConfigError
 
 # Forward translation is labelled by the family of its generator: an LLM or a
-# translation model. The plain `ft` origin stays reserved for forward
-# translation by our own teacher.
+# translation model. The plain `ft` origin is forward translation by our own
+# teacher, the generator kind `teacher` (D10's distillation; the configurable
+# generators of a synthetic-data job cannot be one).
 _FORWARD_ORIGIN_BY_GENERATOR_KIND = {
     "vllm": "synth_llm",
     "llamacpp": "synth_llm",
     "ct2": "synth_nmt",
+    "teacher": "ft",
 }
 _BACKWARD_ORIGIN = "bt"
 _DATA_TAG_BY_ORIGIN = {

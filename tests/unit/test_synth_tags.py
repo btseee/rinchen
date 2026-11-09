@@ -16,9 +16,11 @@ from rinchen.synth.tags import data_origin_tag, origin_for
         ("bt", "vllm", "bt"),
         ("bt", "llamacpp", "bt"),
         ("bt", "ct2", "bt"),
+        ("bt", "teacher", "bt"),
         ("ft", "vllm", "synth_llm"),
         ("ft", "llamacpp", "synth_llm"),
         ("ft", "ct2", "synth_nmt"),
+        ("ft", "teacher", "ft"),
     ],
 )
 def test_origin_for_gives_the_role_and_generator_family(
