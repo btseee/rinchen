@@ -105,7 +105,7 @@ def export(
         spm_model=spm_model,
         tag_placement=placement,
         timeout=timeout,
-    )
+    ).record
 
 
 def refusal(

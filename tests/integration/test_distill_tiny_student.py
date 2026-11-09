@@ -266,6 +266,7 @@ def test_the_teacher_export_holds_the_five_files_and_a_manifest_that_vouches_for
     )
     assert manifest.stage == "distill_export"
     assert manifest.status["export"] == "ok"
+    assert manifest.status["tag_placement_check"] == "checked"
     assert {Path(item.path).name for item in manifest.outputs} == set(EXPORT_FILES)
     for name in EXPORT_FILES:
         assert listed_digest(manifest, name) == sha256_of(directory / name), name
@@ -674,6 +675,7 @@ def test_both_evaluations_score_the_same_dev_lines_without_a_leak(
         assert evaluated.result["spm_sha256"] == sha256_of(workspace.inputs.spm_model)
         assert evaluated.invocation.facts["tag leaks"] == "0"
         assert evaluated.invocation.facts["dev lines in training"] == "0"
+        assert evaluated.manifest.status["tag_placement_check"] == "checked"
         assert evaluated.manifest.stage == "distill_evaluate"
         assert evaluated.manifest.metrics["dev_in_train"] == 0
     assert left.result["checkpoint"] == str(teacher.averaged)

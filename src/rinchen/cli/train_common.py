@@ -15,7 +15,7 @@ import math
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, NoReturn
+from typing import Any, Final, NoReturn
 
 from rinchen.cli.errors import FAILURE_EXIT_CODE, exit_with_error
 from rinchen.errors import ConfigError, DataError
@@ -28,6 +28,14 @@ from rinchen.manifest.stage import (
     tool_versions,
 )
 from rinchen.train.corpus_files import CorpusFiles, corpus_sidecar_path
+from rinchen.train.distill_saved_config import PlacementCheck
+
+# What `distill export` and `distill evaluate` print about how the stated tag placement was
+# settled, so that a placement nothing could check is never silent.
+_PLACEMENT_CHECK_LINES: Final[dict[PlacementCheck, str]] = {
+    "checked": "tag placement: checked against the saved config",
+    "stated": "tag placement: stated, not recorded in the checkpoint",
+}
 
 
 def require_usable_timeout(timeout: float | None) -> None:
@@ -136,6 +144,11 @@ def exit_cannot_write(out_dir: Path, exc: OSError, *, what: str) -> NoReturn:
     exit_with_error(
         f"cannot write the {what} under {out_dir}: {exc}", FAILURE_EXIT_CODE
     )
+
+
+def tag_placement_line(check: PlacementCheck) -> str:
+    """The line a command prints about how its tag placement was settled."""
+    return _PLACEMENT_CHECK_LINES[check]
 
 
 def write_manifest(

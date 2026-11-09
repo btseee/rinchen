@@ -10,8 +10,10 @@ by `tests.support.step_dirs`, so nothing starts a process. What the library chec
 from __future__ import annotations
 
 import importlib.metadata
+import json
 import os
 from pathlib import Path
+from typing import Any
 
 import pytest
 from click.testing import Result
@@ -129,6 +131,7 @@ def test_a_run_prints_where_it_exported_to_the_record_and_the_manifest(
 
     assert result.stdout.splitlines() == [
         f"exported to {workspace.out_dir}",
+        "tag placement: stated, not recorded in the checkpoint",
         f"record: {workspace.out_dir}/export.json",
         f"manifest: {workspace.out_dir}/manifest.json",
     ]
@@ -254,6 +257,7 @@ def test_the_metrics_status_and_seed_are_those_of_an_export(
         "export": "ok",
         "tag_placement": "src",
         "checkpoint_kind": "step",
+        "tag_placement_check": "stated",
     }
     assert manifest.seed == -1
     assert manifest.config_sha256 == SRC_CONFIG_SHA256
@@ -292,6 +296,7 @@ def test_an_averaged_model_is_exported_and_recorded_as_one(
         "export": "ok",
         "tag_placement": "tgt",
         "checkpoint_kind": "averaged",
+        "tag_placement_check": "stated",
     }
     assert [Path(item.path) for item in manifest.inputs[:3]] == [
         workspace.checkpoint / name for name in CHECKPOINT_FILES
@@ -697,3 +702,89 @@ def test_a_saved_config_whose_corpora_disagree_is_a_data_error(
         message=f"{workspace.checkpoint / 'config.json'}: the corpora place the direction tag",
         digest=digest,
     )
+
+
+# --- whether the tag placement was checked ------------------------------------------------------
+
+CHECKED_LINE = "tag placement: checked against the saved config"
+STATED_LINE = "tag placement: stated, not recorded in the checkpoint"
+
+
+def lines_of_a_run(workspace: ExportWorkspace) -> list[str]:
+    return [
+        f"exported to {workspace.out_dir}",
+        f"record: {workspace.out_dir}/export.json",
+        f"manifest: {workspace.out_dir}/manifest.json",
+    ]
+
+
+@pytest.mark.parametrize("placement", ["src", "tgt"])
+def test_a_placement_the_saved_config_records_is_reported_as_checked(
+    tmp_path: Path, converter: FakeConverter, placement: str
+) -> None:
+    workspace = make_export_workspace(tmp_path, data=launcher_data(placement))
+
+    result = run_ok(workspace.args(tag_placement=placement))
+
+    expected = lines_of_a_run(workspace)
+    assert result.stdout.splitlines() == [expected[0], CHECKED_LINE, *expected[1:]]
+    assert manifest_of(workspace).status["tag_placement_check"] == "checked"
+
+
+@pytest.mark.parametrize("placement", ["src", "tgt"])
+@pytest.mark.parametrize(
+    "data",
+    [None, {}, {"corpus": {"src_prefix": "<bt>", "tgt_prefix": ""}}],
+    ids=["no data section", "empty data section", "no direction tag"],
+)
+def test_a_placement_the_checkpoint_does_not_record_is_reported_as_stated(
+    tmp_path: Path,
+    converter: FakeConverter,
+    placement: str,
+    data: dict[str, Any] | None,
+) -> None:
+    workspace = make_export_workspace(tmp_path, data=data)
+
+    result = run_ok(workspace.args(tag_placement=placement))
+
+    expected = lines_of_a_run(workspace)
+    assert result.stdout.splitlines() == [expected[0], STATED_LINE, *expected[1:]]
+    assert manifest_of(workspace).status["tag_placement_check"] == "stated"
+
+
+def test_an_averaged_model_is_reported_as_checked_like_a_step(
+    tmp_path: Path, converter: FakeConverter
+) -> None:
+    workspace = make_export_workspace(
+        tmp_path, averaged=True, data=launcher_data("tgt")
+    )
+
+    result = run_ok(workspace.args(tag_placement="tgt"))
+
+    assert CHECKED_LINE in result.stdout.splitlines()
+    assert manifest_of(workspace).status["tag_placement_check"] == "checked"
+
+
+def test_the_fact_is_in_the_manifest_only_and_the_record_and_the_files_do_not_hold_it(
+    tmp_path: Path, converter: FakeConverter
+) -> None:
+    workspace = make_export_workspace(tmp_path, data=launcher_data("src"))
+
+    run_ok(workspace.args())
+
+    record = json.loads(workspace.record.read_text(encoding="utf-8"))
+    assert "placement_check" not in record
+    assert "tag_placement_check" not in record
+    assert "checked" not in json.dumps(record)
+    assert verify_export(workspace.out_dir).record.tag_placement == "src"
+
+
+def test_a_refused_placement_prints_no_line_about_the_check(
+    tmp_path: Path, converter: FakeConverter
+) -> None:
+    workspace = make_export_workspace(tmp_path, data=launcher_data("src"))
+
+    result = invoke(workspace.args(tag_placement="tgt"))
+
+    assert result.exit_code == 2
+    assert "tag placement:" not in result.stdout

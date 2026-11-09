@@ -73,13 +73,14 @@ def converter_files(tokens: Sequence[str]) -> dict[str, bytes]:
 
 @dataclass(frozen=True)
 class ConverterCall:
-    """One call of the converter: the checkpoint directory, the output directory and the
-    timeout it was given."""
+    """One call of the converter: the checkpoint directory, the output directory, the
+    timeout it was given, the log and the directory its messages name."""
 
     checkpoint: Path
     out_dir: Path
     timeout: float | None
     log_path: Path | None = None
+    reported_dir: Path | None = None
 
 
 @dataclass
@@ -104,8 +105,11 @@ class FakeConverter:
         *,
         timeout: float | None = None,
         log_path: Path | None = None,
+        reported_dir: Path | None = None,
     ) -> Path:
-        self.calls.append(ConverterCall(ckpt_dir, out_dir, timeout, log_path))
+        self.calls.append(
+            ConverterCall(ckpt_dir, out_dir, timeout, log_path, reported_dir)
+        )
         log = export_log_path(out_dir) if log_path is None else log_path
         log.parent.mkdir(parents=True, exist_ok=True)
         log.write_text("converter log\n", encoding="utf-8")

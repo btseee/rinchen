@@ -15,6 +15,10 @@ whose corpora place the tag differently, is a `DataError`: no statement can be r
 
 The bytes of a file are read ONCE, by `verified_content`, and only when their SHA-256 is
 the one taken before (hash before read); `json_object` parses them.
+
+`distill evaluate` accepts models of any origin, so the corpus names and the prefixes of a
+saved config are untrusted text: a message quotes them escaped on one line (`repr`) and cut to
+80 characters, and a corpus name that is a plain word is named as it is (`data.corpus`).
 """
 
 from __future__ import annotations
@@ -25,7 +29,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, Literal
 
 from rinchen.config.ablation import TagPlacement
 from rinchen.errors import ConfigError, DataError
@@ -36,6 +40,14 @@ _SIDES: Final[tuple[tuple[str, TagPlacement], ...]] = (
     ("src_prefix", "src"),
     ("tgt_prefix", "tgt"),
 )
+# How much of a name or a prefix of the config a message shows, and what marks the cut.
+_SHOWN_CHARS: Final = 80
+_ELLIPSIS: Final = "..."
+_PLAIN_NAME: Final = re.compile(rf"[A-Za-z0-9_.-]{{1,{_SHOWN_CHARS}}}")
+
+# How the placement of a stated tag was settled: `checked` against the saved config, which
+# records it, or `stated` only, because the saved config says nothing about it.
+PlacementCheck = Literal["checked", "stated"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,9 +109,10 @@ def saved_tag_placement(config: Mapping[str, Any], file: Path) -> TagPlacement |
 
 def require_stated_placement(
     config: Mapping[str, Any], file: Path, stated: TagPlacement
-) -> None:
+) -> PlacementCheck:
     """Accept `stated` unless the saved config `config` (the content of `file`) places
-    the tag elsewhere.
+    the tag elsewhere, and say whether it was `checked` (the saved config places it where
+    `stated` says) or only `stated` (the saved config places it nowhere).
 
     Raises:
         ConfigError: the saved config places the tag in the other place than `stated`; the
@@ -107,18 +120,22 @@ def require_stated_placement(
         DataError: as `saved_tag_placement`.
     """
     found = _evidence(config, file)
-    if found is None or found.placement == stated:
-        return
+    if found is None:
+        return "stated"
+    if found.placement == stated:
+        return "checked"
     raise ConfigError(
         f"the tag placement {stated!r} is not the one the checkpoint was trained with: "
-        f"{file} has {found.key} = {found.prefix!r}, so the direction tag is in the "
+        f"{file} has {found.key} = {_quoted(found.prefix)}, so the direction tag is in the "
         f"{'source' if found.placement == 'src' else 'target'} prefix, which is placement "
         f"{found.placement!r}; pass --tag-placement {found.placement}. With the tag in "
         "the wrong place the model would be given an input it was never trained on"
     )
 
 
-def require_saved_placement(file: Path, digest: str, stated: TagPlacement) -> None:
+def require_saved_placement(
+    file: Path, digest: str, stated: TagPlacement
+) -> PlacementCheck:
     """`require_stated_placement` for the saved config in `file`, which is read once and
     only if its SHA-256 is `digest`.
 
@@ -127,7 +144,7 @@ def require_saved_placement(file: Path, digest: str, stated: TagPlacement) -> No
         DataError: as `verified_content`, `json_object` and `saved_tag_placement`.
     """
     config = json_object(verified_content(file, digest), file)
-    require_stated_placement(config, file, stated)
+    return require_stated_placement(config, file, stated)
 
 
 def _evidence(config: Mapping[str, Any], file: Path) -> _Evidence | None:
@@ -139,7 +156,9 @@ def _evidence(config: Mapping[str, Any], file: Path) -> _Evidence | None:
     first: _Evidence | None = None
     for name, corpus in data.items():
         if not isinstance(corpus, Mapping):
-            raise DataError(f"{file}: data.{name} is not an object, as Eole saves it")
+            raise DataError(
+                f"{file}: {_entry(name)} is not an object, as Eole saves it"
+            )
         found = _entry_evidence(name, corpus, file)
         if found is None:
             continue
@@ -162,12 +181,29 @@ def _entry_evidence(
         if prefix is None:
             continue
         if not isinstance(prefix, str):
-            raise DataError(f"{file}: data.{name}.{key} is not text, as Eole saves it")
+            raise DataError(
+                f"{file}: {_entry(name)}.{key} is not text, as Eole saves it"
+            )
         if any(_DIRECTION_TAG.fullmatch(word) for word in prefix.split()):
-            tagged.append(_Evidence(f"data.{name}.{key}", prefix, placement))
+            tagged.append(_Evidence(f"{_entry(name)}.{key}", prefix, placement))
     if len(tagged) > 1:
         raise DataError(
-            f"{file}: data.{name} has a direction tag in both its source and its "
+            f"{file}: {_entry(name)} has a direction tag in both its source and its "
             "target prefix, so no tag placement fits the checkpoint"
         )
     return tagged[0] if tagged else None
+
+
+def _entry(name: str) -> str:
+    """How a message names the corpus entry `name` of `data`: `data.<name>` for a plain word,
+    `data[<quoted name>]` for anything else."""
+    if _PLAIN_NAME.fullmatch(name):
+        return f"data.{name}"
+    return f"data[{_quoted(name)}]"
+
+
+def _quoted(text: str) -> str:
+    """`text` as a literal on one line (`repr` escapes line breaks and control characters),
+    cut to `_SHOWN_CHARS` characters, with an ellipsis after the closing quote when it was."""
+    cut = _ELLIPSIS if len(text) > _SHOWN_CHARS else ""
+    return f"{text[:_SHOWN_CHARS]!r}{cut}"

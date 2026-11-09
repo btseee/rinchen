@@ -17,8 +17,10 @@ states it and the record keeps it; the saved `config.json` of a checkpoint our l
 wrote does hold it (the prefixes of its `data` section, `distill_saved_config`), and a
 statement that disagrees is refused before anything is made. A saved config without a
 `data` section, or without a direction tag in it, leaves the statement unchecked and the
-record cannot tell which of the two it was. A saved config that names one SentencePiece
-model for the source and another for the target cannot be exported: an export holds one.
+record cannot tell which of the two it was: `export_checkpoint` returns it beside the record
+(`ExportOutcome.placement_check`) for the command to report. A saved config that names one
+SentencePiece model for the source and another for the target cannot be exported: an
+export holds one.
 Nothing is read from `config.json` or `vocab.json` before its bytes matched the digest
 `verify_source` took, and the checkpoint is never written. The converter reads the weights
 AFTER that digest was taken, as every command of this project reads an input after it
@@ -71,6 +73,7 @@ from rinchen.manifest.stage import sha256_of
 from rinchen.train.checkpoints import CONFIG_FILE, VOCAB_FILE, ContinuationKind
 from rinchen.train.continuation import SourceProvenance, verify_source
 from rinchen.train.distill_saved_config import (
+    PlacementCheck,
     json_object,
     require_stated_placement,
     verified_content,
@@ -219,6 +222,18 @@ class VerifiedExport:
 # ---- export_checkpoint -----------------------------------------------------------------
 
 
+@dataclass(frozen=True, slots=True)
+class ExportOutcome:
+    """What `export_checkpoint` made: the `record` it wrote into `export.json` and how the
+    tag placement of the record was settled, `placement_check`: `checked` when the saved
+    config of the checkpoint records the placement and it is the stated one, `stated` when
+    it records none. The record cannot say which, so the command that reports it reads it
+    here."""
+
+    record: ExportRecord
+    placement_check: PlacementCheck
+
+
 def export_checkpoint(
     checkpoint: Path,
     out_dir: Path,
@@ -226,9 +241,10 @@ def export_checkpoint(
     spm_model: Path,
     tag_placement: TagPlacement,
     timeout: float | None = None,
-) -> ExportRecord:
+) -> ExportOutcome:
     """Export the checkpoint of ours in `checkpoint` to a CTranslate2 model in `out_dir`
-    (which must not exist) with `spm.model` and `export.json`, and return the record.
+    (which must not exist) with `spm.model` and `export.json`, and return the record and
+    whether its tag placement was checked or only stated.
 
     `spm_model` must be the SentencePiece model the checkpoint was trained with;
     `tag_placement` says where its direction tag goes (it must be the one the saved config
@@ -268,7 +284,7 @@ def export_checkpoint(
     # Hashing a real checkpoint takes a while and the first check is older than that.
     _require_no_directory(out_dir)
     _build_export(provenance.path, out_dir, record, spm_bytes, timeout)
-    return record
+    return ExportOutcome(record, saved.placement_check)
 
 
 def _build_export(
@@ -291,7 +307,11 @@ def _build_export(
     published = False
     try:
         export_ct2(
-            checkpoint, built, timeout=timeout, log_path=export_log_path(out_dir)
+            checkpoint,
+            built,
+            timeout=timeout,
+            log_path=export_log_path(out_dir),
+            reported_dir=out_dir,
         )
         _require_the_converters_files(built, out_dir)
         _require_the_vocabulary_of(built / _VOCABULARY_FILE, out_dir, record)
@@ -354,14 +374,15 @@ def _require_no_directory(out_dir: Path) -> None:
 @dataclass(frozen=True, slots=True)
 class _SavedModel:
     """What the saved `config.json` and `vocab.json` of a checkpoint say about its model:
-    the numbers an export records and the copy of the SentencePiece model it was
-    trained with."""
+    the numbers an export records, the copy of the SentencePiece model it was trained
+    with and whether the stated tag placement was checked against them."""
 
     encoder_layers: int
     decoder_layers: int
     hidden_size: int
     vocabulary_entries: int
     spm_copy: Path
+    placement_check: PlacementCheck
 
 
 def _saved_model(
@@ -372,7 +393,7 @@ def _saved_model(
     contradicts."""
     config_file = provenance.path / CONFIG_FILE
     config = _saved_json(config_file, provenance.config_sha256)
-    require_stated_placement(config, config_file, tag_placement)
+    placement_check = require_stated_placement(config, config_file, tag_placement)
     vocab_file = provenance.path / VOCAB_FILE
     vocabulary = _saved_json(vocab_file, provenance.vocab_sha256)
     return _SavedModel(
@@ -381,6 +402,7 @@ def _saved_model(
         hidden_size=_count_at(config, ("model", "encoder", "hidden_size"), config_file),
         vocabulary_entries=_vocabulary_entries(vocabulary, vocab_file),
         spm_copy=_saved_copy(config, config_file, spm_model),
+        placement_check=placement_check,
     )
 
 

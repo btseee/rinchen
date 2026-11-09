@@ -129,12 +129,25 @@ def test_corpora_that_disagree_are_a_data_error_naming_the_first_of_each_side() 
 # ---- require_stated_placement ----------------------------------------------------------
 
 
-def test_a_statement_that_agrees_or_cannot_be_checked_is_accepted() -> None:
-    require_stated_placement({"data": launcher_data("src")}, FILE, "src")
-    require_stated_placement({"data": launcher_data("tgt")}, FILE, "tgt")
-    require_stated_placement({}, FILE, "src")
-    require_stated_placement({}, FILE, "tgt")
-    require_stated_placement({"data": {"c": entry("", "")}}, FILE, "tgt")
+def test_a_statement_that_agrees_is_checked_and_one_that_cannot_be_checked_is_only_stated() -> (
+    None
+):
+    checked = [
+        require_stated_placement({"data": launcher_data("src")}, FILE, "src"),
+        require_stated_placement({"data": launcher_data("tgt")}, FILE, "tgt"),
+        require_stated_placement({"data": {"c": entry("<bt>", "<2x>")}}, FILE, "tgt"),
+    ]
+    stated = [
+        require_stated_placement({}, FILE, "src"),
+        require_stated_placement({}, FILE, "tgt"),
+        require_stated_placement({"data": None}, FILE, "src"),
+        require_stated_placement({"data": {}}, FILE, "src"),
+        require_stated_placement({"data": {"c": entry("", "")}}, FILE, "tgt"),
+        require_stated_placement({"data": {"c": entry("<bt>", "<ft>")}}, FILE, "src"),
+    ]
+
+    assert checked == ["checked"] * 3
+    assert stated == ["stated"] * 6
 
 
 def test_a_statement_that_disagrees_is_a_config_error_naming_both_values_and_the_key() -> (
@@ -166,6 +179,97 @@ def test_the_target_side_key_is_named_when_the_tag_is_a_target_prefix() -> None:
     assert "--tag-placement tgt" in message
 
 
+# ---- what a message quotes of the config -------------------------------------------------
+# `distill evaluate` accepts foreign models, so the corpus names and prefixes of a saved
+# config are untrusted text: a message shows them escaped on one line and cut to a short
+# length, never raw.
+
+ESCAPE = chr(0x1B)
+HOSTILE_NAME = f"odd\n{ESCAPE}[31mred{ESCAPE}[0m"
+SHOWN_LIMIT = 80
+
+
+def refusal_of(data: Any, stated: str = "src") -> str:
+    """The message of the refusal the saved `data` section draws."""
+    with pytest.raises((ConfigError, DataError)) as raised:
+        require_stated_placement({"data": data}, FILE, stated)  # type: ignore[arg-type]
+    return str(raised.value)
+
+
+def hostile_refusals() -> dict[str, str]:
+    prefix = f"<2khk_Cyrl> {HOSTILE_NAME}"
+    return {
+        "not an object": refusal_of({HOSTILE_NAME: "<2khk_Cyrl>"}),
+        "not text": refusal_of({HOSTILE_NAME: entry(7, "")}),
+        "both sides": refusal_of({HOSTILE_NAME: entry("<2a>", "<2b>")}),
+        "disagree": refusal_of(
+            {"first": entry("<2a>", ""), HOSTILE_NAME: entry("", "<2a>")}
+        ),
+        "wrong placement": refusal_of({HOSTILE_NAME: entry(prefix, "")}, stated="tgt"),
+    }
+
+
+@pytest.mark.parametrize("situation", list(hostile_refusals()))
+def test_a_corpus_name_or_prefix_with_a_line_break_and_an_escape_is_quoted_on_one_line(
+    situation: str,
+) -> None:
+    message = hostile_refusals()[situation]
+
+    assert message.isprintable()
+    assert ESCAPE not in message
+    assert "odd\\n\\x1b[31mred\\x1b[0m" in message
+
+
+def test_a_prefix_of_three_kilobytes_is_cut_to_eighty_characters_with_an_ellipsis() -> (
+    None
+):
+    prefix = "<2khk_Cyrl> " + "y" * 3000
+
+    message = refusal_of({"corpus": entry(prefix, "")}, stated="tgt")
+
+    assert f"{prefix[:SHOWN_LIMIT]!r}..." in message
+    assert "y" * (SHOWN_LIMIT + 1) not in message
+    assert len(message) < 600
+    assert "data.corpus.src_prefix" in message
+
+
+def test_a_prefix_of_exactly_eighty_characters_is_quoted_whole() -> None:
+    prefix = "<2khk_Cyrl> " + "y" * (SHOWN_LIMIT - len("<2khk_Cyrl> "))
+
+    message = refusal_of({"corpus": entry(prefix, "")}, stated="tgt")
+
+    assert len(prefix) == SHOWN_LIMIT
+    assert f"{prefix!r}," in message
+    assert "..." not in message
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        {"n" * 3000: "<2khk_Cyrl>"},
+        {"n" * 3000: entry(7, "")},
+        {"n" * 3000: entry("<2a>", "<2b>")},
+        {"first": entry("<2a>", ""), "n" * 3000: entry("", "<2a>")},
+        {"n" * 3000: entry("<2a>", "")},
+    ],
+    ids=["not an object", "not text", "both sides", "disagree", "wrong placement"],
+)
+def test_a_corpus_name_of_three_kilobytes_is_cut_with_an_ellipsis(
+    data: dict[str, Any],
+) -> None:
+    message = refusal_of(data, stated="tgt")
+
+    assert "n" * (SHOWN_LIMIT + 1) not in message
+    assert "..." in message
+    assert len(message) < 700
+
+
+def test_a_plain_corpus_name_is_named_as_it_is() -> None:
+    message = refusal_of({"eng_Latn-khk_Cyrl.auth-2": entry("<2a>", "<2b>")})
+
+    assert "data.eng_Latn-khk_Cyrl.auth-2 has a direction tag" in message
+
+
 # ---- require_saved_placement: the bytes that were hashed are the bytes that are read --------
 
 
@@ -183,7 +287,7 @@ def test_the_saved_config_is_read_once_and_only_when_it_is_the_hashed_file(
         tmp_path, '{"data": {"c": {"src_prefix": "<2khk_Cyrl>", "tgt_prefix": ""}}}'
     )
 
-    require_saved_placement(file, digest, "src")
+    assert require_saved_placement(file, digest, "src") == "checked"
     with pytest.raises(ConfigError, match="'tgt'.*'src'"):
         require_saved_placement(file, digest, "tgt")
     file.write_text('{"data": {"c": {"src_prefix": "", "tgt_prefix": "<2x>"}}}')
@@ -201,3 +305,11 @@ def test_a_saved_config_that_cannot_be_read_or_parsed_is_a_data_error(
         file, digest = write_config(tmp_path / "bad", text)
         with pytest.raises(DataError, match="config.json"):
             require_saved_placement(file, digest, "src")
+
+
+def test_the_saved_config_of_a_baseline_without_a_direction_tag_is_only_stated(
+    tmp_path: Path,
+) -> None:
+    file, digest = write_config(tmp_path, '{"model": {"hidden_size": 64}}')
+
+    assert require_saved_placement(file, digest, "tgt") == "stated"

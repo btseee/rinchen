@@ -29,6 +29,7 @@ with greedy search, and each direction is scored on its own slice. A run prints
     chrF min: <x>
     tag leaks: <n>
     dev lines in training: <n>
+    tag placement: checked against the saved config
     result: <O>/result.json
     manifest: <O>/manifest.json
 
@@ -39,8 +40,12 @@ bytes), `hyp.<direction>.txt` (the hypotheses, one line each), Eole's own `dev.*
 last, `manifest.json` (stage `distill_evaluate`; its inputs are the corpus files, the
 SentencePiece model and the checkpoint's `config.json`, `vocab.json` and weights; its metrics
 `chrf_mean`, `chrf_min`, `tag_leaks`, `dev_in_train` and `lines.<direction>`,
-`chrf.<direction>` and `bleu.<direction>`). The old manifest and result are removed before the
-prediction starts, so a failed run leaves none.
+`chrf.<direction>` and `bleu.<direction>`; its status `evaluate: ok`, the `tag_placement` and the
+`tag_placement_check`). The `tag placement` line says `checked against the saved config` when the
+checkpoint's saved config records the placement and it is the stated one, and `stated, not
+recorded in the checkpoint` when the saved config records none, so that a placement nothing
+could check is never silent; the status holds the same fact as `checked` or `stated`. The old
+manifest and result are removed before the prediction starts, so a failed run leaves none.
 
 Exit codes: 0; 2 for a bad option, a checkpoint directory without the files Eole loads or
 whose path holds `$` or a glob character (Eole globs it), a tag placement its saved config
@@ -70,6 +75,7 @@ from rinchen.cli.train_common import (
     reject_repeated_corpora,
     require_out_apart_from_inputs,
     require_usable_timeout,
+    tag_placement_line,
     write_manifest,
 )
 from rinchen.config.ablation import TagPlacement
@@ -77,7 +83,10 @@ from rinchen.errors import ConfigError, DataError
 from rinchen.manifest.model import ManifestFile
 from rinchen.manifest.stage import begin_commit, output_file, refuse_foreign_manifest
 from rinchen.train.checkpoints import CONFIG_FILE, VOCAB_FILE, WEIGHTS_FILE
-from rinchen.train.distill_saved_config import require_saved_placement
+from rinchen.train.distill_saved_config import (
+    PlacementCheck,
+    require_saved_placement,
+)
 from rinchen.train.eole_cfg import reject_dollar, reject_glob_characters
 from rinchen.train.eole_run import predict_tokens
 from rinchen.train.evaluate import DevResult, evaluate_variant, hypothesis_path
@@ -191,7 +200,7 @@ def evaluate_command(
         hashed = _hash_inputs(corpus, spm_model, source)
         require_out_apart_from_inputs(out_dir, hashed.sources, option="--out-dir")
         refuse_foreign_manifest(target, _STAGE)
-        require_saved_placement(
+        placement_check = require_saved_placement(
             source / CONFIG_FILE, hashed.config_sha256, tag_placement
         )
         training = load_training_rows(corpus)
@@ -225,12 +234,13 @@ def evaluate_command(
                 hashed,
                 checkpoint=checkpoint,
                 tag_placement=tag_placement,
+                placement_check=placement_check,
                 max_lines=max_lines,
                 dev=dev,
             )
         except OSError as exc:
             exit_cannot_write(target, exc, what=_OUTPUTS)
-        for line in _result_lines(result, dev, target, manifest_path):
+        for line in _result_lines(result, dev, placement_check, target, manifest_path):
             typer.echo(line)
 
 
@@ -276,6 +286,7 @@ def _commit(
     *,
     checkpoint: Path,
     tag_placement: TagPlacement,
+    placement_check: PlacementCheck,
     max_lines: int,
     dev: DevRows,
 ) -> Path:
@@ -306,7 +317,11 @@ def _commit(
         ],
         metrics=_metrics(result, dev),
         packages=_TOOL_PACKAGES,
-        status={"evaluate": "ok", "tag_placement": tag_placement},
+        status={
+            "evaluate": "ok",
+            "tag_placement": tag_placement,
+            "tag_placement_check": placement_check,
+        },
     )
 
 
@@ -334,7 +349,11 @@ def _metrics(result: DevResult, dev: DevRows) -> dict[str, float]:
 
 
 def _result_lines(
-    result: DevResult, dev: DevRows, target: Path, manifest_path: Path
+    result: DevResult,
+    dev: DevRows,
+    placement_check: PlacementCheck,
+    target: Path,
+    manifest_path: Path,
 ) -> list[str]:
     return [
         *(
@@ -346,6 +365,7 @@ def _result_lines(
         f"chrF min: {result.chrf_min:.2f}",
         f"tag leaks: {result.tag_leaks}",
         f"dev lines in training: {dev.stats.dev_in_train}",
+        tag_placement_line(placement_check),
         f"result: {target / RESULT_FILE}",
         f"manifest: {manifest_path}",
     ]

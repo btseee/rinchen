@@ -93,6 +93,7 @@ def expected_lines(
         f"chrF min: {low}",
         f"tag leaks: {leaks}",
         "dev lines in training: 0",
+        "tag placement: stated, not recorded in the checkpoint",
         f"result: {workspace.out_dir}/result.json",
         f"manifest: {workspace.out_dir}/manifest.json",
     ]
@@ -287,7 +288,11 @@ def test_the_manifest_vouches_for_the_inputs_the_checkpoint_the_outputs_and_the_
     manifest = manifest_of(workspace)
     assert manifest.stage == "distill_evaluate"
     assert manifest.seed == -1
-    assert manifest.status == {"evaluate": "ok", "tag_placement": "src"}
+    assert manifest.status == {
+        "evaluate": "ok",
+        "tag_placement": "src",
+        "tag_placement_check": "stated",
+    }
     expected_inputs = [
         workspace.corpus,
         workspace.spm_model,

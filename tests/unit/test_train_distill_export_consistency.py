@@ -123,7 +123,7 @@ def test_a_converter_vocabulary_of_the_right_length_is_exported(
 
     record = export_checkpoint(
         teacher.final, out_dir, spm_model=spm_model, tag_placement="src"
-    )
+    ).record
 
     assert record.vocabulary_entries == len(SOURCE_VOCABULARY)
     assert len(json.loads((out_dir / "shared_vocabulary.json").read_text("utf-8"))) == (

@@ -19,6 +19,7 @@ import pytest
 
 from rinchen.cli import distill_evaluate
 from rinchen.manifest import store
+from rinchen.train.distill_saved_config import PlacementCheck
 from tests.support.distill_cli import (
     EvaluateWorkspace,
     OraclePredict,
@@ -50,6 +51,10 @@ def predictor(inputs: Inputs, monkeypatch: pytest.MonkeyPatch) -> OraclePredict:
     oracle = OraclePredict(inputs.spm, build_toy().dev)
     install_predictor(monkeypatch, oracle)
     return oracle
+
+
+def entry(src_prefix: str, tgt_prefix: str) -> dict[str, str]:
+    return {"src_prefix": src_prefix, "tgt_prefix": tgt_prefix}
 
 
 def save_config(workspace: EvaluateWorkspace, data: Any) -> Path:
@@ -111,6 +116,27 @@ def test_a_saved_config_that_is_not_what_eole_writes_is_a_data_error(
     assert not workspace.out_dir.exists()
 
 
+def test_a_foreign_config_with_a_hostile_corpus_name_is_reported_on_one_clean_line(
+    workspace: EvaluateWorkspace, predictor: OraclePredict
+) -> None:
+    # A foreign model may be evaluated, so what its config holds is quoted, never copied raw.
+    escape = chr(0x1B)
+    name = f"odd\n{escape}[31mred{escape}[0m"
+    save_config(workspace, {name: entry("<2khk_Cyrl> " + "y" * 3000, "")})
+
+    result = invoke(workspace.args(*FAST, tag_placement="tgt"))
+
+    assert_one_error(
+        result,
+        2,
+        "the tag placement 'tgt' is not the one the checkpoint was trained with",
+    )
+    assert escape not in result.stderr
+    assert "data['odd\\n\\x1b[31mred\\x1b[0m'].src_prefix" in result.stderr
+    assert len(result.stderr) < 800
+    assert predictor.calls == []
+
+
 def test_the_config_is_read_only_as_the_file_that_was_hashed(
     workspace: EvaluateWorkspace,
     predictor: OraclePredict,
@@ -120,9 +146,9 @@ def test_the_config_is_read_only_as_the_file_that_was_hashed(
     seen: list[tuple[Path, str]] = []
     real = distill_evaluate.require_saved_placement
 
-    def spying(file: Path, digest: str, stated: Any) -> None:
+    def spying(file: Path, digest: str, stated: Any) -> PlacementCheck:
         seen.append((file, digest))
-        real(file, digest, stated)
+        return real(file, digest, stated)
 
     monkeypatch.setattr(distill_evaluate, "require_saved_placement", spying)
 
@@ -133,3 +159,73 @@ def test_the_config_is_read_only_as_the_file_that_was_hashed(
     recorded = {Path(item.path): item.sha256 for item in manifest.inputs}
     assert seen == [(config, hashlib.sha256(config.read_bytes()).hexdigest())]
     assert recorded[config] == seen[0][1]
+
+
+# ---- whether the placement was checked ---------------------------------------------------
+
+CHECKED_LINE = "tag placement: checked against the saved config"
+STATED_LINE = "tag placement: stated, not recorded in the checkpoint"
+
+
+def manifest_status(workspace: EvaluateWorkspace) -> dict[str, str]:
+    manifest = store.read(workspace.out_dir)
+    assert manifest is not None
+    return manifest.status
+
+
+@pytest.mark.parametrize("placement", ["src", "tgt"])
+def test_a_placement_the_saved_config_records_is_reported_as_checked(
+    workspace: EvaluateWorkspace, predictor: OraclePredict, placement: str
+) -> None:
+    save_config(workspace, launcher_data(placement))
+
+    result = run_ok(workspace.args(*FAST, tag_placement=placement))
+
+    lines = result.stdout.splitlines()
+    assert lines.count(CHECKED_LINE) == 1
+    assert STATED_LINE not in lines
+    assert lines[lines.index(CHECKED_LINE) - 1] == "dev lines in training: 0"
+    assert manifest_status(workspace) == {
+        "evaluate": "ok",
+        "tag_placement": placement,
+        "tag_placement_check": "checked",
+    }
+
+
+@pytest.mark.parametrize("placement", ["src", "tgt"])
+@pytest.mark.parametrize(
+    "data",
+    [None, {}, {"corpus": {"src_prefix": "<bt>", "tgt_prefix": ""}}],
+    ids=["no data section", "empty data section", "no direction tag"],
+)
+def test_a_placement_the_checkpoint_does_not_record_is_reported_as_stated(
+    workspace: EvaluateWorkspace,
+    predictor: OraclePredict,
+    placement: str,
+    data: Any,
+) -> None:
+    if data is not None:
+        save_config(workspace, data)
+
+    result = run_ok(workspace.args(*FAST, tag_placement=placement))
+
+    lines = result.stdout.splitlines()
+    assert lines.count(STATED_LINE) == 1
+    assert CHECKED_LINE not in lines
+    assert lines[lines.index(STATED_LINE) - 1] == "dev lines in training: 0"
+    assert manifest_status(workspace) == {
+        "evaluate": "ok",
+        "tag_placement": placement,
+        "tag_placement_check": "stated",
+    }
+
+
+def test_a_refused_placement_prints_no_line_about_the_check(
+    workspace: EvaluateWorkspace, predictor: OraclePredict
+) -> None:
+    save_config(workspace, launcher_data("src"))
+
+    result = invoke(workspace.args(*FAST, tag_placement="tgt"))
+
+    assert result.exit_code == 2
+    assert "tag placement:" not in result.stdout

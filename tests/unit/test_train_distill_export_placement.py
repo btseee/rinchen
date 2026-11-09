@@ -15,6 +15,7 @@ The runs are fabricated by `tests.support.step_dirs` (`launcher_data`) and the c
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -81,10 +82,14 @@ def run_with(tmp_path: Path, data: dict[str, Any] | None) -> Path:
     return make_finished_run(tmp_path / "teacher", model=MODEL, data=data).final
 
 
-def export(checkpoint: Path, target: Path, spm_model: Path, placement: Any) -> Any:
+def exported(checkpoint: Path, target: Path, spm_model: Path, placement: Any) -> Any:
     return export_checkpoint(
         checkpoint, target, spm_model=spm_model, tag_placement=placement
     )
+
+
+def export(checkpoint: Path, target: Path, spm_model: Path, placement: Any) -> Any:
+    return exported(checkpoint, target, spm_model, placement).record
 
 
 def assert_refused_with_nothing_made(
@@ -178,6 +183,45 @@ def test_the_placement_the_checkpoint_records_is_exported(
 
     assert record.tag_placement == placement
     assert len(converter.calls) == 1
+
+
+@pytest.mark.parametrize("placement", ["src", "tgt"])
+def test_an_export_says_the_placement_was_checked_when_the_checkpoint_records_it(
+    placement: str,
+    tmp_path: Path,
+    spm_model: Path,
+    converter: FakeConverter,
+    out_dir: Path,
+) -> None:
+    checkpoint = run_with(tmp_path, launcher_data(placement))
+
+    outcome = exported(checkpoint, out_dir, spm_model, placement)
+
+    assert outcome.placement_check == "checked"
+    assert outcome.record.tag_placement == placement
+
+
+def test_an_averaged_model_is_reported_as_checked_like_a_step(
+    tmp_path: Path, spm_model: Path, converter: FakeConverter, out_dir: Path
+) -> None:
+    averaged = make_averaged_dir(
+        tmp_path / "averaged", model=MODEL, data=launcher_data("src")
+    )
+
+    assert exported(averaged, out_dir, spm_model, "src").placement_check == "checked"
+
+
+def test_the_record_written_does_not_say_whether_the_placement_was_checked(
+    tmp_path: Path, spm_model: Path, converter: FakeConverter, out_dir: Path
+) -> None:
+    # The record keeps its strict schema: the fact is the command's to report, not the file's.
+    checkpoint = run_with(tmp_path, launcher_data("src"))
+
+    exported(checkpoint, out_dir, spm_model, "src")
+
+    document = json.loads((out_dir / "export.json").read_text(encoding="utf-8"))
+    assert "placement_check" not in document
+    assert "checked" not in json.dumps(document)
 
 
 def test_an_averaged_model_with_the_recorded_placement_is_exported(
@@ -274,7 +318,10 @@ def test_a_saved_config_without_a_direction_tag_leaves_the_callers_statement(
 ) -> None:
     checkpoint = run_with(tmp_path, data)
 
-    assert export(checkpoint, out_dir, spm_model, placement).tag_placement == placement
+    outcome = exported(checkpoint, out_dir, spm_model, placement)
+
+    assert outcome.record.tag_placement == placement
+    assert outcome.placement_check == "stated"
 
 
 # ---- a saved config that contradicts itself or is not what Eole writes -----------------------

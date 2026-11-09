@@ -39,6 +39,7 @@ def export_ct2(
     *,
     timeout: float | None = None,
     log_path: Path | None = None,
+    reported_dir: Path | None = None,
 ) -> Path:
     """Convert the Eole checkpoint in `ckpt_dir` to a CTranslate2 model in `out_dir`
     (which must not exist yet) and return `out_dir`.
@@ -48,7 +49,9 @@ def export_ct2(
     `export_log_path(out_dir)`. `timeout` (seconds) bounds it; a converter that runs past
     it is killed with everything it started. A failed export can leave a partial
     `out_dir`, which must be removed before retrying: the converter refuses an existing
-    directory.
+    directory. A caller that writes to a private directory it will rename names the final
+    one as `reported_dir`, which is the path the message about a missing `model.bin`
+    gives (default `out_dir`): the private one would be gone when the message is read.
 
     Raises:
         UpstreamError: the converter exits non-zero or runs past `timeout`, or exits
@@ -79,7 +82,7 @@ def export_ct2(
     if not model_file.is_file() or model_file.stat().st_size == 0:
         raise failure_with_log_tail(
             f"the CTranslate2 export exited with exit code 0 but left no {_MODEL_FILE} "
-            f"in {out_dir}, or an empty one",
+            f"in {out_dir if reported_dir is None else reported_dir}, or an empty one",
             log_path,
         )
     return out_dir

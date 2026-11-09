@@ -57,7 +57,7 @@ def out_dir(tmp_path: Path) -> Path:
 def export(teacher: FabricatedRun, target: Path, spm_model: Path) -> ExportRecord:
     return export_checkpoint(
         teacher.final, target, spm_model=spm_model, tag_placement="src"
-    )
+    ).record
 
 
 def names(directory: Path) -> set[str]:
@@ -82,6 +82,18 @@ def test_the_converter_writes_into_a_private_directory_beside_the_output_not_int
     assert call.out_dir.name == "export"
     assert call.checkpoint == teacher.final
     assert call.log_path == export_log_path(out_dir)
+
+
+def test_the_converter_is_told_to_name_the_output_directory_in_its_messages(
+    teacher: FabricatedRun,
+    spm_model: Path,
+    converter: FakeConverter,
+    out_dir: Path,
+) -> None:
+    export(teacher, out_dir, spm_model)
+
+    (call,) = converter.calls
+    assert call.reported_dir == out_dir
 
 
 def test_a_successful_export_leaves_the_directory_and_its_log_and_nothing_else(
@@ -241,6 +253,52 @@ def test_a_converter_that_leaves_a_file_out_names_the_output_directory(
     message = str(raised.value)
     assert f"left no {name} in {out_dir} " in message
     assert f"the converter's log is {export_log_path(out_dir)}" in message
+    assert names(tmp_path) - before == {"export.export.log"}
+
+
+class ExitingZeroConverter:
+    """Stands in for the process the real `export_ct2` runs (`run_logged`): it exits zero
+    after it made the directory it was told to write to and put `model_bytes` in it as
+    `model.bin` (nothing when None). `built` is that directory."""
+
+    def __init__(self, model_bytes: bytes | None) -> None:
+        self.model_bytes = model_bytes
+        self.built: list[Path] = []
+
+    def __call__(self, command: Any, *, log_path: Path, **options: Any) -> None:
+        built = Path(command[command.index("--output_dir") + 1])
+        self.built.append(built)
+        log_path.write_text("last words of the converter\n", encoding="utf-8")
+        built.mkdir()
+        if self.model_bytes is not None:
+            (built / "model.bin").write_bytes(self.model_bytes)
+
+
+@pytest.mark.parametrize("model_bytes", [None, b""], ids=["missing", "empty"])
+def test_a_converter_that_exits_zero_without_a_model_names_the_output_not_the_private_path(
+    teacher: FabricatedRun,
+    spm_model: Path,
+    out_dir: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    model_bytes: bytes | None,
+) -> None:
+    # The real `export_ct2` runs here, over a private directory that no longer exists when
+    # the message is read: the message names the directory the caller asked for.
+    process = ExitingZeroConverter(model_bytes)
+    monkeypatch.setattr("rinchen.export.eole_ct2.run_logged", process)
+    before = names(tmp_path)
+
+    with pytest.raises(UpstreamError) as raised:
+        export(teacher, out_dir, spm_model)
+
+    message = str(raised.value)
+    (private,) = process.built
+    assert private != out_dir
+    assert str(private.parent) not in message
+    assert f"left no model.bin in {out_dir}, or an empty one" in message
+    assert f"log: {export_log_path(out_dir)};" in message
+    assert message.endswith("last words of the converter")
     assert names(tmp_path) - before == {"export.export.log"}
 
 

@@ -16,17 +16,22 @@ source (`src`) or as a forced prefix of the target (`tgt`): CTranslate2's files 
 it, so the export records what the caller says. The saved config.json of a checkpoint our
 launcher wrote records it in the prefixes of its `data` section, and a placement that
 disagrees is refused (exit 2) before anything is made; a saved config without a `data`
-section, or without a direction tag in it, leaves the statement unchecked. `--out-dir` must not
-exist (the converter refuses a directory that exists, so it works in a private directory made
-beside `--out-dir`, which is renamed onto it when the export is complete; a directory someone
-else makes there in the meantime is refused and kept); the converter's log is `<O>.export.log`
-beside it, and `--timeout` (seconds) bounds the converter.
+section, or without a direction tag in it, leaves the statement unchecked, and the run says
+so (below). `--out-dir` must not exist (the converter refuses a directory that exists, so it
+works in a private directory made beside `--out-dir`, which is renamed onto it when the
+export is complete; a directory someone else makes there in the meantime is refused and
+kept); the converter's log is `<O>.export.log` beside it, and `--timeout` (seconds) bounds
+the converter.
 
 A run prints
 
     exported to <O>
+    tag placement: checked against the saved config
     record: <O>/export.json
     manifest: <O>/manifest.json
+
+where the second line is `tag placement: stated, not recorded in the checkpoint` when the
+saved config holds no placement to check the statement against.
 
 and writes, under O: `model.bin`, `shared_vocabulary.json` and `config.json` (the converter's
 files, run with the GPU hidden), `spm.model` (a copy of the SentencePiece model),
@@ -38,9 +43,10 @@ have now (rows None); its inputs are the checkpoint's weights, `config.json` and
 and the SentencePiece model, with the SHA-256 the verification took before it read any of
 them (the record's; the command never hashes them again). Its metrics are `encoder_layers`,
 `decoder_layers`, `hidden_size`, `vocabulary_entries` and `model_bytes`; its status says
-`export: ok`, the `tag_placement` and the `checkpoint_kind`; its seed is -1 and its config
-digest that of the canonical JSON `{"tag_placement": ...}`. A failure while it is written
-removes the output directory, as a failure of the converter does.
+`export: ok`, the `tag_placement`, the `checkpoint_kind` and the `tag_placement_check`
+(`checked` or `stated`, the fact the second line prints; the record does not hold it); its
+seed is -1 and its config digest that of the canonical JSON `{"tag_placement": ...}`. A
+failure while it is written removes the output directory, as a failure of the converter does.
 
 Exit codes: 0; 2 for a bad option, a checkpoint our manifest does not vouch for, a
 SentencePiece model that is not the checkpoint's, a tag placement the checkpoint's saved
@@ -66,6 +72,7 @@ from rinchen.cli.errors import rinchen_errors_as_exit_codes
 from rinchen.cli.train_common import (
     exit_cannot_write,
     require_usable_timeout,
+    tag_placement_line,
     write_manifest,
 )
 from rinchen.config.ablation import TagPlacement
@@ -76,6 +83,7 @@ from rinchen.train.distill_export import (
     EXPORT_FILES,
     EXPORT_STAGE,
     RECORD_FILE,
+    ExportOutcome,
     ExportRecord,
     export_checkpoint,
 )
@@ -142,27 +150,29 @@ def export_command(
         target = Path(os.path.abspath(out_dir))
         spm = Path(os.path.abspath(spm_model))
         try:
-            record = export_checkpoint(
+            outcome = export_checkpoint(
                 source,
                 target,
                 spm_model=spm,
                 tag_placement=tag_placement,
                 timeout=timeout,
             )
-            manifest_path = _write_manifest(source, spm, target, record)
+            manifest_path = _write_manifest(source, spm, target, outcome)
         except OSError as exc:
             exit_cannot_write(target, exc, what=_OUTPUTS)
         typer.echo(f"exported to {target}")
+        typer.echo(tag_placement_line(outcome.placement_check))
         typer.echo(f"record: {target / RECORD_FILE}")
         typer.echo(f"manifest: {manifest_path}")
 
 
 def _write_manifest(
-    source: Path, spm: Path, target: Path, record: ExportRecord
+    source: Path, spm: Path, target: Path, outcome: ExportOutcome
 ) -> Path:
     """Write the manifest of the export in `target`, last. Anything that goes wrong removes
     `target`: an export directory without its manifest is vouched for by nothing, and the
     next attempt would find the directory in its way."""
+    record = outcome.record
     try:
         return write_manifest(
             target,
@@ -183,6 +193,7 @@ def _write_manifest(
                 "export": "ok",
                 "tag_placement": record.tag_placement,
                 "checkpoint_kind": record.checkpoint.kind,
+                "tag_placement_check": outcome.placement_check,
             },
         )
     except BaseException:
