@@ -521,10 +521,11 @@ script; a unit test covers it with a mislabelled Latin real text.
 | `bt` | any | `bt` | `bt:<generator name>` | `<bt>` |
 | `ft` | `vllm`, `llamacpp` | `synth_llm` | `ft:<generator name>` | `<ft>` |
 | `ft` | `ct2` | `synth_nmt` | `ft:<generator name>` | `<ft>` |
-| (reserved) | our own teacher | `ft` | - | `<ft>` |
+| (D10, not a job kind of `rinchen synth`) | `teacher` | `ft` | `ft:<name>` | `<ft>` |
 
-The plain `ft` origin stays reserved for forward translation by our own teacher (D10);
-D6 never writes it. Every other origin (`human`, `web`, `mined`, `converted`) has no tag
+The plain `ft` origin is forward translation by our own teacher: since D10 the generator kind `teacher`
+gives it (`tags.origin_for`), and `rinchen distill generate` (runbook 10) is the only writer; D6's
+configurable generators (`vllm`, `llamacpp`, `ct2`) never give it. Every other origin (`human`, `web`, `mined`, `converted`) has no tag
 (`data_origin_tag` returns `None`); an origin outside the corpus schema raises
 `ConfigError`. Inserting the tag into a training source belongs to D7 and D8.
 

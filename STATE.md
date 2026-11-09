@@ -806,7 +806,105 @@ beyond toy scale, Windows and macOS. [EVIDENCE: the gate chain, the integration 
 the measurement scripts of the runbook, the spike (`spike-findings.md`) and the review reports, 2026-11-08 to
 2026-11-09, commits `580871d` through `135e9f9`.]
 
-Branch status (updated 2026-11-09, after the D9 build): `main` holds D3, the D3 research follow-up, D4
+**D10 (distillation and students) is done on branch `d10-distillation`; its STOP gate (through the real `rinchen`
+commands and the real Eole and CTranslate2 on the CPU: a tiny teacher of 2,000 steps is exported, its KD corpus of the
+toy training sources is generated, a tiny student of 2 encoder and 1 decoder layers trains for 2,000 steps from random
+initialisation on KD text mixed 1:1 with the originals, its dev chrF is at least 95.0 and at least the teacher's minus
+3.0, and its own CTranslate2 export decodes what Eole decodes on at least 95 % of 200 dev sentences) is met locally.**
+The branch is stacked on `d9-document-level` (cut from it at `7d0c166` on 2026-11-09), is not merged and not pushed, and
+no CI run covers it. It is 13 commits above `d9-document-level` and 91 above `main` at its code tip, and one more with the
+records (the design commit is `e5ff644`; the code tip is `cc917e2`, `D10: fix the vocabulary padding that a teacher
+hypothesis could hold`; the earlier code tip, the gate, is `e67b05e`; the records are `D10: runbook, spec amendments and
+state and decision records`). It is machinery, not a distillation result: the only data it ever ran on is the templated
+toy sentences of `tests/support/tiny_parallel.py`, no real corpus and no real teacher exist, **no GPU was used** (the owner
+did not authorise it; every Eole process had `CUDA_VISIBLE_DEVICES=""` and `gpu_ranks: []`, every CTranslate2 translator
+was built on `device="cpu"`, the converter runs with the device hidden), and `configs/eole/student_server.yaml` and
+`student_edge.yaml` are tables of unmeasured priors that Eole's schema accepts and nothing has trained. Built:
+`rinchen.export.eole_ct2` (D5's converter call MOVED out of `script_conv.export`, which re-exports it),
+`rinchen.train.{distill_export,distill_export_files,distill_saved_config}` (a checkpoint of ours exported to CTranslate2
+with a record and a manifest; the tag placement read back from the saved config; `verify_export`),
+`distill_teacher` (the teacher as D6's `Translator`; six counters), `distill_sources`, `distill_shards`,
+`distill_generate` (KD generation over D6's shard store and selection, with a fingerprint that covers the teacher's
+files), `distill_corpus`, `distill_mix` (the exact integer ratio) and `distill_prepare` (the student's data and config),
+the commands `rinchen distill export|generate|prepare|evaluate` (`cli/distill*.py`), the configs
+`configs/eole/student_{server,edge,tiny}.yaml`, one dict entry in `synth/tags.py` (generator kind `teacher` gives origin
+`ft`), the keyword `kd_tag` of `eole_data.data_section` and the group `kd`, the test helpers `distill_{cli,exports,
+gate,gate_refusals,gate_stages,teachers}.py`, `fake_ct2.py`, `planted_kd.py` and `planted_student.py` in `tests/support/`,
+and `docs/runbooks/10_distillation.md`. The design is `docs/superpowers/specs/2026-11-09-d10-distillation-design.md`
+(amended to the finished code, with section 8 listing each amendment made while building); its rulings T1 to T16 and the
+controller's two rulings (partial KD coverage scales the originals of a direction without KD by K+O; the commands hash
+every input once) are condensed in DECISIONS.md ("2026-11-09: D10 distillation - the rulings, made without a review
+round"), made by the builders and the controller without a review round of their own (none is an approved decision, each lists
+what it costs if wrong). Built task by task with tests first after a spike on the real Eole and CTranslate2 (Tasks 1 to
+7, then ONE combined review, a fix wave and these records; the scoped re-review of the fix wave was running when the
+records were written and is NOT recorded here). **The combined review (an independent reviewer, read-only, Tasks 1 to 7,
+`e5ff644..e67b05e`) found: ready with fixes, 0 Critical, 2 Important and nine groups of Minor findings.** The Important
+ones: the tag placement of an export was the operator's word and never checked although the checkpoint's saved
+`config.json` records it (a source-tag teacher exported with `--tag-placement tgt` exited 0 with a vouching manifest, and
+`generate` over it gave 1,190 rows of which 1 matched an authentic target); and a KD hypothesis holding the unknown piece,
+a reserved symbol or a direction tag decoded to literal text and passed D6's selection. The fix wave (`D10: fix the tag
+placement of an export that its checkpoint contradicts`, `D10: fix the reserved and unknown pieces in a teacher
+hypothesis`, `D10: review minors`, `D10: fix a placement test that read the files of other tests`, `D10: fix the
+vocabulary padding that a teacher hypothesis could hold`) fixed both, the cheap Minor ones (the export is built in a
+private directory beside the output and renamed into place; the vocabulary entry count is cross-checked; the student
+headers; a message) and left open on purpose the ones that `docs/runbooks/10_distillation.md` lists under "Known limits"
+(`generate` exits 0 with few or no rows; a resumed generation reports this process's teacher counters only; "exact" means
+exact weights; memory and scale; no collision rate printed for the `tgt` placement; the gate's test file of 893 lines).
+Gates, run for real on Linux, CPython 3.14.10: `ruff format --check .`, `ruff check .` and `mypy src` clean and
+`pytest -m "not network" -q` -- 8517 passed after Task 1, 8676 after Task 2, 8808 after Task 3, 9064 after Task 4, 9220
+after Task 5, 9395 after Task 6, 9439 after Task 7 (21:08) and **9706 passed, 1 skipped, 10 deselected** after the fix
+wave (`cc917e2`, 20:57), against 8252 at the end of D9; the D5 to D9 regression sets stayed green. Mutation checks by hand,
+one mutant at a time, as recorded per task: 63, 88 (2 equivalent survivors), 95 (and 22 fingerprint mutants), 109, 87 and 65
+for Tasks 1 to 6, ten classes for the gate and 23 for the placement fix.
+Evidence of the STOP gate, through the real `rinchen` binary on the CPU with the GPU hidden (2 threads), measured by the
+gate and again for the runbook on 2026-11-09 (Intel Core Ultra 7 265K, 20 cores, 46 GiB; the machine was loaded by other
+work, so the times are longer than idle; every count and score below was the same in the spike, in the gate and in the
+runbook's run): the tiny teacher through `ablate --prepare-only`, `launch` (2,000 steps, 78 s) and `average --last 2`;
+`distill export` (5.1 s; `model.bin` 2,034,311 bytes, SHA-256 `b7f33d88d5fa...`, `shared_vocabulary.json` 344 entries,
+2/2 layers, hidden 64); `distill generate` (2.8 s): 3,600 sources, 3,599 rows (1 `no_survivor` and 1 `dropped_purity`,
+both `khk_Cyrl-rus_Cyrl`), `matches reference` 3,583 of 3,599 (1,200, 1,191, 597 and 595), 10 shards, the rerun reuses 10 of
+10 with the same rows, the teacher counters all 0 but `sources` 3,600 (`reserved_symbol` 0); `distill prepare --mix 1:1` (1.7 s):
+original weights 22, 6, 22, 6, 15, 7, 15, 7 and KD weights 28, 28, 22, 22 (200 in all, 12 corpora, 400 validation lines,
+`src_vocab_size` 641), `--mix 3:1` 84, 84, 66, 66 (exactly 3 times, a dry run writes nothing); the student through `launch`
+(65 s; 2 encoder and 1 decoder layers in its saved `config.json`); `distill evaluate` (4 s each) on 100 dev lines per
+direction: teacher chrF **98.20** (98.51, 98.29, 97.79, 98.20), student **98.58** (98.82, 99.30, 97.54, 98.67), no tag leak,
+no dev line in training; `distill export` of the student (3.8 s; `model.bin` 1,835,438 bytes); CTranslate2 greedy against
+`eole predict` greedy **200 of 200 equal**, "This is the star." gives the Mongolian "Энэ бол од."; a second student with a
+500-piece SentencePiece model prepared (`src_vocab_size` 501) and trained for 200 steps; fifteen refusals, each exit 2 in 1.0
+to 1.3 s with Eole and the converter not started. The thresholds (teacher chrF at least 90.0, student at least 95.0 and at
+least the teacher's minus 3.0, CTranslate2 equal to Eole on at least 95 %, at least 3,550 KD rows) were not lowered. **The toy
+ranks nothing**: three seeds of the student span 1.9 chrF (98.58, 98.59, 96.68), the originals-only student (97.01) is inside
+the spread, and 99.6 % of the KD targets equal the authentic targets: do not read the gate as evidence that KD helps.
+Findings worth knowing: upstream facts about CTranslate2 4.8.4 and Eole 0.6.4, in `docs/VERIFY.md` ("D10 findings") and in
+DECISIONS.md. CTranslate2 maps an unknown tag to `<unk>` silently, cuts a hypothesis at `max_decoding_length` and a source at
+1,024 pieces silently (ask for the end token and cap the source yourself), and returns a forced target prefix as the first
+token of every hypothesis; its converter keeps the whole padded vocabulary of the checkpoint, so the model can emit `<blank>`
+and padding tokens that decode to their letters. **Selecting by MBR over the beam's n-best lowered the agreement of the KD
+targets with the references on the toy (99.6 % to 76.4 %; ranks 2 to 4 are 41 chrF below rank 1)**, so the top hypothesis is
+the default. **Eole's batch deduplication drops 5.2 % of the examples when the KD corpus is mixed untagged (798 of 15,360), and
+0 % with the `<ft>` tag**, which `prepare` adds by default. A student with unequal depths (2/1) trains from random
+initialisation with no code change; a 3/1 shape at the same recipe did not converge in 2,000 steps (chrF 38). The tag
+placement IS in the saved `config.json` of a checkpoint our launcher wrote, which the spike had missed.
+Open gates (none can be done without real data or a GPU): a real teacher's KD corpus and the measured quality of a student
+distilled from it; the real mix ratio, the repeat factor that is too high, the n-best and MBR on a real teacher and the QE
+thresholds (the real scorer was never loaded); the real students' training (`student_server.yaml` and `student_edge.yaml` are
+priors: speed, convergence, learning rate, steps, the depth recipe); the real share of Eole's deduplication and whether `<ft>`
+at inference helps; everything on a GPU or in float16 or int8, the export of a 1.1 B-parameter teacher (time, memory, a 13 GB
+checkpoint's hashing); the strict parity and quantisation gates (D11); the D3 gates assigned to D4, the D5 gates that need real
+text or a reader and the D6 to D9 gates stay open.
+Known and open: the limits listed in the runbook (`generate` exits 0 with few or no rows; a resumed generation reports this
+process's counters only and the manifest key `teacher.name` is the KD corpus name; "exact" means exact weights, `num_workers`
+above 1 with weights was not run and `--mix 10000:9999` has no guard; memory and scale unmeasured; no collision rate printed by
+`prepare`; `distill evaluate` on an unparseable `config.json` exits 3; the export record does not say whether the placement was
+derived or stated; the "cannot continue from" wording of `verify_source`); `distill_export.py` has 754 lines, `eole_cfg.py` 860,
+`launch.py` 886 and the gate's test file 893 (the limit is 900); the student gate's margin (95.0 against 98.58, the lowest seed
+96.68): if it flakes elsewhere raise `train_steps`, never lower the gate. NOT verified: any run on a GPU or a real corpus,
+CTranslate2 on another device, float16 or int8, `num_workers` above 1 with weights, the `tgt` placement for a real student,
+KeyboardInterrupt with a real CTranslate2 call, Windows and macOS. [EVIDENCE: the gate chain, the integration test module, the
+real-binary runs and the measurement scripts of the runbook (`scratchpad/d10-t8/`), the spike (`spike-findings.md`) and the
+review report, 2026-11-09, commits `e5ff644` through `cc917e2`.]
+
+Branch status (updated 2026-11-09, after the D10 build): `main` holds D3, the D3 research follow-up, D4
 and D5, and is at `0d534a3` (the commit that records the D5 merge; `862e176` is the D5 merge tip,
 `2346cea` was the D3 end, `b38eaae` the D4 merge tip and `4eac98f` the commit that recorded the D4 merge;
 no `d3-research-followup`, `d4-filtering-mining` or `d5-script-converter` ref remains). D6 lives on its own
@@ -814,10 +912,14 @@ branch, `d6-synthetic-data`, cut from `main` at `0d534a3`; D7 lives on `d7-multi
 on it (cut from `d6-synthetic-data` at `9973319`); D8 lives on `d8-teacher-training`, stacked on D7 (cut from
 `d7-multilingual-ablations` at `b1a8a47`); D9 lives on `d9-document-level`, stacked on D8 (cut from
 `d8-teacher-training` at `993f32c`; its last code commit is `135e9f9`, `D9: re-review minors`, and the records are
-`6746ac5` and the commit `D9: record the re-review`). None
-of the four is merged into `main` and none is pushed; merging D9 means merging D6, D7 and D8 first. At the D5 merge `main` was 81 commits ahead of `origin/main`
-(`9e7b0ec`); it is unpushed, and no CI run covers D3, D4, D5, D6, D7, D8 or D9. The full local gate was last run
-on the D9 branch: 8252 passed, 1 skipped, 10 deselected (D6 to D9 included), on `D9: re-review minors` (`135e9f9`;
+`6746ac5` and the commit `D9: record the re-review`); D10 lives on `d10-distillation`, stacked on D9 (cut from
+`d9-document-level` at `7d0c166`; its last code commit is `cc917e2`, `D10: fix the vocabulary padding that a teacher
+hypothesis could hold`, and the records are the commit `D10: runbook, spec amendments and state and decision records`). None
+of the five is merged into `main` and none is pushed; merging D10 means merging D6, D7, D8 and D9 first. At the D5 merge `main` was 81 commits ahead of `origin/main`
+(`9e7b0ec`); it is unpushed, and no CI run covers D3, D4, D5, D6, D7, D8, D9 or D10. The full local gate was last run
+on the D10 branch: 9706 passed, 1 skipped, 10 deselected (D6 to D10 included), on `D10: fix the vocabulary padding that a
+teacher hypothesis could hold` (`cc917e2`; 9439 on `D10: the tiny student gate`, `e67b05e`; 8517 after Task 1); on the D9
+branch it gave 8252 passed, 1 skipped, 10 deselected on `D9: re-review minors` (`135e9f9`;
 8214 on `D9: review minors`, `c2d46b5`; 8075 after Task 5, 7187 at the end of D8); on the D8 branch it gave 7114
 passed, 1 skipped, 10 deselected (D6, D7 and D8 included), on `D8: review minors of the
 launcher` (`3e357ae`; 7020 after Task 5, 5968 on D7's last commit, `D7: re-review minors`) and again, with the final
@@ -826,18 +928,20 @@ commit (`D6: re-review minors`) it gave 4331 passed; on the merged D5 tree `main
 whole-branch review of D8 ran (above); its fix wave's scoped re-review approved it with minors and the minor
 that needed code is fixed (`D8: re-review minors`).
 
-Next step: D10 (Distillation & students): `train/distill.py` (the teacher's n-best through CTranslate2 into a
-sequence-level distillation corpus, an optional QE filter, mixing with the original data by ratio),
-`configs/eole/student_server.yaml` and `student_edge.yaml`, `docs/runbooks/10_distillation.md`; STOP: a tiny student
-exported. Nothing in D9 blocks it. Its inputs from D9: the vocabulary invariant (every vocabulary holds every reserved
-symbol; a config that goes through `launch` and states a `src_vocab_size` must state at least its SentencePiece
-pieces plus one, so 64,001 for the 64k student, and a config that states none gets Eole's 32,768), `rinchen train
-launch` and `average` as in D8 (a student is trained from random initialisation: `--continue-from` is for OUR teacher
-only, with its provenance rule), `predict_tokens(max_length, max_length_ratio)` (a distillation run that reads
-`eole predict` output must state both, because the cut is silent), and for document-level teacher data `docify` and
-`rinchen.infer.doc_chunker`. What D9 does not give D10: any trained teacher, any real document or sentence corpus, a
-measured batch, learning rate or throughput, and any evidence on a GPU; the open gates above and the D3 to D8 gates
-stay open.
+Next step: D11 (Export, quantization, serving, CLI, package): `export/ct2.py` (`convert(eole_ckpt, out, quantization)`:
+the converter, then the SentencePiece models and `rinchen.json`), `export/quantize.py` (`int8`, `int8_float16`),
+`infer/engine.py`, `serve/*`, the `rinchen translate` command and the Python API, the parity and quantisation gates and
+`docs/runbooks/11_serving.md`; STOP: `docker compose up` serves a tiny model. Nothing in D10 blocks it. Its inputs from D10:
+the converter call `rinchen.export.eole_ct2.export_ct2` (with its `log_path`), an export directory of `model.bin`,
+`shared_vocabulary.json`, `config.json`, `spm.model`, `export.json` and a manifest, `verify_export` as its reader and the
+record (tag placement, the checkpoint's digests, layer counts), `ct2_source_tokens` (the source and the forced prefix by
+placement) and the guards of `TeacherTranslator` (the end token, the source limit, the tag check, the reserved-symbol rule:
+CTranslate2 is silent about all of them), a tiny student exported and CTranslate2-equal to Eole on 200 of 200 dev sentences,
+and the CTranslate2 facts of `docs/VERIFY.md` ("D10 findings"). Observation for D11, not a ruling: `verify_export` and the
+record live in `rinchen.train.distill_export`, and `infer/` must not import `train` (a test pins its file set), so the engine
+that reads an export needs the reader moved or re-stated outside `train`. What D10 does not give D11: any real teacher or
+student, the strict parity (log-probabilities) and quantisation measurements, any evidence on a GPU or in float16 or int8, and
+`rinchen.json`; the open gates above and the D3 to D9 gates stay open.
 
 D0 (environment, skeleton, doctor): `pyproject.toml` restructured to the
 master plan's toolchain (see `docs/STACK.md` for resolved versions),

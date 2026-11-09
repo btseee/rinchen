@@ -43,14 +43,15 @@ configs/data/synth.yaml
 configs/eole/converter{,_tiny}.yaml configs/spm/converter_char.yaml
 configs/eole/{multilingual_tiny,ablation_tiny,multilingual_proxy,ablation_priors}.yaml
 configs/eole/{teacher,teacher_tiny}.yaml configs/eole/{teacher_doc,teacher_doc_tiny}.yaml
+configs/eole/student_{server,edge,tiny}.yaml
 docs/STACK.md docs/VERIFY.md
 docs/runbooks/00_environment.md docs/runbooks/01_acquisition.md
 docs/runbooks/02_human_testsets.md docs/runbooks/03_tokenizer.md
 docs/runbooks/04_filtering_mining.md docs/runbooks/05_script_converter.md
 docs/runbooks/06_synthetic.md docs/runbooks/07_ablations.md docs/runbooks/08_teacher.md
-docs/runbooks/09_document_level.md
+docs/runbooks/09_document_level.md docs/runbooks/10_distillation.md
 docs/research/  docs/superpowers/{specs,plans}/
-src/rinchen/{config,manifest,utils,cli,text,lang,split,spm,corpus,filter,mine,script_conv,synth,metrics,eval,serve}/
+src/rinchen/{config,manifest,utils,cli,text,lang,split,spm,corpus,filter,mine,script_conv,synth,metrics,eval,serve,export}/
 src/rinchen/acquire/{http,opus,hf,warc,commoncrawl,registry}.py
 src/rinchen/annotate/{db,export,agreement,app,routes,models}.py
 src/rinchen/spm/{symbols,corpus,train,check}.py src/rinchen/split/rules.py
@@ -68,8 +69,12 @@ src/rinchen/train/{eole_cfg,eole_run,sampling,variants,mixture,corpus_files,eole
 src/rinchen/train/{ablation_plan,ablation_config,ablation_layout,ablation_prepare,ablation,ablation_records,ablation_report}.py
 src/rinchen/train/{checkpoints,curves,average,launch,gpu_rules,launch_command,run_lock}.py
 src/rinchen/train/{docify,doc_source,doc_pack,doc_corpus,continuation,vocabulary_size,eole_cfg_keys}.py
-src/rinchen/infer/doc_chunker.py
+src/rinchen/infer/doc_chunker.py src/rinchen/export/eole_ct2.py
+src/rinchen/train/{distill_export,distill_export_files,distill_saved_config,distill_teacher,distill_sources}.py
+src/rinchen/train/{distill_shards,distill_generate,distill_corpus,distill_mix,distill_prepare}.py
 src/rinchen/config/ablation.py src/rinchen/cli/{train,train_runs,train_common,train_docify}.py
+src/rinchen/cli/{distill,distill_export,distill_generate,distill_generate_plan,distill_generate_records}.py
+src/rinchen/cli/{distill_prepare,distill_evaluate}.py
 src/rinchen/utils/{logged_process,integers}.py
 src/rinchen/errors.py src/rinchen/__init__.py
 tests/ scripts/ plans/ reports/ manifests/
@@ -79,7 +84,8 @@ tests/support/ (planted corpus and alignments, fake embedders, tiny LID model,
   tiny_converter, stub_runtime, fake_process, script_reference, planted_synth,
   synth_cli, fake_llm_server, shard_files, corpus_rows, eole_train_config, tiny_parallel,
   tiny_variant, train_cli, fake_ablation, step_dirs, fake_launch, fake_eole_process, launch_cli,
-  signal_handlers, doc_cli, doc_rows)
+  signal_handlers, doc_cli, doc_rows, distill_cli, distill_exports, distill_gate, distill_gate_refusals,
+  distill_gate_stages, distill_teachers, fake_ct2, planted_kd, planted_student)
 scripts/build_spm_fixture.py (regenerates tests/fixtures/spm/tiny_corpus)
 scripts/build_script_conv_fixtures.py (reference TSV -> lexicon, golden words, tiny fixture)
 data/{raw,clean,mined,synth,test}/ (gitignored content, tracked dirs)
@@ -161,8 +167,27 @@ wave approved it with minors (no Critical or Important finding) and a second fix
 refuses it and names the value to state), `docify` on a split that makes no windows or on rows read without it, and
 the wording of the `average` guard; three limits stay documented (the `average` guard sees three lexical parents only,
 documents are keyed per `corpus` label and not per file, the `launch` pre-flight needs the SentencePiece model
-readable from the working directory when a size is stated). Next up: D10 (Distillation & students). See `STATE.md`,
-`docs/runbooks/08_teacher.md` and `docs/runbooks/09_document_level.md`.
+readable from the working directory when a size is stated). D10 (Distillation & students) is done locally on branch
+`d10-distillation`, stacked on `d9-document-level` (cut from it at `7d0c166`; code tip `cc917e2`), not merged and not pushed,
+and no CI run covers it: its STOP gate (through the real `rinchen distill` commands, `rinchen train launch` and the real Eole
+and CTranslate2 on the CPU, a tiny teacher of 2,000 steps is exported, its KD corpus of the toy training sources is generated,
+a tiny student of 2 encoder and 1 decoder layers trains from random initialisation on that text mixed 1:1 with the originals,
+and its own CTranslate2 export decodes what Eole decodes) is met on toy templated data: teacher chrF 98.20, student 98.58,
+3,599 KD rows, CTranslate2 equal to Eole on 200 of 200 sentences, no threshold lowered. It is machinery, not a distillation
+result: the toy ranks nothing (three seeds of the student span 1.9 chrF), no GPU was used (the one on this machine was not
+authorised), no real corpus or teacher exists, and `configs/eole/student_server.yaml` and `student_edge.yaml` are tables of
+unmeasured priors; everything on a GPU (float16, int8, the export of a 1.1 B-parameter teacher, the real students' training) and
+the quality of any real KD stay open. D10 moved D5's converter call to `rinchen.export.eole_ct2`, exports a checkpoint of ours
+with a record and a manifest, reads the tag placement back from the checkpoint's saved config and refuses a statement that
+disagrees, and found that CTranslate2 is silent about an unknown tag, a cut hypothesis and a cut source (all guarded), that
+selecting by MBR over the toy teacher's n-best lowered the agreement with the references (top-1 is the default), and that Eole
+drops 5.2 % of the examples when KD rows are mixed in untagged and 0 % with the `<ft>` tag. A combined review of the code ran:
+ready with fixes, no Critical finding and two Important ones (the tag placement of an export was never checked; a KD hypothesis
+with an unknown or reserved piece passed the selection); its fix wave (`D10: fix ...` x 4 and `D10: review minors`, gate 9706
+passed, 1 skipped, 10 deselected) fixed both and left open on purpose the limits that `docs/runbooks/10_distillation.md` lists
+under "Known limits"; a scoped re-review of the fix wave was running when the records were written and is not recorded.
+Next up: D11 (Export, quantization, serving, CLI, package). See `STATE.md`, `docs/runbooks/08_teacher.md`,
+`docs/runbooks/09_document_level.md` and `docs/runbooks/10_distillation.md`.
 
 ## Evidence and full plan
 

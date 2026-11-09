@@ -202,3 +202,17 @@ What the toy cannot answer, and where the code leaves room:
 6. **A document-level teacher, monolingual KD sources, several teachers, the `tgt` placement for a real student.** Not built; the extension points are `ct2_source_tokens`, `KdSources`/`kd_sources`, the loader that merges KD files per direction, and `eole_data.data_section`'s `placement`.
 7. **CTranslate2 on a GPU, in float16 or int8, and the export of a 1.1 B teacher.** Nothing here ran on a device other than the CPU; `--device cuda` and `--compute-type` are passed through and recorded, unmeasured; D11 owns the strict parity and the quantisation gates.
 8. **Resumed runs report fewer teacher counters**, and `verify_source` refuses with "cannot continue from": both are recorded limits, not fixed.
+
+---
+
+## As built (added by Task 8)
+
+The plan above was written before the build and is kept as written; where the build differs, the spec's section 8 ("Amendments made while building") and `docs/runbooks/10_distillation.md` say what the code does. The points a reader of the tasks needs:
+
+- Task 1: the placement is NOT only the operator's word: the saved `config.json` of a checkpoint our launcher wrote records it, and the review's fix wave made `distill export` and `distill evaluate` refuse a statement that disagrees (`train/distill_saved_config.py`). The converter writes into a private directory beside the output, renamed into place, and the record's vocabulary entry count is cross-checked.
+- Task 2: SIX counters (`empty_source` in the task, `reserved_symbol` from the fix wave), not three.
+- Task 3: letterless sources are counted, not sent; `train/distill_shards.py` is an extra module; the fingerprint recipe dropped redundant entries.
+- Task 4: a direction without a KD corpus has its originals scaled by `K + O` (the controller's ruling on partial coverage).
+- Tasks 5 and 6: the commands hash every input once and pass the digests on; `prepare_student(kd_digests=, before_writing=)` and `load_kd_rows(digests=)` are the seams; `generate` is three modules.
+- Task 7: no threshold moved; the measured numbers (teacher chrF 98.20, student 98.58, 3,599 rows, 3,583 matches, 200 of 200) are the same in the spike, the gate and the runbook's run.
+- The combined review and its fix wave added behaviour the tasks did not list (the placement check, the reserved-symbol rule, the staging layout, the message of the glob refusal of `generate`); the limits it left open are the runbook's "Known limits".

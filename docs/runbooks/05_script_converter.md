@@ -69,7 +69,7 @@ from where.
 | `config.py` | Renders the Eole configuration of a profile, validates it, writes it as YAML, reads the checkpoint and character model paths back |
 | (moved by D7) | `run_logged` (a command with its output in a log, a timeout, and a kill of its whole process group) is `rinchen/utils/logged_process.py`; the generic Eole runner (`run_training`, `predict_tokens`, `eole_commands`) is `rinchen/train/eole_run.py`, which `train.py` wraps |
 | `train.py` | `run_training` (`eole build_vocab` then `eole train`), `eole_commands`, `predict` (`eole predict` on CPU) |
-| `export.py` | `export_ct2` (CTranslate2 export with CUDA hidden) and `parity` (CTranslate2 against Eole) |
+| `export.py` | `parity` (CTranslate2 against Eole) and, since D10, the re-exports of `export_ct2` (CTranslate2 export with CUDA hidden), `export_environment` and `export_log_path`, which live in `rinchen/export/eole_ct2.py` (moved so that `rinchen train` can use them; behaviour unchanged, `export_ct2` gained an optional `log_path`) |
 | `runtime.py` | `ScriptConverter`: CTranslate2 plus the character model, a word cache, validation of every output, rule fallback |
 
 `src/rinchen/cli/convert_script.py` holds the five commands. It is the only module
@@ -80,7 +80,7 @@ on `fallback`, `segments` and `alphabet`; `data` on `rules`, `validate`, `alphab
 and `rinchen.text.normalize`; `config` on `char_model`'s tags (it hard-codes the
 file layout of `data` by convention, and a test pins it against
 `CORPUS_FILE_NAMES`); `train` on `config`, `char_model` and `rinchen.train.eole_run`; `export`
-on `char_model` and `rinchen.utils.logged_process`; `runtime` on `segments`, `rules`, `validate`,
+on `char_model` and `rinchen.export.eole_ct2` (which imports `rinchen.utils.logged_process`); `runtime` on `segments`, `rules`, `validate`,
 `alphabet`, `char_model` and `rinchen.text.normalize`.
 
 ## Commands
@@ -524,14 +524,14 @@ above. The spec's "Evidence from the spikes" holds the original measurements.
 | Eole expands `$NAME` over the text of the YAML file | A `$` in a path or a string is silently replaced by an environment variable's value | The validator rejects a `$` in any key or string of the config, `run_training` in the config text, and `predict` in the checkpoint directory and the output path (ConfigError, exit 2) |
 | Eole reads ONE validation corpus, the one named `valid`, and trains on every other corpus name | A second validation corpus named `valid_mong2cyrl` would be TRAINED on | `valid` holds the Cyrillic-to-script direction only; the script-to-Cyrillic direction is trained but has no validation loss |
 | The master plan's forbidden key names are not Eole fields | `model.max_relative_positions`, `model.alibi` and `model.num_kv` are rejected by Eole as unknown; the real fields `heads_kv`, `sliding_window` and `relative_positions_buckets` are accepted silently | `FORBIDDEN_KEYS` holds 16 real field names (rotary, relative position buckets, sliding window, layer types, grouped-query heads); a drift test imports Eole and checks that each is a real field and that no rotary, relative, sliding-window or grouped-query field of the installed Eole is missing |
-| `eole_ct2` export SEGFAULTS when a CUDA device is visible | Exit code -11 (139 in a shell) and an empty `model.bin`; the fault is `ctypes.string_at` on a device pointer in `ctranslate2/specs/model_spec.py:757` (`Variable.to_bytes`) | `export_environment()` sets `CUDA_VISIBLE_DEVICES=""`. Reproduced again on 2026-11-07 on the tiny checkpoint: exit 139, `model.bin` 0 bytes. `RINCHEN_CT2_CUDA_PROBE=1` runs the probe as a test |
+| `eole_ct2` export SEGFAULTS when a CUDA device is visible | Exit code -11 (139 in a shell) and an empty `model.bin`; the fault is `ctypes.string_at` on a device pointer in `ctranslate2/specs/model_spec.py:757` (`Variable.to_bytes`) | `export_environment()` (in `rinchen/export/eole_ct2.py` since D10) sets `CUDA_VISIBLE_DEVICES=""`. Reproduced again on 2026-11-07 on the tiny checkpoint: exit 139, `model.bin` 0 bytes. `RINCHEN_CT2_CUDA_PROBE=1` runs the probe as a test |
 | Eole copies the `valid` corpus's `src_prefix` into the checkpoint and the checkpoint overrides the prediction config | `eole predict` ran every file under the Cyrillic-to-script tag, whatever the config said; see below | `predict()` tokenises and tags itself and runs Eole with `transforms: []` |
 | SentencePiece merges unknown characters into one unknown piece spelled like the text | A tag whose characters the model never saw looks atomic: `encode(tag, out_type=str)` is `['▁', tag]` | `check_char_model` compares ids and requires `piece_to_id(tag) != unk_id` |
 | `hard_vocab_limit=False` makes `vocab_size` a cap | A cap below the number of characters silently drops the rarest; the fixture trains to 73 pieces at a cap of 512. Eole's `src_vocab_size` is a cap too | `train` runs `check_char_model` on the corpus words after training; the tiny config uses 200 |
 | CTranslate2 source tokens are `[tag, *sp.encode(text, out_type=str)]` | The dummy-prefix piece is a token of its own; `config.json` has `add_source_bos` and `add_source_eos` false | `ScriptConverter`, `parity` and `predict` build tokens this way |
 | `str.split()` with no argument splits at U+202F | A script word is cut from its separated suffix | Every word split in the package is `split(" ")` or `segment()` |
 | `-W error` on the command line crashes the SentencePiece SWIG import | A test run dies on import | Do not pass it |
-| Eole globs the checkpoint directory, so `[`, `]`, `*` and `?` in the run directory are pattern syntax (`D-EOLE-GLOB-CKPT` in `docs/VERIFY.md`) | The loader finds no shard (`No safetensors file found`) or the shards of sibling directories | Since D7 `run_training` and `predict` refuse such a run directory with a `ConfigError` at once (the guard is shared with D7's `rinchen train ablate`; before, such a path trained and then failed at prediction). `export_ct2` (the CTranslate2 conversion) is still unguarded and fails for such a directory |
+| Eole globs the checkpoint directory, so `[`, `]`, `*` and `?` in the run directory are pattern syntax (`D-EOLE-GLOB-CKPT` in `docs/VERIFY.md`) | The loader finds no shard (`No safetensors file found`) or the shards of sibling directories | Since D7 `run_training` and `predict` refuse such a run directory with a `ConfigError` at once (the guard is shared with D7's `rinchen train ablate`; before, such a path trained and then failed at prediction). `export_ct2` (the CTranslate2 conversion, in `rinchen/export/eole_ct2.py` since D10) is still unguarded and fails for such a directory; `rinchen distill export` refuses such paths before it calls it |
 
 The decoders: CTranslate2 and Eole agree on 448/448 words in both directions on the
 tiny model, but on the 500-word spike model they differed on one word where both
@@ -776,7 +776,7 @@ o-like substitute counts) are also still open; they are listed in
 ## Where the code lives
 
 `src/rinchen/script_conv/` (modules above, plus `lexicon.tsv` and
-`standardized_variants.tsv`), `src/rinchen/cli/convert_script.py`,
+`standardized_variants.tsv`), `src/rinchen/export/eole_ct2.py` (the converter call, moved here by D10; runbook 10), `src/rinchen/cli/convert_script.py`,
 `configs/eole/converter.yaml` and `converter_tiny.yaml` (renderings, never
 hand-edited), `configs/spm/converter_char.yaml`,
 `scripts/build_script_conv_fixtures.py`, `tests/fixtures/script_conv/`,

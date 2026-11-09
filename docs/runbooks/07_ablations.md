@@ -63,7 +63,7 @@ invocations, a probe of the mixture build at 1,000,000 and 4,000,000 rows).
 | `rinchen/train/variants.py` | `Variant`, `expand_variants` (the product of the axes and the seeds) |
 | `rinchen/train/mixture.py` | Which corpus rows train and which are dev rows, and what was counted: `load_training_rows`, `load_dev_rows`, `MixtureStats`, `DevStats`, `source_collision_rate` |
 | `rinchen/train/corpus_files.py` | The plain-text corpus files Eole reads: `build_corpora`, `planned_corpus_sizes`, `planned_corpus_files`, `bt_usage_by_direction`, reuse by digest sidecar |
-| `rinchen/train/eole_data.py` | The Eole `data` section: `data_section`, `bt_tag` |
+| `rinchen/train/eole_data.py` | The Eole `data` section: `data_section` (with the `kd_tag` keyword since D10: a corpus of the group `kd`, which only `rinchen distill prepare` makes, is marked with `<ft>` as a `bt` corpus is with `<bt>`; an ablation has none), `bt_tag`, `ft_tag` |
 | `rinchen/train/validation_corpus.py` | The dev sets as SentencePiece token lines: `dev_token_lines`, `write_validation`, `require_direction_tags`, `load_processor` |
 | `rinchen/train/evaluate.py` | `evaluate_variant`: one prediction over all dev lines, decoding, corpus chrF and BLEU per direction, `tag_leaks` |
 | `rinchen/train/ablation_layout.py` | Where the files of a run go (`variant_paths`, `data_dir`); touches no disk |
@@ -227,7 +227,8 @@ Before the check was added, `--out-dir 'out[1]'` trained a whole variant and the
 prediction; `--out-dir 'out*'` passed only because the pattern matched four sibling checkpoints, so
 another run's weights could have been scored as this one's. Only the checkpoint directory is globbed;
 a corpus, config or SentencePiece path may hold those characters. D5's `export_ct2` is handed a
-checkpoint directory and fails the same way; it was not changed.
+checkpoint directory and fails the same way; its behaviour was not changed (D10 moved it to
+`rinchen/export/eole_ct2.py`; `rinchen distill export` refuses such paths before it calls it).
 
 ## Commands
 
@@ -301,7 +302,8 @@ dry run with exit 2, not after the data directory has been written.
 
 How to read it: `rows kept` are the training rows; each excluded row is counted under the first
 reason that applies, in the order `not_train`, `filtered` (a `filter_reason` is set), `excluded_origin`
-(origin `ft`, `synth_llm` or `synth_nmt`: forward-translated data enters training with D8 and D10; also
+(origin `ft`, `synth_llm` or `synth_nmt`: forward-translated data never enters an ablation; it enters a
+student's training only through D10's `rinchen distill prepare`, which reads KD files by its own loader; also
 counted by origin), `empty` (null, empty or whitespace-only text) and `line_break` (a character
 `str.splitlines` splits at, U+2028 included, which would turn one sentence into two lines of a text
 file); `rows read = rows kept + the exclusions`. `dev in train` counts dev lines whose row id is also
@@ -594,7 +596,7 @@ that the sizes raised to it do not fit a float is a `ConfigError` naming the var
 
 The direction tag of a corpus is the tag of its target language (`<2khk_Cyrl>`, `<2eng_Latn>`,
 `<2rus_Cyrl>`, ...; the registry in `configs/languages.yaml`), one SentencePiece piece. A
-back-translated corpus also carries `<bt>`.
+back-translated corpus also carries `<bt>`; a KD corpus of D10 (group `kd`) carries `<ft>` the same way.
 
 | Placement | Training (Eole `prefix` transform) | Prediction (the harness) |
 |---|---|---|
@@ -806,8 +808,10 @@ gates assigned to D4 and the D5 gates that need real text stay open as recorded 
   teacher (runbook 09).
 - **`xavier_uniform` at scale**: toy only.
 - **CTranslate2 export and Eole-native prediction of a tag-on-target model**: not tested (the
-  harness predicts from pre-tokenised lines with the tag forced). D5's `export_ct2` fails for an
-  output directory with glob characters (`D-EOLE-GLOB-CKPT`); D5 was not changed.
+  harness predicts from pre-tokenised lines with the tag forced; the D10 spike did export a target-tag teacher to
+  CTranslate2, with a forced prefix, and got 200 of 200 equal to Eole's greedy output: runbook 10). D5's `export_ct2`
+  (moved by D10 to `rinchen/export/eole_ct2.py`) fails for an output directory with glob characters
+  (`D-EOLE-GLOB-CKPT`); its behaviour was not changed.
 - **SIGKILL** of `rinchen`: the child is not cleaned up (above). `rinchen train launch` (D8) holds a
   lock that the Eole it started keeps, so a second launch is refused while an orphan trains (runbook
   08); `ablate` has no such lock.

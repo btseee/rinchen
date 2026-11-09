@@ -2602,3 +2602,171 @@ the gate.
 
 Gate after the second fix wave: 8252 passed, 1 skipped, 10 deselected (1,217 s). The tiny doc integration test (`tests/integration/test_train_tiny_doc.py`, real
 Eole on the CPU, GPU hidden) passed: 29 tests in 219 s.
+
+## 2026-11-09: D10 distillation - the rulings, made without a review round
+
+D10 (`src/rinchen/export/eole_ct2.py`, `src/rinchen/train/{distill_export,distill_export_files,distill_saved_config,
+distill_teacher,distill_sources,distill_shards,distill_generate,distill_corpus,distill_mix,distill_prepare}.py`,
+`src/rinchen/cli/distill*.py`, `configs/eole/student_{server,edge,tiny}.yaml`, one dict entry of `synth/tags.py`, the
+`kd_tag` keyword of `train/eole_data.py`, the constant `KD_GROUP` of `train/mixture.py`) filled gaps in the master plan with
+the rulings below. **They were made by the builders and the controller without a review round of their own.** None is an
+approved decision; each lists what it costs if wrong so that it can be undone. (One combined review of the code ran after
+Task 7; it reviewed the work, not these rulings, and its findings and fixes are in "2026-11-09: D10 review - corrections and
+fixes" below.) The design with the full wording is `docs/superpowers/specs/2026-11-09-d10-distillation-design.md` (T1 to
+T16, amended to match the finished code, and its section 8, "Amendments made while building"; the numbers below are the
+same); procedures, measured numbers and the known limits are in `docs/runbooks/10_distillation.md`; the upstream facts are in
+`docs/VERIFY.md`, section "D10 findings". The work lives on branch `d10-distillation`, stacked on `d9-document-level` (cut
+from it at `7d0c166`); it is not merged and not pushed.
+
+[DESIGN: T1. The teacher is a checkpoint of OURS (the final step of a run `rinchen train launch` finished, or a directory
+`rinchen train average` wrote) whose manifest vouches for its files (`continuation.verify_source`); `rinchen distill export`
+turns it into a directory of the converter's three files, `spm.model`, `export.json` and a manifest, with the converter MOVED
+to `rinchen.export.eole_ct2`.] The layering test forbids `train` to import `script_conv`, so `export_ct2` moved out of D5's
+`script_conv.export`, which re-exports the three names with its behaviour unchanged (one edit to an existing test: the CUDA
+probe patches the new module). The spike and the first design said the tag placement "is not in the checkpoint": it IS in the
+saved `config.json` of a checkpoint our launcher wrote (the `src_prefix` and `tgt_prefix` of its `data` section), so
+`--tag-placement` stays a required option, is recorded, and is refused when the saved config places the tag elsewhere (the
+review's I1). The record does not say whether the placement was derived or stated. The converter writes into a child of a
+private directory made beside the output and the child is renamed onto it. Cost if wrong: an export made before the check
+cannot be re-verified; a record schema bump would refuse every existing record; a kill leaves a `.<name>.<random>` directory
+beside the output.
+
+[DESIGN: T2. The teacher is a `Translator` (`TeacherTranslator`, CTranslate2 behind D6's protocol) that guards what the library
+does silently, and counts what it drops under six counters.] CTranslate2 maps an unknown tag to `<unk>`, cuts a hypothesis at
+`max_decoding_length` and a source at 1,024 pieces without a sign, and returns a forced target prefix as the first token of the
+hypothesis (spike; `D-CT2-UNKNOWN-TAG`, `D-CT2-END-TOKEN`, `D-CT2-INPUT-TRUNCATION`, `D-CT2-TARGET-PREFIX`). So the tag of every
+target language must be an entry of `shared_vocabulary.json` and one SentencePiece piece (`check_directions`), the end token is
+always asked for and a hypothesis without it is dropped (`truncated`), a source of more than `max_source_pieces` (default 256, at
+most 1,023) is not sent (`source_too_long`), a source with no piece is not sent (`empty_source`), a hypothesis holding a piece no
+translation holds is dropped before it is decoded (`reserved_symbol`, added after the review) and one with a line break is dropped
+(`line_break`), each under the first reason that applies. The device is `cpu` or `cuda`, never `auto`. Cost if wrong:
+`--device cuda` and `--compute-type` are passed through and were never run; the counters cover this process only.
+
+[DESIGN: T3 and T4. The sources are the `src` texts of the AUTHENTIC training rows (D7's `load_training_rows`, group `auth`), one
+per direction and text; generation uses D6's shards, selection and `build_rows` with a fingerprint of its own that covers the
+teacher's files.] D6's job fingerprint names a model, not the weights behind a path, so a rerun with another teacher would reuse
+the wrong shards. The fingerprint is the SHA-256 over the teacher's five-file identity and tag placement, the decoding options
+that decide a hypothesis (not the batch size or the threads), `shard_size`, `seed` and the `(id, text)` rows per direction; the
+selection thresholds are not in it (as D6). A source with no letter or digit is not sent (the teacher would invent a sentence
+for a zero-width character) and is counted. Cost if wrong: a shard directory per fingerprint accumulates; the generation holds
+the references of every source in memory (unmeasured at scale).
+
+[DESIGN: T5, T6 and T7. A KD row is a row of the corpus schema with origin `ft` (generator kind `teacher`) and label
+`ft:<name>`; the KD target is the beam's top hypothesis (`--n 1`); `--qe` is refused when its scorer cannot run.] **Selecting by
+MBR over the n-best lowered the agreement of the KD targets with the authentic ones on the toy** (3,583 of 3,599, 99.6 %, for the
+top hypothesis; 2,749 of 3,600, 76.4 %, for n = 4 with MBR; ranks 2 to 4 are about 41 chrF below rank 1, and 871 of 14,400
+candidates of n = 4 failed the script rule; `D-KD-NBEST-MBR`), so `n = 1` is the default and n-best as extra targets is not built
+(the schema has no rank column). Cost if wrong: a real teacher's n-best may help, which nobody measured; the toy teacher is
+overfit, so `matches_reference` is 99.6 % and says nothing about KD. The real QE scorer needs a GPU and was never loaded; its
+thresholds (script share 0.9, MetricX-QE floor 8.0) are priors.
+
+[DESIGN: T8. `--mix K:O` is exact in the WEIGHTS, in every direction: the originals weigh `O x` D7's weights and the KD corpus
+`K x` their sum, so the KD share is `K/(K+O)` and the directions' shares are the temperature's.] The controller ruled on a case
+the design did not cover: **a direction WITHOUT a KD corpus (`generate --direction` covered only some) has its originals scaled
+by `K + O` instead of `O`**, so that its share of the draws stays the temperature's and the weights add up to `(K + O) x` the sum
+of D7's (the toy: 33, 66, 34, 34 and KD 33, 200 in all). Full coverage is the design's. Cost if wrong: the draw share rests on
+`D-EOLE-WEIGHT-SEMANTICS` (measured for Eole's mixer); `num_workers` above 1 with weights was not run and `--mix 10000:9999` gives
+a weight sum near 2 million with no guard; `kd.repeat.<direction>` (how many times more often a KD row is drawn than an original
+one: 1.25 at 1:1 on the toy) is recorded and never gated.
+
+[DESIGN: T9. KD corpora are tagged `<ft>` by default (`<2xx> <ft>` for the placement `src`, `<ft>` alone as `src_prefix` for
+`tgt`); `--no-kd-tag` is allowed and recorded.] Eole drops, silently, a training example whose tokenised source equals one already
+in the same minibatch (`D-EOLE-BATCH-DEDUP`); a KD row repeats an original source, so with the KD corpus mixed 1:1 and untagged
+**5.19 % of the examples were dropped (798 of 15,360 at 2,048-token batches, 5,317 of 102,400 at 16,384) against 0 % with `<ft>`
+and 0 % for the originals alone** (spike, measured again for the runbook: 798 of 15,360 untagged, 0 of 13,312 and 0 of 102,400
+tagged; `D-EOLE-BATCH-DEDUP-KD`). The tag cost nothing measurable (chrF 98.58, 98.55 with `<ft>` at inference), and the student is
+used without it. Cost if wrong: on real data the KD rows rarely equal the references, so the collisions and the benefit of the tag
+are UNMEASURED; whether `<ft>` helps a real student is open.
+
+[DESIGN: T10. The student configs: `student_server.yaml` (encoder 16, decoder 3, hidden 768, heads 12, feed-forward 3072),
+`student_edge.yaml` (12, 2, 512, 8, 2048), `student_tiny.yaml` (2, 1, 64, 4, 128); `src_vocab_size` 64,001 for the 64k
+SentencePiece model; each student has its OWN SentencePiece model.] The shapes are the master plan's. Parameter counts are
+ARITHMETIC (190,845,963, 79,006,218 and the teacher's 1,102,982,164, by a formula that reproduces the element counts of the two tiny
+checkpoints exactly). Unequal depths need no code (`D-EOLE-LAYER-COUNTS`); **a 3/1 shape at the 2/1 recipe did not converge in 2,000
+steps (dev chrF 38.4 against 98.6)**, so a depth needs its own recipe, unmeasured for the real shapes. A student with a 500-piece
+SentencePiece model against the teacher's 640 trained on the KD text unchanged and reached chrF 89.4 against 98.6 (the coarser model
+cuts nouns into characters): what changes is the validation corpus (cut with the student's model), `src_vocab_size` (pieces plus
+one: 501) and the evaluation. The server and edge schedules are the teacher's scaled to the model, with one difference the headers
+state (`attention_dropout: [0.1]`). Cost if wrong: every value of the server and edge configs is an unmeasured prior.
+
+[DESIGN: T11, T12 and T15. `distill prepare` lays out the data and config of a student (reading the KD files only with a valid
+manifest) and trains nothing; `distill evaluate` scores any checkpoint of ours on the `dev` rows with its own SentencePiece model;
+every command hashes its inputs ONCE before it reads them and writes its manifest last.] The controller ruled on hashing: the CLI
+hashes every input once (`hash_input`) and passes the KD digests to `load_kd_rows(digests=)`, which compares them with the manifest
+instead of hashing a large file twice (a spy test pins it); `prepare_student(before_writing=)` runs once after every refusal and
+before the first write, so a refusal never deletes an old manifest and a dry run writes nothing, not even the directory. The window
+between a hash and the read is every command's. Cost if wrong: a file swapped in that window is read as it is; the digests guard
+against a mistake or a stale file, not against someone who writes a manifest by hand.
+
+[DESIGN: T13 and T14. D10 builds only the export its gate needs (`export/eole_ct2.py`, `train/distill_export.py` and the command);
+D11 takes over quantisation, `rinchen.json`, the engine, serving and the strict parity gate. No document-level teacher, no
+monolingual KD sources, no `<ft>` at inference.] The gate's CTranslate2 against Eole figure (95 % of 200) is D11's floor, measured
+here on three tiny models (200 of 200 each). Cost if wrong: `verify_export` and the record live in `train`, where `infer/` may not
+import them; D11 has to move or re-state the reader.
+
+[DESIGN: T16. The GPU was not used.] This machine has a GeForce RTX 5070 Ti that the owner did not authorise for a run, so the
+spike, every test and every measurement of D10 ran with `CUDA_VISIBLE_DEVICES=""`, `gpu_ranks: []` and CTranslate2 on
+`device="cpu"`, and the converter runs with the device hidden (`D-CT2-EOLE-CUDA`). Everything GPU-side is unmeasured. Cost if
+wrong: none to undo; the cost of the choice is the list of open gates in the runbook.
+
+[DESIGN: Controller rulings, smaller ones.] The D10 branch is stacked on D9, and merging D10 means merging D6, D7, D8 and D9 first.
+The reviews of D10 use one combined review after Task 7, one fix wave and a scoped re-review, instead of one per task. A
+checkpoint without our manifest is never a teacher; `train_from` and `reset_optim` stay unknown keys in every config and are never
+rendered; the edits to D5 to D9 are limited to `script_conv/export.py` (imports), `synth/tags.py` (one entry), `train/mixture.py`
+(one constant), `train/eole_data.py` (one keyword) and `cli/main.py` (registration), plus `train/eole_cfg.py` (an optional `reason`
+of two refusal helpers, from the review). Cost if wrong: each is one place to change.
+
+[EVIDENCE: the STOP gate.] Through the real `rinchen` binary on the CPU with the GPU hidden, the same numbers in the spike, the gate
+and the runbook's run: the tiny teacher (2,000 steps, averaged) exported (`model.bin` 2,034,311 bytes, 344 vocabulary entries); 3,600
+sources, 3,599 KD rows, 3,583 equal to an authentic target; the mix 1:1 weights 22, 6, 22, 6, 15, 7, 15, 7 and KD 28, 28, 22, 22
+(`3:1`: 84, 84, 66, 66); the student (2 encoder, 1 decoder layers, 2,000 steps) chrF 98.58 against the teacher's 98.20, no tag leak;
+its export `model.bin` 1,835,438 bytes, CTranslate2 equal to Eole on 200 of 200 sentences; a second student with a 500-piece
+SentencePiece model prepared and trained. **The toy ranks nothing** (three seeds of the student: 98.58, 98.59, 96.68; originals only
+97.01), and no threshold was lowered (teacher at least 90.0, student at least 95.0 and the teacher's minus 3.0, CTranslate2 at least
+95 %, at least 3,550 rows). Cost if wrong: none; the numbers test machinery, not quality.
+
+## 2026-11-09: D10 review - corrections and fixes
+
+A combined review of D10's Tasks 1 to 7 (an independent reviewer, read-only, `e5ff644..e67b05e`) found: ready with fixes, 0 Critical,
+2 Important and nine groups of Minor findings, and reproduced the STOP gate (44 tests passed in 240 s, the numbers as above). It
+checked and found sound: the move of the converter, the hashes taken before anything is parsed, the SentencePiece comparison, the
+stripping of the target prefix, the alignment when sources are skipped, `auto` refused, the lazy imports, the completeness of the
+fingerprint, a truncated shard regenerated, the QE orientation, the mix through the real CLI (partial coverage 33, 66, 34, 34 and KD
+33, sum 200; 3:2 giving KD 99 against 66; a back-translated mix at 2:1 with KD 62 = 2 x 31 and 38 = 2 x 19), the `tgt` rendering
+(`src_prefix` `<ft>`, `tgt_prefix` the direction tag), the foreign manifests, the dry runs, KeyboardInterrupt (exit 130), the
+independence of the gate's tests, the shapes and the arithmetic, the hygiene and the edits to existing files. The fix wave (one
+commit each, failing test first) fixed:
+
+- I1 (`95a28c8`): the tag placement of an export was the operator's word and never checked although the checkpoint's saved
+  `config.json` records it; a source-tag teacher exported with `--tag-placement tgt` exited 0 with a vouching manifest and
+  `generate` over it gave 1,190 rows of which 1 matched an authentic target, Cyrillic garbage that passed the script rule. The new
+  `distill_saved_config.py` reads the placement back and `export` and `evaluate` refuse a statement that disagrees (exit 2, before
+  anything is made); a saved config without a `data` section or a direction tag keeps the statement; contradictory saved data is a
+  `DataError` (exit 3). The export record is unchanged: it does not say derived or stated. 23 mutants; real artifacts: source-tag
+  teacher + `tgt` exit 2, + `src` exit 0; target-tag teacher + `src` exit 2; student + `tgt` exit 2.
+- I2 (`46c160e`, `cc917e2`): a KD hypothesis holding the unknown piece, the end token inside it, a reserved symbol or a direction tag
+  decoded to literal text and passed D6's selection (`dropped_purity 0`); the teacher now drops it before decoding and counts it
+  under the new counter `reserved_symbol` (counts file, manifest metrics, result line); the second commit extended the rule to the
+  vocabulary entries that are no SentencePiece piece (`<blank>`, `averyunlikelytoken0`). 800 real hypotheses gave 0, so the rule has
+  no real positive. The wrong-placement export produces garbage with no reserved symbol, so I2 would not have caught it: I1 prevents it.
+- Minors (`6eb778a`): M1 the export cleanup could remove a directory another process made at the output path (the converter now
+  writes into a private directory beside the output, renamed into place; a rename onto an empty directory appearing in the last
+  instant would still replace it, stated in the code); M2 the record's vocabulary entry count is checked against the converter's
+  `shared_vocabulary.json` and a saved config with two SentencePiece models is refused (the converter reads the weights after the
+  digest: stated); M6 the student headers say that `attention_dropout: [0.1]` differs from `teacher.yaml`; M9 the glob refusal of
+  `generate --out-dir` no longer talks about Eole. `d3ed47f`: a test of the fix wave digested a directory shared with other tests.
+
+Edits to existing tests, all forced: the counter key set in five files, three assertions on the converter's output directory. Gate
+after the fix wave: 9706 passed, 1 skipped, 10 deselected (20:57), against 9439 before it and 8252 at the end of D9; the integration
+module 44 passed (180 to 190 s) twice.
+
+Left open on purpose (controller decisions; each is documented in the runbook): M3, `generate` exits 0 with few or no rows
+(`load_kd_rows` refuses an empty corpus later); M4, a resumed generation reports the teacher counters of this process only and the
+manifest key `teacher.name` holds the KD corpus name; M5, "exact" means exact weights (`num_workers` above 1 with weights was not
+run, `--mix 10000:9999` gives a weight sum near 2 million above `bucket_size` with no guard); M7, memory and scale (the references
+frozensets, the plan and the fingerprint computed twice, all KD rows in memory); M8, `prepare` prints no `source_collision_rate`,
+although `D-EOLE-BATCH-DEDUP` applies to multi-parallel sources under `--tag-placement tgt`; the gate's test file has 893 lines.
+Also found and not fixed: an export made before I1 cannot be re-checked (the saved config is not in the export directory);
+`distill evaluate` on an unparseable or non-Eole `config.json` exits 3 (it was 4); `verify_source`'s refusals say "cannot continue
+from"; the student gate's margin (95.0 against 98.58 measured). A scoped re-review of the fix wave (`e67b05e..cc917e2`) was
+dispatched at the same time as the records were written; its verdict is not recorded here.

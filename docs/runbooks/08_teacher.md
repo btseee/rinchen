@@ -46,7 +46,8 @@ averager makes one model from the last checkpoints.
   this, consciously: `launch --continue-from` starts a NEW run from OUR OWN teacher, with a provenance
   rule and the identity covering the source, and nothing else may be continued; see
   `docs/runbooks/09_document_level.md`.)
-- **No export, serving or evaluation suite** (D11 to D13).
+- **No export, serving or evaluation suite** (D11 to D13; D10 later added `rinchen distill export`, which exports a
+  checkpoint of ours to CTranslate2 for distillation, and `rinchen distill evaluate`: runbook 10).
 
 Tags used below: **measured** (run for this runbook or by a test of the build), **spike** (run in the
 spike, on the CPU), **source-read, unmeasured** (read from Eole's source, never run), **ARITHMETIC**
@@ -860,7 +861,8 @@ Three things follow:
 
 - **It is not a checkpoint.** It has no optimizer state (`is_complete` names `optimizer.pt`) and is never
   named `step_N`: a resume or another average cannot pick it up. It is for `eole predict`, the
-  CTranslate2 converter (the spike's averager's output ran in both) and, since D9, as the SOURCE of a
+  CTranslate2 converter (the spike's averager's output ran in both; since D10 `rinchen distill export` takes an averaged
+  directory as a teacher, runbook 10) and, since D9, as the SOURCE of a
   continuation: `rinchen train launch --continue-from <averaged>` loads its weights with a fresh optimizer
   when its `manifest.json` (stage `train_average`) vouches for its files (runbook 09). For that reason
   `average` refuses a checkpoint directory that is not inside a run directory with a readable `launch.json`

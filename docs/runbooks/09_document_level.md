@@ -38,7 +38,8 @@ through such a model window by window and still returns exactly one translation 
   `reset_optim` stay unknown keys in every config file.
 - **No mixing of sentence-level corpora into the doc run** (the spike measured that it lowers the alignment at 1,000
   steps; the real recipe is the operator's and unmeasured), **no target-side tag placement for documents**, **no
-  distillation, export, serving or evaluation suite** (D10 to D13): the chunker is a library, not a serving path.
+  distillation, export, serving or evaluation suite** (D10 to D13; D10 has since built `rinchen distill`, runbook 10, for
+  sentence-level teachers): the chunker is a library, not a serving path.
 
 Tags used below: **measured** (run for this runbook or by a test of the build), **spike** (run in the spike, on the
 CPU), **source-read, unmeasured** (read from Eole's source, never run). Every number is from a test, the code, the
@@ -664,7 +665,8 @@ callable), and `src_seq_length` 512 for the windows of real sentences.
 Not done by D9, because no real data, GPU or reader exists: a document model on real documents and its measured
 quality; the real-corpus doc workflow above (mix ratios, window-size mix, the real continuation schedule); anything on a
 GPU (bf16, NCCL, the 13 GB checkpoint of the teacher shape, the time of the continuation); the CTranslate2 export of a
-document model and the use of the chunker in a serving path (D11); the D3 gates assigned to D4, the D5 gates that need
+document model (D10's `rinchen distill export` takes any checkpoint of ours, a document model's included, but none was
+exported or translated) and the use of the chunker in a serving path (D11); the D3 gates assigned to D4, the D5 gates that need
 real text or a reader and the D6, D7 and D8 gates stay open as recorded in their runbooks.
 
 ## What was not verified
