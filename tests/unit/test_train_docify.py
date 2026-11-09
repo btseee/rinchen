@@ -887,6 +887,7 @@ def test_the_rows_of_every_file_are_read_with_the_columns_docify_needs(
         "src",
         "tgt",
         "origin",
+        "corpus",
         "split",
         "filter_reason",
         "doc_id",

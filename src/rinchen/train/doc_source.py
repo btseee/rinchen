@@ -41,11 +41,14 @@ REQUIRED_COLUMNS: Final = (
     "src",
     "tgt",
     "origin",
+    "corpus",
     "split",
     "filter_reason",
     "doc_id",
     "seg_idx",
 )
+# The columns the corpus table types as enums, which docify compares as text.
+_ENUM_COLUMNS: Final = ("origin", "split")
 _REASON: Final = "reason"
 
 
@@ -95,10 +98,8 @@ def read_corpus_rows(paths: Sequence[Path]) -> pl.DataFrame:
             frames.append(
                 scan_corpus(path)
                 .select(
-                    *REQUIRED_COLUMNS[:5],
-                    pl.col("origin").cast(pl.String),
-                    pl.col("split").cast(pl.String),
-                    *REQUIRED_COLUMNS[7:],
+                    pl.col(name).cast(pl.String) if name in _ENUM_COLUMNS else name
+                    for name in REQUIRED_COLUMNS
                 )
                 .collect()
             )
@@ -128,7 +129,7 @@ def classify_rows(rows: pl.DataFrame, split: str) -> ClassifiedRows:
         raise DataError(f"the corpus rows lack the columns {missing}")
     classified = rows.select(REQUIRED_COLUMNS).with_columns(_reason(split))
     candidates = classified.filter(pl.col(_REASON).is_null())
-    for column in ("id", "src_lang", "tgt_lang", "origin"):
+    for column in ("id", "src_lang", "tgt_lang", "corpus", "origin"):
         absent = candidates[column].null_count()
         if absent:
             raise DataError(

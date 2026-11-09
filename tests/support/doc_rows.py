@@ -46,10 +46,12 @@ def doc_row(
     split: str = "train",
     src: str | None = None,
     tgt: str | None = None,
+    corpus: str = "doc-test",
 ) -> dict[str, Any]:
     """One corpus row of sentence `index` of `SENTENCES` (in the direction `languages`)
-    in the document `doc_id` at `seg_idx`; `src` and `tgt` replace the text. The key
-    of a `None` id or index is left out, so the column is null."""
+    in the document `doc_id` of the corpus `corpus` at `seg_idx`; `src` and `tgt`
+    replace the text. The key of a `None` id or index is left out, so the column is
+    null."""
     english, mongolian = SENTENCES[index % len(SENTENCES)]
     forward = languages == EN_MN
     row: dict[str, Any] = {
@@ -58,7 +60,7 @@ def doc_row(
         "src": (english if forward else mongolian) if src is None else src,
         "tgt": (mongolian if forward else english) if tgt is None else tgt,
         "origin": origin,
-        "corpus": "doc-test",
+        "corpus": corpus,
         "split": split,
     }
     if doc_id is not None:

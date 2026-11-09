@@ -4,8 +4,8 @@ sentences, each side joined with ` <sep> `, which a document-level model trains 
 `docify` takes the corpus rows (`read_corpus_rows` reads them whole) and, for one split,
 cuts the rows that can be in a window (`doc_source.classify_rows`: authentic rows of the
 split with a document id, a `seg_idx` and usable text) into windows per `(src_lang,
-tgt_lang, doc_id)` (`doc_pack`: consecutive `seg_idx` only, sizes drawn by a seeded hash,
-shortened to a piece budget). The windows do not depend on the order of the rows or of
+tgt_lang, corpus, doc_id)` (`doc_pack`: consecutive `seg_idx` only, never across two
+corpora, sizes drawn by a seeded hash, shortened to a piece budget). The windows do not depend on the order of the rows or of
 the files.
 
 Every row of the input is counted once, in a window or under the reason it is in none
@@ -103,8 +103,9 @@ class DocStats:
 class DocWindows:
     """The windows (columns `id`, `src_lang`, `tgt_lang`, `src`, `tgt`, `doc_id`,
     `first_seg`, `n_sentences`, `src_pieces`, `tgt_pieces`, sorted by language pair,
-    document and first segment) and what was counted. `id` is the row id of the joined
-    texts (`corpus.schema.make_row_id`)."""
+    corpus, document and first segment; `doc_id` is the id the document has in its
+    corpus, so it can repeat across corpora) and what was counted. `id` is the row id of
+    the joined texts (`corpus.schema.make_row_id`)."""
 
     frame: pl.DataFrame
     stats: DocStats

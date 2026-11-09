@@ -2,16 +2,17 @@
 which rows can be in one.
 
 A window holds only sentences whose `seg_idx` are consecutive (a gap, or a sentence that
-was left out, ends a run) and is cut per `(src_lang, tgt_lang, doc_id)` over the sentences
-sorted by `seg_idx`. Its size is drawn from `[min_size, max_size]` by a seeded hash of
-`(seed, doc_id, seg_idx of its first sentence)`, so the windows do not depend on the order
-of the rows or of the files and the two directions of a document get the same windows. It
-is shortened, down to one sentence, while its source or its target would be longer than
-`max_pieces` SentencePiece pieces; the source counts the direction tag and `<doc>` that
-the prefix transform puts in front of it, and both sides are measured on the JOINED text,
-so the word-boundary piece (U+2581) in front of a `<sep>` counts. The last window of a run
-takes what is left when that is at least `min_size` sentences; fewer are a `tail` (or
-`gap_single` when the whole run is shorter than `min_size`).
+was left out, ends a run) and is cut per `(src_lang, tgt_lang, corpus, doc_id)` over the
+sentences sorted by `seg_idx`; a window never holds sentences of two corpora, whatever
+their `doc_id` and `seg_idx`. Its size is drawn from `[min_size, max_size]` by a seeded
+hash of `(seed, doc_id, seg_idx of its first sentence)`, so the windows do not depend on
+the order of the rows or of the files and the two directions of a document get the same
+windows. It is shortened, down to one sentence, while its source or its target would be
+longer than `max_pieces` SentencePiece pieces; the source counts the direction tag and
+`<doc>` that the prefix transform puts in front of it, and both sides are measured on
+the JOINED text, so the word-boundary piece (U+2581) in front of a `<sep>` counts. The
+last window of a run takes what is left when that is at least `min_size` sentences;
+fewer are a `tail` (or `gap_single` when the whole run is shorter than `min_size`).
 """
 
 from __future__ import annotations
@@ -32,7 +33,9 @@ WINDOW_JOIN: Final = f" {SEGMENT_SEPARATOR} "
 PREFIX_PIECES: Final = 2
 
 _ENCODE_CHUNK: Final = 20_000
-_DOCUMENT_KEY: Final = ("src_lang", "tgt_lang", "doc_id")
+# A document is named within its corpus: D4 names it after the file it came from, so two
+# corpora can hold a document with the same id.
+_DOCUMENT_KEY: Final = ("src_lang", "tgt_lang", "corpus", "doc_id")
 WINDOW_COLUMNS: Final = (
     "id",
     "src_lang",
@@ -85,7 +88,7 @@ class Window:
 
 
 def one_row_per_position(candidates: pl.DataFrame) -> tuple[pl.DataFrame, int]:
-    """The candidates with one row per position `(src_lang, tgt_lang, doc_id,
+    """The candidates with one row per position `(src_lang, tgt_lang, corpus, doc_id,
     seg_idx)` (the first of the rows sorted by id, source and target, so no input order
     decides which) and the number of rows dropped."""
     position = (*_DOCUMENT_KEY, "seg_idx")
@@ -120,8 +123,8 @@ def pack_windows(
 ) -> tuple[list[Window], int, int]:
     """The windows of every document of `sentences` (the sentences that fit the budget
     alone, one per position, as `one_row_per_position` leaves them: sorted by language
-    pair, document and `seg_idx`), the number of sentences alone in their run and the
-    number left over after the last window of a run."""
+    pair, corpus, document and `seg_idx`), the number of sentences alone in their run and
+    the number left over after the last window of a run."""
     keys = list(
         zip(*(sentences[name].to_list() for name in _DOCUMENT_KEY), strict=True)
     )
@@ -130,7 +133,7 @@ def pack_windows(
     windows: list[Window] = []
     singles = tails = 0
     for run in _runs(keys, seg_idx):
-        src_lang, tgt_lang, doc_id = keys[run.start]
+        src_lang, tgt_lang, _corpus, doc_id = keys[run.start]
         starts = len(windows)
         position = run.start
         while position < run.stop:
