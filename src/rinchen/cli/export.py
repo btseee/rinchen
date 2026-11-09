@@ -1,7 +1,8 @@
 """`rinchen export`: the commands on the export directory of a model (D11).
 
 `convert` turns a checkpoint of ours into an export directory (the same command function as
-`rinchen distill export`, D10's name for it, which is registered beside it) and `verify`
+`rinchen distill export`, D10's name for it, which is registered beside it), `parity` checks an
+export against the checkpoint it was made from (`rinchen.cli.export_parity`) and `verify`
 reads one back: it accepts a directory only when `rinchen.export.verified.verify_export`
 does, prints what the record says and the digests of the model and the manifest, and
 changes nothing.
@@ -23,7 +24,7 @@ from typing import Annotated, Final
 
 import typer
 
-from rinchen.cli import distill_export
+from rinchen.cli import distill_export, export_parity
 from rinchen.cli.errors import rinchen_errors_as_exit_codes
 from rinchen.export.record import CT2_FILES
 from rinchen.export.verified import verify_export
@@ -33,6 +34,7 @@ _MODEL_FILE: Final = CT2_FILES[0]
 
 app = typer.Typer(no_args_is_help=True)
 app.command("convert")(distill_export.export_command)
+app.command("parity")(export_parity.parity_command)
 
 
 @app.command("verify")
