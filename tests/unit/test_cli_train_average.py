@@ -44,6 +44,7 @@ def run_dir(tmp_path: Path) -> Path:
 def checkpoints(run_dir: Path) -> Path:
     model_path = run_dir / "ckpt"
     step_dirs.make_run(model_path, STEPS)
+    step_dirs.write_run_record(run_dir)
     return model_path
 
 
@@ -169,6 +170,7 @@ def test_the_default_output_is_beside_a_checkpoint_directory_that_is_a_link(
     step_dirs.make_run(disk / "exp1", (100, 200))
     run = tmp_path / "run"
     run.mkdir()
+    step_dirs.write_run_record(run)
     (run / "ckpt").symlink_to(disk / "exp1", target_is_directory=True)
     monkeypatch.chdir(run)
 
@@ -237,6 +239,74 @@ def test_an_existing_output_is_refused_and_left_alone(
     assert snapshot(run_dir / "averaged") == before
 
 
+def test_checkpoints_that_no_launch_wrote_are_refused_and_nothing_is_written(
+    tmp_path: Path,
+) -> None:
+    # Two step directories laid out by hand: averaged, they would make a model that
+    # passes for ours, and `launch --continue-from` accepts any averaged model that a
+    # `train_average` manifest vouches for.
+    foreign = tmp_path / "foreign" / "ckpt"
+    step_dirs.make_run(foreign, (10, 20))
+    before = snapshot(tmp_path)
+
+    result = runner.invoke(app, args(foreign, "--last", "2"))
+
+    assert_one_error(
+        result, 2, f"cannot average {foreign}: no launch.json within 3 levels above"
+    )
+    assert snapshot(tmp_path) == before
+
+
+def test_the_launch_record_may_be_up_to_three_levels_above_the_steps(
+    tmp_path: Path,
+) -> None:
+    nested = tmp_path / "run" / "models" / "ckpt"  # steps -> ckpt -> models -> run
+    step_dirs.make_run(nested, (10, 20))
+    step_dirs.write_run_record(tmp_path / "run")
+
+    result = run_ok(args(nested, "--last", "2"))
+
+    assert (tmp_path / "run" / "models" / "averaged" / "manifest.json").is_file()
+    assert result.stdout.startswith("averaged: 2 checkpoints")
+
+
+def test_the_run_is_found_above_a_checkpoint_directory_named_relative_to_the_cwd(
+    checkpoints: Path, run_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # `.` has no parent in the path as given: the run directory is above the cwd.
+    monkeypatch.chdir(checkpoints)
+
+    run_ok(["train", "average", "--checkpoint-dir", ".", "--last", "2"])
+
+    assert (run_dir / "averaged" / "manifest.json").is_file()
+
+
+def test_a_launch_record_four_levels_above_the_steps_is_not_looked_for(
+    tmp_path: Path,
+) -> None:
+    deep = tmp_path / "run" / "a" / "b" / "ckpt"
+    step_dirs.make_run(deep, (10, 20))
+    step_dirs.write_run_record(tmp_path / "run")
+
+    result = runner.invoke(app, args(deep, "--last", "2"))
+
+    assert_one_error(result, 2, f"cannot average {deep}: no launch.json")
+    assert not (deep.parent / "averaged").exists()
+
+
+def test_a_launch_record_that_cannot_be_read_is_a_data_error_that_writes_nothing(
+    checkpoints: Path, run_dir: Path
+) -> None:
+    (run_dir / "launch.json").write_text("{not json", encoding="utf-8")
+    before = snapshot(run_dir)
+
+    result = runner.invoke(app, args(checkpoints, "--last", "2"))
+
+    assert_one_error(result, 3, f"cannot average {checkpoints}: ")
+    assert "launch.json" in result.stderr
+    assert snapshot(run_dir) == before
+
+
 def test_fewer_complete_steps_than_asked_for_is_a_data_error_naming_the_count(
     checkpoints: Path, run_dir: Path
 ) -> None:
@@ -280,7 +350,7 @@ def test_checkpoints_of_different_shapes_are_a_data_error_that_leaves_nothing(
 
     assert result.exit_code == 3, result.output
     assert "Traceback" not in result.output
-    assert sorted(path.name for path in run_dir.iterdir()) == ["ckpt"]
+    assert sorted(path.name for path in run_dir.iterdir()) == ["ckpt", "launch.json"]
 
 
 def test_a_nan_in_a_checkpoint_is_a_data_error_that_leaves_nothing(
@@ -293,7 +363,7 @@ def test_a_nan_in_a_checkpoint_is_a_data_error_that_leaves_nothing(
     result = runner.invoke(app, args(checkpoints, "--last", "2"))
 
     assert result.exit_code == 3, result.output
-    assert sorted(path.name for path in run_dir.iterdir()) == ["ckpt"]
+    assert sorted(path.name for path in run_dir.iterdir()) == ["ckpt", "launch.json"]
 
 
 # --- the manifest ------------------------------------------------------------------------
@@ -425,7 +495,7 @@ def test_a_manifest_that_cannot_be_written_removes_the_output_and_exits_1(
     assert_one_error(
         result, 1, f"cannot write the averaged model under {run_dir / 'averaged'}: "
     )
-    assert sorted(path.name for path in run_dir.iterdir()) == ["ckpt"]
+    assert sorted(path.name for path in run_dir.iterdir()) == ["ckpt", "launch.json"]
     monkeypatch.undo()
     assert runner.invoke(app, args(checkpoints, "--last", "2")).exit_code == 0
 
@@ -441,7 +511,7 @@ def test_an_interrupt_while_the_manifest_is_written_removes_the_output(
     result = runner.invoke(app, args(checkpoints, "--last", "2"))
 
     assert result.exit_code == 130, result.output
-    assert sorted(path.name for path in run_dir.iterdir()) == ["ckpt"]
+    assert sorted(path.name for path in run_dir.iterdir()) == ["ckpt", "launch.json"]
 
 
 def test_an_output_that_cannot_be_written_exits_1_naming_it(

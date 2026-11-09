@@ -64,7 +64,11 @@ average
 Averages the newest N (at least 2) COMPLETE `step_<k>` directories of the checkpoint
 directory D (the run's `training.model_path`, not the run directory: its name is the
 config's choice and the config is not read here) into the new directory O, by default
-`averaged` beside D. An existing O is refused. Prints
+`averaged` beside D. An existing O is refused, and so is a D that is not inside a run
+directory with a readable `launch.json` (at most three levels above the steps): an average
+is accepted by `launch --continue-from`, so only the checkpoints of a run `launch` wrote
+are averaged (a guard against a mistake, not against someone who writes the record
+too). Prints
 
     averaged: <n> checkpoints (steps <a>, <b>, ...)
     output: <O>
@@ -109,9 +113,12 @@ from rinchen.train.checkpoints import (
     CONFIG_FILE,
     LAUNCH_FILE,
     OPTIMIZER_FILE,
+    RUN_DIRECTORY_LEVELS,
     VOCAB_FILE,
     WEIGHTS_FILE,
     StepDirectory,
+    read_launch_record,
+    run_directory_above,
     step_directories,
     step_of,
 )
@@ -308,6 +315,7 @@ def average_command(
                 "checkpoint is that checkpoint"
             )
         sources, skipped = _newest_complete(checkpoint_dir, last)
+        _require_a_launched_run(checkpoint_dir, sources[-1])
         target = out if out is not None else _default_output(checkpoint_dir)
         try:
             averaged = average_run([directory.path for directory in sources], target)
@@ -543,6 +551,33 @@ def _newest_complete(
         if not directory.complete and directory.step > chosen[0].step
     ]
     return chosen, skipped
+
+
+def _require_a_launched_run(checkpoint_dir: Path, step: StepDirectory) -> None:
+    """Refuse a checkpoint directory that is not inside a run directory with a readable
+    `launch.json`, so that only the checkpoints of a run `rinchen train launch` wrote are
+    averaged. `launch --continue-from` accepts any averaged model a `train_average`
+    manifest vouches for, and step directories laid out by hand would otherwise become one
+    after a single command: a guard against that mistake, not against someone who also
+    writes the launch record.
+
+    Raises:
+        ConfigError: no run directory holds a `launch.json` near enough above the steps.
+        DataError: the record cannot be read.
+    """
+    run = run_directory_above(Path(os.path.abspath(step.path)))
+    if run is None:
+        raise ConfigError(
+            f"cannot average {checkpoint_dir}: no {LAUNCH_FILE} within "
+            f"{RUN_DIRECTORY_LEVELS} levels above its step directories, so it is not "
+            "the checkpoint directory of a run that `rinchen train launch` wrote; only "
+            "those are averaged, because an average is accepted as the model to "
+            "continue from"
+        )
+    try:
+        read_launch_record(run)
+    except DataError as error:
+        raise DataError(f"cannot average {checkpoint_dir}: {error}") from error
 
 
 def _default_output(checkpoint_dir: Path) -> Path:

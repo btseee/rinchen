@@ -18,7 +18,11 @@ for. `verify_source` accepts exactly two kinds of directory:
               `config.json`, `vocab.json` and `averaged_from.json` with their SHA-256. It
               has no `optimizer.pt` (a file Eole would load that no manifest vouches for,
               so one is refused), and, like a step, no other `model.*.safetensors` than the
-              one the manifest lists: Eole loads every shard of the directory.
+              one the manifest lists: Eole loads every shard of the directory. The two
+              accounts of what it was made from must agree: `averaged_from.json` names at
+              least two source checkpoints, the manifest lists the weights of the same
+              ones (same directories, same SHA-256, same order) as inputs, and the weights
+              the record names are the ones the manifest vouches for.
 
 Nothing else is a source: no manifest, the manifest of another stage, a status that is not
 ok, a manifest that does not list a file, a file whose bytes are not the ones the manifest
@@ -67,6 +71,7 @@ from rinchen.train.checkpoints import (
     CONFIG_FILE,
     LAUNCH_FILE,
     OPTIMIZER_FILE,
+    RUN_DIRECTORY_LEVELS,
     VOCAB_FILE,
     WEIGHTS_FILE,
     ContinuationKind,
@@ -74,9 +79,11 @@ from rinchen.train.checkpoints import (
     architecture_mismatch,
     is_complete,
     read_launch_record,
+    run_directory_above,
     step_of,
 )
 from rinchen.train.eole_cfg import reject_dollar, reject_glob_characters
+from rinchen.utils.integers import is_strict_int
 
 # The manifest stages whose outputs a continuation accepts: the commands write them
 # (the `rinchen train launch` and `average` commands), and the status key each puts its
@@ -85,13 +92,12 @@ LAUNCH_STAGE: Final = "train_launch"
 AVERAGE_STAGE: Final = "train_average"
 _STATUS_KEY: Final = {LAUNCH_STAGE: "launch", AVERAGE_STAGE: "average"}
 
-# `launch.json` is looked for in the source's three nearest parents: `<run>/ckpt/step_<N>`
-# has it two levels up, a checkpoint directory nested one deeper still within three.
-_RUN_DIRECTORY_LEVELS: Final = 3
 # The files that must be listed in the manifest and match it, by kind.
 _STEP_FILES: Final = (WEIGHTS_FILE, OPTIMIZER_FILE, CONFIG_FILE, VOCAB_FILE)
 _AVERAGED_FILES: Final = (WEIGHTS_FILE, CONFIG_FILE, VOCAB_FILE, AVERAGED_FROM_FILE)
 _SHARDS: Final = "model.*.safetensors"
+# `rinchen train average` refuses fewer than two checkpoints.
+_MIN_AVERAGED_SOURCES: Final = 2
 _DIGEST_SHOWN: Final = 12
 
 # The keys of the `model` section a continuation states: it says which architecture it
@@ -268,6 +274,8 @@ def verify_source(source: Path) -> SourceProvenance:
     _require_complete(path, origin)
     _require_plain_files_and_no_other_shard(path, origin)
     digests = _digests_matching_the_manifest(path, origin, listed, manifest_file)
+    if origin.kind == "averaged":
+        _require_record_to_agree_with_manifest(path, manifest, manifest_file, digests)
     return SourceProvenance(
         kind=origin.kind,
         path=path,
@@ -359,16 +367,15 @@ def _step_origin(path: Path) -> _Origin:
 
 
 def _run_directory_above(path: Path) -> Path:
-    """The nearest of the three parents of `path` that holds `launch.json`: the run
-    directory of a checkpoint that `rinchen train launch` wrote."""
-    for parent in path.parents[:_RUN_DIRECTORY_LEVELS]:
-        if os.path.lexists(parent / LAUNCH_FILE):
-            return parent
-    raise _refuse(
-        path,
-        f"no {LAUNCH_FILE} within {_RUN_DIRECTORY_LEVELS} levels above it, so it is "
-        "not a checkpoint of a run that `rinchen train launch` wrote",
-    )
+    """The run directory of a checkpoint that `rinchen train launch` wrote."""
+    run = run_directory_above(path)
+    if run is None:
+        raise _refuse(
+            path,
+            f"no {LAUNCH_FILE} within {RUN_DIRECTORY_LEVELS} levels above it, so it is "
+            "not a checkpoint of a run that `rinchen train launch` wrote",
+        )
+    return run
 
 
 def _vouching_manifest(path: Path, origin: _Origin, manifest_file: Path) -> Manifest:
@@ -476,6 +483,77 @@ def _digests_matching_the_manifest(
             )
         digests[name] = digest
     return digests
+
+
+def _require_record_to_agree_with_manifest(
+    path: Path, manifest: Manifest, manifest_file: Path, digests: dict[str, str]
+) -> None:
+    """`averaged_from.json` and the manifest are two accounts, written by one command, of
+    the checkpoints an average was made from and of the weights it holds: refuse a
+    directory whose two accounts differ, or that names fewer than two checkpoints (an
+    average of one is not one `rinchen train average` wrote). A guard against a mistake,
+    not against a manifest written by hand to match a record written by hand."""
+    record_file = path / AVERAGED_FROM_FILE
+    record = _verified_json(
+        record_file, digests[AVERAGED_FROM_FILE], AVERAGED_FROM_FILE
+    )
+    recorded = _recorded_sources(record, record_file)
+    weights = _recorded_weights(record, record_file)
+    if len(recorded) < _MIN_AVERAGED_SOURCES:
+        raise _refuse(
+            path,
+            f"{AVERAGED_FROM_FILE} names {len(recorded)} source checkpoints: an "
+            "average of fewer than two is not one `rinchen train average` wrote",
+        )
+    # The manifest lists the weights file of each checkpoint, the record the directory.
+    listed = [(str(Path(item.path).parent), item.sha256) for item in manifest.inputs]
+    if recorded != listed:
+        raise _refuse(
+            path,
+            f"{AVERAGED_FROM_FILE} names {len(recorded)} source checkpoints and "
+            f"{manifest_file} lists {len(listed)} inputs, and they are not the same "
+            "checkpoints, with the same SHA-256, in the same order",
+        )
+    if weights != digests[WEIGHTS_FILE]:
+        raise _refuse(
+            path,
+            f"{AVERAGED_FROM_FILE} records other weights than the {WEIGHTS_FILE} the "
+            f"manifest {manifest_file} vouches for",
+        )
+
+
+def _recorded_sources(record: Mapping[str, Any], file: Path) -> list[tuple[str, str]]:
+    """The `(directory, SHA-256)` of each source `averaged_from.json` names."""
+    sources = record.get("sources")
+    if not isinstance(sources, list):
+        raise _not_a_record(file, "`sources` must be a list")
+    recorded: list[tuple[str, str]] = []
+    for source in sources:
+        if (
+            not isinstance(source, dict)
+            or not isinstance(source.get("path"), str)
+            or not isinstance(source.get("sha256"), str)
+            or not is_strict_int(source.get("step"))
+        ):
+            raise _not_a_record(
+                file, "each source must have a `path`, a `step` and a `sha256`"
+            )
+        recorded.append((source["path"], source["sha256"]))
+    return recorded
+
+
+def _recorded_weights(record: Mapping[str, Any], file: Path) -> str:
+    weights = record.get("weights")
+    digest = weights.get("sha256") if isinstance(weights, dict) else None
+    if not isinstance(digest, str):
+        raise _not_a_record(file, "`weights` must have a `sha256`")
+    return digest
+
+
+def _not_a_record(file: Path, problem: str) -> DataError:
+    return DataError(
+        f"{file}: is not a record `rinchen train average` wrote: {problem}"
+    )
 
 
 def _hashed(file: Path, source: Path) -> str:

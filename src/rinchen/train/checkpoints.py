@@ -66,6 +66,10 @@ CONFIG_FILE: Final = "config.json"
 VOCAB_FILE: Final = "vocab.json"
 # The file `write_launch_record` writes into the run directory.
 LAUNCH_FILE: Final = "launch.json"
+# `launch.json` is looked for in the three nearest parents of a checkpoint directory:
+# `<run>/ckpt/step_<N>` has it two levels up, a model path nested one deeper still
+# within three.
+RUN_DIRECTORY_LEVELS: Final = 3
 # The `training` keys a run may change and stay the same run: the target, which a
 # longer run extends, and the checkpoint a resume continues.
 IDENTITY_EXCLUDED_KEYS: Final = ("train_steps", "train_from")
@@ -475,6 +479,17 @@ def write_launch_record(run_dir: Path, record: RunIdentity) -> Path:
         }
     replace_file(path, (json.dumps(document, indent=2) + "\n").encode("utf-8"))
     return path
+
+
+def run_directory_above(path: Path) -> Path | None:
+    """The nearest of the `RUN_DIRECTORY_LEVELS` parents of `path` (a checkpoint
+    directory) that holds `launch.json`: the run directory of a checkpoint that `rinchen
+    train launch` wrote, or None when there is none. Only the presence of the file is
+    looked at (`read_launch_record` reads it)."""
+    for parent in path.parents[:RUN_DIRECTORY_LEVELS]:
+        if os.path.lexists(parent / LAUNCH_FILE):
+            return parent
+    return None
 
 
 def read_launch_record(run_dir: Path) -> RunIdentity | None:

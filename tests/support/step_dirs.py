@@ -373,10 +373,11 @@ def write_manifest(
     *,
     stage: str = LAUNCH_STAGE,
     status: Mapping[str, str] | None = None,
+    inputs: Sequence[ManifestFile] = (),
 ) -> Path:
     """The manifest of `stage` in `directory`, written through `rinchen.manifest.store`,
     listing `files` as outputs with their real SHA-256 and size (the way a stage lists
-    the files it wrote, by the path they had then)."""
+    the files it wrote, by the path they had then) and `inputs` as they are."""
     outputs = [
         ManifestFile(path=str(path), sha256=sha256(path), bytes=path.stat().st_size)
         for path in files
@@ -388,13 +389,22 @@ def write_manifest(
         code_version="0000000",
         config_sha256="0" * 64,
         seed=1234,
-        inputs=[],
+        inputs=list(inputs),
         outputs=outputs,
         metrics={"steps": 200.0},
         tool_versions={"eole": "0.6.4"},
         status=dict(ok if status is None else status),
     )
     return store.write(directory, manifest)
+
+
+def write_run_record(run_dir: Path) -> None:
+    """The `launch.json` that `rinchen train launch` writes into a run directory (which
+    must exist): what makes the directory a run of ours."""
+    write_launch_record(
+        run_dir,
+        RunIdentity(identity="a" * 64, world_size=1, gpu_ranks=(), created=_NOW),
+    )
 
 
 def make_finished_run(
@@ -425,10 +435,7 @@ def make_finished_run(
             vocab_tokens=vocab_tokens,
             vocab_document=vocab_document,
         )
-    write_launch_record(
-        run_dir,
-        RunIdentity(identity="a" * 64, world_size=1, gpu_ranks=(), created=_NOW),
-    )
+    write_run_record(run_dir)
     (run_dir / "command.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
     run = FabricatedRun(run_dir, tuple(steps))
     if manifest:
@@ -437,6 +444,26 @@ def make_finished_run(
         files += [run_dir / LAUNCH_FILE, run_dir / "command.sh"]
         write_manifest(run_dir, files, stage=stage, status=status)
     return run
+
+
+@dataclass(frozen=True)
+class AveragedSource:
+    """One checkpoint an averaged model says it was made from: the step directory as
+    `averaged_from.json` names it (it need not exist), its step and the SHA-256 of its
+    weights."""
+
+    directory: str
+    step: int
+    sha256: str
+
+
+def averaged_sources(directory: Path) -> tuple[AveragedSource, AveragedSource]:
+    """The two checkpoints the averaged model in `directory` is made from by default."""
+    base = directory.parent / "ckpt"
+    return (
+        AveragedSource(str(base / "step_150"), 150, "1" * 64),
+        AveragedSource(str(base / "step_200"), 200, "2" * 64),
+    )
 
 
 def make_averaged_dir(
@@ -449,10 +476,20 @@ def make_averaged_dir(
     stage: str = AVERAGE_STAGE,
     status: Mapping[str, str] | None = None,
     listed: Sequence[str] = (WEIGHTS_FILE, AVERAGED_FROM_FILE, CONFIG_FILE, VOCAB_FILE),
+    recorded: Sequence[AveragedSource] | None = None,
+    inputs: Sequence[AveragedSource] | None = None,
+    recorded_weights_sha256: str | None = None,
+    record_text: str | None = None,
 ) -> Path:
     """What `rinchen train average` leaves in `directory`: the weights, the config and
     vocabulary of the last step, the SentencePiece artifact (never `optimizer.pt`),
-    `averaged_from.json` and, when `manifest`, a manifest of `stage` listing `listed`."""
+    `averaged_from.json` and, when `manifest`, a manifest of `stage` listing `listed`.
+
+    `averaged_from.json` records the sources `recorded` (default `averaged_sources`) and
+    the SHA-256 of the weights (`recorded_weights_sha256`, default the real one); the
+    manifest lists the weights of the sources `inputs` (default the recorded ones), as
+    the command writes them, so the two agree unless a test says otherwise.
+    `record_text` is the whole content of `averaged_from.json` instead."""
     scratch = directory.parent / f".{directory.name}.steps"
     step = make_step_dir(
         scratch,
@@ -465,12 +502,34 @@ def make_averaged_dir(
     for name in (WEIGHTS_FILE, CONFIG_FILE, VOCAB_FILE, SPM_ARTIFACT):
         shutil.copyfile(step / name, directory / name)
     shutil.rmtree(scratch)
+    sources = averaged_sources(directory) if recorded is None else tuple(recorded)
+    weights_sha256 = (
+        sha256(directory / WEIGHTS_FILE)
+        if recorded_weights_sha256 is None
+        else recorded_weights_sha256
+    )
+    record = {
+        "schema_version": 1,
+        "sources": [
+            {"path": s.directory, "step": s.step, "sha256": s.sha256} for s in sources
+        ],
+        "weights": {"file": WEIGHTS_FILE, "sha256": weights_sha256},
+    }
     (directory / AVERAGED_FROM_FILE).write_text(
-        json.dumps({"schema_version": 1, "sources": []}), encoding="utf-8"
+        json.dumps(record) if record_text is None else record_text, encoding="utf-8"
     )
     if manifest:
         write_manifest(
-            directory, [directory / name for name in listed], stage=stage, status=status
+            directory,
+            [directory / name for name in listed],
+            stage=stage,
+            status=status,
+            inputs=[
+                ManifestFile(
+                    path=f"{s.directory}/{WEIGHTS_FILE}", sha256=s.sha256, bytes=1
+                )
+                for s in (sources if inputs is None else inputs)
+            ],
         )
     return directory
 

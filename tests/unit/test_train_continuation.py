@@ -18,6 +18,7 @@ import copy
 import hashlib
 import json
 import shutil
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -249,6 +250,107 @@ def test_an_averaged_directory_without_its_record_is_refused(
     message = refusal(averaged)
 
     assert "averaged_from.json" in message
+
+
+# ---- the record of an averaged model ---------------------------------------------------
+# `averaged_from.json` and the manifest are two accounts of what an average was made from,
+# written by one command; a source whose accounts differ is not what the command made.
+
+
+def two_sources(directory: Path) -> tuple[step_dirs.AveragedSource, ...]:
+    return step_dirs.averaged_sources(directory)
+
+
+def test_an_averaged_model_that_was_moved_is_still_accepted(
+    averaged: Path, tmp_path: Path
+) -> None:
+    moved = tmp_path / "elsewhere" / "averaged"
+    moved.parent.mkdir()
+    shutil.move(averaged, moved)
+
+    assert verify_source(moved).kind == "averaged"
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["other_sha256", "other_path", "one_input_less", "one_input_more", "reordered"],
+)
+def test_an_averaged_model_whose_record_and_manifest_name_other_checkpoints_is_refused(
+    tmp_path: Path, case: str
+) -> None:
+    directory = tmp_path / "avg"
+    first, second = two_sources(directory)
+    extra = step_dirs.AveragedSource(
+        str(tmp_path / "elsewhere" / "step_250"), 250, "3" * 64
+    )
+    inputs = {
+        "other_sha256": (replace(first, sha256="9" * 64), second),
+        "other_path": (replace(first, directory=extra.directory), second),
+        "one_input_less": (first,),
+        "one_input_more": (first, second, extra),
+        "reordered": (second, first),
+    }[case]
+    make_averaged_dir(directory, inputs=inputs)
+
+    message = refusal(directory)
+
+    assert "averaged_from.json" in message
+    assert "manifest" in message
+
+
+@pytest.mark.parametrize("count", [0, 1])
+def test_an_average_of_fewer_than_two_checkpoints_is_refused(
+    tmp_path: Path, count: int
+) -> None:
+    directory = tmp_path / "avg"
+    sources = two_sources(directory)[:count]
+    make_averaged_dir(directory, recorded=sources)
+
+    message = refusal(directory)
+
+    assert "averaged_from.json" in message
+    assert "fewer than two" in message
+
+
+def test_an_averaged_model_whose_record_has_other_weights_than_the_manifest_is_refused(
+    tmp_path: Path,
+) -> None:
+    averaged = make_averaged_dir(tmp_path / "avg", recorded_weights_sha256="e" * 64)
+
+    message = refusal(averaged)
+
+    assert "averaged_from.json" in message
+    assert "weights" in message
+
+
+@pytest.mark.parametrize(
+    "record",
+    [
+        "SECRET-NOT-JSON",
+        '["SECRET"]',
+        '{"sources": "SECRET", "weights": {"sha256": "x"}}',
+        '{"sources": 5, "weights": {"sha256": "x"}}',
+        '{"sources": ["SECRET", "SECRET"], "weights": {"sha256": "x"}}',
+        '{"sources": [{"path": "SECRET"}, {"path": "SECRET"}], "weights": {"sha256": "x"}}',
+        '{"sources": [{"path": 1, "step": 2, "sha256": "SECRET"}], "weights": {"sha256": "x"}}',
+        '{"sources": [{"path": "a", "step": "SECRET", "sha256": "b"}], "weights": {"sha256": "x"}}',
+        '{"sources": [{"path": "a", "step": true, "sha256": "SECRET"}], "weights": {"sha256": "x"}}',
+        '{"sources": [{"path": "a", "step": 1, "sha256": 7}], "weights": {"sha256": "x"}}',
+        '{"sources": [], "weights": "SECRET"}',
+        '{"sources": [], "weights": {"sha256": 3}}',
+        '{"sources": []}',
+    ],
+)
+def test_an_averaged_model_whose_record_is_not_what_average_writes_is_a_data_error(
+    tmp_path: Path, record: str
+) -> None:
+    averaged = make_averaged_dir(tmp_path / "avg", record_text=record)
+
+    with pytest.raises(DataError) as raised:
+        verify_source(averaged)
+
+    assert "averaged_from.json" in str(raised.value)
+    assert "SECRET" not in str(raised.value)
 
 
 @pytest.mark.parametrize("char", ["$", "[", "]", "*", "?"])
