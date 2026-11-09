@@ -2331,3 +2331,224 @@ the D5 spec do not mention the sweep of the process group after a non-zero leade
 documented pid-reuse window of that sweep (the pid_max is 4194304 and pids are handed out sequentially, so a reuse needs a full
 wrap within microseconds; an exact fix with `waitid(WNOWAIT)` would replace the polled wait that the D5 and D7 tests record).
 Cost if wrong: none beyond the documentation.]
+
+## 2026-11-09: D9 document-level - the rulings, made without a review round
+
+D9 (`src/rinchen/train/{docify,doc_source,doc_pack,doc_corpus,continuation,vocabulary_size,eole_cfg_keys}.py`
+with the extensions of `eole_run.py`, `eole_cfg.py`, `checkpoints.py`, `launch.py`, `launch_command.py`,
+`ablation_config.py`, `ablation.py`, `corpus_files.py`, `mixture.py` and `validation_corpus.py`,
+`src/rinchen/infer/doc_chunker.py`, `src/rinchen/cli/{train_docify,train_runs,train_common,train}.py`,
+`configs/eole/{teacher_doc,teacher_doc_tiny}.yaml`) filled gaps in the master plan with the rulings below.
+**They were made by the builders and the controller without a review round of their own, because the user's
+instruction for this stretch was "Proceed. I'm going to sleep now. Don't stop until you finish everything. Commit
+everything." (later "continue").** None is an approved decision; each lists what it costs if wrong so that it can be
+undone. (One combined review of the code ran after Task 5; it reviewed the work, not these rulings, and its findings
+and fixes are in "2026-11-09: D9 review - corrections and fixes" below.) The design with the full wording is
+`docs/superpowers/specs/2026-11-09-d9-document-level-design.md` (T1 to T9, amended to match the finished code, and
+its section 8, "Amendments made while building"; the numbers below are the same); procedures, measured numbers and
+the known limits are in `docs/runbooks/09_document_level.md`; the upstream facts are in `docs/VERIFY.md`, section
+"D9 findings". The work lives on branch `d9-document-level`, stacked on `d8-teacher-training` (cut from it at
+`993f32c`); it is not merged and not pushed.
+
+[DESIGN: T1. Every Eole vocabulary holds every D3 reserved symbol (all 118 of `spm.symbols.user_defined_symbols()`),
+appended by `eole_run.add_reserved_symbols` after `eole build_vocab`; `src_vocab_size` is the SentencePiece pieces
+plus one.] Eole's vocabulary is the file of tokens the data showed, not the SentencePiece vocabulary, so `<doc>` and
+`<sep>` were `<unk>` to the D8 tiny teacher and continuing it on document data was silent (alignment 0.00). The spike
+proposed adding `<doc>` and `<sep>` only (the tiny teacher's vocabulary stayed 232 with just those two); the
+controller ruled for ALL reserved symbols, because the rule is then literal and D12's placeholders and the
+`<bt>`/`<ft>`/`<t>`/`<r>` tags need entries too. The `+1` is Eole's pad token `<blank>`, which is no SentencePiece
+piece and counts against the size (`pyonmttok`'s `maximum_size` counts the special tokens). `run_training` (D7) takes
+`reserved_symbols` and the ablation passes them; D5's converter passes none and is unchanged; `launch` adds them
+for a run about to train; `command.sh` does not. Cost if wrong: every tiny-run number of D7 and D8 moved (see the
+corrections below) and every earlier ablation variant retrains (its config gained `src_vocab_size`); a config that
+reaches `launch` with no `src_vocab_size` gets Eole's default 32,768 and nothing says so; a hand run from
+`command.sh` is not topped up.
+
+[DESIGN: T2. Document windows: per `(src_lang, tgt_lang, corpus, doc_id)` the sentences sorted by `seg_idx`, windows of
+consecutive `seg_idx` only, sizes 2 to 4 drawn by a seeded hash, shortened to a piece budget, every input row counted
+once under a reason.] The corpus is in the key since the review (C1). A tail of fewer than `min_size` sentences is
+dropped and counted (`tail`, `gap_single`); `contains_sep` excludes a sentence with a literal `<sep>`; a literal
+`<doc>` or direction tag inside a sentence is NOT guarded. The budget counts the joined text, so the piece in front of
+a `<sep>` counts, and Eole's `filtertoolong` also counts two boundary tokens of a target, so `docify` passes at most
+`tgt_seq_length - 2`. Cost if wrong: a real corpus with fragmented documents will lose its short runs to `tail` and
+`gap_single` (the dry run says how many); the hash-drawn sizes are one fixed mix (2, 3 and 4 equally likely), which is
+a guess.
+
+[DESIGN: T3. The doc corpora are plain text with the tags in Eole's `prefix` configuration (`src_prefix` `"<2xx>
+<doc>"`, `tgt_prefix` `''`); `rinchen train docify` writes them, the validation windows, a rendered continuation
+config and a manifest, and trains nothing.] `--max-pieces` defaults to, and may not exceed,
+`min(src_seq_length, tgt_seq_length - 2)` of the base config's `filtertoolong`; a split with no window is a
+`DataError`. The validation windows are the dev documents windowed with the fixed seed 0. Cost if wrong: the tag and
+`<doc>` as prefixes are the project's mechanism and measured no different from text (spike); a placement on the target
+side is untested.
+
+[DESIGN: T4. A continuation starts only from OUR OWN checkpoint: the final `step_N` of a run whose `train_launch`
+manifest vouches for its four files, or an averaged directory whose `train_average` manifest vouches for its files and
+whose `averaged_from.json` agrees with that manifest; anything else is a `ConfigError` (a manifest that cannot be read
+is a `DataError`).] The source is recorded in `launch.json` (schema version 2, `continued_from`) and in the manifest's
+inputs, the run identity covers the kind and the SHA-256 of its weights, `config.json` and `vocab.json`, and the
+files are matched to the manifest by name so a moved run still works. `rinchen train average` refuses a checkpoint
+directory with no `launch.json` within three parents. These are guards against mistakes, not against someone who
+writes a manifest and a record by hand, and the hash is not atomic with Eole's own read. Cost if wrong: a forged
+record passes; a source that moved to another machine with other manifests is refused; a resume needs the source to
+exist and verify again (a finished run does not).
+
+[DESIGN: T5 and T6. The first attempt states `train_from: <source>` and `reset_optim: all`; every later attempt states
+`train_from: <own step_N>` and `reset_optim: none`; the config must state the architecture, five optimiser options and
+the SentencePiece model of the source, and the source's vocabulary must hold `<doc>`, `<sep>` and every tag the data
+needs.] The design said a resume of a continuation must DROP `reset_optim`; the real Eole showed that dropping it is not
+enough, because Eole fills a key the YAML omits from the config recorded in the checkpoint, and a continuation's
+checkpoints record `all` (a "resume" of step 40 ran 200 steps from step 1). Only five optimiser options are required
+(`learning_rate`, `warmup_steps`, `decay_method`, `optim`, `adam_beta2`): every other omitted option is inherited from
+the checkpoint too and is not checked (review M2, left open). The SentencePiece model is compared by SHA-256 with the
+copy Eole saved into the source (review I3). Cost if wrong: an operator config that omits `max_grad_norm`,
+`label_smoothing`, `dropout` or the batch size silently continues with the teacher's values; a relative
+SentencePiece path is read from the working directory of `rinchen`.
+
+[DESIGN: T7. The chunker is pure functions over three callables; blank sentences pass through and end the window they
+are in; a window whose output has the wrong segment count, or an empty segment, falls back as a whole to sentence-level
+translation; the budget is 2 plus `count_pieces` of the joined text.] Left open on purpose (review M5, M6, M11): the
+budget measures the source only and `eole predict` truncates a target silently, so a cut inside the last segment still
+counts as aligned; a `translate_sentence` result with `<sep>` passes through; a literal `<doc>` or tag in a sentence
+is not guarded. The module defines its own `<doc>`, `<sep>`, joint and fixed-piece count, because `infer` must not
+import `train` (three definitions, pinned equal by a test). Cost if wrong: D11 must close the first two before a
+serving path relies on the chunker; the fallback repairs the sentence count, not the content (the spike measured it).
+
+[DESIGN: T8 and T9. `predict_tokens` takes `max_length` and `max_length_ratio` (written only when given); the gate
+measures the `<sep>` alignment of held-out dev windows, never translation quality, at 0.9 for each window size after
+2,500 continuation steps.] The spike's and the plan's 1,000 steps do not reach 0.9 on the non-overlapping windows
+`docify` cuts (.955/.847/.886 at 1,000; the spike trained on 7,260 overlapping windows, docify gives 1,194); the
+threshold was not lowered and `teacher_doc_tiny.yaml` trains 2,500 steps (.982/.978/.941), a 3,000-step run was no
+better for size 4 and was not adopted. Cost if wrong: the size-4 margin is .941 against .9 on 202 windows and one
+seed, and the training is repeatable only on this machine and thread count: the review estimated a 5 to 10 percent
+chance of a miss elsewhere; if CI flakes, raise `train_steps`, never lower the gate. Window chrF is not gated (31 at
+1,600 steps in the spike).
+
+[DESIGN: Controller rulings, smaller ones.] The D9 branch is stacked on D8 and merging D9 means merging D6, D7 and D8
+first. The reviews of D9 use one combined review after Task 5, one fix wave and a scoped re-review, instead of one
+per task. `docify` takes a `split` and `DEV_WINDOW_SEED` 0 cuts the validation windows; `read_corpus_rows` loads only
+the splits it is asked for; D7's CLI helpers `reject_repeated_corpora`, `numbers_under` and `corpus_manifest_files`
+moved to `cli/train_common` with their behaviour unchanged; `eole_cfg_keys.py` took the key lists out of `eole_cfg.py`
+(976 to 856 lines). `TRAINING_KEYS` has no `adam_beta1` or `adam_eps`: they stay Eole's defaults, which the teacher
+trained with. Cost if wrong: each is one place to change.
+
+[DESIGN: The GPU was not used.] This machine has a GeForce RTX 5070 Ti that the owner did not authorise for a run, so
+the spike, every test and every measurement of D9 ran with `CUDA_VISIBLE_DEVICES=""` and `gpu_ranks: []`, and
+everything GPU-side is unmeasured. Cost if wrong: none to undo; the cost of the choice is the list of open gates below.
+
+[EVIDENCE: Eole's vocabulary is not the SentencePiece vocabulary (spike; `docs/VERIFY.md` `D-EOLE-VOCAB-NOT-SPM`).]
+The `src_vocab` file (the tokens the data showed plus the `prefix` specials) in file order, cut to `src_vocab_size`
+(default 32,768), with Eole's four special tokens added and padded to a multiple of 8. The D8 tiny teacher's
+`vocab.json` had 232 entries of 640 pieces and neither `<doc>` nor `<sep>`; continuing it naively gave alignment 0.00
+and all 768 outputs with an unknown. A symbol appended at the end of the file did not survive `src_vocab_size: 100`;
+`update_vocab: true` works but drops tokens missing from the new file. Measured on 2026-11-09 through the real binary:
+`build_vocab` wrote 225 lines (4 of the 118 symbols present), 114 were appended (339 lines), `src_vocab_size` 641, the
+checkpoint `vocab.json` 344 entries.
+
+[EVIDENCE: `reset_optim` and continuing from another run (spike; `D-EOLE-RESET-OPTIM`, `D-EOLE-TRAIN-FROM-FOREIGN`).]
+`train_from: <another run>/step_N` with a new `model_path`, `src_vocab` and `data` works and never writes the source;
+the `model:` section is merged unchecked (`heads: 8` on a 4-head checkpoint loaded silently); `reset_optim: all` loads
+the weights only, restarts the step at 1 and lets the new YAML's explicit options win (`Step 1/40 lr 3.49e-04`),
+`none` takes every option from the checkpoint (`Step 201/240 lr 4.41e-03`, the new 0.25 and 20 ignored), `states`
+keeps the step, `keep_states` crashes (`KeyError: 'training_step'`); a key the YAML omits is filled from the
+checkpoint's recorded config; an averaged directory (no `optimizer.pt`) works as `train_from` under every value, all
+acting as `all`; D8's launcher would have refused a continuation and resumed it with `all` still set (a full 100 more
+steps, lr 6.25e-04 at step 10). With the real Eole in Task 3, a resume that omits `reset_optim` restarted at step 1.
+
+[EVIDENCE: Predictor truncation and length limits (spike; `D-EOLE-PREDICT-TRUNCATION`, `D-EOLE-FILTERTOOLONG`).]
+`eole predict` has no source-length limit (only the 5,000 sinusoidal positions: a 55,520-piece source gave
+`SequenceTooLongError`) and caps the output at `min(max_length, padded_source_length x max_length_ratio + 5)` with
+`max_length` 250 and `max_length_ratio` 2: `max_length: 10` gave exactly 10 pieces ending mid-word, rc 0, no warning.
+`filtertoolong` counts pieces after `sentencepiece` and `prefix` (the tag and `<doc>` count), drops an example whose
+source is over `src_seq_length` or whose target is over `tgt_seq_length - 2`, defaults to 192 and says only a
+statistics line; it is a training transform only.
+
+[EVIDENCE: The spike's alignment numbers and the tokenisation facts.] On the toy documents, 768 dev windows of stride 1,
+one seed: continued from the tiny teacher with `<doc>` as a `src_prefix`, `<sep>` alignment .38 at 200 steps, .75 at
+400, .97, .92, .99 at 600, 800, 1,000; from scratch .92 at 800; `<doc>` in the text .77 at 400 and .97 at 1,600 (no
+measurable difference from the prefix); mixing the sentence corpora in gave .81 at 400 and .99 at 3,200; window chrF
+31 at 1,600 steps and 95 at 3,200, so the gate is on alignment alone. Eole's `sentencepiece` transform gives exactly
+the pieces `sp.encode` gives; `<sep>` written in text gets a standalone word-boundary piece in front of it, a prefix
+piece does not; `re.split(r"\s*<sep>\s*", decoded.strip())` splits any output and the segment count is the `<sep>`
+count plus one. Window piece lengths on the toy: 10 to 28 pieces for 2 sentences, 16 to 42 for 3, 22 to 51 for 4;
+real sentences are about four to five times longer.
+
+[EVIDENCE: The STOP gate and the measurements, 2026-11-09 (Intel Core Ultra 7 265K, 20 cores, 46 GiB, CPython 3.14.10,
+eole 0.6.4, torch 2.14.1+cu130, safetensors 0.8.0, sentencepiece 0.2.1; GPU hidden; a machine loaded by other work).]
+Through the real binary on the toy documents: the tiny teacher's `launch` (200 steps) and `average --last 2` (1.43 s);
+`docify` 2.73 s (4,000 rows read, 3,380 in windows, 1,194 windows of 514, 368 and 312, 220 tail rows, 136 dev
+windows, `--max-pieces` 126); `launch --continue-from` 2,500 steps in 107 s (87 s idle in the build), `xent` 3.07 to
+0.97, validation perplexity 7.34474, 5.99236, 3.62612, 3.28613, 3.21243; the teacher's tree unchanged; two runs gave
+the same weights at all five checkpoints. Alignment of 804 dev windows (334, 268, 202): .9641/.1716/.0000 at 500,
+.9521/.8470/.8861 at 1,000, .9731/.9664/.9158 at 1,500, .9880/.9664/.9109 at 2,000, .9820/.9776/.9406 at 2,500; the
+chunker over 66 document-direction pairs (400 sentences): 106 windows, 102 aligned, 4 fallbacks, 18 singles, chrF 70.62
+against 10.44. Eight refusals of the real binary exit 2 in about a second. Gates: 8214 passed, 1 skipped, 10
+deselected after the fix wave (929 s), 7187 at the end of D8. Mutation checks by hand: Task 1 31, Task 2 about 73,
+Task 3 109, Task 4 68 and 110.
+
+[EVIDENCE: Not verified.] Anything on a GPU; a real document corpus and the quality of document translation; the
+mix of window and sentence data, the window sizes, the steps and the learning rate of a real continuation; the time
+to hash and read a real teacher's 13 GB step directory; `read_corpus_rows` beyond toy scale; a different SentencePiece
+model inside Eole (refused by hash, never run); the size-4 margin of the gate on another machine; Windows and macOS.
+
+[DESIGN: Gates.] Open, because they need real data or a GPU: a document model on real documents; the real-corpus doc
+workflow; everything on a GPU; the CTranslate2 export and serving of a document model (D11). The D3 gates assigned to
+D4, the D5 gates that need real text and the D6, D7 and D8 gates stay open as recorded there. D10 (distillation) takes
+`launch`, `average`, `predict_tokens` with its length keys and the vocabulary invariant from here.
+
+## 2026-11-09: D9 review - corrections and fixes
+
+A combined review of D9's Tasks 1 to 5 (an independent reviewer, read-only, `993f32c..98e42d1`) found: ready with
+fixes, 1 Critical, 5 Important and 12 Minor findings, and reproduced the STOP gate. It checked and found sound: the
+held-out dev windows of the gate, a SIGTERM test that is not vacuous, a vocabulary-without-`<doc>` refusal that fires
+only from the vocabulary check, the shipped configs, the layering, the D7 refactor (behaviour-preserving) and the
+hygiene. The fix wave (one commit each, failing test first) fixed:
+
+- C1 (`3838713`): a document was keyed without its corpus; two corpora sharing a `doc_id` produced a window joining
+  both (`A3 <sep> B0`) or interleaving both (`B0 <sep> A1 <sep> B2`). The key is `(src_lang, tgt_lang, corpus,
+  doc_id)`.
+- I1 (`7d3da62`): `read_corpus_rows` decoded the text of every split, test included; the filter is in the lazy plan.
+- I2 (`61fada2`): `rinchen train average` accepted any step directories and so could turn a foreign checkpoint into a
+  valid `--continue-from` source; it refuses a directory with no `launch.json` within three parents and `verify_source`
+  cross-checks `averaged_from.json` with the manifest. A guard against mistakes, not forgery.
+- I3 (`92dddcc`): the SentencePiece model of the config is compared by SHA-256 with the copy Eole saved in the source.
+- I4 (`b1c2d12`): an empty `vocab.src` became 118 reserved symbols; it is a `DataError` now (a test that pinned the
+  defect was replaced by refusal tests).
+- I5 (`63c97d5`): `launch` refuses a STATED `src_vocab_size` or `tgt_vocab_size` below pieces plus one; the D5
+  converter configs state sizes equal to their piece count and stay off `launch`.
+- Minors (`c2d46b5`): `eole_cfg_keys.py` out of `eole_cfg.py`, the gate's aligned rule is the chunker's (a window with
+  an empty segment is not aligned), the chunker closes a window at a blank sentence (`docify` ends a run at any
+  excluded sentence), the permission bits of the vocabulary file are kept, dead code, the plan's wording, a constant for
+  a literal. A 3,000-step run was measured and not adopted.
+
+Left open on purpose (controller decisions; each is documented in the runbook): M2, only five optimiser options are
+required of a continuation config and the others are inherited from the checkpoint; M5, the chunker's budget counts
+the source only and a cut inside the last segment still counts as aligned; M6, a `translate_sentence` result that
+contains `<sep>` passes through; M8, resuming a continuation requires its source to exist and verify; M9, `<doc>` and
+`<sep>` are defined three times and a test pins them equal; M11, a literal `<doc>` or tag in a sentence is not
+guarded. Also found and not fixed: `launch.py` has 886 lines and `continuation.py` 777 (the limit is 900); the
+SentencePiece comparison reads the model path as given (a relative path from the working directory). A scoped
+re-review of the fix wave was running when these records were written and nothing from it is in them. The gate after
+the fix wave: 8214 passed, 1 skipped, 10 deselected.
+
+**Corrections of earlier records.** The D7 and D8 entries above quote the numbers of the tiny runs as they were
+measured at the time and are left as written. D9's vocabulary invariant changed them; the same commands measured again
+on 2026-11-09 (code `c2d46b5`, a machine loaded by other work) gave, for the tiny teacher of D8 (`vocab.src` 225 to 339
+lines, checkpoint `vocab.json` 232 to 344 entries): the weights of `step_200` SHA-256 `32a1c92e...` to
+`6f5e836c7553563b...` and 3,289,000 to 3,318,120 bytes (two uninterrupted runs, the same); `optimizer.pt` 1,490,955 to
+1,549,195 bytes; `xent` at steps 10, 20, 50, 100, 150, 200 from 5.44, 5.40, 4.64, 2.81, 2.28, 2.14 to 5.81, 5.76, 4.93,
+2.91, 2.33, 2.13 (a 60.7 % fall to 63.3 %); validation perplexity from 83.6869, 16.6115, 10.1611, 8.81733 to 106.851,
+18.3535, 10.4948, 8.73594; the resumed run (weights cut, resumed from 150) from `7e62604f...` and 8.80908 to
+`b665b997...` and 8.80202; the separate run extended from 100 to 200 from 8.60773 to 8.78357 (its weights now
+`7f0b2899...`); `average --last 3` weights from `4a0c8535...` to `629aa11e...`; the run directory 19,296,131 to
+19,659,478 bytes and a step directory 4,808,113 to 4,898,781 (the same arithmetic reproduces the file: 827,738
+elements and 3,318,120 bytes). For the tiny ablation of D7 the dev chrF of the source-tag variant (eng-khk, khk-eng,
+khk-rus, rus-khk) moved from 98.89, 99.23, 97.76, 96.25 (mean 98.03, minimum 96.25) to 95.94, 95.85, 90.89, 93.67 (mean
+94.09, minimum 90.89), BLEU from 98.85, 99.01, 98.60, 96.19 to 95.91, 95.54, 93.11, 93.41; the target-tag variant from
+99.72, 98.24, 98.32, 98.33 (mean 98.65, minimum 98.24) to 99.45, 99.16, 98.13, 98.24 (mean 98.75, minimum 98.13), BLEU
+from 99.67, 98.01, 98.79, 98.43 to 99.52, 99.01, 98.96, 98.01; the checkpoint 3,289,000 to 3,318,120 bytes; 135.7 s on
+the loaded machine against 72.7 s; the gate (chrF at least 60) still holds with a minimum of 90.89. D5's converter
+numbers are identical. The spike's figure of 232 entries for a vocabulary with `<doc>` and `<sep>` held only for those
+two symbols; with all 118 it is 344. The plan's and the spec's "1,000 steps" for the gate do not hold for the windows
+`docify` cuts; the checked-in config trains 2,500. The runbooks 07 and 08, STATE.md and the D9 spec carry the old
+values as history beside the new ones.

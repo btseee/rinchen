@@ -469,7 +469,8 @@ overnight run made no merge and no push), and no CI run covers it. It is 21 comm
 commit of the branch; `cbd2365` was the last code commit of the final fix wave, and the re-review's
 minors follow its documents). It is machinery, not a result: the only data it
 ever ran on is a templated toy set that the model saturates (chrF 96.25 to 99.72 in every direction of
-both variants), no real corpus exists, no GPU was used, and `configs/eole/multilingual_proxy.yaml` and
+both variants when D7 was built; 90.89 to 99.45 after D9's vocabulary invariant changed the vocabulary, see
+below), no real corpus exists, no GPU was used, and `configs/eole/multilingual_proxy.yaml` and
 `ablation_priors.yaml` are unmeasured priors that Eole's schema accepts and nothing has trained. Built:
 `rinchen.train` (`eole_cfg` with the per-level allow-lists and `validate_train_config`, `merge`, `render`;
 `eole_run` with `run_training` and `predict_tokens`; `sampling` with `mixing_probabilities` and
@@ -519,7 +520,12 @@ both directions, 300 back-translated pairs per language pair, 100 dev lines per 
 evaluation 2.6 s each); the integer weights are 22 6 22 6 15 7 15 7 = 100 over 1200, 300, 1200, 300, 600,
 300, 600 and 300 rows; the dev chrF of eng-khk, khk-eng, khk-rus and rus-khk is 98.89, 99.23, 97.76 and
 96.25 for the source tag (mean 98.03, minimum 96.25) and 99.72, 98.24, 98.32 and 98.33 for the target tag
-(mean 98.65, minimum 98.24), BLEU 96.19 to 99.67, no direction tag in any hypothesis; the saved
+(mean 98.65, minimum 98.24), BLEU 96.19 to 99.67, no direction tag in any hypothesis (**after D9 added every
+reserved symbol to the vocabulary, the same command on 2026-11-09, code `c2d46b5`, gave 95.94, 95.85, 90.89 and
+93.67 for the source tag (mean 94.09, minimum 90.89) and 99.45, 99.16, 98.13 and 98.24 for the target tag (mean
+98.75, minimum 98.13), BLEU 93.11 to 99.52, no tag leak, 135.7 s on a loaded machine, the checkpoint 3,318,120
+bytes where it was 3,289,000: the model has another vocabulary, so another initialisation; the values above stay
+as the record of D7's build**); the saved
 `config.json` of both checkpoints has a `valid` corpus without prefix keys; a rerun reuses both variants
 in 0.76 s; with one `result.json` deleted the rerun only evaluates (3.37 s); with one checkpoint cut in
 half the rerun trains that variant again (37.75 s), reuses the other, and the retrained checkpoint has the
@@ -635,10 +641,13 @@ on the toy set of `tests/support/tiny_parallel.py` with `configs/eole/teacher_ti
 2026-11-08 (Intel Core Ultra 7 265K, 20 cores, 46 GiB): `ablate --prepare-only` 0.78 s; `launch` from nothing
 25.61 s, `completed`, training `xent` 5.44, 5.40, 4.64, 2.81, 2.28, 2.14 at steps 10, 20, 50, 100, 150, 200 (a
 60.7 % fall; the gate asks 30 %), validation perplexity 83.6869, 16.6115, 10.1611, 8.81733, no NaN, the weights
-of `step_200` SHA-256 `32a1c92e...` (the spike's value for an uninterrupted run); a second `launch` 0.73 s,
+of `step_200` SHA-256 `32a1c92e...` (the spike's value for an uninterrupted run; **after D9's vocabulary
+invariant, 2026-11-09: `xent` 5.81, 5.76, 4.93, 2.91, 2.33, 2.13, a 63.3 % fall, validation perplexity 106.851,
+18.3535, 10.4948, 8.73594, the weights `6f5e836c7553...`, 3,318,120 bytes, in 34.5 s on a loaded machine; the
+values of 2026-11-08 stay as the record of D8's build**); a second `launch` 0.73 s,
 `already_complete`, the run directory unchanged; with the weights of `step_200` cut in half, `launch` resumed
 from step 150 (9.60 s, `incomplete step directories skipped: [200]`, the log starting at `Step 160/  200`,
-`launch.json` unchanged) and finished with other weights (`7e62604f...`: a resumed run is not the
+`launch.json` unchanged) and finished with other weights (`7e62604f...`, after D9 `b665b997...`: a resumed run is not the
 uninterrupted one, because the data stream restarts at line 1 of every corpus), a separate run of 100 steps
 extended to 200 resumed from step 100 (`Step 110/  200`, 13.50 s) and lowering `train_steps` or changing the
 learning rate was refused (exit 2, nothing written); `average --last 3` (steps 100, 150, 200) 0.74 s, 58 of 62
@@ -646,7 +655,8 @@ tensors averaged; a real SIGTERM ended the launcher with 143 in 0.21 to 0.26 s w
 the next launch finished the run; a SIGKILL of the launcher left the Eole running, which kept the lock, so the
 next launch was refused (exit 2) and the one after the orphan ended said `already_complete`. Those numbers
 rank nothing: the model memorises a templated grammar. ARITHMETIC, not measurement (the formula reproduces the
-real tiny checkpoint exactly, 820,458 tensor elements and 3,289,000 bytes): the teacher shape (24+12 layers,
+real tiny checkpoint exactly, 820,458 tensor elements and 3,289,000 bytes; 827,738 elements and 3,318,120 bytes
+after D9, with a vocabulary of 344 instead of 232): the teacher shape (24+12 layers,
 hidden 1536, feed-forward 4096) has 1,004,601,868 parameters with a 64,000-piece vocabulary and 1,102,969,868
 with 128,000, a step directory of 12.1 and 13.3 GB (fp32 weights plus 8 bytes per parameter of Adam state), and
 the config's batch is 8 x 8 x 16384 = 1,048,576 padded tokens per update.
@@ -680,34 +690,134 @@ macOS. [EVIDENCE: the gate chain, the integration test module, the real-binary r
 the runbook, the spike (`spike-findings.md`) and the review reports, 2026-11-08, commits `36559a1` through
 `0378265`.]
 
-Branch status (updated 2026-11-08, after the D8 build): `main` holds D3, the D3 research follow-up, D4
+**D9 (document-level) is done on branch `d9-document-level`; its STOP gate (a tiny doc model, made by
+continuing the averaged tiny teacher on windows of 2 to 4 sentences joined with `<sep>`, decodes `<sep>`-aligned
+output for at least 90 % of held-out dev windows of each size, and the chunker returns exactly one translation per
+input sentence for every toy test document) is met locally.** The branch is stacked on `d8-teacher-training` (cut
+from it at `993f32c` on 2026-11-09), is not merged and not pushed, and no CI run covers it. It is 13 commits above
+`d8-teacher-training` and 75 above `main` as of the code tip `c2d46b5` (`D9: review minors`); the commit that carries
+these records follows it (14 and 76). It is machinery, not a result: the only data it ever ran on is the templated
+toy documents of `tests/support/tiny_parallel.py` (documents of 4 to 8 sentences from 37 nouns), no real document
+corpus exists, **no GPU was used** (the owner did not authorise it; every Eole process of D9 had
+`CUDA_VISIBLE_DEVICES=""` and `gpu_ranks: []`), and `configs/eole/teacher_doc.yaml` is a table of unmeasured priors
+that Eole's schema accepts and nothing has trained. Built: the vocabulary invariant (`eole_run.add_reserved_symbols`
+and `run_training(reserved_symbols=)`, `vocabulary_size.py`, `src_vocab_size` = pieces + 1), `predict_tokens(max_length,
+max_length_ratio)`, `rinchen.train.{docify,doc_source,doc_pack,doc_corpus}` (windows, counted exclusions, doc corpora,
+validation windows, the rendered continuation config), `continuation.py` (the provenance rule and the checks of the
+config), the extensions of `checkpoints` (`launch.json` version 2, `continued_from`), `launch` (`--continue-from`),
+`eole_cfg` (the `continues=` rules; `eole_cfg_keys.py`) and `train_runs` (the `average` guard),
+`rinchen.infer.doc_chunker`, the command `rinchen train docify` (`cli/train_docify.py`) and the option
+`rinchen train launch --continue-from`, the configs `configs/eole/{teacher_doc_tiny,teacher_doc}.yaml`, the test
+helpers `doc_cli.py` and `doc_rows.py` (and extensions of `step_dirs.py`, `fake_launch.py`, `tiny_parallel.py`) in
+`tests/support/`, and `docs/runbooks/09_document_level.md`. The design is
+`docs/superpowers/specs/2026-11-09-d9-document-level-design.md` (amended to the finished code, with a section listing
+each amendment made while building); its rulings T1 to T9 and the controller rulings, made without a review round
+because the user said "Proceed. I'm going to sleep now. Don't stop until you finish everything. Commit everything."
+(later "continue"), are condensed in DECISIONS.md ("2026-11-09: D9 document-level - the rulings, made without a
+review round"). Built task by task with tests first after a spike on the real Eole (Tasks 1 and 2 together; 3; 4; 5,
+the STOP gate; then one combined review, one fix wave and a scoped re-review, then these records). **The combined
+review (an independent reviewer, read-only, Tasks 1 to 5, `993f32c..98e42d1`) found: ready with fixes, 1 Critical,
+5 Important and 12 Minor findings.** The Critical one: a document was keyed without its corpus, so two corpora that
+share a `doc_id` (D4 names a document after its file) were joined or interleaved into one window. The Important ones:
+`read_corpus_rows` decoded the text of every split, test included; `rinchen train average` let hand-laid step
+directories become a valid `--continue-from` source; the SentencePiece model of the config was never compared with
+the teacher's; an empty `vocab.src` became 118 reserved symbols and nothing else; `launch` did not enforce
+`src_vocab_size >= pieces + 1`. The fix wave (six `D9: fix ...` commits, each with a failing test first, and `D9:
+review minors`) fixed all of them, the Minor ones that were cheap, and left open on purpose the five that
+`docs/runbooks/09_document_level.md` lists under "Known limits" (only five optimiser options are checked, the
+chunker's budget counts the source only, a `<sep>` in a fallback translation passes, resuming needs the source, a
+literal `<doc>` in a sentence is not guarded). A scoped re-review of the fix wave (`98e42d1..c2d46b5`) was running when
+these records were written, and nothing from it is in them. Gates, run for real on Linux, CPython 3.14.10: `ruff
+format --check .`, `ruff check .` and `mypy src` clean and `pytest -m "not network" -q` -- 7279 passed after Task 1,
+7446 after Task 2, 7799 after Task 3, 8024 after Task 4, 8075 after Task 5 (1,090 s) and **8214
+passed, 1 skipped, 10 deselected** after the fix wave (`D9: review minors`, 929 s), against 7187 at the end of D8;
+the D5, D7 and D8 regression sets stayed green. Mutation checks by hand, one mutant at a time, as recorded per task:
+Task 1 31, Task 2 about 73, Task 3 109, Task 4 68 for the chunker and 110 for the CLI (10 survivors of the first CLI
+pass got tests).
+Evidence of the STOP gate, through the real `rinchen` binary and the real Eole on the CPU with the GPU hidden, on the
+toy documents with `configs/eole/teacher_doc_tiny.yaml` (the tiny teacher's model, 2,500 steps, a validation and a
+save every 500), measured again for the runbook on 2026-11-09 (Intel Core Ultra 7 265K, 20 cores, 46 GiB; the machine
+was loaded by other work, so the times are longer than idle): the tiny teacher through `launch` (200 steps) and
+`average --last 2` (1.43 s); `docify` over the toy train and dev documents (2.73 s; 4,000 rows read, 3,380 in windows,
+1,194 windows of sizes 2, 3 and 4 numbering 514, 368 and 312, 220 tail rows, the 400 dev rows `not_train`, 136 dev
+windows, `--max-pieces` 126, source windows of 12 to 52 pieces, weights 33 33 17 17); `launch --continue-from <the
+averaged teacher>` for 2,500 steps (107 s here, 87 s idle; training `xent` 3.07 at step 50 and 0.97 at the end,
+validation perplexity 7.34, 5.99, 3.63, 3.29, 3.21; the teacher's tree byte-identical afterwards; `launch.json`
+version 2 with `continued_from`; two runs of the continuation gave the same weights at all five checkpoints). The
+gate, the alignment of the 804 held-out stride-1 dev windows (334, 268 and 202 of the sizes 2, 3 and 4; a window is
+aligned when its output has one segment per sentence and none is empty): .9641/.1716/.0000 at step 500,
+.9521/.8470/.8861 at 1000, .9731/.9664/.9158 at 1500, .9880/.9664/.9109 at 2000 and **.9820/.9776/.9406 at 2500**,
+at least 0.9 for every size; a 3,000-step run ended at .982/.974/.936, so the config stays at 2,500. **1,000 steps,
+the spike's figure and the plan's, did NOT reach 0.9 on the non-overlapping windows `docify` cuts** (the spike
+trained on 7,260 overlapping ones; docify's 1,194 gave .955/.847/.886 at 1,000): the threshold was not lowered, the
+steps were raised. The chunker over the toy test split (66 document-direction pairs, 400 sentences): 106 windows, 102 aligned, 4 fallbacks,
+18 singles, 0 oversize, one non-empty translation per sentence in every document, chrF 70.62 against 10.44 for pure
+sentence-level translation (recorded, not gated). Real-binary refusals, each exit 2 in about a second with Eole not
+started: a step directory with no run, a flipped weights byte, a vocabulary without `<doc>`, a config without an
+architecture key, another SentencePiece model, `average` of hand-laid step directories, a stated `src_vocab_size` of
+100, `docify --max-pieces` above the base config's limit. A SIGTERM after the first checkpoint and a second `launch`
+resumed from the run's own step with `reset_optim: none` and continued at the next step. **The vocabulary invariant
+changed every D7 and D8 tiny-run number** (the tiny teacher's `vocab.src` 225 to 339 lines, its checkpoint's
+`vocab.json` 232 to 344 entries, the weights of `step_200` 3,289,000 to 3,318,120 bytes and SHA-256 `32a1c92e...` to
+`6f5e836c...`, `xent` 5.44 and 2.14 to 5.81 and 2.13, the validation perplexities, the D7 ablation chrF of the
+source-tag variant by up to 5.9 points); those records were updated with the old values kept as history (D5's
+converter is identical).
+Findings worth knowing: upstream facts about Eole 0.6.4, in `docs/VERIFY.md` ("D9 findings") and in DECISIONS.md.
+**Eole's vocabulary is the file of tokens the data showed, not the SentencePiece vocabulary**, so a symbol the data
+never showed (`<doc>`, `<sep>`) is `<unk>` to the model and continuing it on document data is silent (alignment
+0.00); hence the invariant. `reset_optim: all` loads the weights only and counts steps from 1; `none` ignores every
+new optimiser option; Eole fills any key a YAML omits from the checkpoint's own config, which is why the attempts
+after the first of a continuation must STATE `reset_optim: none` (a plan deviation found with the real Eole: an
+omitted key restarted a "resume" at step 1). The `model:` section of a continuation is merged unchecked. An averaged
+directory works as `train_from`. `eole predict` has no source-length limit and truncates the output silently
+(`max_length` 250, `max_length_ratio` 2); `filtertoolong` counts pieces after `prefix` and drops silently.
+Open gates (none can be done without real data or a GPU): a document model on real documents and its quality; the
+real-corpus doc workflow (the mix with sentence-level data, the window sizes, the number of steps and the learning
+rate: `teacher_doc.yaml` is a table of priors); everything on a GPU; the time to hash and to read a real teacher's
+13 GB step directory; the CTranslate2 export of a document model and the chunker in a serving path (D11); the D3
+gates assigned to D4, the D5 gates that need real text or a reader and the D6, D7 and D8 gates stay open.
+Known and open: the limits listed in the runbook (five optimiser options only; the chunker's source-only budget and
+the silent output truncation; `<sep>` in a fallback result; resuming needs the source; `<doc>` in a sentence; the
+triple definition of `<doc>` and `<sep>` pinned equal by a test); the `average` guard and the provenance rule guard
+against mistakes, not forgery; the SentencePiece comparison reads a relative path from the working directory; a
+`launch` config that states no `src_vocab_size` gets Eole's 32,768; `launch.py` has 886 lines and `continuation.py`
+777 (the limit is 900); the size-4 margin of the gate (.941 against .9, 202 windows, one seed) is thin and the
+training is repeatable only on the machine it was measured on: if CI flakes, raise `train_steps`, never lower the
+gate. NOT verified: any run on a GPU or a real corpus, a different SentencePiece model inside Eole, `read_corpus_rows`
+beyond toy scale, Windows and macOS. [EVIDENCE: the gate chain, the integration test module, the real-binary runs and
+the measurement scripts of the runbook, the spike (`spike-findings.md`) and the review reports, 2026-11-08 to
+2026-11-09, commits `580871d` through `c2d46b5`.]
+
+Branch status (updated 2026-11-09, after the D9 build): `main` holds D3, the D3 research follow-up, D4
 and D5, and is at `0d534a3` (the commit that records the D5 merge; `862e176` is the D5 merge tip,
 `2346cea` was the D3 end, `b38eaae` the D4 merge tip and `4eac98f` the commit that recorded the D4 merge;
 no `d3-research-followup`, `d4-filtering-mining` or `d5-script-converter` ref remains). D6 lives on its own
 branch, `d6-synthetic-data`, cut from `main` at `0d534a3`; D7 lives on `d7-multilingual-ablations`, stacked
 on it (cut from `d6-synthetic-data` at `9973319`); D8 lives on `d8-teacher-training`, stacked on D7 (cut from
-`d7-multilingual-ablations` at `b1a8a47`). None of the three is merged into `main` and none is pushed;
-merging D8 means merging D6 and D7 first. At the D5 merge `main` was 81 commits ahead of `origin/main`
-(`9e7b0ec`); it is unpushed, and no CI run covers D3, D4, D5, D6, D7 or D8. The full local gate was last run
-on the D8 branch: 7114 passed, 1 skipped, 10 deselected (D6, D7 and D8 included), on `D8: review minors of the
+`d7-multilingual-ablations` at `b1a8a47`); D9 lives on `d9-document-level`, stacked on D8 (cut from
+`d8-teacher-training` at `993f32c`; its code tip is `c2d46b5` and the commit after it carries the records). None
+of the four is merged into `main` and none is pushed; merging D9 means merging D6, D7 and D8 first. At the D5 merge `main` was 81 commits ahead of `origin/main`
+(`9e7b0ec`); it is unpushed, and no CI run covers D3, D4, D5, D6, D7, D8 or D9. The full local gate was last run
+on the D9 branch: 8214 passed, 1 skipped, 10 deselected (D6 to D9 included), on `D9: review minors` (`c2d46b5`; 8075
+after Task 5, 7187 at the end of D8); on the D8 branch it gave 7114 passed, 1 skipped, 10 deselected (D6, D7 and D8 included), on `D8: review minors of the
 launcher` (`3e357ae`; 7020 after Task 5, 5968 on D7's last commit, `D7: re-review minors`) and again, with the final
 review's fixes, on `D8: final review fixes` (`0378265`): 7187 passed, 1 skipped, 10 deselected; on D6's last
 commit (`D6: re-review minors`) it gave 4331 passed; on the merged D5 tree `main` gave 2833 passed. The
 whole-branch review of D8 ran (above); its fix wave's scoped re-review approved it with minors and the minor
 that needed code is fixed (`D8: re-review minors`).
 
-Next step: D9 (Document-level). Nothing in D8 blocks it. Its inputs from D8: `rinchen train launch` (the
-resumable launcher: start, resume from the newest complete checkpoint, `already_complete`, the NaN gate, the
-run lock, `command.sh` for the operator, the manifest of the final step) for continuing OUR teacher
-(`train_from` is allowed only as the launcher's own resume, inside the run directory, and the run identity
-excludes only `train_steps` and `train_from`, so D9's continued training on document-level data, which changes
-the data section and the schedule, will need a CONSCIOUS extension of the identity rule and of the
-`resumes` validation, decided and recorded rather than patched in), `rinchen train average` (a plain mean of the
-last checkpoints; not a checkpoint to resume from), `rinchen train ablate --prepare-only` (the corpora and the
-config of a variant from the mixture the ablations chose), `check_gpu_rules`, `curves.parse_train_log` and
-`loss_gate`, and `configs/eole/teacher.yaml` (a prior). What D8 does not give D9: any trained teacher (no real
-corpus and no GPU run exist), any measured batch, learning rate, throughput or memory, a live NaN abort, and any
-evidence on a GPU; the open gates above and the D3, D5, D6 and D7 gates stay open.
+Next step: D10 (Distillation & students): `train/distill.py` (the teacher's n-best through CTranslate2 into a
+sequence-level distillation corpus, an optional QE filter, mixing with the original data by ratio),
+`configs/eole/student_server.yaml` and `student_edge.yaml`, `docs/runbooks/10_distillation.md`; STOP: a tiny student
+exported. Nothing in D9 blocks it. Its inputs from D9: the vocabulary invariant (every vocabulary holds every reserved
+symbol; a config that goes through `launch` and states a `src_vocab_size` must state at least its SentencePiece
+pieces plus one, so 64,001 for the 64k student, and a config that states none gets Eole's 32,768), `rinchen train
+launch` and `average` as in D8 (a student is trained from random initialisation: `--continue-from` is for OUR teacher
+only, with its provenance rule), `predict_tokens(max_length, max_length_ratio)` (a distillation run that reads
+`eole predict` output must state both, because the cut is silent), and for document-level teacher data `docify` and
+`rinchen.infer.doc_chunker`. What D9 does not give D10: any trained teacher, any real document or sentence corpus, a
+measured batch, learning rate or throughput, and any evidence on a GPU; the open gates above and the D3 to D8 gates
+stay open.
 
 D0 (environment, skeleton, doctor): `pyproject.toml` restructured to the
 master plan's toolchain (see `docs/STACK.md` for resolved versions),

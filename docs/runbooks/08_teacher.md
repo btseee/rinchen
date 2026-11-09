@@ -42,8 +42,10 @@ averager makes one model from the last checkpoints.
   fake the log and the exit code the spike observed; the one real observation is the spike's
   (below).
 - **No fine-tuning.** `training.train_from` exists only in the resume config the launcher renders for
-  the run's own newest complete step directory; it is refused everywhere else. D9 (continued training
-  of our own teacher) will need a conscious extension of the identity rule.
+  the run's own newest complete step directory; it is refused everywhere else. (D9 has since extended
+  this, consciously: `launch --continue-from` starts a NEW run from OUR OWN teacher, with a provenance
+  rule and the identity covering the source, and nothing else may be continued; see
+  `docs/runbooks/09_document_level.md`.)
 - **No export, serving or evaluation suite** (D11 to D13).
 
 Tags used below: **measured** (run for this runbook or by a test of the build), **spike** (run in the
@@ -113,8 +115,12 @@ the interpreter.
    a finished run.
 6. Call the `before_writing` hook (the CLI drops the old manifest here), write this attempt's files
    (`launch/train-<k>.yaml`, `command.sh`) and `launch.json`.
-7. With `--write-only`: stop. Otherwise build the vocabulary when the `src_vocab` file is missing, run
-   `eole train`, and decide from its log and the step directories how it ended.
+7. With `--write-only`: stop. Otherwise build the vocabulary when the `src_vocab` file is missing, add the
+   reserved symbols it lacks (D9, `eole_run.add_reserved_symbols`: the file `eole build_vocab` writes holds
+   only the tokens the data showed; runbook 09, "The vocabulary invariant"), run `eole train`, and decide
+   from its log and the step directories how it ended. (D9 also refuses, in step 1, a config that states a
+   `src_vocab_size` below its SentencePiece model's pieces plus one, and, for `--continue-from`, verifies the
+   source and checks the config against it between steps 4 and 5; runbook 09.)
 
 ### Outcomes
 
@@ -142,8 +148,8 @@ Failures print `error: <message>` and exit with the code of the error class (as 
 
 ### Identity
 
-`launch.json` records the run: `schema_version` 1, `identity`, `world_size`, `gpu_ranks` and `created`
-(ISO 8601 with a UTC offset). The identity is the SHA-256 of the canonical JSON (sorted keys, no
+`launch.json` records the run: `schema_version` 1 (2 for a D9 continuation, which adds `continued_from`),
+`identity`, `world_size`, `gpu_ranks` and `created` (ISO 8601 with a UTC offset). The identity is the SHA-256 of the canonical JSON (sorted keys, no
 spaces, non-ASCII text as it is) of the EFFECTIVE config WITHOUT `training.train_steps` and
 `training.train_from`. These two are the only keys a run may change and stay the same run: a longer
 run extends `train_steps`, and the resume config names the checkpoint. Everything else is in the
@@ -179,32 +185,38 @@ ran is on disk and an earlier attempt's log is never read as a later one's. `tra
 appears ONLY in the `train-<k>.yaml` of an attempt that resumes (`training.train_from:
 <model_path>/step_<N>`, the newest complete step, never `model_path` itself, because Eole's saver is
 not atomic); the config file the operator gives is never changed, and `validate_train_config` accepts
-`train_from` only under `resumes=True` and only for `<training.model_path>/step_<N>`.
+`train_from` only under `resumes=True` and only for `<training.model_path>/step_<N>`. (The one other
+place is D9's first attempt of a continuation, `continues=`, runbook 09.)
 
 The tiny run of "Commands" left (measured; sizes in bytes; `ckpt/` has the four step directories
-`step_50`, `step_100`, `step_150`, `step_200` of the same shape):
+`step_50`, `step_100`, `step_150`, `step_200` of the same shape). The first figure is from the D9
+measurement of 2026-11-09 (after the vocabulary invariant, runbook 09), the figure in parentheses is what
+this runbook recorded on 2026-11-08 before it, where a number changed:
 
 ```
 run/
-  command.sh                         2,037    the commands of the latest attempt
+  command.sh                         1,967    the commands of the latest attempt (2,037)
   launch.json                          188    the record of the run
-  manifest.json                      2,956    written last
-  vocab.src                          3,063    built by eole build_vocab
+  manifest.json                      2,893    written last (2,956)
+  vocab.src                          4,299    built by eole build_vocab, the reserved symbols appended (3,063)
   launch/lock                            0    the run lock; empty, never removed
   launch/build_vocab.log             3,028
-  launch/train-1.yaml                5,850    the effective config of attempt 1
-  launch/attempt-1.log              46,450    standard output and error of eole train
-  ckpt/step_200/model.00.safetensors 3,289,000
-  ckpt/step_200/optimizer.pt         1,490,955
-  ckpt/step_200/config.json              7,457
-  ckpt/step_200/vocab.json               8,081
-  ckpt/step_200/toy.model               12,620   the SentencePiece artifact
+  launch/train-1.yaml                5,650    the effective config of attempt 1 (5,850)
+  launch/attempt-1.log              46,329    standard output and error of eole train (46,450)
+  ckpt/step_200/model.00.safetensors 3,318,120  (3,289,000)
+  ckpt/step_200/optimizer.pt         1,549,195  (1,490,955)
+  ckpt/step_200/config.json              7,282  (7,457)
+  ckpt/step_200/vocab.json              11,585  (8,081)
+  ckpt/step_200/toy.model               12,599  the SentencePiece artifact (12,620)
   ckpt/config.json, model.00.safetensors, optimizer.pt, toy.model, vocab.json
                                               relative symbolic links into step_200/
 ```
 
-`du -sb` of the run directory: 19,296,131 bytes; of one step directory 4,808,113. The sizes of
-`config.json` and the logs depend on the length of the paths in them.
+`du -sb` of the run directory: 19,659,478 bytes (19,296,131 before D9); of one step directory 4,898,781
+(4,808,113). The sizes of `config.json`, the SentencePiece artifact, the scripts, the manifest and the logs
+depend on the length of the paths in them (the two measurements used different scratch directories); the
+weights, the optimizer and `vocab.json` grew because the vocabulary did (225 to 339 lines in `vocab.src`,
+232 to 344 entries in `vocab.json`).
 
 ### The NaN gate
 
@@ -251,15 +263,19 @@ changes none of this):
   left `step_50, 100, 150, 200`.
 - The weights, the Adam moments, the step counter and the Noam schedule ARE restored (optimizer.pt
   says 201 after step 200; the learning rate at step 110 was 5.96e-03 in both runs).
-- **An interrupted run differs from an uninterrupted one.** Spike: three uninterrupted 200-step runs
-  are byte-identical (weights SHA-256 `32a1c92e...`); a clean stop at 100 and a resume to 200 gave
-  `3bdbb444...`, 58 of 62 tensors different, largest difference 0.538, validation perplexity at 200 of
-  8.61 against 8.82; a SIGKILL near step 120 and a resume gave the same bytes as the clean stop (a
-  resume itself is deterministic). Measured again for this runbook: the weights of the uninterrupted
-  run of "Commands" have SHA-256 `32a1c92e42d8...` (the spike's value); after the weights of `step_200`
-  were cut and the run resumed from step 150, the finished `step_200` has `7e62604fb210...`, with
-  validation perplexity 8.80908 at 200 against 8.81733; the separate run resumed from step 100 had 8.60773
-  at 200 (spike: 8.61).
+- **An interrupted run differs from an uninterrupted one.** Spike (before D9's vocabulary invariant): three
+  uninterrupted 200-step runs are byte-identical (weights SHA-256 `32a1c92e...`); a clean stop at 100 and a
+  resume to 200 gave `3bdbb444...`, 58 of 62 tensors different, largest difference 0.538, validation
+  perplexity at 200 of 8.61 against 8.82; a SIGKILL near step 120 and a resume gave the same bytes as the
+  clean stop (a resume itself is deterministic). Measured again for this runbook on 2026-11-08 (still before
+  D9): the uninterrupted run of "Commands" had SHA-256 `32a1c92e42d8...` (the spike's value); after the
+  weights of `step_200` were cut and the run resumed from step 150, the finished `step_200` had
+  `7e62604fb210...`, with validation perplexity 8.80908 at 200 against 8.81733; the separate run resumed from
+  step 100 had 8.60773 at 200 (spike: 8.61). **After D9 (2026-11-09, every reserved symbol in the
+  vocabulary, so every number moved; the effect is the same):** the uninterrupted run has `6f5e836c7553...`
+  (validation perplexity 8.73594 at 200); cut at step 200 and resumed from 150, `b665b997a108...`, 8.80202;
+  the separate run extended from 100, `7f0b2899494d...`, 8.78357 at 200; a second uninterrupted run of the
+  same config gave the same bytes as the first.
 - Eole's saver is not atomic. It writes `optimizer.pt`, the weights, the transform artifacts,
   `vocab.json` and `config.json` (last) into `step_N/`, linking each into `model_path` right after, and
   then deletes the oldest step directory (`keep_checkpoint`). A kill in the middle leaves a partly
@@ -272,7 +288,11 @@ changes none of this):
 
 The runs below were made on 2026-11-08 on the machine of "Measured numbers", through the real binary
 (`.venv/bin/rinchen`, what `uv run rinchen` starts) from the repository root with the GPU hidden
-(`CUDA_VISIBLE_DEVICES=""`), on the toy data, once each. `$W` is a scratch directory and
+(`CUDA_VISIBLE_DEVICES=""`), on the toy data, once each. **D9 changed the vocabulary of the tiny model on
+2026-11-09 (runbook 09, "The vocabulary invariant"), so every number below that depends on the weights moved;
+the 2026-11-08 values stay in this text as history and the values measured again on 2026-11-09 (the same
+commands, code `c2d46b5`, a machine loaded by other work, so the times are longer) are given beside them,
+labelled "after D9".** `$W` is a scratch directory and
 `$RUN=$W/tiny/out/variants/t0.5_bt0.5_src_s1234/run`. The inputs are written by the test helper (a
 corpus Parquet file of 126,698 bytes and a SentencePiece model of 12,620 bytes):
 
@@ -319,31 +339,35 @@ command.sh: $RUN/command.sh
 manifest: $RUN/manifest.json
 ```
 
-25.61 s wall, including `eole build_vocab`, 200 steps, four validations and four saves. The curve
-(`parse_train_log` of `attempt-1.log`, 20 reports, 4 validations, saved steps 50, 100, 150, 200):
+25.61 s wall, including `eole build_vocab`, 200 steps, four validations and four saves (after D9: 34.5 s on a
+loaded machine; 49.38 s in the D9 flow). The curve (`parse_train_log` of `attempt-1.log`, 20 reports, 4
+validations, saved steps 50, 100, 150, 200):
 
 | step | 10 | 20 | 50 | 100 | 150 | 200 |
 |---|---:|---:|---:|---:|---:|---:|
-| xent | 5.44 | 5.40 | 4.64 | 2.81 | 2.28 | 2.14 |
+| xent, 2026-11-08 | 5.44 | 5.40 | 4.64 | 2.81 | 2.28 | 2.14 |
+| xent, after D9 | 5.81 | 5.76 | 4.93 | 2.91 | 2.33 | 2.13 |
 
-The fall from the first report to the last is 60.7 % (the gate asks for 30 %; the spike's three seeds
-fell 60.7, 60.7 and 62.4 %). Validation perplexity at steps 50, 100, 150, 200: 83.6869, 16.6115,
-10.1611, 8.81733 (accuracy 12.6863, 49.3498, 56.2956, 58.5791). No non-finite figure; `loss_gate`
-returns None. The weights of `step_200` have SHA-256 `32a1c92e42d8219fbd9e0a09a0a08a2069590ca8c1f140aaf2adc271c936f548`,
-the spike's value for an uninterrupted run. The manifest of the run records `xent_first` 5.44,
-`xent_last` 2.14, `valid_ppl_first` 83.6869, `valid_ppl_last` 8.81733. The Task 6 gate saw 27 to 35 s
-for the same run.
+The fall from the first report to the last is 60.7 % (after D9: 63.3 %; the gate asks for 30 %; the spike's
+three seeds fell 60.7, 60.7 and 62.4 %). Validation perplexity at steps 50, 100, 150, 200: 83.6869, 16.6115,
+10.1611, 8.81733 (accuracy 12.6863, 49.3498, 56.2956, 58.5791); after D9: 106.851, 18.3535, 10.4948, 8.73594
+(accuracy 12.6863, 48.4935, 56.4225, 60.9895). No non-finite figure; `loss_gate` returns None. The weights of
+`step_200` have SHA-256 `32a1c92e42d8219fbd9e0a09a0a08a2069590ca8c1f140aaf2adc271c936f548`, the spike's value for
+an uninterrupted run; after D9 `6f5e836c7553563ba05ebe2f70b9a3b3f4dd7ef9dc2af5a5f316c977f00ddcdb` (two
+uninterrupted runs, the same). The manifest of the run records `xent_first` 5.44, `xent_last` 2.14,
+`valid_ppl_first` 83.6869, `valid_ppl_last` 8.81733; after D9 5.81, 2.13, 106.851 and 8.73594. The Task 6 gate
+saw 27 to 35 s for the same run.
 
 ### Launch again (B: already complete)
 
 The same command: `status: already_complete`, `steps: 200`, `resumed from: none`, `attempt: 0`,
-`checkpoint: $RUN/ckpt/step_200`, `log: none`, `command.sh: none`, the manifest line. 0.73 s. The
+`checkpoint: $RUN/ckpt/step_200`, `log: none`, `command.sh: none`, the manifest line. 0.73 s (after D9, 1.11 s). The
 tree of the run directory (names, sizes, modification times, SHA-256) is unchanged: nothing ran,
 nothing was written, the manifest was kept because it still vouches for the same files.
 
 ### A damaged final checkpoint (C: truncate and resume)
 
-The weights of `step_200` were cut to half their size (1,644,500 of 3,289,000 bytes). `is_complete`
+The weights of `step_200` were cut to half their size (1,644,500 of 3,289,000 bytes; after D9 1,659,060 of 3,318,120). `is_complete`
 says `model.00.safetensors: is not a complete safetensors file (Error while deserializing header:
 incomplete metadata, file not fully covered)`. The same command:
 
@@ -359,10 +383,10 @@ incomplete step directories skipped: [200]
 manifest: $RUN/manifest.json
 ```
 
-9.60 s. `launch/train-2.yaml` holds `training.train_from: $RUN/ckpt/step_150`; the log starts at
-`Step 160/  200;` and has one validation (at 200: 8.80908); `launch.json` is byte-identical to the
-first launch's; `step_200` is rewritten and complete again (its weights differ from the first run's, see
-"What a resume does not restore"). The manifest was refreshed.
+9.60 s (after D9: 13.13 s). `launch/train-2.yaml` holds `training.train_from: $RUN/ckpt/step_150`; the log
+starts at `Step 160/  200;` and has one validation (at 200: 8.80908; after D9 8.80202); `launch.json` is
+byte-identical to the first launch's; `step_200` is rewritten and complete again (its weights differ from the
+first run's, see "What a resume does not restore"). The manifest was refreshed.
 
 ### Extending a run (D)
 
@@ -371,7 +395,9 @@ A separate run with `train_steps: 100` (18.07 s, `completed`, step 100), then th
 real launch (13.50 s): `resumed from: 100`, `attempt: 2`, the first report of the log
 `Step 110/  200; acc: 57.1; ppl: 12.14; xent: 2.50; ... lr: 5.96e-03; sents:    1512; bsz:
 1131/1231/151; ...`, validation perplexity 10.0769 at 150 and 8.60773 at 200. `launch.json` was not
-changed. Lowering `train_steps` to 50 afterwards:
+changed. After D9 the same three commands took 23.43 s, 0.93 s and 18.71 s, and the first report read `acc:
+55.8; ppl: 13.42; xent: 2.60; ... lr: 5.96e-03; sents:    1512; bsz: 1131/1231/151`, with validation
+perplexity 10.3336 at 150 and 8.78357 at 200. Lowering `train_steps` to 50 afterwards:
 
 ```
 error: training.train_steps is 50, below step 200, the newest complete checkpoint of this run: a run is not shortened; set train_steps to at least 200 or use a new run directory
@@ -382,7 +408,9 @@ exit 2, tree unchanged.
 **The loss gate is for a first attempt.** `parse_train_log` reads the LAST run of a log, and each
 attempt has its own log, so `loss_gate` on the resumed attempt's log compares step 110 (xent 2.50) with
 step 200 (2.07), a fall of 17.2 %, and answers `xent went from 2.5 at step 110 to 2.07 at step 200, a
-fall of less than 30%`. Apply it to the log of the attempt that started the run.
+fall of less than 30%` (after D9: `xent went from 2.6 at step 110 to 2.1 at step 200, a fall of less than 30%`;
+and a resumed attempt with fewer than two validations raises `DataError`). Apply it to the log of the attempt that
+started the run.
 
 ### Averaging (F)
 
@@ -396,7 +424,8 @@ weights sha256: 4a0c8535f585e3a33186dc81987208d9e33b9f3182f283114ea6454450217ff0
 manifest: $RUN/averaged/manifest.json
 ```
 
-0.74 s. See "Averaging".
+0.74 s (after D9: 1.16 s; the weights SHA-256 `629aa11e68ba...`, which was `4a0c8535f585...`; the averaged directory
+3,354,430 bytes, 3,322,115 before). See "Averaging".
 
 ### Options
 
@@ -670,7 +699,13 @@ layers, `V` 232): the formula gives 180,458 parameters and 640,000 buffer elemen
 exactly the element count of the 62 tensors of the real `model.00.safetensors`, and `4 x 820,458 + 7,168`
 (the header) = 3,289,000 bytes, exactly the real file. `optimizer.pt` (Adam: two moments) is
 1,490,955 bytes against `8 x 180,458` = 1,443,664: 3.3 % more, from the pickle and the archive (it does
-not hold the buffers).
+not hold the buffers). **After D9** the vocabulary of the tiny model has `V` = 344 (every reserved symbol is in
+it, runbook 09), so the formula gives 187,738 parameters (`V x (H + 1)` grew by `112 x 65` = 7,280) and
+827,738 elements in all, and `4 x 827,738 + 7,168` = 3,318,120 bytes, exactly the real file of 2026-11-09;
+`optimizer.pt` is 1,549,195 bytes against `8 x 187,738` = 1,501,904 (3.1 % more). Since D9 the vocabulary of a
+model whose vocabulary file holds every SentencePiece piece has `V` = pieces + 1 (Eole's pad token)
+rounded up to a multiple of 8: for the 128,000-piece teacher the table's `V` is about 128,008, not
+128,000 (a difference of 0.006 %).
 
 | | `V` = 64,000 | `V` = 128,000 (`teacher_128k`) |
 |---|---:|---:|
@@ -714,7 +749,7 @@ explained) and 5,053/5,498 in the first window (start-up). They say nothing abou
   uv run python -I -c "import sys; from pathlib import Path; from rinchen.train.curves import parse_train_log; c = parse_train_log(Path(sys.argv[1]).read_text(errors='replace')); assert len(c.validations) == len(c.saved_steps); p, s = min(zip(c.validations, c.saved_steps)); print(f'best validation perplexity {p} at step {s}')" $RUN/launch/attempt-1.log
   ```
 
-  which printed `best validation perplexity 8.81733 at step 200` for the tiny run. It pairs the n-th
+  which printed `best validation perplexity 8.81733 at step 200` for the tiny run (after D9: 8.73594). It pairs the n-th
   validation with the n-th save; a log whose counts differ (a final save at a step that is not a
   validation) needs the pairing by hand, and a resumed run has one log per attempt.
 - **Early stopping** is on `ppl` alone (one criterion), strictly better (`<`), checked at validation steps
@@ -819,12 +854,17 @@ the averaged `model.00.safetensors`, the files beside the weights in the LAST ch
 `vocab.json`, the SentencePiece artifact; not `optimizer.pt`), `averaged_from.json` (the sources with the
 SHA-256 of their weights, the output's SHA-256, the tensor counts) and `manifest.json` (stage
 `train_average`, written last; if it cannot be written the directory is removed). Measured for the tiny
-run: `averaged_from.json` 1,567 bytes, 62 tensors of which 58 averaged, output 3,322,115 bytes in all.
+run: `averaged_from.json` 1,567 bytes, 62 tensors of which 58 averaged, output 3,322,115 bytes in all
+(after D9: 1,537 bytes, the weights 3,318,120 bytes, 3,354,430 bytes in all).
 Three things follow:
 
 - **It is not a checkpoint.** It has no optimizer state (`is_complete` names `optimizer.pt`) and is never
-  named `step_N`: a resume or another average cannot pick it up. It is for `eole predict` and the
-  CTranslate2 converter (the spike's averager's output ran in both).
+  named `step_N`: a resume or another average cannot pick it up. It is for `eole predict`, the
+  CTranslate2 converter (the spike's averager's output ran in both) and, since D9, as the SOURCE of a
+  continuation: `rinchen train launch --continue-from <averaged>` loads its weights with a fresh optimizer
+  when its `manifest.json` (stage `train_average`) vouches for its files (runbook 09). For that reason
+  `average` refuses a checkpoint directory that is not inside a run directory with a readable `launch.json`
+  within three parents of its steps (a guard against a mistake: a record written by hand passes).
 - The `config.json` copied from the last checkpoint holds `training.train_from` when the last checkpoint was
   written after a resume (7,642 bytes against 7,457 for the step directory of the uninterrupted run).
 - `average_decay` (Eole's EMA) is not an allowed key: it saves the EMA in place of the live weights in
@@ -862,6 +902,9 @@ one line in the log):
 [2026-11-08 15:22:45,713 INFO] Saving optimizer and weights to step_50, and symlink to $RUN/ckpt
 ```
 
+(The excerpt is from the run of 2026-11-08. After D9 the same lines read `Step 10/  200; acc: 2.2; ppl:
+332.84; xent: 5.81; ...`, `Validation perplexity: 106.851` and `Validation accuracy: 12.6863`.)
+
 - A report line is every `report_every` steps (a top-level key, 10 in the tiny config, 50 in Eole's
   default). The step is printed `Step %2d/%5d`: `Step 10/  200`, `Step 110/  200`, `Step 160/  200`, two
   blanks after the slash for a total of 200. The figures are those of the steps since the previous report.
@@ -887,7 +930,10 @@ one line in the log):
 ## The teacher prior
 
 `configs/eole/teacher.yaml` holds NO per-run value (`data: {}`; `src_vocab`, `training.model_path`,
-`transforms_configs.sentencepiece`, `data` and `seed` come from `--prepare-only`). **No value was
+`transforms_configs.sentencepiece`, `data` and `seed` come from `--prepare-only`, which since D9 also sets
+`src_vocab_size` to the SentencePiece model's pieces plus one: `teacher.yaml` states none, and a config that
+reaches `launch` without it would get Eole's default of 32,768 tokens, which would cut a 128,000-piece
+vocabulary and the reserved symbols appended at its end; see runbook 09). **No value was
 measured; each is a prior.** Master plan = `docs/research/2026-10-29-rinchen-dev-agent-prompt.md`, lines
 511 to 516 (the comments of the config cite 511 to 514; the dropout, `train_steps`, `valid_steps` and
 `early_stopping` of the plan are on 515 and the metrics on 516).
@@ -957,6 +1003,8 @@ if another stage's manifest is there.)
 ### Known and left open by the reviews and by this runbook
 
 - `--write-only` leaves an existing manifest with a stale `command.sh` digest (detectable).
+- `command.sh` builds the vocabulary but does not add the reserved symbols (D9): a run started by hand trains on
+  the vocabulary as Eole wrote it, and the next `launch` of that run adds them, too late for its checkpoints.
 - Curve metrics in the manifest come from the last attempt's log only.
 - The manifest is written after the lock is released (a tiny window).
 - No CLI way to force CPU on a GPU config (`--gpu-ranks` cannot be empty); the identity-mismatch message
@@ -990,7 +1038,8 @@ the `is_complete` message). Left open on purpose, each with its cost:
   cannot overwrite steps); read from `curves.py`.
 - **Design notes (M-6).** `eole_cfg.py` has 837 lines (an earlier record said "about 844") and carries key
   lists, value rules, the resume rule, merge, render and file I/O; the value rules and the `train_from`
-  rule would sit well in a sibling module. `average` imports `manifest.stage` for `sha256_of`. Not changed:
+  rule would sit well in a sibling module. (D9 grew it to 976 lines and then moved the key lists out into
+  `eole_cfg_keys.py`: 856 lines now, runbook 09.) `average` imports `manifest.stage` for `sha256_of`. Not changed:
   cohesion, not behaviour.
 - **The look is not a hold (M-7).** Between `--write-only`'s look at the lock and its writes a real launch
   can start (documented since Task 5).
@@ -1015,14 +1064,32 @@ CPython 3.14.10, eole 0.6.4, torch 2.14.1+cu130, safetensors 0.8.0, numpy 2.5.4,
 | the STOP gate test module (ledger, Task 6) | 28 tests collected from 25 functions, 2 min 38 s (about 184 s of a loaded 11 min gate); 30 from 27 after the final review's fixes |
 | the gate (the tree that holds this runbook; only documents differ from `3e357ae`) | `ruff format --check`, `ruff check`, `mypy src` clean; 7114 passed, 1 skipped, 10 deselected in 10 min 34 s of pytest (10 min 37 s in all) |
 
+**Measured again after D9 (2026-11-09, code `c2d46b5`, the same commands, a machine loaded by other work).**
+D9's vocabulary invariant (every reserved symbol in the vocabulary: `vocab.src` 225 to 339 lines, `vocab.json` 232
+to 344 entries, runbook 09) changed every weight-dependent number above; the 2026-11-08 values stay in the table
+as history.
+
+| What | Value, after D9 |
+|---|---|
+| `ablate --prepare-only` | 0.86 s |
+| `launch`, 200 steps from nothing | 34.5 s; `completed`; xent 5.81 to 2.13 (63.3 %); validation perplexity 106.851, 18.3535, 10.4948, 8.73594; weights SHA-256 `6f5e836c7553...`, 3,318,120 B |
+| `launch` of the finished run | 1.11 s; `already_complete`; the tree unchanged |
+| `launch` after the weights of `step_200` were cut in half | 13.13 s; `resumed from: 150`, skipped `[200]`, attempt 2; validation perplexity 8.80202; `step_200` weights `b665b997a108...` |
+| separate run: 100 steps, `--write-only` for 200, then 200 | 23.43 s, 0.93 s, 18.71 s; `resumed from: 100`; validation perplexity 10.3336 and 8.78357; `step_200` weights `7f0b2899494d...` |
+| `average --last 3` | 1.16 s; weights SHA-256 `629aa11e68ba...` |
+| lowering `train_steps` to 50 afterwards | exit 2, the same message |
+| `du -sb` | run directory 19,659,478 B; a step directory 4,898,781 B; the averaged directory 3,354,430 B |
+
 The measurement scripts were read-only scratch files (`m1_tiny_teacher.py`, `m2_teacher_commands.py`,
 `m3_arithmetic.py`) run with `python -I`; the arithmetic and the commands in "The 8-GPU teacher" were not
-measurements and are labelled so.
+measurements and are labelled so. The measurements after D9 are those of `measure_d8.py` (the same flow), in the
+scratchpad of the D9 session.
 
 ## Where the code lives
 
 `src/rinchen/train/{checkpoints,curves,average,launch,gpu_rules,launch_command,run_lock}.py` with the
-extensions of `eole_cfg.py`, `eole_run.py` and `corpus_files.py`; `src/rinchen/utils/{logged_process,
+extensions of `eole_cfg.py`, `eole_run.py` and `corpus_files.py` (D9 extended `launch`, `checkpoints`,
+`launch_command`, `eole_cfg` and `eole_run` again and added `continuation.py` and `eole_cfg_keys.py`: runbook 09); `src/rinchen/utils/{logged_process,
 integers}.py`; `src/rinchen/cli/{train,train_runs,train_common}.py`; `configs/eole/{teacher,
 teacher_tiny}.yaml`; unit tests `tests/unit/test_train_checkpoints.py`, `test_train_curves.py`,
 `test_train_average.py`, `test_train_launch.py`, `test_train_launch_command.py`,

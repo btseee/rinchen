@@ -24,8 +24,10 @@ placement is better.
 
 - **No ablation conclusion exists.** The only data the machinery ever ran on is the toy set of
   `tests/support/tiny_parallel.py` (37 nouns in six templates, three languages), which the model
-  saturates: the two variants of the gate scored chrF 96.25 to 99.72 in every direction. Those
-  numbers show that the tags, weights, prediction and scoring work end to end; they rank nothing.
+  saturates: the two variants of the gate scored chrF 96.25 to 99.72 in every direction when D7 was
+  built, and 90.89 to 99.45 after D9's vocabulary invariant changed the model's vocabulary (see
+  "The toy numbers rank nothing"). Those numbers show that the tags, weights, prediction and scoring
+  work end to end; they rank nothing.
 - **No real corpus and no GPU run exist.** Every run was on the CPU (the GPU hidden from Eole), on at
   most 5,200 toy rows. The proxy base config (`configs/eole/multilingual_proxy.yaml`) and the
   ablation that uses it (`configs/eole/ablation_priors.yaml`) are unmeasured priors, checked only by
@@ -37,7 +39,9 @@ placement is better.
 - **No fine-tuning.** Every variant is trained from random initialisation; `train_from` is not an
   allowed Eole key of an ablation config. (D8's launcher allows it in one place only: the config it
   renders itself to resume its OWN run from a complete checkpoint of the same run directory,
-  `validate_train_config(..., resumes=True)`; see `docs/runbooks/08_teacher.md`.)
+  `validate_train_config(..., resumes=True)`; see `docs/runbooks/08_teacher.md`. D9's `launch
+  --continue-from` starts a NEW run from OUR OWN teacher, with a provenance rule, and is the one other
+  place `train_from` and `reset_optim` appear: `docs/runbooks/09_document_level.md`.)
 
 Every number below is from a test, the code, the design, the spike (`spike-findings.md` in the SDD
 workspace; toy data) or a measurement made for this runbook on 2026-11-08 ("Measured numbers"); a
@@ -52,8 +56,8 @@ invocations, a probe of the mixture build at 1,000,000 and 4,000,000 rows).
 | Module | Job |
 |---|---|
 | `rinchen/utils/logged_process.py` | `run_logged`: a command with its output in a log, a timeout, a wait in 0.2 s slices that Ctrl-C can interrupt, SIGTERM and SIGHUP turned into an exit, and a kill of the whole process group (moved from `script_conv/_subprocess.py`; D8 added `inherit_fds`) |
-| `rinchen/train/eole_cfg.py` | Allow-lists of Eole config keys per level, `FORBIDDEN_KEYS`, `validate_train_config`, `merge`, `merged_config`, `render`, `read_config`, `dump_config`, `reject_dollar`, `reject_glob_characters` (D8 extended the lists and added the `resumes` flag: runbook 08) |
-| `rinchen/train/eole_run.py` | `run_training` (`eole build_vocab` then `eole train`), `predict_tokens` (`eole predict` on token lines, optionally with forced prefixes), `training_environment`, `eole_commands`, `CHECKPOINT_FILE` |
+| `rinchen/train/eole_cfg.py` | Allow-lists of Eole config keys per level (D9 moved the lists to `eole_cfg_keys.py`, which `eole_cfg` re-exports), `FORBIDDEN_KEYS`, `validate_train_config`, `merge`, `merged_config`, `render`, `read_config`, `dump_config`, `reject_dollar`, `reject_glob_characters` (D8 extended the lists and added the `resumes` flag: runbook 08; D9 added the `continues` and `resumes_continuation` rules: runbook 09) |
+| `rinchen/train/eole_run.py` | `run_training` (`eole build_vocab`, the reserved symbols appended to the vocabulary file when the caller gives them, then `eole train`), `predict_tokens` (`eole predict` on token lines, optionally with forced prefixes and, since D9, `max_length` and `max_length_ratio`), `add_reserved_symbols`, `training_environment`, `eole_commands`, `CHECKPOINT_FILE` (the D9 additions: runbook 09) |
 | `rinchen/train/sampling.py` | `mixing_probabilities` (temperature over directions) and `integer_weights` (largest-remainder rounding to `weight_total`) |
 | `rinchen/config/ablation.py` | `AblationMatrix`, `Axes`, `load_ablation`, `TagPlacement`, `id_number`; imports no feature package |
 | `rinchen/train/variants.py` | `Variant`, `expand_variants` (the product of the axes and the seeds) |
@@ -140,8 +144,8 @@ The matrix has no axis for an Eole key. To compare two values of one (a learning
 ### Allow-lists
 
 `validate_train_config` allows only these keys, level by level (copied from
-`src/rinchen/train/eole_cfg.py`, alphabetical here; D8 added 4 top-level and 9 `training` keys for the
-teacher runs). Eole 0.6.4 rejects any other key of `eole
+`src/rinchen/train/eole_cfg_keys.py` since D9 (`eole_cfg` re-exports them), alphabetical here; D8
+added 4 top-level and 9 `training` keys for the teacher runs). Eole 0.6.4 rejects any other key of `eole
 train` (`D-EOLE-UNKNOWN-KEYS`), and `tests/unit/test_train_eole_cfg_drift.py` checks every listed key
 against the fields of the installed Eole.
 
@@ -160,10 +164,12 @@ against the fields of the installed Eole.
 | forbidden at any depth (16) | `global_heads_kv`, `heads_kv`, `interleave_local`, `layer_types`, `multidimensional_rope`, `partial_rotary_factor`, `qk_norm_post_rope`, `relative_positions_buckets`, `rope_config`, `rotary_dim`, `rotary_dim_global`, `rotary_interleave`, `rotary_theta`, `rotary_theta_local`, `sliding_window`, `xdrope_section` |
 
 Nothing that adapts, continues or quantises a model is listed (no LoRA; `train_from` is accepted only by
-`validate_train_config(..., resumes=True)`, which D8's launcher uses for its own resume config), and no
-relative, rotary, ALiBi, sliding-window or grouped-query key; the lists describe a plain transformer.
-`average_decay`, `average_every`, `accum_steps`, `dropout_steps`, `reset_optim` and `update_vocab` are
-deliberately absent (runbook 08).
+`validate_train_config(..., resumes=True)`, which D8's launcher uses for its own resume config, and, with
+`reset_optim`, by the `continues=` and `resumes_continuation=True` forms that D9's launcher uses for its
+own continuation attempts: runbook 09), and no relative, rotary, ALiBi, sliding-window or
+grouped-query key; the lists describe a plain transformer. `average_decay`, `average_every`,
+`accum_steps`, `dropout_steps`, `reset_optim` and `update_vocab` are deliberately absent from the lists
+(runbook 08; `reset_optim` has the two forms above, `update_vocab` none).
 
 ### The rules of `validate_train_config`, in the order they are checked
 
@@ -198,7 +204,8 @@ What it does NOT check: the type of the value of a known key (a `train_steps` of
 dry run and fails in `eole train`, which has its own pydantic check; the keys D8 added are the
 exception, their kinds of value are checked), and that the config has at least one training corpus
 (the plan does, below). D8 added two rules between the ninth and the tenth: the kinds of value of the
-teacher keys and, with `resumes`, the form of `train_from`.
+teacher keys and, with `resumes`, the form of `train_from`; D9 added two more at the end, for the
+launcher's continuation attempts (`continues=`, `resumes_continuation=True`: runbook 09).
 
 `merge(base, overrides)` merges mappings key by key at any depth; every other value, a list included,
 replaces; an override of `None` deletes the key; neither input is changed. `render(base, overrides,
@@ -206,7 +213,10 @@ out)` merges, validates and writes `out` atomically (a failing config writes not
 the base, a directory, or below a file). A variant's config is the base, then the per-run values
 (`seed`, `src_vocab` = `variants/<id>/run/vocab.src`, `data`, `transforms_configs.sentencepiece` for
 both sides, `training.model_path` = `variants/<id>/run/ckpt`), then the matrix overrides over them,
-every path absolute in POSIX form. The corpora run the `filtertoolong` transform when the finished
+every path absolute in POSIX form. Since D9 the finished config also has `src_vocab_size`: the
+SentencePiece model's pieces plus one (Eole's pad token) unless the base or the overrides give a size,
+and a given size below that is a `ConfigError` naming both numbers (runbook 09, "The vocabulary
+invariant"); that key is why every variant trained before D9 has another fingerprint and retrains. The corpora run the `filtertoolong` transform when the finished
 config configures `transforms_configs.filtertoolong`; the base is the switch.
 
 `$` in the output directory or the SentencePiece model path is refused (it would be expanded). `[`,
@@ -427,9 +437,10 @@ $W/out/
   manifest.json                                     written last of all
 ```
 
-The tiny run left 71 files and 10 links; the largest are, per variant, the checkpoint (3,289,000
-bytes), its `optimizer.pt` (1,490,955) and `train.log` (116 to 130 KB), then the authentic corpus
-files (17 to 34 KB); `results.tsv` is 521 bytes and `manifest.json` 5,349.
+The tiny run left 71 files and 10 links; the largest are, per variant, the checkpoint (3,318,120
+bytes since D9's vocabulary invariant, 3,289,000 before), its `optimizer.pt` (1,549,195; 1,490,955
+before) and `train.log` (116 to 130 KB), then the authentic corpus files (17 to 34 KB); `results.tsv`
+is 521 bytes and `manifest.json` 5,349 (5,443 in the D9 measurement, whose paths were longer).
 
 **The corpus files** are plain text, one sentence per line, LF only, rows sorted by id then source
 then target, no tags (the tags are Eole `prefix` configuration, so the placement is a config
@@ -463,7 +474,7 @@ trusted before that. A complete variant is `reused`. Otherwise:
 
 | Outcome | When |
 |---|---|
-| `trained` | no valid record: the stale `result.json` and `train.json` are removed, Eole builds the vocabulary and trains (`eole build_vocab`, then `eole train`), `train.json` is written as soon as the checkpoint is hashed, then the evaluation runs and `result.json` is written last |
+| `trained` | no valid record: the stale `result.json` and `train.json` are removed, Eole builds the vocabulary and trains (`eole build_vocab`, then the reserved symbols of `spm.symbols` are appended to `vocab.src` when it lacks them, then `eole train`), `train.json` is written as soon as the checkpoint is hashed, then the evaluation runs and `result.json` is written last |
 | `evaluated` | `result.json` is missing or not trusted, but `train.json` parses, holds the current fingerprint and the checkpoint has the recorded digest: only the evaluation runs again. A failed or interrupted evaluation therefore does not cost the training |
 | `reused` | complete |
 
@@ -656,16 +667,29 @@ clamped at 100.0 (sacrebleu reports 100.00000000000004 for identical text); a co
 are all empty scores 0.0.
 
 **The toy numbers rank nothing.** The two variants of the gate, one seed each, 100 dev lines per
-direction:
+direction. As D7 recorded them on 2026-11-08 (code `f7d1bd0`, before the vocabulary invariant):
 
 | variant | eng-khk | khk-eng | khk-rus | rus-khk | chrf_mean | chrf_min |
 |---|---:|---:|---:|---:|---:|---:|
 | `t0.5_bt0.5_src_s1234` | 98.89 | 99.23 | 97.76 | 96.25 | 98.03 | 96.25 |
 | `t0.5_bt0.5_tgt_s1234` | 99.72 | 98.24 | 98.32 | 98.33 | 98.65 | 98.24 |
 
-(BLEU 98.85, 99.01, 98.60, 96.19 for `src` and 99.67, 98.01, 98.79, 98.43 for `tgt`.) The model
-memorises a templated grammar of 37 nouns; a 0.6 point difference of means on one seed says
-nothing about the placement. The only claims these numbers support are the gate's: every direction
+(BLEU 98.85, 99.01, 98.60, 96.19 for `src` and 99.67, 98.01, 98.79, 98.43 for `tgt`.) After D9 added
+every reserved symbol to the vocabulary (the vocabulary grew from 232 to 344 entries, the checkpoint
+from 3,289,000 to 3,318,120 bytes, so the initialisation and every number moved), the same command
+on 2026-11-09 (code `c2d46b5`, one run on a loaded machine) gave:
+
+| variant | eng-khk | khk-eng | khk-rus | rus-khk | chrf_mean | chrf_min |
+|---|---:|---:|---:|---:|---:|---:|
+| `t0.5_bt0.5_src_s1234` | 95.94 | 95.85 | 90.89 | 93.67 | 94.09 | 90.89 |
+| `t0.5_bt0.5_tgt_s1234` | 99.45 | 99.16 | 98.13 | 98.24 | 98.75 | 98.13 |
+
+(BLEU 95.91, 95.54, 93.11, 93.41 for `src` and 99.52, 99.01, 98.96, 98.01 for `tgt`; no tag leak; 135.7 s
+wall on a machine loaded by other work, `train` 75.1 s and 50.9 s.) The source-tag variant moved by up
+to 5.9 points (khk-rus 97.76 to 90.89), the target-tag variant by less than 1.5; both stay far above the
+gate's 60. The model memorises a templated grammar of 37 nouns; a 0.6 point difference of means on
+one seed said nothing about the placement and a 4.7 point one now says nothing either: the same
+variant moved 7 points by a change of vocabulary alone. The only claims these numbers support are the gate's: every direction
 of both variants is above chrF 60, the tags select the right language, no tag leaks, and the machinery
 runs end to end.
 
@@ -778,7 +802,8 @@ gates assigned to D4 and the D5 gates that need real text stay open as recorded 
   the code (`D-EOLE-WEIGHT-SEMANTICS`).
 - **`num_workers` above 1 with weights**, weight `None`, GPU or bf16 runs, dropout above 0,
   learning-rate or warmup tuning, larger models: not tested (the spike's list). `train_from` is not
-  an ablation key; D8 tested resuming a run's own checkpoint (runbook 08).
+  an ablation key; D8 tested resuming a run's own checkpoint (runbook 08) and D9 continuing our own
+  teacher (runbook 09).
 - **`xavier_uniform` at scale**: toy only.
 - **CTranslate2 export and Eole-native prediction of a tag-on-target model**: not tested (the
   harness predicts from pre-tokenised lines with the tag forced). D5's `export_ct2` fails for an
@@ -826,7 +851,8 @@ The machine: Intel Core Ultra 7 265K (20 cores as `nproc` reports), 46 GiB of RA
 | The dry run | 0.71 s; 215 MiB |
 | A rerun that reuses both / evaluates one / retrains one | 0.76 s / 3.37 s / 37.75 s |
 | Weights of the tiny run | 22 6 22 6 15 7 15 7 = 100 over 1200, 300, 1200, 300, 600, 300, 600, 300 rows |
-| The gate | dev chrF at least 60 in every direction of both variants (measured 96.25 to 99.72) |
+| The gate | dev chrF at least 60 in every direction of both variants (measured 96.25 to 99.72 on 2026-11-08; 90.89 to 99.45 on 2026-11-09, after D9's vocabulary invariant) |
+| The tiny run again, 2026-11-09 (code `c2d46b5`, loaded machine) | 135.7 s wall; `train` 75.1 and 50.9 s, `eval` 4.2 and 4.0 s; checkpoint 3,318,120 B, `optimizer.pt` 1,549,195 B, `vocab.src` 339 lines in both variants; 71 files and 10 links |
 
 The mixture probe is under "What was not verified". The measurement scripts were read-only scratch
 files (`build_inputs.py`, `weights_tables.py`, `gen_1m.py`, `measure_mixture.py`) run with `python -I`.

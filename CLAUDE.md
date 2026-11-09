@@ -42,12 +42,13 @@ configs/data/sources.yaml configs/data/sources.tiny.yaml configs/data/filters.ya
 configs/data/synth.yaml
 configs/eole/converter{,_tiny}.yaml configs/spm/converter_char.yaml
 configs/eole/{multilingual_tiny,ablation_tiny,multilingual_proxy,ablation_priors}.yaml
-configs/eole/{teacher,teacher_tiny}.yaml
+configs/eole/{teacher,teacher_tiny}.yaml configs/eole/{teacher_doc,teacher_doc_tiny}.yaml
 docs/STACK.md docs/VERIFY.md
 docs/runbooks/00_environment.md docs/runbooks/01_acquisition.md
 docs/runbooks/02_human_testsets.md docs/runbooks/03_tokenizer.md
 docs/runbooks/04_filtering_mining.md docs/runbooks/05_script_converter.md
 docs/runbooks/06_synthetic.md docs/runbooks/07_ablations.md docs/runbooks/08_teacher.md
+docs/runbooks/09_document_level.md
 docs/research/  docs/superpowers/{specs,plans}/
 src/rinchen/{config,manifest,utils,cli,text,lang,split,spm,corpus,filter,mine,script_conv,synth,metrics,eval,serve}/
 src/rinchen/acquire/{http,opus,hf,warc,commoncrawl,registry}.py
@@ -66,7 +67,9 @@ src/rinchen/synth/{ct2_baselines,_candidates,_texts,shards,select,plan,bt,ft,run
 src/rinchen/train/{eole_cfg,eole_run,sampling,variants,mixture,corpus_files,eole_data,validation_corpus,evaluate}.py
 src/rinchen/train/{ablation_plan,ablation_config,ablation_layout,ablation_prepare,ablation,ablation_records,ablation_report}.py
 src/rinchen/train/{checkpoints,curves,average,launch,gpu_rules,launch_command,run_lock}.py
-src/rinchen/config/ablation.py src/rinchen/cli/{train,train_runs,train_common}.py
+src/rinchen/train/{docify,doc_source,doc_pack,doc_corpus,continuation,vocabulary_size,eole_cfg_keys}.py
+src/rinchen/infer/doc_chunker.py
+src/rinchen/config/ablation.py src/rinchen/cli/{train,train_runs,train_common,train_docify}.py
 src/rinchen/utils/{logged_process,integers}.py
 src/rinchen/errors.py src/rinchen/__init__.py
 tests/ scripts/ plans/ reports/ manifests/
@@ -76,7 +79,7 @@ tests/support/ (planted corpus and alignments, fake embedders, tiny LID model,
   tiny_converter, stub_runtime, fake_process, script_reference, planted_synth,
   synth_cli, fake_llm_server, shard_files, corpus_rows, eole_train_config, tiny_parallel,
   tiny_variant, train_cli, fake_ablation, step_dirs, fake_launch, fake_eole_process, launch_cli,
-  signal_handlers)
+  signal_handlers, doc_cli, doc_rows)
 scripts/build_spm_fixture.py (regenerates tests/fixtures/spm/tiny_corpus)
 scripts/build_script_conv_fixtures.py (reference TSV -> lexicon, golden words, tiny fixture)
 data/{raw,clean,mined,synth,test}/ (gitignored content, tracked dirs)
@@ -136,8 +139,25 @@ crashed Eole leader was not killed, so the rank processes of a multi-GPU run cou
 events landed outside the run directory) and seven Minor ones; the fix wave (two commits, gate 7187 passed, 1 skipped,
 10 deselected) fixed the two Important ones, a guard against a resumed checkpoint of another architecture and the
 wording of an unreadable-file message, and left four findings open on purpose (`DECISIONS.md`); a scoped re-review of
-the fix wave approved it with minors, and the one that needed code is fixed. Next up: D9 (Document-level). See
-`STATE.md`, `docs/runbooks/07_ablations.md` and `docs/runbooks/08_teacher.md`.
+the fix wave approved it with minors, and the one that needed code is fixed. D9 (Document-level) is done locally
+on branch `d9-document-level`, stacked on `d8-teacher-training` (cut from it at `993f32c`), not merged and not
+pushed, and no CI run covers it: its STOP gate (a tiny doc model, made by continuing the averaged tiny teacher on
+windows of 2 to 4 sentences joined with `<sep>` through the real `rinchen train docify` and `launch --continue-from`
+and the real Eole, decodes `<sep>`-aligned output for at least 90 % of held-out dev windows of each size, and the
+chunker returns one translation per input sentence for every toy test document) is met on toy templated documents:
+alignment .982/.978/.941 for the sizes 2, 3 and 4 after 2,500 continuation steps (1,000 steps, the spike's figure, did
+not reach 0.9 on the non-overlapping windows `docify` cuts; the threshold was not lowered). It is machinery, not a
+document model: no GPU was used (the one on this machine was not authorised), no real document corpus exists, and
+`configs/eole/teacher_doc.yaml` is a table of unmeasured priors; the mix with sentence-level data, the window sizes
+and the real continuation schedule are unmeasured, and everything on a GPU stays open. D9 found that Eole's
+vocabulary is the file of tokens the data showed (so `<doc>` and `<sep>` were `<unk>` to a teacher that never saw
+them) and added the vocabulary invariant: every vocabulary now holds every reserved symbol, which moved every D7 and
+D8 tiny-run number (the old values are kept as history in the runbooks). A combined review of the code ran: ready with
+fixes, one Critical (a document keyed without its corpus), five Important and twelve Minor findings; its fix wave
+(six `D9: fix ...` commits and `D9: review minors`, gate 8214 passed, 1 skipped, 10 deselected) fixed them and left
+six findings open on purpose (`docs/runbooks/09_document_level.md`, "Known limits"); a scoped re-review was running
+when the records were written. Next up: D10 (Distillation & students). See `STATE.md`,
+`docs/runbooks/08_teacher.md` and `docs/runbooks/09_document_level.md`.
 
 ## Evidence and full plan
 
