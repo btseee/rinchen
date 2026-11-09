@@ -6,14 +6,14 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Final, Protocol
 
 from rinchen.config.ablation import TagPlacement, require_placement
 from rinchen.config.languages import direction_tag
 from rinchen.errors import ConfigError
 from rinchen.synth.tags import data_origin_tag
 from rinchen.train.eole_cfg import reject_dollar
-from rinchen.train.mixture import BT_GROUP, BT_ORIGIN
+from rinchen.train.mixture import BT_GROUP, BT_ORIGIN, KD_GROUP
 from rinchen.train.validation_corpus import ValidPaths
 
 
@@ -37,6 +37,10 @@ class CorpusEntry(Protocol):
     def tgt_path(self) -> Path: ...
 
 
+# The origin of the rows of a KD corpus: forward translation by our own teacher.
+_KD_ORIGIN: Final = "ft"
+
+
 def bt_tag() -> str:
     """The tag that marks a back-translated corpus (`<bt>`)."""
     tag = data_origin_tag(BT_ORIGIN)
@@ -45,14 +49,33 @@ def bt_tag() -> str:
     return tag
 
 
-def _prefixes(corpus: CorpusEntry, placement: str) -> tuple[str, str]:
-    """(`src_prefix`, `tgt_prefix`) of a corpus: the tag of its target language and,
-    for a back-translated corpus, the bt tag, on the side the placement names."""
+def ft_tag() -> str:
+    """The tag that marks a corpus of knowledge distillation (`<ft>`)."""
+    tag = data_origin_tag(_KD_ORIGIN)
+    if tag is None:
+        raise ConfigError(f"the origin {_KD_ORIGIN!r} has no data tag")
+    return tag
+
+
+def _origin_marker(group: str, *, kd_tag: bool) -> str | None:
+    """The tag that marks the origin of the corpora of `group`, none for an authentic one
+    and for a KD corpus when `kd_tag` is false."""
+    if group == BT_GROUP:
+        return bt_tag()
+    if group == KD_GROUP and kd_tag:
+        return ft_tag()
+    return None
+
+
+def _prefixes(corpus: CorpusEntry, placement: str, *, kd_tag: bool) -> tuple[str, str]:
+    """(`src_prefix`, `tgt_prefix`) of a corpus: the tag of its target language and, for a
+    back-translated corpus the bt tag, for a KD corpus the ft tag, on the side the
+    placement names."""
     tag = direction_tag(corpus.tgt_lang)
-    back_translated = corpus.group == BT_GROUP
+    marker = _origin_marker(corpus.group, kd_tag=kd_tag)
     if placement == "src":
-        return (f"{tag} {bt_tag()}" if back_translated else tag), ""
-    return (bt_tag() if back_translated else ""), tag
+        return (f"{tag} {marker}" if marker else tag), ""
+    return (marker or ""), tag
 
 
 def _weight(name: str, weights: Mapping[str, int]) -> int:
@@ -73,6 +96,7 @@ def data_section(
     *,
     valid_paths: ValidPaths,
     filtertoolong: bool,
+    kd_tag: bool = True,
 ) -> dict[str, Any]:
     """The Eole `data` mapping: one entry per corpus with its paths, `transforms`
     (`sentencepiece`, `prefix` and, when `filtertoolong`, `filtertoolong`), `weight`
@@ -80,8 +104,10 @@ def data_section(
 
     The tag is that of the corpus's target language; with placement `src` it is the
     source prefix and a bt corpus adds `<bt>` after it, with `tgt` it is the target
-    prefix and a bt corpus has `<bt>` alone as source prefix. Paths are written as
-    given, as POSIX text. The text files carry no tags: the placement is configuration.
+    prefix and a bt corpus has `<bt>` alone as source prefix. A KD corpus (group `kd`) is
+    marked the same way with `<ft>`, unless `kd_tag` is false: then it is prefixed as an
+    authentic corpus (the keyword changes no other corpus). Paths are written as given, as
+    POSIX text. The text files carry no tags: the placement is configuration.
 
     Raises:
         ValueError: a placement other than `src` or `tgt`; no corpus or two corpora of
@@ -108,7 +134,7 @@ def data_section(
     for corpus in corpora:
         reject_dollar(f"source path of corpus {corpus.name}", corpus.src_path)
         reject_dollar(f"target path of corpus {corpus.name}", corpus.tgt_path)
-        src_prefix, tgt_prefix = _prefixes(corpus, placement)
+        src_prefix, tgt_prefix = _prefixes(corpus, placement, kd_tag=kd_tag)
         section[corpus.name] = {
             "path_src": corpus.src_path.as_posix(),
             "path_tgt": corpus.tgt_path.as_posix(),

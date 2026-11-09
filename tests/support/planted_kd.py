@@ -16,13 +16,17 @@ show that such a row adds neither a source nor a reference.
 
 `ScriptedTeacher` is a `KdTranslator`: it answers each text with its scripted candidates (a
 text the script lacks is a mistake of the test), records every call and can fail, or reply
-something that is no list, on a chosen call."""
+something that is no list, on a chosen call.
+
+`write_kd_files` writes a KD corpus file and the `distill_generate` manifest that vouches for
+it, as the generation command leaves them, for the tests that read KD files back."""
 
 from __future__ import annotations
 
 import random
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -30,7 +34,11 @@ import polars as pl
 
 from rinchen.config.synth import SelectionConfig
 from rinchen.corpus.schema import make_row_id
+from rinchen.corpus.writers import write_corpus
 from rinchen.filter.qe import QEScorer
+from rinchen.manifest import store
+from rinchen.manifest.model import Manifest, ManifestFile
+from rinchen.manifest.stage import output_file
 from rinchen.train.distill_export import VerifiedExport
 from rinchen.train.distill_generate import KdResult, KdTranslator, generate_kd
 from rinchen.train.distill_sources import KdSources
@@ -285,3 +293,45 @@ def kd_run(
         name=name,
         **keywords,
     )
+
+
+KD_FILE = "kd.parquet"
+KD_STAGE = "distill_generate"
+
+
+def write_kd_files(
+    directory: Path,
+    frame: pl.DataFrame,
+    *,
+    name: str = KD_FILE,
+    stage: str = KD_STAGE,
+    status: Mapping[str, str] | None = None,
+    listed: bool = True,
+    rows: int | None = None,
+) -> Path:
+    """Write `frame` (a corpus frame) as `directory/name` and the manifest beside it that
+    vouches for it the way `rinchen distill generate` does: stage `distill_generate`,
+    status `generate: ok`, the file listed with its SHA-256 and its row count. The keywords
+    make the manifests that must be refused: another `stage` or `status`, a file that is
+    not `listed`, a recorded row count `rows` that is not the real one. Returns the path of
+    the corpus file."""
+    path = directory / name
+    count = write_corpus(frame, path)
+    entry = output_file(path, count if rows is None else rows)
+    manifest = Manifest(
+        stage=stage,
+        created=datetime(2026, 1, 1, tzinfo=UTC).isoformat(),
+        code_version="test",
+        config_sha256="0" * 64,
+        seed=1234,
+        outputs=[entry] if listed else [_other_file(directory)],
+        status={"generate": "ok"} if status is None else dict(status),
+    )
+    store.write(directory, manifest)
+    return path
+
+
+def _other_file(directory: Path) -> ManifestFile:
+    counts = directory / "counts.json"
+    counts.write_text("{}\n", encoding="utf-8")
+    return output_file(counts, None)

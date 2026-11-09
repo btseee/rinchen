@@ -14,7 +14,9 @@ once: `rows_read = rows_kept + the sum of the exclusions`):
 
 The origin sorts a kept row into a group: `bt` for back-translated rows, `auth` for
 the rest (human, web, mined, converted). A corpus is a direction (`src_lang-tgt_lang`)
-and a group, named `<direction>.<group>`.
+and a group, named `<direction>.<group>`. The group `kd` is that of the corpora of
+knowledge distillation (D10), which this module never produces: its rows have the origin
+`ft` and are read by `distill_corpus`.
 
 Development rows (`split` is `dev`, no `filter_reason`) go through the `empty` and
 `line_break` rules and are counted apart. Rows of a language outside the registry
@@ -37,6 +39,8 @@ from rinchen.errors import ConfigError, DataError
 
 AUTH_GROUP: Final = "auth"
 BT_GROUP: Final = "bt"
+# The group of KD corpora: `load_training_rows` never produces it, a student run adds it.
+KD_GROUP: Final = "kd"
 BT_ORIGIN: Final = "bt"
 EXCLUDED_ORIGINS: Final = ("ft", "synth_llm", "synth_nmt")
 

@@ -121,6 +121,175 @@ def test_the_target_placement_puts_the_tag_in_the_target_prefix_and_bt_alone_in_
     assert section[f"{EN_MN}.bt"]["tgt_prefix"] == "<2khk_Cyrl>"
 
 
+def _kd(direction: str) -> CorpusFiles:
+    return _files(direction, "kd", directory="data/kd")
+
+
+def test_a_kd_corpus_has_the_ft_tag_after_the_direction_tag_in_the_source_prefix() -> (
+    None
+):
+    section = data_section(
+        [_kd(EN_MN)],
+        {f"{EN_MN}.kd": 28},
+        "src",
+        valid_paths=_VALID,
+        filtertoolong=True,
+    )
+
+    assert section[f"{EN_MN}.kd"] == {
+        "path_src": f"data/kd/{EN_MN}.kd.src",
+        "path_tgt": f"data/kd/{EN_MN}.kd.tgt",
+        "transforms": ["sentencepiece", "prefix", "filtertoolong"],
+        "weight": 28,
+        "src_prefix": "<2khk_Cyrl> <ft>",
+        "tgt_prefix": "",
+    }
+
+
+def test_a_kd_corpus_has_the_ft_tag_alone_as_source_prefix_for_the_target_placement() -> (
+    None
+):
+    section = data_section(
+        [_kd(EN_MN)],
+        {f"{EN_MN}.kd": 28},
+        "tgt",
+        valid_paths=_VALID,
+        filtertoolong=False,
+    )
+
+    assert section[f"{EN_MN}.kd"]["src_prefix"] == "<ft>"
+    assert section[f"{EN_MN}.kd"]["tgt_prefix"] == "<2khk_Cyrl>"
+
+
+@pytest.mark.parametrize(
+    ("placement", "src_prefix", "tgt_prefix"),
+    [("src", "<2eng_Latn>", ""), ("tgt", "", "<2eng_Latn>")],
+)
+def test_without_the_kd_tag_a_kd_corpus_is_prefixed_as_an_authentic_one(
+    placement: Any, src_prefix: str, tgt_prefix: str
+) -> None:
+    section = data_section(
+        [_kd(MN_EN), _files(MN_EN, "auth")],
+        {f"{MN_EN}.kd": 5, f"{MN_EN}.auth": 5},
+        placement,
+        valid_paths=_VALID,
+        filtertoolong=False,
+        kd_tag=False,
+    )
+
+    assert section[f"{MN_EN}.kd"]["src_prefix"] == src_prefix
+    assert section[f"{MN_EN}.kd"]["tgt_prefix"] == tgt_prefix
+    assert (
+        section[f"{MN_EN}.kd"]["src_prefix"] == section[f"{MN_EN}.auth"]["src_prefix"]
+    )
+    assert (
+        section[f"{MN_EN}.kd"]["tgt_prefix"] == section[f"{MN_EN}.auth"]["tgt_prefix"]
+    )
+
+
+def test_the_kd_tag_is_on_by_default() -> None:
+    corpora = [_kd(MN_RU)]
+    weights = {f"{MN_RU}.kd": 3}
+
+    default = data_section(
+        corpora, weights, "src", valid_paths=_VALID, filtertoolong=False
+    )
+    explicit = data_section(
+        corpora, weights, "src", valid_paths=_VALID, filtertoolong=False, kd_tag=True
+    )
+
+    assert default == explicit
+    assert default[f"{MN_RU}.kd"]["src_prefix"] == "<2rus_Cyrl> <ft>"
+
+
+def _old_section(placement: str) -> dict[str, Any]:
+    """The `data` section of an authentic and a back-translated corpus as D7 wrote it
+    before the KD group existed, spelled out by hand."""
+    src_tag = "<2khk_Cyrl>"
+    return {
+        f"{EN_MN}.auth": {
+            "path_src": f"data/auth/{EN_MN}.auth.src",
+            "path_tgt": f"data/auth/{EN_MN}.auth.tgt",
+            "transforms": ["sentencepiece", "prefix", "filtertoolong"],
+            "weight": 3,
+            "src_prefix": src_tag if placement == "src" else "",
+            "tgt_prefix": "" if placement == "src" else src_tag,
+        },
+        f"{EN_MN}.bt": {
+            "path_src": f"data/bt/r1_s1/{EN_MN}.bt.src",
+            "path_tgt": f"data/bt/r1_s1/{EN_MN}.bt.tgt",
+            "transforms": ["sentencepiece", "prefix", "filtertoolong"],
+            "weight": 1,
+            "src_prefix": f"{src_tag} <bt>" if placement == "src" else "<bt>",
+            "tgt_prefix": "" if placement == "src" else src_tag,
+        },
+        "valid": {
+            "path_src": "variants/v/valid.src",
+            "path_tgt": "variants/v/valid.tgt",
+        },
+    }
+
+
+@pytest.mark.parametrize("placement", ["src", "tgt"])
+@pytest.mark.parametrize("kd_tag", [True, False, None])
+def test_the_authentic_and_back_translated_entries_do_not_depend_on_the_kd_keyword(
+    placement: Any, kd_tag: bool | None
+) -> None:
+    keywords: dict[str, Any] = {} if kd_tag is None else {"kd_tag": kd_tag}
+
+    section = data_section(
+        [_files(EN_MN, "auth"), _files(EN_MN, "bt", directory="data/bt/r1_s1")],
+        {f"{EN_MN}.auth": 3, f"{EN_MN}.bt": 1},
+        placement,
+        valid_paths=_VALID,
+        filtertoolong=True,
+        **keywords,
+    )
+
+    assert section == _old_section(placement)
+
+
+def test_a_mixture_of_the_three_groups_names_each_prefix_by_its_group() -> None:
+    corpora = [
+        _files(EN_MN, "auth"),
+        _files(EN_MN, "bt", directory="data/bt/r1_s1"),
+        _kd(EN_MN),
+    ]
+    weights = {f"{EN_MN}.auth": 3, f"{EN_MN}.bt": 1, f"{EN_MN}.kd": 4}
+
+    section = data_section(
+        corpora, weights, "src", valid_paths=_VALID, filtertoolong=True
+    )
+
+    assert [section[name]["src_prefix"] for name in weights] == [
+        "<2khk_Cyrl>",
+        "<2khk_Cyrl> <bt>",
+        "<2khk_Cyrl> <ft>",
+    ]
+    assert list(section) == [*weights, "valid"]
+
+
+@pytest.mark.parametrize("placement", ["src", "tgt"])
+@pytest.mark.parametrize("kd_tag", [True, False])
+def test_a_section_with_a_kd_corpus_passes_the_config_validator(
+    placement: Any, kd_tag: bool
+) -> None:
+    corpora = [_files(EN_MN, "auth"), _kd(EN_MN), _kd(MN_RU)]
+    weights = {corpus.name: index + 1 for index, corpus in enumerate(corpora)}
+
+    section = data_section(
+        corpora,
+        weights,
+        placement,
+        valid_paths=_VALID,
+        filtertoolong=True,
+        kd_tag=kd_tag,
+    )
+
+    config = _validated(section)
+    assert config["data"][f"{EN_MN}.kd"]["weight"] == 2
+
+
 @pytest.mark.parametrize(
     ("direction", "tag"),
     [(EN_MN, "<2khk_Cyrl>"), (MN_EN, "<2eng_Latn>"), (MN_RU, "<2rus_Cyrl>")],
