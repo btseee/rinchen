@@ -35,6 +35,13 @@ def _script_of_letter(letter: str) -> Script | None:
     return None
 
 
+def counted_letters(text: str) -> int:
+    """How many letters of `text` `script_of` counts: the denominator of its shares. A
+    letter of a script outside `Script` is counted, a letter of Script=Common or
+    Script=Inherited is not."""
+    return sum(1 for _ in _COUNTED_LETTER.finditer(text))
+
+
 def script_of(text: str) -> dict[Script, float]:
     """Share of each script among all letters of `text`.
 

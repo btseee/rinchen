@@ -79,16 +79,28 @@ def test_the_chunker_imports_nothing_from_training_or_the_command_line() -> None
     assert "rinchen.errors" in imported
 
 
+INFER_FORBIDDEN_LAYERS = (
+    "rinchen.train",
+    "rinchen.cli",
+    "rinchen.serve",
+    "rinchen.synth",
+    "rinchen.script_conv",
+    "rinchen.annotate",
+)
+
+
 def test_the_whole_infer_package_stays_free_of_training_and_the_command_line() -> None:
     files = sorted(Path(doc_chunker.__file__).parent.glob("*.py"))
 
-    assert {path.name for path in files} == {"__init__.py", "doc_chunker.py"}
+    assert {path.name for path in files} == {
+        "__init__.py",
+        "doc_chunker.py",
+        "script_mask.py",
+        "source_tokens.py",
+    }
     for path in files:
         for module in imported_modules(path):
-            assert not module.startswith(("rinchen.train", "rinchen.cli")), (
-                path.name,
-                module,
-            )
+            assert not module.startswith(INFER_FORBIDDEN_LAYERS), (path.name, module)
 
 
 def test_the_constants_are_the_ones_the_windows_are_trained_with() -> None:

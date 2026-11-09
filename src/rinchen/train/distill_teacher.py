@@ -40,7 +40,6 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Final, Literal, Protocol
 
-from rinchen.config.ablation import TagPlacement, require_placement
 from rinchen.config.languages import direction_tag, known_language_codes
 from rinchen.errors import ConfigError, DataError, UpstreamError
 from rinchen.export.record import CT2_FILES, SPM_FILE
@@ -50,6 +49,7 @@ from rinchen.export.verified import (
     shared_vocabulary,
     verified_bytes,
 )
+from rinchen.infer.source_tokens import ct2_source_tokens, reserved_pieces
 from rinchen.spm.symbols import user_defined_symbols
 from rinchen.synth._candidates import clean_candidates
 from rinchen.synth._texts import require_encodable
@@ -144,22 +144,6 @@ class TeacherOptions:
             )
 
 
-def ct2_source_tokens(
-    placement: TagPlacement, tag: str, pieces: Sequence[str]
-) -> tuple[list[str], list[str] | None]:
-    """The source line and the forced target prefix CTranslate2 is given for a text cut into
-    `pieces` and asked for the language `tag` stands for: for placement `src` the tag in
-    front of the pieces and no prefix, for `tgt` the pieces alone and the prefix `[tag]`.
-
-    Raises:
-        ValueError: `placement` is neither `src` nor `tgt`.
-    """
-    require_placement(placement)
-    if placement == "src":
-        return [tag, *pieces], None
-    return list(pieces), [tag]
-
-
 class _Translation(Protocol):
     @property
     def hypotheses(self) -> Sequence[Sequence[str]]: ...
@@ -224,9 +208,10 @@ class TeacherTranslator:
         self._translator = (
             translator if translator is not None else _load_ct2(export, options)
         )
-        self._reserved = _reserved_pieces(
+        # The engine may write a numbered placeholder (D12); a teacher's candidate never does.
+        self._reserved = reserved_pieces(
             self._processor, self._end_token, self._vocabulary
-        )
+        ) | frozenset(user_defined_symbols())
         self._checked_tags: set[str] = set()
         self._counters = dict.fromkeys(COUNTER_KEYS, 0)
 
@@ -377,21 +362,6 @@ class TeacherTranslator:
                 continue
             kept.append(text)
         return clean_candidates(kept)
-
-
-def _reserved_pieces(
-    processor: ProcessorLike, end_token: str, vocabulary: frozenset[str]
-) -> frozenset[str]:
-    """The pieces a translation never holds: the unknown piece of `processor`, the
-    `end_token` (a hypothesis ends with it once), every reserved symbol of the project
-    (every SentencePiece model of ours keeps them as single pieces) and every entry of the
-    export's `vocabulary` that is no piece of `processor`: Eole adds its pad token and
-    pads the vocabulary with made-up tokens, which the model could emit and
-    `processor.decode` would write as their letters."""
-    unknown_id = processor.unk_id()
-    foreign = (e for e in vocabulary if processor.piece_to_id(e) == unknown_id)
-    unknown = processor.id_to_piece(unknown_id)
-    return frozenset({unknown, end_token, *user_defined_symbols(), *foreign})
 
 
 def _languages_of(direction: str) -> tuple[str, str]:
