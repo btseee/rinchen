@@ -1,0 +1,55 @@
+# Benchmark suites (D13, T4): the benchmarks `rinchen eval suite` knows and how it reads each.
+# Nothing here was fetched, checked against a real dataset or run. The dataset id, the column
+# names and the split names below are recalled from memory and unverified offline: the commands
+# refuse a column that is not in a shard and name it, and they record the row counts they find,
+# but never assume them. The operator pins the revision of the dataset (a 40-character commit
+# hash) before a real fetch: `fetch` refuses to run without one unless it is told `--unpinned`,
+# and a suite built from an unpinned fetch says so.
+#
+# reader:    parquet_shards is a Hub dataset as `rinchen eval suite fetch` writes it, one directory
+#            per language holding Parquet shards; lines_dir is a directory of text files, one per
+#            language (<code>.txt), one sentence per line, the line number is the id.
+# dataset:   the Hub dataset id (parquet_shards only; null means nothing can be fetched).
+# revision:  the commit hash the fetch is pinned to; null until the operator pins it.
+# splits:    the splits the benchmark has: dev (for choosing a model) and devtest (for reporting
+#            one; never for tuning). The names are those of the dataset as recalled.
+# columns:   the shard columns holding the sentence id, its text and, optionally, its document
+#            (parquet_shards only). FLORES+ is recalled to hold the article address in `url`,
+#            which the build turns into a document id.
+# languages: the registry codes to look for, Khalkha (khk_Cyrl) always among them. A language the
+#            source lacks is recorded in the suite as missing, never dropped silently. khk_Mong is
+#            refused by name wherever a language is read, and mn_Mong is not a language of
+#            FLORES+. Whether NTREX has Khalkha is not known here.
+benchmarks:
+  flores_plus:
+    reader: parquet_shards
+    dataset: openlanguagedata/flores_plus
+    revision: null
+    splits: [dev, devtest]
+    columns:
+      id: id
+      text: text
+      doc: url
+    languages:
+      - khk_Cyrl
+      - eng_Latn
+      - rus_Cyrl
+      - zho_Hans
+      - kor_Hang
+      - jpn_Jpan
+      - deu_Latn
+      - kaz_Cyrl
+      - tur_Latn
+  ntrex:
+    reader: lines_dir
+    splits: [devtest]
+    languages:
+      - khk_Cyrl
+      - eng_Latn
+      - rus_Cyrl
+      - zho_Hans
+      - kor_Hang
+      - jpn_Jpan
+      - deu_Latn
+      - kaz_Cyrl
+      - tur_Latn

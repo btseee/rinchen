@@ -48,6 +48,10 @@ COMMAND_MODULES = [
     CLI / "eval_robustness.py",
     CLI / "eval_robustness_output.py",
     CLI / "eval_robustness_plan.py",
+    CLI / "eval_suite.py",
+    CLI / "eval_suite_files.py",
+    CLI / "eval_suite_output.py",
+    CLI / "eval_suite_plan.py",
 ]
 COMMAND_FORBIDDEN_LAYERS = (
     "rinchen.train",
@@ -262,6 +266,48 @@ def test_the_scan_covers_the_bootstrap_modules() -> None:
 def test_the_scan_covers_the_modules_of_the_evaluation_suite() -> None:
     for module in ("suite_rules", "suites"):
         assert PACKAGE / f"{module}.py" in MODULES
+
+
+def test_the_scan_covers_the_suite_sources_and_the_suite_commands() -> None:
+    assert PACKAGE / "suite_sources.py" in MODULES
+    for name in (
+        "eval_suite",
+        "eval_suite_files",
+        "eval_suite_output",
+        "eval_suite_plan",
+    ):
+        assert CLI / f"{name}.py" in COMMAND_MODULES
+
+
+def test_the_suite_commands_may_read_tables_with_polars_and_fetch_through_acquire() -> (
+    None
+):
+    # The only two commands that name polars (the Parquet, TSV and JSON Lines reading) and
+    # `rinchen.acquire.hf` (the fetch): neither is a layer or a library the rule forbids.
+    imported = imported_names((CLI / "eval_suite_files.py").read_text(encoding="utf-8"))
+    fetching = imported_names((CLI / "eval_suite.py").read_text(encoding="utf-8"))
+
+    assert "polars" in imported
+    assert "rinchen.acquire.hf" in fetching
+    for module in sorted(CLI.glob("eval_suite*.py")):
+        names = imported_names(module.read_text(encoding="utf-8"))
+        assert not any(is_inside(name, "datasets") for name in names)
+        assert not any(is_inside(name, "huggingface_hub") for name in names)
+        assert not any(is_inside(name, "httpx") for name in names)
+
+
+def test_the_suite_sources_import_none_of_the_libraries_a_fetch_or_a_table_needs() -> (
+    None
+):
+    imported = imported_names(
+        (PACKAGE / "suite_sources.py").read_text(encoding="utf-8")
+    )
+
+    for library in ("polars", "datasets", "huggingface_hub", "httpx", "csv", "yaml"):
+        assert not any(is_inside(name, library) for name in imported), library
+    assert not any(is_inside(name, "rinchen.cli") for name in imported)
+    assert not any(is_inside(name, "rinchen.export") for name in imported)
+    assert not any(is_inside(name, "rinchen.acquire") for name in imported)
 
 
 @pytest.mark.parametrize("path", MODULES, ids=lambda path: path.name)

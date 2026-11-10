@@ -3,13 +3,14 @@
 `write_shards` takes an already-constructed row iterator so it is
 unit-testable without any network access, and is exercised directly by
 `tests/unit/test_acquire_hf.py`. `fetch` is the thin wrapper that actually
-calls `datasets.load_dataset(..., streaming=True)`; it has no test
-coverage at all (the master plan's own D1 test list names no such test,
-and a real network-backed test would violate the "never network-access in
-unit tests" hard constraint). It is NOT reachable via the tiny-profile
-`--profile tiny` fixture path either: every `sources.tiny.yaml` entry uses
-`kind: local`, which `registry.fetch_source` dispatches to
-`http.download`, never to `hf.fetch`."""
+calls `datasets.load_dataset(..., streaming=True)`; a real network-backed
+test would violate the "never network-access in unit tests" hard constraint,
+so `tests/unit/test_acquire_hf_revision.py` (D13) runs it with
+`datasets.load_dataset` replaced by a recording fake. It is NOT reachable via
+the tiny-profile `--profile tiny` fixture path: every `sources.tiny.yaml`
+entry uses `kind: local`, which `registry.fetch_source` dispatches to
+`http.download`, never to `hf.fetch`. `rinchen eval suite fetch` (D13) is its
+other caller."""
 
 from __future__ import annotations
 
@@ -61,10 +62,14 @@ def fetch(
     config: str | None = None,
     split: str = "train",
     shard_size: int = 10_000,
+    revision: str | None = None,
 ) -> list[Path]:
     """Stream `dataset` (optionally a `config`/`split`) from the Hub and
-    write it to `dest_dir` as Parquet shards."""
+    write it to `dest_dir` as Parquet shards. `revision` pins the dataset to
+    a commit; without one the call to `load_dataset` is the one this function
+    always made (no `revision` keyword)."""
     import datasets  # type: ignore[import-untyped]
 
-    stream = datasets.load_dataset(dataset, config, split=split, streaming=True)
+    pin = {} if revision is None else {"revision": revision}
+    stream = datasets.load_dataset(dataset, config, split=split, streaming=True, **pin)
     return write_shards(stream, dest_dir, shard_size=shard_size)

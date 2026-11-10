@@ -877,6 +877,82 @@ REVIEWED: Final[tuple[tuple[str, str, str, str], ...]] = (
             "reader's own tuple"
         ),
     ),
+    # ---- the readers of the sources of a suite (D13, Task 4) ----
+    (
+        "eval/suite_sources.py",
+        "lines_rows",
+        "language",
+        "a registry code: `checked_language` has passed it before any message is built",
+    ),
+    ("eval/suite_sources.py", "lines_rows", "number", "the number of a line"),
+    ("eval/suite_sources.py", "build_multiway", "HUB_LANGUAGE", CONSTANT),
+    (
+        "eval/suite_sources.py",
+        "build_multiway",
+        "language",
+        "a key of `languages`, which `checked_language` has passed before any message is built",
+    ),
+    ("eval/suite_sources.py", "build_multiway", "len(rows)", COUNT),
+    ("eval/suite_sources.py", "build_multiway", "len(hub)", COUNT),
+    (
+        "eval/suite_sources.py",
+        "_by_id",
+        "language",
+        "a registry code, passed by `build_multiway` before it is called",
+    ),
+    ("eval/suite_sources.py", "_by_id", "len(found)", COUNT),
+    ("eval/suite_sources.py", "_by_id", "len(rows)", COUNT),
+    ("eval/suite_sources.py", "_partner_directions", "HUB_LANGUAGE", CONSTANT),
+    (
+        "eval/suite_sources.py",
+        "human_rows",
+        "src",
+        "a registry code of a row: `_item` has passed it through `checked_language`",
+    ),
+    (
+        "eval/suite_sources.py",
+        "human_rows",
+        "tgt",
+        "a registry code of a row: `_item` has passed it through `checked_language`",
+    ),
+    (
+        "eval/suite_sources.py",
+        "_item",
+        "place",
+        "`export row index` and the index of the row in the export, never a cell",
+    ),
+    (
+        "eval/suite_sources.py",
+        "_item",
+        "column",
+        "a column of the export, taken from the module's own tuple `HUMAN_COLUMNS`",
+    ),
+    (
+        "eval/suite_sources.py",
+        "_item",
+        "None",
+        "the absent field of a refusal about the whole row, a constant",
+    ),
+    ("eval/suite_sources.py", "_item", "_HUMAN_SPLIT", CONSTANT),
+    (
+        "eval/suite_sources.py",
+        "_optional_document",
+        "place",
+        "`export row index` and the index of the row in the export, never a cell",
+    ),
+    ("eval/suite_sources.py", "_optional_document", "_DOC_ID_RULE", CONSTANT),
+    (
+        "eval/suite_sources.py",
+        "_optional_segment",
+        "place",
+        "`export row index` and the index of the row in the export, never a cell",
+    ),
+    (
+        "eval/suite_sources.py",
+        "_require_one_set",
+        "index",
+        "the index of a row of the export",
+    ),
 )
 
 
@@ -967,6 +1043,12 @@ def test_the_scan_covers_the_modules_of_the_evaluation_suite() -> None:
     covered = {f.path for f in scanned()}
 
     assert {"eval/suite_rules.py", "eval/suites.py"} <= covered
+
+
+def test_the_scan_covers_the_readers_of_the_sources_of_a_suite() -> None:
+    covered = {f.path for f in scanned()}
+
+    assert "eval/suite_sources.py" in covered
 
 
 # ---- the scan itself ----------------------------------------------------------------------
