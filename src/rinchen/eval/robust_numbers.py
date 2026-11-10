@@ -19,7 +19,7 @@ from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, replace
 from decimal import Decimal
 from functools import cache
-from itertools import islice
+from itertools import chain, islice
 from typing import Final
 
 from rinchen.spm.symbols import PLACEHOLDER_COUNT, user_defined_symbols
@@ -64,8 +64,10 @@ _UNIT_BEFORE = re.compile(f"([{_CURRENCY}])[{_SPACES}]?\\Z")
 @dataclass(frozen=True, slots=True)
 class NumberToken:
     """A number of a text: the values it can mean (two for an ambiguous group), the
-    currency symbol written next to it, the number as written, and whether its reading
-    depends on a convention the language did not settle."""
+    currency symbol written next to it, the number as written (the components of a date, a
+    time or a range share the run as written, separators included, so that a date in
+    another layout has another surface), and whether its reading depends on a convention
+    the language did not settle."""
 
     readings: frozenset[Decimal]
     unit: str | None
@@ -160,8 +162,9 @@ def _scan(text: str, lang: str | None) -> Iterator[NumberToken]:
             )
             yield token
         else:
-            yield from first_two
-            yield from numbers
+            layout = _GROUP_SPACE.sub(" ", run.group())
+            for token in chain(first_two, numbers):
+                yield replace(token, surface=layout)
 
 
 def _run_numbers(run: str, lang: str | None) -> Iterator[NumberToken]:

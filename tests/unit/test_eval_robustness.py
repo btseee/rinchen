@@ -110,7 +110,9 @@ def test_the_golden_numbers_section() -> None:
     assert section["details"] == {
         "recall": 9 / 11,
         "extra_tokens": 1,
-        "surface_exact_rows": 4,
+        # n1, n3 and n7 are written as the reference writes them; n2 is `03/12/2024`
+        # against `12.03.2024` (the layout of a date), n4 and n8 are not exact.
+        "surface_exact_rows": 3,
         "unit_failures": 1,
         "ambiguous_rows": 0,
         "capped_rows": 0,

@@ -255,7 +255,14 @@ def test_signs_units_placeholders_and_foreign_digits(
         (f"1{NBSP}250,50", "rus_Cyrl", ["1 250,50"]),
         (f"1{NARROW_NBSP}250,50", "rus_Cyrl", ["1 250,50"]),
         (f"1{THIN_SPACE}250,50", "rus_Cyrl", ["1 250,50"]),
-        ("12.03.2024", None, ["12", "03", "2024"]),
+        # The components of one run share the run as written: the layout of a date.
+        ("12.03.2024", None, ["12.03.2024"] * 3),
+        ("03/12/2024", None, ["03/12/2024"] * 3),
+        ("10:30", None, ["10:30"] * 2),
+        ("5-6", None, ["5-6"] * 2),
+        ("10.0.0.1", None, ["10.0.0.1"] * 4),
+        (f"1{NBSP}250-5", None, ["1 250-5"] * 2),
+        ("1 5 12.03", None, ["1", "5", "12.03"]),
         ("-5", None, ["-5"]),
         (f"{MINUS}5", None, ["-5"]),
         ("a -5 b", None, ["-5"]),
@@ -426,11 +433,32 @@ SCORES = [
     scored("120", "210", None, counts=(1, 0, 1), exact=False),
     scored("7529", "752", None, counts=(1, 0, 1), exact=False),
     scored("7529", "7592", None, counts=(1, 0, 1), exact=False),
+    # A date is one run: written in another layout it keeps its values (`exact`) and not
+    # its written form (`surface_exact`), which compares the run with its separators.
+    scored("2024.03.12", "12.03.2024", None, counts=(3, 3, 0), exact=True),
+    scored("12.03.2024", "03/12/2024", None, counts=(3, 3, 0), exact=True),
     scored(
-        "2024.03.12", "12.03.2024", None, counts=(3, 3, 0), exact=True, surface=True
+        "12.03.2024", "12.03.2024", None, counts=(3, 3, 0), exact=True, surface=True
+    ),
+    scored("12.03.2024", "12/03/2024", None, counts=(3, 3, 0), exact=True),
+    scored(
+        "2024-03-12", "2024-03-12", None, counts=(3, 3, 0), exact=True, surface=True
+    ),
+    scored("10:30", "10:30", None, counts=(2, 2, 0), exact=True, surface=True),
+    scored(
+        "Meeting 12.03.2024 at 10:30.",
+        "Date 03/12/2024, 10:30.",
+        None,
+        counts=(5, 5, 0),
+        exact=True,
     ),
     scored(
-        "12.03.2024", "03/12/2024", None, counts=(3, 3, 0), exact=True, surface=True
+        "Meeting 12.03.2024 at 10:30.",
+        "At 10:30 on 12.03.2024.",
+        None,
+        counts=(5, 5, 0),
+        exact=True,
+        surface=True,
     ),
     scored("10:30", "10.30", None, counts=(2, 0, 1), exact=False),
     scored("5 and 5", "5", None, counts=(2, 1, 0), exact=False),
@@ -480,7 +508,8 @@ SCORES = [
         "no numbers", "no numbers", None, counts=(0, 0, 0), exact=True, surface=True
     ),
     scored(ARABIC_INDIC[1:3], "12", None, counts=(1, 1, 0), exact=True, surface=True),
-    scored("5-6", "6, 5", None, counts=(2, 2, 0), exact=True, surface=True),
+    scored("5-6", "6, 5", None, counts=(2, 2, 0), exact=True),
+    scored("5-6", "5-6", None, counts=(2, 2, 0), exact=True, surface=True),
     scored("5", "-5", None, counts=(1, 0, 1), exact=False),
     scored("12", "012", None, counts=(1, 1, 0), exact=True),
     # One value written twice, once with a unit: a text is its own best translation.

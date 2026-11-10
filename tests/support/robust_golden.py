@@ -39,7 +39,7 @@ GOLDEN_HYPOTHESES_SHA256: Final = (
 # tests that read it was checked against an independent computation; its size and digest pin
 # that file (the suite and the hypotheses files are the spike's, byte for byte).
 GOLDEN_RESULT_SHA256: Final = (
-    "80d08ddf242132570c0f033dbc59df6ad3121fc47fb2c1dc2f84f9e4ac2fc87c"
+    "0dbf112712a739b558eed9e441d5cdeeb95f688467e68c99f5f37a8f10043770"
 )
 GOLDEN_RESULT_BYTES: Final = 13614
 # The units each of the six values is a share of, in the unit of its section (rows; mentions
