@@ -24,7 +24,7 @@ accept:
 
 # Builds and starts the service in its container (never run here).
 serve-tiny:
-    docker compose -f docker/compose.serve.yaml up
+    docker compose -f docker/compose.serve.yaml up --build
 
 # Validates the compose file only (read only, builds and starts nothing, needs no daemon).
 docker-check:

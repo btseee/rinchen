@@ -7,7 +7,8 @@ them to the configured ones and keeps every other rule.
 
 Every error answers `{"error": {"code": str, "message": str}}`, the 422 of a refused body
 included. A message names a field and what is wrong with it and never holds what a client sent:
-the text of a request is not logged, echoed or put in an exception.
+the text of a request is not logged, echoed or put in an exception. The one thing of the client's
+a message does name is an unknown key, up to 40 characters and then cut with an ellipsis.
 """
 
 from __future__ import annotations
@@ -42,6 +43,8 @@ from rinchen.utils.integers import is_strict_int
 # A registry code is eight to ten characters; the room is for a typo to be echoed in the
 # engine's refusal, not for a text.
 MAX_LANGUAGE_CODE_CHARS: Final = 32
+# How much of an unknown key of a body a refusal names (no field of ours is longer).
+MAX_KEY_CHARS: Final = 40
 
 
 def _reject_blank(value: str) -> str:
@@ -198,7 +201,17 @@ def _field_of(error: Mapping[str, Any]) -> str:
     # The body is the only input, so its name says nothing before a field's.
     if len(location) > 1 and location[0] == "body" and isinstance(location[1], str):
         location = location[1:]
-    return ".".join(str(part) for part in location) or "body"
+    return ".".join(_shown(part) for part in location) or "body"
+
+
+def _shown(part: str | int) -> str:
+    """A part of a location as the message says it. The name of an unknown key is the client's
+    own, so it is cut after `MAX_KEY_CHARS` characters: the client still learns which field is
+    unknown, and no key is echoed whole whatever its length."""
+    name = str(part)
+    if len(name) <= MAX_KEY_CHARS:
+        return name
+    return name[:MAX_KEY_CHARS] + "..."
 
 
 def validation_error_response(errors: Sequence[Mapping[str, Any]]) -> JSONResponse:

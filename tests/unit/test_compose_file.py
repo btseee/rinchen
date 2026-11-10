@@ -213,6 +213,42 @@ def test_the_root_file_system_is_read_only_with_a_tmpfs_for_tmp(
     assert "/tmp" in [entry.split(":")[0] for entry in service["tmpfs"]]
 
 
+def test_the_service_is_linux_amd64_because_the_vendored_wheel_is_x86_64(
+    service: dict[str, Any],
+) -> None:
+    vendored = [
+        path.name for path in (REPO_ROOT / "vendor" / "wheels").glob("pyonmttok*")
+    ]
+
+    assert service["platform"] == "linux/amd64"
+    assert any("manylinux" in name and "x86_64" in name for name in vendored)
+
+
+def test_the_comments_say_who_must_be_able_to_read_the_model_and_where_a_relative_path_goes() -> (
+    None
+):
+    text = COMPOSE.read_text(encoding="utf-8")
+    comments = " ".join(
+        re.sub(r"\s*#\s*", " ", line) for line in text.splitlines() if "#" in line
+    )
+
+    assert "readable by that uid" in comments
+    assert "10001" in comments
+    assert "resolved against docker/" in comments
+
+
+def test_the_command_that_builds_is_the_same_in_the_justfile_the_dockerfile_and_the_compose_file() -> (
+    None
+):
+    command = "docker compose -f docker/compose.serve.yaml up --build"
+    justfile = (REPO_ROOT / "justfile").read_text(encoding="utf-8")
+    recipe = justfile.split("serve-tiny:")[1].splitlines()[1].strip()
+
+    assert recipe == command
+    assert command in DOCKERFILE.read_text(encoding="utf-8")
+    assert command in COMPOSE.read_text(encoding="utf-8")
+
+
 def test_the_container_has_an_init_process(service: dict[str, Any]) -> None:
     assert service["init"] is True
 

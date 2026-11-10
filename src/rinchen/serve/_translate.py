@@ -12,8 +12,8 @@ as a value: the batcher would raise an exception that was returned, and a refuse
 not fail its neighbours). An error of the library (`UpstreamError`) is not isolated: it says
 nothing about which request caused it.
 
-`ServingEngine` is what the service reads of an engine: `rinchen.infer.engine.Engine` has it,
-and so does the fake of the tests.
+`ServingEngine` (`rinchen.serve.engine`) is what the service reads of an engine. The status of
+a document is `rinchen.infer.engine_types.document_status`, the one `rinchen translate` reports.
 """
 
 from __future__ import annotations
@@ -21,52 +21,20 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from itertools import groupby
-from typing import Final, Protocol
 
 from rinchen.config.serve import ServeConfig
 from rinchen.errors import ConfigError, DataError
 from rinchen.infer.engine_types import (
     DecodeOptions,
     DocumentResult,
-    ModelInfo,
     Row,
     ScriptName,
     Status,
     Translation,
+    document_status,
 )
+from rinchen.serve.engine import ServingEngine
 from rinchen.serve.schemas import TranslateRequest, TranslateResponse
-
-# The worst status of a document first. `empty` is no problem of a sentence (a sentence of a
-# document with no letter is normal): a document is `empty` only when nothing in it is not.
-# `rinchen.cli.translate_io` reports a document the same way.
-_SEVERITY: Final[tuple[Status, ...]] = ("no_output", "too_long", "truncated")
-
-
-class ServingEngine(Protocol):
-    """What the service reads of an engine."""
-
-    @property
-    def info(self) -> ModelInfo: ...
-
-    def translate(
-        self, rows: Sequence[Row], options: DecodeOptions | None = None
-    ) -> list[Translation]: ...
-
-    def translate_documents(
-        self,
-        documents: Sequence[str],
-        src: str | None,
-        tgt: str,
-        options: DecodeOptions | None = None,
-        *,
-        script: ScriptName | None = None,
-    ) -> list[DocumentResult]: ...
-
-    def warmup(self) -> None: ...
-
-    def counters(self) -> dict[str, int]: ...
-
-    def close(self) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -180,16 +148,6 @@ def _call(engine: ServingEngine, key: BatchKey, rows: list[Row]) -> Sequence[Ans
             [row.text for row in rows], key.src, key.tgt, key.options, script=key.script
         )
     return engine.translate(rows, key.options)
-
-
-def document_status(result: DocumentResult) -> Status:
-    """The status of a document: the worst of its sentences (`no_output`, `too_long`,
-    `truncated`), else `ok`, and `empty` when no sentence is anything but empty."""
-    statuses = {translation.status for translation in result.translations}
-    for status in _SEVERITY:
-        if status in statuses:
-            return status
-    return "ok" if "ok" in statuses else "empty"
 
 
 def statuses_of(answers: Sequence[Answer]) -> list[Status]:

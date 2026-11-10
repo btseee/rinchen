@@ -38,7 +38,7 @@ import pytest
 from fastapi import FastAPI
 
 from rinchen.config.serve import ServeConfig
-from rinchen.errors import ConfigError, DataError
+from rinchen.errors import ConfigError
 from rinchen.infer.doc_chunker import ChunkStats
 from rinchen.infer.engine_types import (
     ENGINE_COUNTERS,
@@ -49,6 +49,7 @@ from rinchen.infer.engine_types import (
     ScriptName,
     Status,
     Translation,
+    reserved_symbol_error,
     selected_target,
 )
 from rinchen.infer.script_mask import script_hint
@@ -279,10 +280,7 @@ class FakeEngine:
         self._require_servable(src, tgt, script)
         for index, document in enumerate(documents):
             if "<sep>" in document:
-                raise DataError(
-                    f"document {index} contains the literal '<sep>', which a window "
-                    "would read as the boundary of two sentences"
-                )
+                raise reserved_symbol_error(f"document {index}", "<sep>")
         self._enter(Call("documents", tuple(documents), options, (), src, tgt, script))
         try:
             results = []
@@ -349,6 +347,9 @@ class RecordingLog:
     def _add(self, level: str, event: str, fields: dict[str, Any]) -> None:
         with self._lock:
             self.events.append((level, event, fields))
+
+    def debug(self, event: str, **fields: Any) -> None:
+        self._add("debug", event, fields)
 
     def info(self, event: str, **fields: Any) -> None:
         self._add("info", event, fields)

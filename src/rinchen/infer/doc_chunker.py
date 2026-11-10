@@ -332,6 +332,5 @@ def _refuse_separators(sentences: Sequence[str]) -> None:
         if SEGMENT_SEPARATOR in sentence:
             raise DataError(
                 f"sentence {position} contains the literal {SEGMENT_SEPARATOR!r}, "
-                "which a window would read as the boundary of two sentences: "
-                f"{sentence[:60]!r}"
+                "which a window would read as the boundary of two sentences"
             )

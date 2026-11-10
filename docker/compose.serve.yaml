@@ -29,6 +29,9 @@ services:
       context: ..
       dockerfile: docker/Dockerfile.cpu
     image: rinchen-serve:cpu
+    # The vendored pyonmttok wheel is built for x86_64 only (vendor/wheels): the image is
+    # linux/amd64 and an arm64 host runs it under emulation or not at all (not measured).
+    platform: linux/amd64
     # The ENTRYPOINT of the image is `rinchen`; this replaces its CMD with the same words.
     command:
       - serve
@@ -50,6 +53,10 @@ services:
       # The loopback of the host only: the service has no authentication.
       - "127.0.0.1:8000:8000"
     volumes:
+      # The container runs as uid 10001 (not root): the files of the export on the host must be
+      # readable by that uid (the mount is read only). A relative RINCHEN_MODEL_DIR (and the
+      # default below) is resolved against docker/, the directory of this file, not against
+      # the directory `docker compose` is run from.
       - type: bind
         source: "${RINCHEN_MODEL_DIR:-../models/tiny}"
         target: /models/tiny

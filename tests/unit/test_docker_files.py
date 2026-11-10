@@ -343,3 +343,34 @@ def test_the_dockerfile_says_what_was_never_measured() -> None:
     assert "unmeasured" in comments
     for note in UNMEASURED_NOTES:
         assert note in comments, f"the comments do not mention: {note}"
+
+
+def test_the_dockerfile_discloses_what_the_build_fetches_and_for_which_platform() -> (
+    None
+):
+    comments = comments_of(DOCKERFILE)
+
+    for note in (
+        "the build needs the network",
+        "hatchling",
+        "build isolation",
+        "kiwipiepy-model",
+        "source distribution",
+        "linux/amd64",
+        "pyonmttok",
+        "x86_64",
+    ):
+        assert note.lower() in comments, f"the comments do not mention: {note}"
+
+
+def test_the_number_of_skipped_packages_the_comments_state_is_the_lock_s() -> None:
+    family = d.gpu_family_packages(LOCK.read_text(encoding="utf-8"))
+    stated = {
+        int(number)
+        for number in re.findall(
+            r"(\d+) packages in this lock", DOCKERFILE.read_text(encoding="utf-8")
+        )
+    }
+
+    assert len(family) == 22
+    assert stated == {len(family)}

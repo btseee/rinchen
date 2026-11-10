@@ -49,8 +49,8 @@ from rinchen.cli.errors import rinchen_errors_as_exit_codes
 from rinchen.cli.translate import open_engine as open_engine_with_converter
 from rinchen.config.serve import ServeConfig, load_serve_config
 from rinchen.export.verified import verify_export
-from rinchen.serve._translate import ServingEngine
 from rinchen.serve.app import create_app, load_options
+from rinchen.serve.engine import ServingEngine
 from rinchen.utils import logging as rinchen_logging
 
 

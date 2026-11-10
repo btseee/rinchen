@@ -160,3 +160,43 @@ def test_importing_the_serving_modules_loads_no_library_that_only_the_engine_nee
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "[]"
+
+
+# ---- what is public and what is defined once ------------------------------------------------
+
+
+def test_the_serving_engine_has_a_public_module_of_its_own() -> None:
+    from rinchen.serve.engine import ServingEngine
+
+    assert ServingEngine.__module__ == "rinchen.serve.engine"
+    assert (PACKAGE / "engine.py").is_file()
+
+
+def test_no_module_outside_the_service_imports_a_private_module_of_it() -> None:
+    root = PACKAGE.parent
+    offenders = [
+        f"{path.relative_to(root)}: {name}"
+        for path in sorted(root.rglob("*.py"))
+        if PACKAGE not in path.parents
+        for name in imported_names(path.read_text(encoding="utf-8"))
+        if any(
+            part.startswith("_") and part != "__init__"
+            for part in name.split(".")[2:]
+            if name.startswith("rinchen.serve.")
+        )
+    ]
+
+    assert offenders == []
+
+
+def test_the_status_of_a_document_is_defined_once_and_the_service_uses_it() -> None:
+    from rinchen.infer import engine_types
+    from rinchen.serve import _translate
+
+    assert _translate.document_status is engine_types.document_status
+    defined_in = [
+        path.name
+        for path in sorted(PACKAGE.parent.rglob("*.py"))
+        if "def document_status(" in path.read_text(encoding="utf-8")
+    ]
+    assert defined_in == ["engine_types.py"]

@@ -27,12 +27,12 @@ from rinchen.infer.engine_types import (
     DocumentResult,
     Row,
     Translation,
+    document_status,
 )
 from rinchen.serve._translate import (
     DocumentKey,
     SentenceKey,
     build_response,
-    document_status,
 )
 from rinchen.serve.app import create_app
 from rinchen.serve.batcher import MicroBatcher

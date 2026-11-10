@@ -209,7 +209,8 @@ def healthcheck_command(instruction: Instruction) -> list[str] | None:
 
 def gpu_family_packages(lock_text: str) -> list[str]:
     """The sorted names of the packages of a `uv.lock` that belong to the torch and CUDA
-    family (the same names, built from the lock, the design spike measured: 22 of them)."""
+    family (the same names, built from the lock, the design spike measured: 22 of them; a
+    review's hand count of 21 was not the lock's)."""
     names = {package["name"] for package in tomllib.loads(lock_text)["package"]}
     return sorted(name for name in names if GPU_FAMILY.fullmatch(name))
 

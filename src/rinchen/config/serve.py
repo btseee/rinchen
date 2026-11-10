@@ -10,6 +10,12 @@ is an unmeasured prior: nothing here was timed on a real model, and no GPU was u
 export to int8 on a CPU: measured in the D11 spike). Relative paths stay relative: the
 service resolves them from its working directory, as the command line does.
 
+This is the one module of `rinchen.config` that imports a feature package
+(`rinchen.export.quantize`, for the one list of the compute types an export may be loaded as: a
+module of constants that imports only `rinchen.errors`; the others import `rinchen.errors` and
+`rinchen.lang.scripts`). The list belongs to the export, and moving it into `config` would touch
+D10's export code for one check, so the import stays.
+
 `shutdown_timeout_seconds` is the budget of the WHOLE stop, not of each step of it: the server
 waits for the requests in flight for `graceful_wait_seconds` of it and the end of the lifespan
 for `drain_wait_seconds`, the rest. A container's stop grace period must be longer than the budget

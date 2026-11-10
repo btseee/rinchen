@@ -274,6 +274,45 @@ def test_a_validation_message_names_the_field_without_the_body_prefix() -> None:
     assert message == "texts.0: too long; body.3: JSON decode error; body: odd"
 
 
+def test_an_unknown_key_is_named_up_to_40_characters_and_then_cut_with_an_ellipsis() -> (
+    None
+):
+    # The client learns which field the service does not know, but a key of any length is not
+    # echoed back whole.
+    errors = [
+        {
+            "type": "extra_forbidden",
+            "loc": ("body", key),
+            "msg": "Extra inputs are not permitted",
+        }
+        for key in ("terminology", "k" * 40, "k" * 41, SECRET * 10)
+    ]
+
+    message = json.loads(validation_error_response(errors).body)["error"]["message"]
+
+    assert message == "; ".join(
+        [
+            "terminology: Extra inputs are not permitted",
+            "k" * 40 + ": Extra inputs are not permitted",
+            "k" * 40 + "...: Extra inputs are not permitted",
+            (SECRET * 10)[:40] + "...: Extra inputs are not permitted",
+        ]
+    )
+
+
+def test_a_secret_key_of_a_request_is_not_echoed_whole() -> None:
+    key = "SECRET-KEY-" + "x" * 80
+    with pytest.raises(ValidationError) as caught:
+        TranslateRequest.model_validate(valid(**{key: 1}))
+
+    message = json.loads(validation_error_response(caught.value.errors()).body)[
+        "error"
+    ]["message"]
+
+    assert message == f"{key[:40]}...: Extra inputs are not permitted"
+    assert key not in message
+
+
 def test_a_response_has_the_fields_of_the_service() -> None:
     response = TranslateResponse(
         translations=["Сайн уу"],

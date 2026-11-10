@@ -11,8 +11,9 @@ Two pure ASGI middlewares (no `BaseHTTPMiddleware`, whose body handling would hi
   400, which is why the service parses its one body by hand.
 - `RequestRecorder` counts every response in `rinchen_requests_total` and times it by route, and
   logs one `request` event, at the moment the response starts (so a client that has seen the
-  response finds it counted). It sees 404s, 405s, 413s and 500s as it sees a 200, and counts a
-  request the server cancelled at the end of its graceful wait as a 500 with the code `cancelled`.
+  response finds it counted; a probe that works is a debug event, the rest info). It sees 404s,
+  405s, 413s and 500s as it sees a 200, and counts a request the server cancelled at the end of
+  its graceful wait as a 500 with the code `cancelled`.
 
 `register_error_handlers` makes every error the service answers `{"error": {"code": str,
 "message": str}}`: an unknown path (404), a wrong method (405), a refused parameter (422), a body
@@ -49,11 +50,16 @@ _ROUTE_BY_PATH: Final = {
     "/metrics": "metrics",
 }
 _CODE_BY_STATUS: Final = {404: "not_found", 405: "method_not_allowed"}
+# A probe comes every few seconds: its event is debug while it succeeds (it is counted all the
+# same), and info again when it fails.
+_PROBE_ROUTES: Final = frozenset({"healthz", "readyz", "metrics"})
 
 
 class EventLog(Protocol):
     """What the service asks of its logger (`rinchen.utils.logging.get` returns one): events
     with named fields, none of which is ever a text of a request."""
+
+    def debug(self, event: str, **fields: Any) -> None: ...
 
     def info(self, event: str, **fields: Any) -> None: ...
 
@@ -207,7 +213,9 @@ class RequestRecorder:
                 fields["target"] = note.target
             if note.code is not None:
                 fields["code"] = note.code
-            self._log.info("request", **fields)
+            probe_that_works = route in _PROBE_ROUTES and status < 400
+            emit = self._log.debug if probe_that_works else self._log.info
+            emit("request", **fields)
 
         async def recording_send(message: Message) -> None:
             if message["type"] == "http.response.start":

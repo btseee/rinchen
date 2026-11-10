@@ -392,27 +392,34 @@ def shown(value: object) -> str:
     return repr(value)[:_SHOWN]
 
 
+class RequestTextError(DataError):
+    """A text of a request that the engine refuses by a fixed rule (a lone surrogate, a
+    reserved symbol). Its message names the text by its place (`row 3`, `document 1`) and what
+    is wrong with it and never quotes it, so a service may pass it on; any other `DataError` may
+    carry whatever its raiser put in it."""
+
+
 def require_encodable(text: str, label: str) -> None:
     """A lone surrogate cannot be encoded as UTF-8, and SentencePiece raises a bare
     `TypeError` on it. The error names the text by its place and never quotes it.
 
     Raises:
-        DataError: `text` holds a lone surrogate.
+        RequestTextError: `text` holds a lone surrogate.
     """
     try:
         text.encode()
     except UnicodeEncodeError as error:
-        raise DataError(
+        raise RequestTextError(
             f"{label} cannot be encoded as UTF-8: a lone surrogate at position "
             f"{error.start}"
         ) from error
 
 
-def reserved_symbol_error(label: str, symbol: str) -> DataError:
+def reserved_symbol_error(label: str, symbol: str) -> RequestTextError:
     """The refusal of a request whose text spells a reserved `symbol`: it names the request by
     its place (`label`) and the symbol, a fixed entry of the model's vocabulary, never the
     text."""
-    return DataError(
+    return RequestTextError(
         f"{label} contains the reserved symbol {symbol}, which the model reads as a control "
         "piece and not as text (a direction tag would change the language asked for): "
         "remove it"

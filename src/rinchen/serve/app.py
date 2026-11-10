@@ -62,7 +62,7 @@ from starlette.types import Scope
 
 from rinchen.config.serve import ServeConfig
 from rinchen.errors import ConfigError, DataError, UpstreamError
-from rinchen.infer.engine_types import LoadOptions
+from rinchen.infer.engine_types import LoadOptions, RequestTextError
 from rinchen.serve._http import (
     BodyLimit,
     EventLog,
@@ -76,13 +76,13 @@ from rinchen.serve._translate import (
     BatchKey,
     Job,
     Refused,
-    ServingEngine,
     build_response,
     plan,
     run_jobs,
     statuses_of,
 )
 from rinchen.serve.batcher import Draining, MicroBatcher, QueueFull
+from rinchen.serve.engine import ServingEngine
 from rinchen.serve.metrics import ServeMetrics
 from rinchen.serve.schemas import (
     TranslateRequest,
@@ -97,6 +97,7 @@ _JSON_TYPE: Final = "application/json"
 _GENERIC_FAILURE: Final = "the model could not answer this request"
 _DRAINING: Final = "the service is shutting down"
 _NOT_READY: Final = "the model is not loaded yet"
+_REFUSED_TEXT: Final = "the model refused a text of this request"
 
 
 def load_options(config: ServeConfig) -> LoadOptions:
@@ -194,14 +195,19 @@ def create_app(
             await _stop(state)
 
     # No OpenAPI document means no interactive documentation either: the surface is four routes.
-    app = FastAPI(title="rinchen", lifespan=lifespan, openapi_url=None)
+    # No redirect of a path with a trailing slash either: it would be an empty 307 whose
+    # `Location` is built from the `Host` header of the client, and a 404 says it better.
+    app = FastAPI(
+        title="rinchen", lifespan=lifespan, openapi_url=None, redirect_slashes=False
+    )
     app.state.serving = state
     app.add_middleware(BodyLimit, limit=config.max_body_bytes)
     app.add_middleware(RequestRecorder, metrics=state.metrics, log=log)
     register_error_handlers(app, log=log)
-    app.add_api_route("/healthz", healthz, methods=["GET"])
-    app.add_api_route("/readyz", readyz, methods=["GET"])
-    app.add_api_route("/metrics", metrics, methods=["GET"])
+    # A load balancer may probe with HEAD.
+    app.add_api_route("/healthz", healthz, methods=["GET", "HEAD"])
+    app.add_api_route("/readyz", readyz, methods=["GET", "HEAD"])
+    app.add_api_route("/metrics", metrics, methods=["GET", "HEAD"])
     app.add_api_route("/v1/translate", translate, methods=["POST"])
     return app
 
@@ -403,7 +409,14 @@ async def translate(request: Request) -> Response:
         )
     except Draining:
         return refusal(scope, 503, "draining", _DRAINING, retry=True)
-    except (ConfigError, DataError) as error:
+    except RequestTextError as error:
+        # A fixed refusal that names the text by its place and never quotes it.
+        return refusal(scope, 400, "bad_request", str(error))
+    except DataError:
+        # Any other `DataError` carries whatever its raiser put in it: not a word of it is passed
+        # on, so that a text of the request never comes back in a response.
+        return refusal(scope, 400, "bad_request", _REFUSED_TEXT)
+    except ConfigError as error:
         return refusal(scope, 400, "bad_request", str(error))
     except _Expired:
         return refusal(
