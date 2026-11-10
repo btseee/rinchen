@@ -10,13 +10,18 @@ reviewed and says why it holds no such text. A new interpolation fails the test 
 looked at it and added it here with its reason; an entry that no longer matches code fails too, so
 the list cannot rot.
 
-The scan follows the four error classes of the project, `ValueError` and `TypeError`, and the
-helpers that make a refusal (`refusal` of the suite reader, `_refused` of the hypotheses reader):
-the helpers are where the message is assembled, so their callers' arguments are listed too.
+The scan follows the four error classes of the project, `ValueError` and `TypeError`, the
+helpers that make a refusal (`refusal` of the suite reader, `_refused` of the hypotheses reader)
+and the command's exit for an output it cannot write (`exit_cannot_write`): the helpers are where
+the message is assembled, so their callers' arguments are listed too.
 
 What a reviewed entry may hold: an index, a count, a constant, a field name of the format, a
 section of the format, a registry code, an id that matched its pattern, a path or an option of the
 operator, the digest of a file. Never a source, a reference, a term, a spelling or a hypothesis.
+
+The scan also reads the three modules of the command `rinchen eval robustness` (`cli/`), whose
+messages come from the same files: they name paths of the operator, options, counts and the
+parts of a request that `request_place` chose, never what a file holds.
 """
 
 from __future__ import annotations
@@ -28,7 +33,19 @@ import rinchen
 from tests.support.error_messages import ERROR_NAMES, Finding, interpolations
 
 PACKAGE = Path(rinchen.__file__).parent / "eval"
-NAMES: Final = ERROR_NAMES | {"refusal", "_refused", "ValueError", "TypeError"}
+COMMAND = Path(rinchen.__file__).parent / "cli"
+COMMAND_MODULES: Final = (
+    "eval_robustness.py",
+    "eval_robustness_output.py",
+    "eval_robustness_plan.py",
+)
+NAMES: Final = ERROR_NAMES | {
+    "refusal",
+    "_refused",
+    "ValueError",
+    "TypeError",
+    "exit_cannot_write",
+}
 
 PLACE = (
     "the place the reader chose: a section of the format, an index and an id that matched "
@@ -218,6 +235,41 @@ REVIEWED: Final[tuple[tuple[str, str, str, str], ...]] = (
         "EntityTable.spellings_of",
         "language",
         "the target language of a row, a code of the language registry",
+    ),
+    # ---- the command: `rinchen eval robustness` ----
+    (
+        "cli/eval_robustness_plan.py",
+        "plan_of",
+        "_SYSTEM_RULE",
+        "the characters a system name may hold, a constant of the module",
+    ),
+    (
+        "cli/eval_robustness.py",
+        "_require_the_files_that_were_hashed",
+        "name",
+        "`model.bin` or `manifest.json`, the literals of the function's own tuple",
+    ),
+    (
+        "cli/eval_robustness_output.py",
+        "commit",
+        "target",
+        OPERATOR_PATH,
+    ),
+    (
+        "cli/eval_robustness_output.py",
+        "commit",
+        "exc",
+        (
+            "the OSError of a write the command made itself, from bytes it produced: it names a "
+            "path of the operator and the reason the system gave, no text of a suite or of a "
+            "hypothesis"
+        ),
+    ),
+    (
+        "cli/eval_robustness_output.py",
+        "commit",
+        "_OUTPUTS",
+        CONSTANT,
     ),
     # ---- the suite file ----
     (
@@ -505,6 +557,10 @@ def scanned() -> list[Finding]:
     for path in sorted(PACKAGE.glob("*.py")):
         relative = f"eval/{path.name}"
         found += interpolations(path.read_text(encoding="utf-8"), relative, names=NAMES)
+    for name in COMMAND_MODULES:
+        found += interpolations(
+            (COMMAND / name).read_text(encoding="utf-8"), f"cli/{name}", names=NAMES
+        )
     return found
 
 
@@ -573,6 +629,9 @@ def test_the_scan_covers_every_module_of_eval() -> None:
         "eval/robust_suite_rules.py",
         "eval/robust_spans.py",
         "eval/robust_mong.py",
+        "cli/eval_robustness.py",
+        "cli/eval_robustness_output.py",
+        "cli/eval_robustness_plan.py",
     } <= covered
 
 

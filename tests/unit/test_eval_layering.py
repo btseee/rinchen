@@ -6,6 +6,12 @@ SentencePiece, Eole nor torch (the engine and the converter load them; the comma
 them through those). Importing any module of the package loads none of them and not polars.
 No source of `eval` and no test of the robustness suites asks about the GPU: the machine
 has one that nothing here is authorised to touch.
+
+The command `rinchen eval robustness` (`cli/eval_robustness.py`, the module that reads its
+options and the one that writes its files) sits above `eval`: it may import the engine
+(`infer`), the export reader, the converter (`script_conv.runtime`), the manifest and the
+helpers of the other commands, but never the training, synthetic-data, serving, annotation or
+filter layers and never a heavy library directly; it asks about the GPU no more than `eval` does.
 """
 
 from __future__ import annotations
@@ -37,6 +43,19 @@ NOT_LOADED_BY_IMPORTING = (*FORBIDDEN_LAYERS, *FORBIDDEN_LIBRARIES, "polars")
 GPU_COUNT_NAME = "get_cuda_device_count"
 GPU_DRIVER_TOOL = "nvidia-smi"
 MODULES = sorted(PACKAGE.glob("*.py"))
+CLI = PACKAGE.parent / "cli"
+COMMAND_MODULES = [
+    CLI / "eval_robustness.py",
+    CLI / "eval_robustness_output.py",
+    CLI / "eval_robustness_plan.py",
+]
+COMMAND_FORBIDDEN_LAYERS = (
+    "rinchen.train",
+    "rinchen.synth",
+    "rinchen.serve",
+    "rinchen.annotate",
+    "rinchen.filter",
+)
 ROBUSTNESS_TESTS = sorted(
     path for path in TESTS.rglob("*robust*") if path.is_file() and path.suffix == ".py"
 )
@@ -213,6 +232,11 @@ def test_the_scan_covers_the_package_and_the_robustness_tests() -> None:
         "test_eval_robustness_rows",
         "test_eval_robustness_document",
         "test_eval_robust_report",
+        "test_cli_eval_robustness",
+        "test_cli_eval_robustness_refusals",
+        "test_cli_eval_robustness_failures",
+        "test_cli_eval_robustness_messages",
+        "test_cli_eval_robustness_manifest",
     ):
         assert TESTS / "unit" / f"{unit_test}.py" in ROBUSTNESS_TESTS
     for property_test in (
@@ -224,7 +248,7 @@ def test_the_scan_covers_the_package_and_the_robustness_tests() -> None:
         assert TESTS / "property" / f"{property_test}.py" in ROBUSTNESS_TESTS
     assert TESTS / "support" / "robust_suite_documents.py" in ROBUSTNESS_TESTS
     assert TESTS / "support" / "robust_golden.py" in ROBUSTNESS_TESTS
-    for support in ("robust_toy", "robust_toy_text", "robust_suites"):
+    for support in ("robust_toy", "robust_toy_text", "robust_suites", "robust_cli"):
         assert TESTS / "support" / f"{support}.py" in ROBUSTNESS_TESTS
     for toy_test in ("test_support_robust_toy", "test_support_robust_suites"):
         assert TESTS / "unit" / f"{toy_test}.py" in ROBUSTNESS_TESTS
@@ -239,9 +263,39 @@ def test_a_module_of_eval_imports_no_forbidden_layer_or_heavy_library(
     assert forbidden_among(imported) == []
 
 
+@pytest.mark.parametrize("path", COMMAND_MODULES, ids=lambda path: path.name)
+def test_the_command_imports_no_layer_it_has_no_need_of_and_no_heavy_library(
+    path: Path,
+) -> None:
+    imported = imported_names(path.read_text(encoding="utf-8"))
+
+    assert (
+        sorted(
+            module
+            for module in imported
+            if any(is_inside(module, layer) for layer in COMMAND_FORBIDDEN_LAYERS)
+            or any(is_inside(module, library) for library in FORBIDDEN_LIBRARIES)
+        )
+        == []
+    )
+
+
+def test_the_command_reaches_the_engine_and_the_converter_through_the_modules_that_load_them() -> (
+    None
+):
+    imported = imported_names(COMMAND_MODULES[0].read_text(encoding="utf-8"))
+
+    assert {
+        "rinchen.infer.engine.Engine",
+        "rinchen.script_conv.runtime.ScriptConverter",
+        "rinchen.export.verified.verify_export",
+        "rinchen.export.verified.verified_content",
+    } <= imported
+
+
 @pytest.mark.parametrize(
     "path",
-    [*MODULES, *ROBUSTNESS_TESTS],
+    [*MODULES, *COMMAND_MODULES, *ROBUSTNESS_TESTS],
     ids=lambda path: path.name,
 )
 def test_no_source_of_eval_or_of_its_tests_asks_about_the_gpu(path: Path) -> None:
