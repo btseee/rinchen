@@ -1,5 +1,6 @@
-"""No message of `rinchen eval suite` and of the configuration it reads holds a text of a suite or of
-a source (D13, Task 4; later tasks extend this file with their command modules).
+"""No message of `rinchen eval suite`, of `rinchen eval run` and of the configuration they read holds
+a text of a suite, of a source or of a system's output (D13, Tasks 4 and 7; later tasks extend this
+file with their command modules).
 
 `tests/unit/test_eval_error_messages.py` reads every module of `rinchen.eval`, the suite readers
 and `suite_sources` among them, and compares each place where an error is built from something that
@@ -56,6 +57,10 @@ LANGUAGE = "a registry code: it has passed the check against the registry"
 OPTION = "an option of the operator that the configuration was asked about, not a text of a file"
 UPSTREAM_CLASS = (
     "the class name of an upstream error, never its message (which may hold a token)"
+)
+DIRECTION_PLACE = (
+    "`direction_place` names a direction only when it has the shape of one, else says it is "
+    "not well formed"
 )
 CONFIGURED = (
     "a name, a split or a column that the configuration holds and the code has checked"
@@ -192,6 +197,87 @@ REVIEWED: Final[tuple[tuple[str, str, str, str], ...]] = (
             "(`include_input=False`; the messages of the module's own validators quote none)"
         ),
     ),
+    # ---- cli/eval_run*.py and cli/eval_systems.py (Task 7) ----
+    ("cli/eval_run.py", "_require_declared", "direction_place(entry)", DIRECTION_PLACE),
+    ("cli/eval_run.py", "_require_run_dir_apart", "run_dir", OPERATOR_PATH),
+    ("cli/eval_run.py", "_require_run_dir_apart", "held", OPERATOR_PATH),
+    (
+        "cli/eval_run.py",
+        "_require_the_files_that_were_hashed",
+        "name",
+        "`model.bin` or `manifest.json`, the two names the loop above lists",
+    ),
+    ("cli/eval_run_inputs.py", "read_robustness_input", "ROBUSTNESS_STAGE", CONSTANT),
+    (
+        "cli/eval_run_inputs.py",
+        "read_robustness_input",
+        "name",
+        "`robustness.json` or `report.json`, the two names of the files D12 writes",
+    ),
+    (
+        "cli/eval_run_output.py",
+        "documents_of",
+        "MAX_OUTPUTS_BYTES // 2 ** 20",
+        CONSTANT,
+    ),
+    ("cli/eval_run_output.py", "commit", "target", OPERATOR_PATH),
+    ("cli/eval_run_output.py", "commit", "exc", OS_ERROR),
+    ("cli/eval_run_output.py", "commit", "_OUTPUTS", CONSTANT),
+    ("cli/eval_run_plan.py", "plan_of", "_SYSTEM_RULE", CONSTANT),
+    ("cli/eval_run_plan.py", "plan_of", "_SYSTEM_OPTIONS", CONSTANT),
+    ("cli/eval_run_plan.py", "plan_of", "len(chosen)", COUNT),
+    (
+        "cli/eval_run_plan.py",
+        "plan_of",
+        "', '.join(engine_options)",
+        "the names of options the operator gave, from a fixed table",
+    ),
+    ("cli/eval_run_plan.py", "_usable_name", "what", CONSTANT),
+    ("cli/eval_run_plan.py", "_usable_name", "_SYSTEM_RULE", CONSTANT),
+    (
+        "cli/eval_run_plan.py",
+        "_scores_of",
+        "', '.join(SEGMENT_SCORE_METRICS)",
+        "the three metric names of the registry",
+    ),
+    ("cli/eval_systems.py", "generator_system", "name", OPTION),
+    (
+        "cli/eval_systems.py",
+        "generator_system",
+        "', '.join(sorted(generators))",
+        "the names of the generators the operator's own configuration holds",
+    ),
+    (
+        "cli/eval_systems.py",
+        "_generators_of",
+        "where",
+        "the line and column PyYAML gives for the operator's own configuration, two integers",
+    ),
+    (
+        "cli/eval_systems.py",
+        "_generators_of",
+        "type(raw).__name__",
+        "the class name of the top level of the configuration",
+    ),
+    (
+        "cli/eval_systems.py",
+        "_generators_of",
+        "problems",
+        (
+            "the field paths and the messages of the validation, which never quote a value "
+            "(`include_input=False`; the messages of the module's own validators quote none)"
+        ),
+    ),
+    ("cli/eval_systems.py", "_evaluation_config", "name", OPTION),
+    ("cli/eval_systems.py", "vocabulary_guard", "entry.path", OPERATOR_PATH),
+    ("cli/eval_systems.py", "vocabulary_guard", "family", CONSTANT),
+    ("cli/eval_systems.py", "vocabulary_guard", "language", LANGUAGE),
+    (
+        "cli/eval_systems.py",
+        "vocabulary_guard",
+        "shown",
+        "the token the family's table (D6's code tables) holds for a registry code, in parentheses and only when it is not the code: never an entry of the vocabulary",
+    ),
 )
 
 
@@ -202,9 +288,16 @@ def scanned_paths() -> list[Path]:
     ]
 
 
+def run_paths() -> list[Path]:
+    """The modules of `rinchen eval run`: their messages name the words `token` and `login`
+    (the vocabulary guard is about language TOKENS), so the environment scan below is narrower for
+    them."""
+    return [*sorted(CLI.glob("eval_run*.py")), CLI / "eval_systems.py"]
+
+
 def scanned() -> list[Finding]:
     found: list[Finding] = []
-    for path in scanned_paths():
+    for path in [*scanned_paths(), *run_paths()]:
         relative = path.relative_to(SOURCE_ROOT).as_posix()
         found += interpolations(path.read_text(encoding="utf-8"), relative, names=NAMES)
     return found
@@ -273,6 +366,31 @@ def test_the_scan_covers_the_modules_of_the_suite_commands_and_the_configuration
         "cli/eval_suite_files.py",
         "config/eval_suites.py",
     } <= covered
+
+
+def test_the_scan_covers_the_modules_of_the_run_command() -> None:
+    covered = {path.relative_to(SOURCE_ROOT).as_posix() for path in run_paths()}
+
+    assert {
+        "cli/eval_run.py",
+        "cli/eval_run_output.py",
+        "cli/eval_run_plan.py",
+        "cli/eval_run_inputs.py",
+        "cli/eval_systems.py",
+    } <= covered
+
+
+@pytest.mark.parametrize("path", run_paths(), ids=lambda path: path.name)
+def test_the_run_modules_never_read_the_environment_or_a_token_file(path: Path) -> None:
+    # `RINCHEN_MODEL` is the option's `envvar`, which typer reads; the modules themselves never do,
+    # and nothing here logs in or looks for a Hub token (no Hub is contacted by this command).
+    forbidden = ("environ", "getenv", "hf_home", "login", "hf_token", "huggingface")
+
+    names = {name.lower() for name in code_names(path)}
+
+    assert [
+        name for name in sorted(names) if any(word in name for word in forbidden)
+    ] == []
 
 
 # ---- the modules never look at the environment or at a token ------------------------------

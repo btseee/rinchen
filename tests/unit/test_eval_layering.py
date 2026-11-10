@@ -52,6 +52,10 @@ COMMAND_MODULES = [
     CLI / "eval_suite_files.py",
     CLI / "eval_suite_output.py",
     CLI / "eval_suite_plan.py",
+    CLI / "eval_run.py",
+    CLI / "eval_run_inputs.py",
+    CLI / "eval_run_output.py",
+    CLI / "eval_run_plan.py",
 ]
 COMMAND_FORBIDDEN_LAYERS = (
     "rinchen.train",
@@ -60,6 +64,11 @@ COMMAND_FORBIDDEN_LAYERS = (
     "rinchen.annotate",
     "rinchen.filter",
 )
+# The one command module that reaches D6's generators (`rinchen eval run` builds a baseline
+# through them): it may import `synth`, and only the two modules that hold the language tables and
+# the directions the prompts cover; every other layer stays forbidden to it.
+SYNTH_COMMAND_MODULES = [CLI / "eval_systems.py"]
+SYNTH_MODULES_ALLOWED = ("rinchen.synth.ct2_baselines", "rinchen.synth.prompts")
 ROBUSTNESS_TESTS = sorted(
     path for path in TESTS.rglob("*robust*") if path.is_file() and path.suffix == ".py"
 )
@@ -368,9 +377,65 @@ def test_the_command_reaches_the_engine_and_the_converter_through_the_modules_th
     } <= imported
 
 
+def test_the_scan_covers_the_run_command_and_its_systems() -> None:
+    for name in ("eval_run", "eval_run_inputs", "eval_run_output", "eval_run_plan"):
+        assert CLI / f"{name}.py" in COMMAND_MODULES
+    assert CLI / "eval_systems.py" in SYNTH_COMMAND_MODULES
+    assert CLI / "eval_systems.py" not in COMMAND_MODULES
+
+
+@pytest.mark.parametrize("path", SYNTH_COMMAND_MODULES, ids=lambda path: path.name)
+def test_the_systems_module_imports_synth_only_for_its_tables_and_no_other_forbidden_layer(
+    path: Path,
+) -> None:
+    imported = imported_names(path.read_text(encoding="utf-8"))
+
+    other_layers = tuple(
+        layer for layer in COMMAND_FORBIDDEN_LAYERS if layer != "rinchen.synth"
+    )
+    assert (
+        sorted(
+            module
+            for module in imported
+            if any(is_inside(module, layer) for layer in other_layers)
+            or any(is_inside(module, library) for library in FORBIDDEN_LIBRARIES)
+        )
+        == []
+    )
+    synth = {module for module in imported if is_inside(module, "rinchen.synth")}
+    assert synth
+    assert all(
+        any(is_inside(module, allowed) for allowed in SYNTH_MODULES_ALLOWED)
+        for module in synth
+    ), sorted(synth)
+    assert "rinchen.cli.synth.build_translator" in imported
+    assert "rinchen.infer.engine.Engine" in imported
+
+
+def test_no_command_module_but_the_systems_one_reaches_the_generators() -> None:
+    for module in sorted(CLI.glob("eval_run*.py")):
+        imported = imported_names(module.read_text(encoding="utf-8"))
+        assert not any(is_inside(name, "rinchen.synth") for name in imported), (
+            module.name
+        )
+        assert not any(is_inside(name, "rinchen.infer.engine") for name in imported), (
+            module.name
+        )
+
+
+def test_the_run_commands_import_no_dataset_hub_or_http_library() -> None:
+    for module in (*sorted(CLI.glob("eval_run*.py")), CLI / "eval_systems.py"):
+        names = imported_names(module.read_text(encoding="utf-8"))
+        for library in ("datasets", "huggingface_hub", "httpx", "polars"):
+            assert not any(is_inside(name, library) for name in names), (
+                module.name,
+                library,
+            )
+
+
 @pytest.mark.parametrize(
     "path",
-    [*MODULES, *COMMAND_MODULES, *ROBUSTNESS_TESTS],
+    [*MODULES, *COMMAND_MODULES, *SYNTH_COMMAND_MODULES, *ROBUSTNESS_TESTS],
     ids=lambda path: path.name,
 )
 def test_no_source_of_eval_or_of_its_tests_asks_about_the_gpu(path: Path) -> None:
