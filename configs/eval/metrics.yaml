@@ -1,0 +1,39 @@
+# Evaluation metrics (D13, T9 and T13): the bootstrap and the release targets, as data.
+# Every number below is an unvalidated prior: nothing was measured on a real model, a real
+# benchmark or a real baseline, and no target was ever checked against one.
+#
+# bootstrap: `resamples` draws of the units of a direction (the document when every row has one,
+#   else the segment) from the fixed `seed`; the interval is the percentile one at level
+#   `alpha` (0.05 is a 95 % interval); a comparison is significant when its p-value is below it.
+# primary_metric: the release metric, chrF++ (`chrf_pp`).
+# comparison_metrics: the metrics a paired comparison of two systems is made on.
+# baseline_system: the id of the system `beats_baseline` is counted against; null while no
+#   baseline was run, and the target is then unmeasured.
+# targets: each is measured and reported, none ends a command with an error.
+bootstrap:
+  resamples: 1000
+  seed: 20261110
+  alpha: 0.05
+primary_metric: chrf_pp
+comparison_metrics: [chrf_pp, bleu]
+baseline_system: null
+targets:
+  - id: beats_baseline
+    description: chrF++ above the baseline system, by the paired bootstrap, in at least 12 of 16 FLORES+ devtest directions
+    kind: beats_baseline
+    min_directions: 12
+    of_directions: 16
+  - id: off_target
+    description: at most 1 % of outputs in the wrong language (no language identification is run, so never measured)
+    kind: off_target
+    threshold: 0.01
+  - id: numbers
+    description: the number accuracy of the robustness suites is at least 0.99
+    kind: robustness_value
+    key: numbers_acc
+    threshold: 0.99
+  - id: placeholders
+    description: the placeholder accuracy of the robustness suites is 1.0
+    kind: robustness_value
+    key: placeholder_acc
+    threshold: 1.0
