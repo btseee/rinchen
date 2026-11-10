@@ -549,6 +549,13 @@ REVIEWED: Final[tuple[tuple[str, str, str, str], ...]] = (
         "field",
         "an optional field of the format, from the reader's own table of defaults",
     ),
+    # ---- the bootstrap (D13): numbers only, no text of a suite ever reaches it ----
+    (
+        "eval/bootstrap.py",
+        "BootstrapSettings.__post_init__",
+        "MIN_RESAMPLES",
+        CONSTANT,
+    ),
 )
 
 

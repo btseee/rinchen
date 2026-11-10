@@ -254,6 +254,11 @@ def test_the_scan_covers_the_package_and_the_robustness_tests() -> None:
         assert TESTS / "unit" / f"{toy_test}.py" in ROBUSTNESS_TESTS
 
 
+def test_the_scan_covers_the_bootstrap_modules() -> None:
+    for module in ("bootstrap", "significance"):
+        assert PACKAGE / f"{module}.py" in MODULES
+
+
 @pytest.mark.parametrize("path", MODULES, ids=lambda path: path.name)
 def test_a_module_of_eval_imports_no_forbidden_layer_or_heavy_library(
     path: Path,
