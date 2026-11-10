@@ -14,7 +14,9 @@ Gates (the 2 s is the gate and is never tightened or loosened; every other numbe
         quantization, `This is the star.` into `khk_Cyrl` is the engine's translation, `/healthz`,
         an unknown target and a script on an English target are 400 with the engine's message,
         `n_best` 3 gives the engine's alternatives, `/metrics` has the names of T17
-    S1b readiness is false while the warm-up runs (the real engine behind a gate) and true after
+    S1b readiness is false while the warm-up runs (the real engine behind a gate) and true after;
+        in process only: over a socket the port is bound after the warm-up, so a client sees a
+        refused connection and never the 503 `not_ready`
     S2  64 concurrent requests, in process and against the real `rinchen serve`: all 200, p95
         below 2.0 s, 64 requests of 8 sentences also, every translation the engine's, and the
         counters of `/metrics` equal to the requests and sentences sent (warm-up included)
@@ -23,7 +25,9 @@ Gates (the 2 s is the gate and is never tightened or loosened; every other numbe
         first, every request in flight is answered 200, `shutdown_drained` has failed 0. This is
         the only test that reaches the batcher's own drain: on the real server uvicorn waits for
         the requests in flight before the lifespan, and so the batcher's queue is already empty
-        (S3 in `test_serving_gate_process.py`; the mutation check showed it)
+        (S3 in `test_serving_gate_process.py`; the mutation check showed it). The false
+        `/readyz` and the 503 `draining` are in process only too: on a socket the listener is
+        closed before the end of the lifespan, so a client gets a refused connection
     S7  the int8 export serves the same requests: 200, the engine's int8 translations, `/readyz`
         says `int8_float32` and `int8`
 
@@ -325,9 +329,11 @@ def test_metrics_has_every_name_of_the_spec_and_no_created_series(
 # S1b: readiness waits for the warm-up of the real engine.
 
 
-def test_readiness_is_false_while_the_warm_up_runs_and_true_after_it(
+def test_readiness_is_false_in_process_while_the_warm_up_runs_and_true_after_it(
     d11_tiny_export_dir: Path, d11_test_log: RecordingLog
 ) -> None:
+    """In process (`ASGITransport` and the lifespan driven by hand). Over a socket the port is
+    bound only after the warm-up, so this state is not observable over HTTP."""
     held = HeldEngine(open_engine(d11_tiny_export_dir))
     held.warmup_gate.clear()
     app = create_app(tiny_config(), engine=held)
@@ -519,13 +525,16 @@ def test_a_reader_of_the_engine_counters_never_sees_half_a_call_while_eight_work
 # S3b: the stop with work queued, in process.
 
 
-def test_a_stop_with_work_queued_closes_readiness_first_and_answers_every_request(
+def test_a_stop_with_work_queued_closes_readiness_first_and_answers_every_request_in_process(
     d11_tiny_export_dir: Path,
     d11_sentences: list[str],
     d11_float32_engine: Engine,
     d11_test_log: RecordingLog,
     record_property: Any,
 ) -> None:
+    """In process: the app is driven by hand, so the 503 `draining` and the false `/readyz` are
+    seen. Over a socket the listener is closed before the end of the lifespan (a refused
+    connection), and the batcher's drain has little left to do: see S3 of the process module."""
     expected = engine_translations(d11_float32_engine, d11_sentences)
     held = HeldEngine(open_engine(d11_tiny_export_dir))
     app = create_app(tiny_config(), engine=held)

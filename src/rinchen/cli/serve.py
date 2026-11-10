@@ -16,8 +16,10 @@ authentication: put a gateway in front of it.
 
 The command builds the settings and has the manifest vouch for the export BEFORE it binds a
 port, so a refused model or setting is an exit code and nothing listens. The engine itself is
-opened in the lifespan of the app, after `uvicorn` started it; a model that then fails to load
-ends the server with a non-zero status. One process serves: more processes would load the model
+opened in the lifespan of the app, which `uvicorn` starts before it binds the port: the port
+opens only once the export is hashed again, loaded and warmed up (a health check sees a refused
+connection until then: size its start period for the model, UNMEASURED for a real one), and a
+model that fails to load ends the server with a non-zero status. One process serves: more processes would load the model
 more times, so scale with `--inter-threads` and with replicas. On SIGTERM the server stops
 accepting, waits for the requests in flight, drains the queue and exits with the status of the
 signal (143 in a shell), not 0; the whole stop takes `--shutdown-timeout-seconds` at most (and the

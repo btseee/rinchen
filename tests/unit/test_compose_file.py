@@ -257,6 +257,29 @@ def test_the_health_check_is_the_one_the_image_carries(service: dict[str, Any]) 
     assert service["healthcheck"]["test"][1:] == image_command
 
 
+@pytest.mark.parametrize(
+    ("path", "start_period"),
+    [(COMPOSE, "start_period:"), (DOCKERFILE, "HEALTHCHECK --interval")],
+    ids=["compose", "dockerfile"],
+)
+def test_the_comments_say_the_start_period_fits_the_tiny_model_and_must_fit_a_real_one(
+    path: Path, start_period: str
+) -> None:
+    # `uvicorn` binds the port after the model is hashed, loaded and warmed up: until then the
+    # probe is refused, and a real export takes longer than the tiny one.
+    text = path.read_text(encoding="utf-8")
+    comment = re.sub(r"\s*#\s*", " ", text[: text.index(start_period)])
+    nearby = " ".join(comment.split()[-170:])
+
+    for phrase in (
+        "sized for the tiny model",
+        "refused",
+        "hash + load + warm-up",
+        "UNMEASURED for a real model",
+    ):
+        assert phrase in nearby, phrase
+
+
 # --- the command ----------------------------------------------------------------------------
 
 

@@ -121,6 +121,15 @@ EXPOSE 8000
 # The service is ready when /readyz answers 200 (the model is loaded and the queue is open); the
 # standard library asks, so that no download tool is installed for it. The port is the one of
 # CMD below: a command that changes --port must change this too.
+#
+# --start-period=20s is sized for the tiny model (ready within a second when started natively,
+# measured). `uvicorn` binds the port only after the lifespan started: the export is hashed (by
+# the command and again by the engine), loaded and warmed up first, so until then the probe gets
+# a refused connection and the container is not healthy: "not ready" is never a 503 on the wire.
+# For a real export set the start period (and the same value in docker/compose.serve.yaml) from
+# the time of that start for the model: hash + load + warm-up, UNMEASURED for a real model; too
+# short and anything that acts on health (an orchestrator, a Swarm service) may restart a
+# container that was only loading.
 HEALTHCHECK --interval=10s --timeout=3s --start-period=20s --retries=3 \
     CMD ["python", "-c", "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/readyz', timeout=2).status == 200 else 1)"]
 

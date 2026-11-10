@@ -13,20 +13,33 @@ its state in `app.state.serving` (`ServeState`) and its routes are plain functio
 nothing is global.
 
 A translate request is parsed by hand (one body, and `BodyLimit` of `serve._http` must be able to
-stop it), validated by the bounded model of the config, refused with 503 while the service is
-loading or stopping, and its texts become jobs of the micro-batcher: concurrent requests are
-decoded in one engine call when they share a key. A request that waits longer than
-`request_timeout_seconds` is a 504. The batch the worker thread runs is `run_jobs`, which also
-keeps one refused request from failing the others of its batch.
+stop it), validated by the bounded model of the config, refused with 503 `not_ready` or `draining`
+when it reaches the app before the engine is ready or after the stop began, and its texts become
+jobs of the micro-batcher: concurrent requests are decoded in one engine call when they share a
+key. A request that waits longer than `request_timeout_seconds` is a 504. The batch the worker
+thread runs is `run_jobs`, which also keeps one refused request from failing the others of its
+batch.
 
-The stop (T16): `uvicorn` has already stopped accepting and waited for the requests in flight;
-the end of the lifespan flips readiness to false FIRST (a probe must see a service that is going
-away before anything else is done), then closes the micro-batcher (which runs what is queued and
-waits for what is in flight, up to `drain_wait_seconds` of the config, the share of the shutdown
-budget that `uvicorn`'s own wait left, and fails the rest with a 503),
-then closes the engine, but only when no batch is still running in it (a timed-out batch keeps
-its thread; unloading the model under it is the engine's documented hazard), and logs what the
-drain completed and failed. No GPU was used and none is claimed.
+What a client can see of the start and of the stop depends on the server in front of the app.
+With `uvicorn` (`rinchen serve`) it runs the start of the lifespan BEFORE it binds the port and
+closes the listener BEFORE it runs the end of the lifespan, so over the wire "not ready" and
+"draining" are both a refused connection: the 503s and a false `/readyz` exist for an app driven
+in process (the tests) or served by something that binds first, and nothing here makes them
+visible on a socket. The port opens only after the export has been hashed (by the command and
+again by the engine), loaded and warmed up: a health check on `/readyz` fails until then, so its
+start period must be sized by the time of that start for the model (UNMEASURED for a real model).
+
+The stop (T16): `uvicorn` has already closed the listener and waited for the requests in flight
+(`graceful_wait_seconds` of the shutdown budget, then it cancels what is left); the end of the
+lifespan flips readiness to false first (in process a probe sees a service that is going away;
+over a socket nothing listens any more), then closes the micro-batcher with the rest of the
+budget (`drain_wait_seconds`): it runs what is still queued and waits for what is in flight, and
+fails the rest with a 503. With `uvicorn` that work is almost always done by then, because its own
+wait answered the requests: a real SIGTERM logs `shutdown_drained` with `completed` 0 and
+`failed` 0, and the batcher's drain matters only when the work outlasts the server's wait and the
+requests were cancelled. The engine is closed last, but only when no batch is still running in it
+(a timed-out batch keeps its thread; unloading the model under it is the engine's documented
+hazard). No GPU was used and none is claimed.
 """
 
 from __future__ import annotations

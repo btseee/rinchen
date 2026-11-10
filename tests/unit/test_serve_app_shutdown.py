@@ -6,6 +6,11 @@ the batcher (it runs what is queued, waits for what is in flight and fails with 
 still unanswered after its share of the shutdown budget) and only then closes the engine. These
 tests run the end of the lifespan by hand, with the engine held on a gate so that requests are in
 flight while it runs.
+
+All of it is in process. Over a socket `uvicorn` has closed the listener and answered the
+requests in flight before it runs the end of the lifespan, so the false `/readyz` and the 503
+`draining` below are not observable over HTTP (a client gets a refused connection), and the
+batcher's own drain has little left to do on a real server.
 """
 
 from __future__ import annotations
@@ -34,6 +39,8 @@ from tests.support.serve_app import (
 def test_the_service_is_not_ready_from_the_first_moment_of_the_stop_and_refuses_new_requests(
     recording_log: RecordingLog,
 ) -> None:
+    """In process only: over a socket the listener is closed before this state exists."""
+
     async def scenario() -> dict[str, Any]:
         engine = FakeEngine()
         async with make_app(recording_log, engine) as svc:

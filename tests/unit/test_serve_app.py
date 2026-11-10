@@ -85,6 +85,9 @@ def test_healthz_answers_200_before_the_service_started_and_after(
 def test_readyz_is_503_not_ready_before_the_lifespan_ran(
     recording_log: RecordingLog,
 ) -> None:
+    """In process only: `uvicorn` binds the port after the start of the lifespan, so over a
+    socket this state is a refused connection and no client can see it."""
+
     async def scenario() -> Any:
         async with make_app(recording_log) as svc:
             return await svc.client.get("/readyz")
@@ -111,6 +114,8 @@ def test_readyz_is_200_with_the_five_keys_once_the_service_is_ready(
 def test_the_service_is_not_ready_until_the_warm_up_ran(
     recording_log: RecordingLog,
 ) -> None:
+    """In process only: `uvicorn` binds the port after the start of the lifespan, so over a
+    socket the warm-up is a refused connection and the 503 below is never seen by a client."""
     engine = FakeEngine()
     engine.hold_warmup()
 

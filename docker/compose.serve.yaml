@@ -65,7 +65,12 @@ services:
     # exit of the process. With less, Docker sends SIGKILL (137) before `shutdown_drained`.
     stop_grace_period: 30s
     # The same probe as the HEALTHCHECK of the image (a test compares them): /readyz answers
-    # 200 once the model is loaded and the queue is open.
+    # 200 once the model is loaded and the queue is open. Before that the port is not bound
+    # (the server binds it after the model is hashed, loaded and warmed up), so the probe is
+    # refused and the container is not healthy: start_period must cover that start. 20s is
+    # sized for the tiny model (ready within a second natively); for a real export size it
+    # from the time of hash + load + warm-up, UNMEASURED for a real model, and keep it equal
+    # to the HEALTHCHECK of docker/Dockerfile.cpu.
     healthcheck:
       test:
         - CMD

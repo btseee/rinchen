@@ -15,6 +15,10 @@ Gates:
         200 with the engine's translations, a connection made after the signal is refused, the
         process exits by the signal (-15) within the shutdown timeout, and its standard error
         holds `shutdown_begin` and `shutdown_drained` with `failed` 0 and no text of a request.
+        `shutdown_drained` says `completed` 0 and `failed` 0 here, which is vacuous as a proof of
+        the batcher's drain: uvicorn's own wait answered the requests before the lifespan ran.
+        The 503 `draining` is not observable on the socket either (the listener is closed first,
+        a client gets a refused connection); S3b of the other module sees both in process
         The signal is sent once `/metrics` shows every sentence queued or in a batch
     S4  the `command` of `docker/compose.serve.yaml`, run natively with the model, the host, the
         port and the path of the config replaced (`/app` of the image is the repository root here)
