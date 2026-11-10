@@ -22,7 +22,7 @@ Cyrillic and translated, so that the converter is measured beside the model.
 
 The command measures: it has no threshold, no pass and no fail, and exits 0 whenever it measured
 (the floors belong to the gate). It prints `suite: <name>`, `system: <name>`, one line per section
-the suite has (`numbers: 0.9323 (895/960), excluded 0`; `n/a (no scored row)` for a null figure),
+the suite has (`numbers: 0.9292 (892/960), excluded 0`; `n/a (no scored row)` for a null figure),
 `result: <O>/robustness.json`, `report: <O>/report.json` and `manifest: <O>/manifest.json`, and
 writes those files into `--out-dir` with `hypotheses.jsonl` (with `--model`) and, LAST,
 `manifest.json` (stage `eval_robustness`: every input with the SHA-256 taken before it was read,

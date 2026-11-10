@@ -4,7 +4,7 @@ of the steps before it, the hashing and the exit codes are the command's
 (`rinchen.cli.eval_robustness`); the scoring, `robustness.json` and `report.json` are
 `rinchen.eval`'s.
 
-A section line says the headline of the section and what it rests on (`numbers: 0.9323 (895/960),
+A section line says the headline of the section and what it rests on (`numbers: 0.9292 (892/960),
 excluded 0`); a section in which nothing was scored says `n/a (no scored row)` in place of the
 figure and keeps the rest of the line, so that the exclusions stay visible.
 """
