@@ -224,6 +224,10 @@ def test_the_scan_covers_the_package_and_the_robustness_tests() -> None:
         assert TESTS / "property" / f"{property_test}.py" in ROBUSTNESS_TESTS
     assert TESTS / "support" / "robust_suite_documents.py" in ROBUSTNESS_TESTS
     assert TESTS / "support" / "robust_golden.py" in ROBUSTNESS_TESTS
+    for support in ("robust_toy", "robust_toy_text", "robust_suites"):
+        assert TESTS / "support" / f"{support}.py" in ROBUSTNESS_TESTS
+    for toy_test in ("test_support_robust_toy", "test_support_robust_suites"):
+        assert TESTS / "unit" / f"{toy_test}.py" in ROBUSTNESS_TESTS
 
 
 @pytest.mark.parametrize("path", MODULES, ids=lambda path: path.name)
