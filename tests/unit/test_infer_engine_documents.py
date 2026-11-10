@@ -215,12 +215,127 @@ def test_the_separator_is_text_the_model_may_write_in_a_window(
     counted(fixture, windows=1)
 
 
-def test_a_sentence_never_writes_the_separator(tmp_path: Path) -> None:
-    fixture = documents(tmp_path, script=lambda line: [hyp(SP + "x", SEP, END)])
+# -- a sentence decoded alone by a document model
+
+# A document model is continued on windows of 2 to 4 sentences only (D9), so after a lone
+# sentence it writes `<sep>`: the engine reads that as the end of the sentence.
+
+
+def test_a_sentence_decoded_by_a_document_model_is_cut_at_the_separator(
+    tmp_path: Path,
+) -> None:
+    def script(line: tuple[str, ...]) -> Sequence[Hypothesis]:
+        return [hyp(SP + "x", SEP, SP + "y", SEP, SP + "z", END)]
+
+    fixture = documents(tmp_path, script=script)
+
+    (result,) = fixture.engine.translate([Row("hello", None, ENG)])
+
+    assert (result.status, result.text) == ("ok", "x")
+    assert fixture.engine.counters()["reserved_symbol"] == 0
+
+
+def test_a_sentence_model_still_drops_a_hypothesis_with_a_separator(
+    tmp_path: Path,
+) -> None:
+    fixture = scripted_engine(
+        tmp_path, document_level=False, script=lambda line: [hyp(SP + "x", SEP, END)]
+    )
 
     (result,) = fixture.engine.translate([Row("hello", None, ENG)])
 
     assert (result.status, result.text) == ("no_output", "")
+    assert fixture.engine.counters()["reserved_symbol"] == 1
+
+
+def test_a_hypothesis_that_starts_with_the_separator_is_no_output_for_a_document_model(
+    tmp_path: Path,
+) -> None:
+    fixture = documents(tmp_path, script=lambda line: [hyp(SEP, SP + "y", END)])
+
+    (result,) = fixture.engine.translate([Row("hello", None, ENG)])
+
+    assert (result.status, result.text) == ("no_output", "")
+
+
+def test_a_hypothesis_cut_by_the_length_cap_after_a_separator_is_a_finished_sentence(
+    tmp_path: Path,
+) -> None:
+    def script(line: tuple[str, ...]) -> Sequence[Hypothesis]:
+        return [hyp(SP + "x", SEP, SP + "y")]
+
+    fixture = documents(tmp_path, script=script)
+
+    (result,) = fixture.engine.translate([Row("hello", None, ENG)])
+
+    assert (result.status, result.text) == ("ok", "x")
+
+
+def test_a_hypothesis_cut_by_the_length_cap_with_no_separator_is_still_truncated(
+    tmp_path: Path,
+) -> None:
+    fixture = documents(tmp_path, script=lambda line: [hyp(SP + "x", SP + "y")])
+
+    (result,) = fixture.engine.translate([Row("hello", None, ENG)])
+
+    assert (result.status, result.text) == ("truncated", "x y")
+
+
+def test_the_alternatives_of_a_sentence_are_cut_at_the_separator_and_stay_distinct(
+    tmp_path: Path,
+) -> None:
+    def script(line: tuple[str, ...]) -> Sequence[Hypothesis]:
+        return [
+            hyp(SP + "x", SEP, SP + "y", END),
+            hyp(SP + "x", SEP, SP + "z", END),
+            hyp(SP + "w", SEP, END),
+            hyp(SP + "v", END),
+        ]
+
+    fixture = documents(tmp_path, script=script)
+
+    (result,) = fixture.engine.translate(
+        [Row("hello", None, ENG)], DecodeOptions(n=4, script_mask="off")
+    )
+
+    assert (result.status, result.text) == ("ok", "x")
+    assert result.alternatives == ("w", "v")
+
+
+def test_a_reserved_symbol_before_the_separator_still_drops_the_hypothesis(
+    tmp_path: Path,
+) -> None:
+    def script(line: tuple[str, ...]) -> Sequence[Hypothesis]:
+        return [hyp(SP + "x", "<doc>", SEP, END), hyp(SP + "y", SEP, "<doc>", END)]
+
+    fixture = documents(tmp_path, script=script)
+
+    (result,) = fixture.engine.translate(
+        [Row("hello", None, ENG)], DecodeOptions(n=2, script_mask="off")
+    )
+
+    # The first hypothesis holds `<doc>` in its head; the second holds it only after the cut.
+    assert (result.status, result.text, result.alternatives) == ("ok", "y", ())
+    assert fixture.engine.counters()["reserved_symbol"] == 1
+
+
+def test_a_single_sentence_of_a_document_survives_a_model_that_only_knows_windows(
+    tmp_path: Path,
+) -> None:
+    def windows_only(line: tuple[str, ...]) -> Sequence[Hypothesis]:
+        if is_window(line):
+            return copy_windows(line)
+        return [hyp(*line[1:], SEP, END)]
+
+    fixture = documents(tmp_path, script=windows_only)
+    options = DecodeOptions(max_source_pieces=7, script_mask="off")
+
+    (result,) = fixture.engine.translate_documents([DOC], KHK, RUS, options)
+
+    assert [t.status for t in result.translations] == ["ok"] * 3
+    assert [t.text for t in result.translations] == SENTENCES
+    assert result.text == DOC
+    counted(fixture, windows=1, sources=1)
 
 
 # -- the cut of a document

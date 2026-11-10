@@ -51,10 +51,14 @@ or a score never does; the D11 spike measured the same counts and scores):
         export 4 s, `document_level` derived true; 66 test documents (400 sentences) give 106
         windows, 101 aligned (95.3 %) and 18 single sentences; windows of 2 sentences 325 of 334
         aligned (97.3 %), of 3 sentences 260 of 268 (97.0 %), of 4 sentences 191 of 202 (94.6 %);
-        chrF 78.5 over the 400 sentences. The 36 sentences decoded alone (the 18 singles and
-        the sentences of the 5 windows that did not line up) come back `no_output`: the model was
-        continued on windows of 2 to 4 sentences only, so after one sentence it writes `<sep>`,
-        which the engine drops. With a cap of 20 pieces 94 of the 106 windows fall back; each of
+        every one of the 400 sentences `ok`, chrF 84.8 over them (re-measured on 2026-11-10, same
+        counts of windows and singles). The 36 sentences decoded alone (the 18 singles and the
+        sentences of the 5 windows that did not line up) used to come back `no_output`, chrF
+        78.5: the model was continued on windows of 2 to 4 sentences only, so after one sentence
+        it writes `<sep>`, which the engine dropped as a reserved piece and now reads as the end
+        of the sentence (it cuts the hypothesis there). The same 400 sentences as plain rows of
+        the document model: 400 `ok`, chrF 88.4 (400 `no_output` before). With a cap of 20
+        pieces 94 of the 106 windows fall back; each of
         the 334 windows of 2 sentences, decoded with a cap two pieces below its own full
         translation (21 distinct lengths), falls back although it has one segment per sentence
 
@@ -565,12 +569,10 @@ def test_every_document_has_one_translation_per_sentence_and_most_windows_line_u
 
     assert windows > 0
     assert aligned / windows >= MIN_ALIGNMENT
-    # A sentence of an aligned window is the model's own output. The model was continued on
-    # windows of 2 to 4 sentences only, so one decoded alone (a single the windows left over,
-    # or a sentence of a window that did not line up) comes back with a `<sep>` after it and
-    # is `no_output`: the statuses say so, and no sentence is lost without one.
-    assert set(statuses) <= {"ok", "no_output"}
-    assert statuses["ok"] >= sentences - decoded_alone
+    # The model was continued on windows of 2 to 4 sentences only, so a sentence decoded alone
+    # (a single the windows left over, or a sentence of a window that did not line up) comes
+    # back with a `<sep>` after it; the engine cuts it there, so no sentence is missing.
+    assert statuses == {"ok": sentences}
 
 
 @pytest.mark.parametrize("size", WINDOW_SIZES)

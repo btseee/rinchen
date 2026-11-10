@@ -15,7 +15,11 @@ What CTranslate2 does silently, the engine does not (measured in the D10 and D11
   letter, digit or piece is `empty`, neither is sent;
 - a hypothesis with a piece no translation holds is dropped and counted (`no_output` when none
   is left); a line break in the output becomes a space; the script is masked as
-  `DecodeOptions.script_mask` says.
+  `DecodeOptions.script_mask` says;
+- a document model (the record's `document_level`) writes `<sep>` after a sentence decoded
+  alone, because it was continued on windows of 2 to 4 sentences only: its hypothesis is cut at
+  the first `<sep>` and the head is the translation, finished (the separator is the model
+  saying so); one that starts with `<sep>` is dropped. A window lets `<sep>` through instead.
 
 A request is all-or-nothing in its errors (an unknown target, a `script` for a target that is not
 Mongolian, the same source and target, a lone surrogate raise before anything is sent), a
@@ -407,7 +411,14 @@ class Engine:
         if len(pieces) > options.max_source_pieces:
             return Prepared(route, src, "too_long", None)
         tokens, prefix = ct2_source_tokens(self._placement, route.tag, pieces)
-        return Prepared(route, src, None, Job(label, tokens, prefix, route))
+        job = Job(
+            label,
+            tokens,
+            prefix,
+            route,
+            cut_at_separator=self._record.document_level,
+        )
+        return Prepared(route, src, None, job)
 
     # ---- decoding ------------------------------------------------------------------------
 
@@ -529,6 +540,10 @@ class Engine:
                 tokens = tokens[1:]
             complete = bool(tokens) and tokens[-1] == self._end
             pieces = tokens[:-1] if complete else tokens
+            if job.cut_at_separator and SEGMENT_SEPARATOR in pieces:
+                # The separator is the model saying the sentence is finished.
+                pieces = pieces[: pieces.index(SEGMENT_SEPARATOR)]
+                complete = True
             if any(piece in reserved for piece in pieces):
                 tally["reserved_symbol"] += 1
                 continue

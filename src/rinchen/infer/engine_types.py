@@ -318,13 +318,19 @@ class Route:
 
 @dataclass(frozen=True, slots=True)
 class Job:
-    """One source for the library: `label` names it in an error (`row 3`, `window 0`)."""
+    """One source for the library: `label` names it in an error (`row 3`, `window 0`).
+
+    A window lets `<sep>` through (`allow_separator`). A sentence decoded by a document model
+    (`cut_at_separator`) is cut at its first `<sep>`: the model was continued on windows of 2
+    to 4 sentences only, so it writes the separator after a lone sentence.
+    """
 
     label: str
     tokens: list[str]
     prefix: list[str] | None
     route: Route
     allow_separator: bool = False
+    cut_at_separator: bool = False
 
 
 @dataclass(frozen=True, slots=True)
