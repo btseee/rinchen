@@ -197,7 +197,7 @@ longer exists, a saved config quoted unbounded and unescaped in a message, and a
 unreported: `export` and `evaluate` now print whether it was checked or only stated) and documented the rest (the hidden
 directory a hard-killed export leaves, exports made before the check, shards made before `cc917e2`).
 D11 (Export, quantization, serving, CLI, package) is done locally on branch `d11-export-serving`, stacked on
-`d10-distillation` (cut from it at `b672aa8`; code tip `4bfaa5e`), not merged and not pushed, and no CI run covers it: its STOP
+`d10-distillation` (cut from it at `b672aa8`; code tip `039d1d7`), not merged and not pushed, and no CI run covers it: its STOP
 gate ("`docker compose up` serves a tiny model") is met IN PARTS and the container part is UNMEASURED. Through the real `rinchen`
 commands and the real Eole and CTranslate2 on the CPU the tiny teachers are exported to float32, int8 and int8_float16 (a record
 `rinchen.json` replaces D10's `export.json`), strict parity passes (200 of 200 exact, mean |delta| 7.19e-7 per token for the
@@ -216,8 +216,12 @@ reviewers ran: ready with fixes, no Critical finding and seven Important ones (a
 alone; a reserved symbol in a request text silently changed the language; `torch` was dropped from the tool versions; a stop could
 take twice the shutdown timeout; `n_best` was judged against the wrong beam; a mistyped `RINCHEN_SERVE_*` variable was ignored;
 readiness is not observable over HTTP); its fix wave (nine commits, gate 11768 passed, 1 skipped, 10 deselected) fixed them and
-left open on purpose the limits that `docs/runbooks/11_serving.md` lists under "Known limits". The scoped re-review of the fix
-wave was running when this was written and its verdict is not recorded here.
+left open on purpose the limits that `docs/runbooks/11_serving.md` lists under "Known limits". A scoped re-review of the fix
+wave found that it needed one small fix (no Critical finding, one Important, eight Minor): the suppression list of a lone sentence of a document
+model still held `<sep>` in the script modes `always` and `retry`'s second pass, so the model ran on and invented text (`always` chrF 81.8
+against 88.2 unmasked on the gate's plain rows; 88.5 after the fix); a final wave of three commits (gate 11778 passed, 1 skipped, 10 deselected) fixed it and five of the minors
+and documented three (Kubernetes service links under the refused `RINCHEN_SERVE_` prefix, half of the stop budget for requests in flight,
+a 40-character echo of an unknown key).
 Next up: D12 (Robustness). See `STATE.md`, `docs/runbooks/09_document_level.md`, `docs/runbooks/10_distillation.md` and
 `docs/runbooks/11_serving.md`.
 

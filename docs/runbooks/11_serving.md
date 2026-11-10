@@ -45,7 +45,7 @@ real CTranslate2 on the CPU, on the templated toy sentences of `tests/support/ti
   batcher is `serve/batcher.py`); no rate limiting by client, no authentication, no hot reload, no multi-model server (a gateway in
   front is assumed); no `export/model_card.py` or `export/hub.py` (D13).
 
-Tags used below: **measured** (run for this runbook on 2026-11-10, code `4bfaa5e`, or by a gate), **spike** (run in the design spike,
+Tags used below: **measured** (run for this runbook on 2026-11-10, code `4bfaa5e`, or by a gate; the numbers the final wave moved were measured again at `039d1d7`), **spike** (run in the design spike,
 on the CPU), **source-read** (read from the source of an installed package, never run), **ARITHMETIC** (a formula applied to values
 that were measured), **UNMEASURED** (nothing was run). Every number is from a test, the code, the spike, the ledger of the build
 (`.superpowers/sdd/2026-11-09-d11-export-serving/progress.md`) or a measurement made for this runbook ("Measured numbers"); a number
@@ -53,15 +53,15 @@ that was not obtained is not given. A TIME moves by a third from one run to the 
 cores while these were taken); a count or a score does not.
 
 What was checked: the unit and property tests (every new test mutation-checked by hand during the build: 92, 61, 62, 159, 106, 132,
-about 146, 133, 196 mutants for Tasks 1 to 6 and 8 to 10, the gates' mutants for Tasks 7 and 11, and 4 + 9 + 11 + 30 + 10 + 8 + 14 + 23
-for the fix wave, with the first-pass survivors each given a test or an analysis), the integration modules
+about 146, 133, 196 mutants for Tasks 1 to 6 and 8 to 10, the gates' mutants for Tasks 7 and 11, 4 + 9 + 11 + 30 + 10 + 8 + 14 + 23
+for the fix wave and 5 + 14 + 1 for the final wave, with the first-pass survivors each given a test or an analysis), the integration modules
 (`tests/integration/test_export_parity.py`, `test_engine_surfaces.py`, `test_serving_gate.py`, `test_serving_gate_process.py`,
-`test_serving_stop_budget.py`, and D10's `test_distill_tiny_student.py` re-run on the new reader: 111 tests in all), a combined review
+`test_serving_stop_budget.py`, and D10's `test_distill_tiny_student.py` re-run on the new reader: 112 tests in all), a combined review
 by two independent reviewers (Tasks 1 to 7, `17549f8..6ed0e72`, and Tasks 8 to 11, `6ed0e72..b6d57a4`: both "ready with fixes", 0
 Critical and 7 Important findings between them), a fix wave of nine commits (`b6d57a4..4bfaa5e`) with the full gate at its end (11768
 passed, 1 skipped, 10 deselected, 24 min 1 s, one sequential process; the baseline of D10 was 9750), the real binary for this runbook,
-and a **scoped re-review of the fix wave (`b6d57a4..4bfaa5e`) that was RUNNING when this runbook was written and whose verdict is NOT
-recorded here**: a follow-up edit adds it, as D9 and D10 did.
+a scoped re-review of the fix wave (`b6d57a4..4bfaa5e`: it needed one small fix, an Important finding and eight Minor ones) and a final
+wave of three commits (`330250a..039d1d7`) with the full gate again (11778 passed, 1 skipped, 10 deselected, 26 min 51 s): see "The review, its fix wave and the re-review".
 
 ## Architecture
 
@@ -485,7 +485,7 @@ most 126 source pieces):
 |---|---|---|---|
 | the spike's document model, default | 400 plain rows | 400 `no_output`, chrF 0.0 | 400 `ok`, chrF 93.861 |
 | the spike's document model, default | 66 documents | 382 `ok` + 18 `no_output`, chrF 88.465 | 400 `ok`, chrF 92.061 |
-| the gate's own document model, gate | 400 plain rows | 400 `no_output`, chrF 0.0 | 400 `ok`, chrF 88.419 |
+| the gate's own document model, gate | 400 plain rows | 400 `no_output`, chrF 0.0 | 400 `ok`, chrF 88.419 (88.494 after the final wave, below) |
 | the gate's own document model, gate | 66 documents | 364 `ok` + 36 `no_output`, chrF 78.549 | 400 `ok`, chrF 84.747 |
 
 The fix (`966387a`): for an export whose record says `document_level` the engine cuts the hypothesis at its first `<sep>` and reads the
@@ -499,6 +499,29 @@ them. The end-token fallback closes the two items D9 left open for D11: a cut in
 (94 of the 106 windows fell back at a 20-piece cap, and each of the 334 windows of two sentences decoded two pieces below its own length
 fell back although it still had one segment per sentence), and a `translate_sentence` result cannot hold `<sep>` (the engine cuts or
 drops it).
+
+**The list of a lone sentence lets `<sep>` through too (`330250a`, found by the re-review).** The fix above cut the hypothesis at `<sep>`, but the
+suppression list of such a sentence still held `<sep>` in the script mode `always` and in the second pass of `retry` (only a window's list
+left it out). With `<sep>` suppressed the model does not stop: it writes the runner-up token and goes on, inventing the sentences that follow,
+and the status stays `ok`. **Measured** on the gate's own document model, the 400 toy test sentences as plain rows, beam 1, 128 pieces (the
+re-review's `p_modes.py`, run again for this record):
+
+| mode | before `330250a` | after `330250a` |
+|---|---|---|
+| `off` | 400 `ok`, chrF 88.23 | 400 `ok`, chrF 88.23 |
+| `retry` (the default) | 400 `ok`, chrF 88.42; 5 retries, every replaced text carries an invented trailing sentence (`The day is the dog. . Where is the door.`) | 400 `ok`, chrF 88.49; the 5 replaced texts are one sentence each (`The day is the dog.`) |
+| `always` | 400 `ok`, chrF 81.80; 358 of 400 texts differ from `off` (`Цай, гар ба ном.` became `Цай, гар ба ном. П, ном ба ном.`) | 400 `ok`, chrF 88.49; 5 of 400 texts differ from `off` |
+
+Now every call of a document export lets `<sep>` through in its list (`Job.lets_separator_through`: a window, or a sentence the engine cuts); the
+list of a sentence export still suppresses it, and `Engine.warmup` builds both kinds of list for a document model (a test counts the lists built
+after the warm-up in all three modes: none). The list key and the allow flag are read from the one answer (`_suppression` takes the flag from the
+key), so the two cannot disagree again. Through `translate_documents` with the gate's options the document numbers do not move (66 documents,
+400 `ok`, chrF 84.747, 101 of 106 windows aligned, 18 singles; the spike's model, default options: plain rows 93.861, documents 92.061); only
+the plain rows of the gate's model moved, 88.419 to 88.494, because under the default mode `retry` the 5 impure rows are decoded again. A gate
+module test (`test_plain_rows_of_a_document_model_do_not_run_on_in_any_script_mode`) now runs the three modes on the real document model:
+at most 20 of the 400 texts may differ from the unmasked ones (5 measured; 358 with the defect) and the chrF may drop by 1.0 at most (+0.26
+measured; -6.4 with the defect). A hypothesis that STARTS with `<sep>` has an empty head, is dropped as an empty text and is counted
+`reserved_symbol` (before, nothing counted it); the row stays `no_output`.
 
 On the gate's own document model (the tiny teacher continued for 2,500 steps on windows made by `rinchen train docify`: 1,194 windows,
 `docify` 1.5 s, the continuation 104 s, the export 3.5 s, `document_level: derived from the saved config (true)`; **measured**): 66 test
@@ -555,7 +578,9 @@ traditional script, in a Cyrillic one). `infer/script_mask.py`:
 - **Modes** (`DecodeOptions.script_mask`): `always` decodes every row with its list; `retry` (the default, the master plan's post-check)
   decodes without a script list and decodes again, with the list, only a row whose output has letters and a purity below the floor (counted
   `script_retries`; `script_retry_improved` when the second purity is higher, and only then does the second output replace the first); `off`
-  never suppresses a script (the control entries are always suppressed: they are never text). A `no_output` row is not retried.
+  never suppresses a script (the control entries are always suppressed: they are never text). A `no_output` row is not retried. For a
+  document export every list lets `<sep>` through, a lone sentence's as a window's ("Documents"): the model writes `<sep>` after a lone
+  sentence, and with it suppressed the model goes on and invents the sentences that follow.
 - **Cost.** The conversion of the list on every CTranslate2 call: 0.55 microseconds per entry (30,000 entries 16 ms per call, per batch, not
   per sentence; **spike**, extrapolated to a real vocabulary, **UNMEASURED** at real size); the per-step cost is noise (0.6 to 2 ns per entry
   per row-step). `Engine.warmup` builds every list a call can ask for (about 0.3 s per script list for a 64,000-piece vocabulary by the
@@ -638,7 +663,7 @@ and `--doc` over three English documents of the gate's document model (6, 8 and 
 |---:|---|
 | 0 | all lines written (also when some are not `ok`, unless `--strict`) |
 | 2 | a bad option; a model our manifest does not vouch for (the old format, a flipped byte); `--tgt xxx_Latn` (`error: the model does not translate into 'xxx_Latn': its targets are eng_Latn, khk_Cyrl, rus_Cyrl`); `--script Mong` with no converter and no `mn_Mong` target; `--device auto` (typer: `'auto' is not one of 'cpu', 'cuda'`); `--compute-type auto`; `--doc` on a sentence model (`the model does not translate documents: its record says document_level is false`); `--doc` without `--src`; `--output` that is `--input` |
-| 3 | an input that is not UTF-8 (`error: input line 2 is not valid UTF-8: invalid byte at offset 0 of the line`) or that the engine refuses (`error: lines 1 to 2: row 1 contains the reserved symbol <2eng_Latn>, which the model reads as a control piece ...`) |
+| 3 | an input that is not UTF-8 (`error: input line 2 is not valid UTF-8: invalid byte at offset 0 of the line`) or that the engine refuses (`error: line 2 contains the reserved symbol <2eng_Latn>, which the model reads as a control piece ...`) |
 | 4 | CTranslate2 fails, or `--strict` meets a line that is not `ok`, after all the output is written (`error: --strict: 3 of 5 lines were not translated ok`) |
 | 1 | the output cannot be written, a failure to close after a good run, or a broken standard output (`... \| head -1`: `error: cannot write the output to standard output: [Errno 32] Broken pipe`, one line, not Python's exit 120) |
 | 130 | interrupted |
@@ -646,7 +671,11 @@ and `--doc` over three English documents of the gate's document model (6, 8 and 
 The target and every other language are checked right after the model opens and before the output file opens, also for an empty input: a
 typo in `--tgt` with `--output out.txt` leaves an existing `out.txt` as it was. `--device cuda` is validated and was never run. `--script-converter-ct2` and
 `--script-converter-spm` (both or neither) attach D5's converter, which loads before the export is verified. A failure of a chunk names its
-lines (`lines A to B:`); the chunks before it stay written; no summary is printed when a run fails midway.
+lines (`lines A to B:`); the chunks before it stay written; no summary is printed when a run fails midway. A refusal of ONE text (a reserved
+symbol, a lone surrogate) names it by its place in the input, one number counted from 1 (`line 4`, `document 2`), also in a chunk after the first: the engine
+counts from 0 inside the call (`row 1`) and the command adds the chunk's offset to that index and keeps the engine's wording after it (before, the
+message was `lines 3 to 4: row 1 contains ...`, which mixed file lines with a chunk-relative row, and `document 1: document 0 contains ...` for a
+document). The engine's label `row N` or `document N` is read by a regular expression; a refusal with another label keeps the span (`lines A to B:`).
 
 ## The service
 
@@ -763,11 +792,14 @@ On SIGTERM `uvicorn` stops accepting, waits for the requests in flight, cancels 
 batcher closed, the engine closed last and only when no batch is still running in it; `engine_left_loaded` is logged otherwise) and then
 RE-RAISES the signal, so the process ends with status -15 (143 in a shell and for `docker stop`), not 0: treat 143 after a stop as a clean exit.
 
-`shutdown_timeout_seconds` (T, default 20) is the budget of the WHOLE stop. `ServeConfig.graceful_wait_seconds` is `ceil(T/2)` whole seconds (none
-when T is under a second) and goes to `uvicorn`; `drain_wait_seconds` is T minus that and goes to `batcher.close`. Before the fix of the review the two
+`shutdown_timeout_seconds` (T, default 20, at least 1) is the budget of the WHOLE stop. `ServeConfig.graceful_wait_seconds` is `ceil(T/2)` whole seconds
+and goes to `uvicorn`; `drain_wait_seconds` is T minus that and goes to `batcher.close`. Before the fix of the review the two
 waits were a whole T each, so a stuck batch made a stop take 2T: with T=20 and the compose `stop_grace_period: 30s` that is SIGKILL (137) and no
 `shutdown_drained`. The requests in flight get `ceil(T/2)` (10 s with the default), an app driven in process waits `drain_wait_seconds` at the end of
-its lifespan, and a T under one second cancels in-flight requests at once. A request cancelled at the end of the server's wait gets uvicorn's
+its lifespan. T has a **floor of 1** (`SHUTDOWN_TIMEOUT_FLOOR`; found by the re-review): `uvicorn` takes whole seconds, so T=0.5 gave it a wait of 0 and a
+request of 0.3 s got uvicorn's plain 500 at +0.13 s although its batch would have finished. A smaller value is a `ConfigError` that names the field, the
+layer that supplied it and the floor (`shutdown_timeout_seconds (from --shutdown-timeout-seconds): Input should be greater than or equal to 1`); at T=1
+the server waits 1 s and the drain wait is 0. A request cancelled at the end of the server's wait gets uvicorn's
 plain-text 500 and is counted `translate/500` with the log code `cancelled`. **Measured** (fake engine on a real `uvicorn`, SIGTERM to the process
 group; the stuck request's client got its 500 at half the budget):
 
@@ -778,7 +810,10 @@ group; the stuck request's client got its 500 at half the budget):
 | stuck 30 s | 20 s (the default) | 20.17 s | 500 at +10.15 s |
 | a request of 0.8 s | 6 s | 0.87 s | 200 at +0.78 s; no `engine_left_loaded`, `shutdown_drained` `failed` 0 |
 
-The compose file's `stop_grace_period` must be at least T + 5 s (a test pins the formula; the 5 s are room for the server's polling and the exit of the
+The re-review measured the bound again (fake engine stuck 6 s, real `uvicorn`): T=0.5 ended at 0.72 s (before the floor), T=1 at 1.17 s, T=1.5 at
+1.67 s, T=2 at 2.17 to 2.22 s, T=3 at 3.18 s: **T plus about 0.2 s**. **The requests in flight get only `ceil(T/2)`** (10 s with T=20) while
+`request_timeout_seconds` is 30 in `tiny.yaml`: a legitimate request of 15 s is cut at a stop (plain 500, counted `cancelled`) although the second half
+of the budget is still unused. Size T as twice the longest request that must finish at a stop. The compose file's `stop_grace_period` must be at least T + 5 s (a test pins the formula; the 5 s are room for the server's polling and the exit of the
 process): 30 s against T=20 holds. An idle server stops 0.21 s after the signal (**measured**). A real server with 24 requests of 8 sentences held in
 the micro-batcher answered all 24 by 1.58 s and the process ended at 1.69 s with status -15 (the gate's S3; "The STOP gate").
 
@@ -818,7 +853,7 @@ the defaults, the YAML file (`--config`), the environment (`RINCHEN_SERVE_<FIELD
 | `script_mask` | `retry` | yes | |
 | `max_batch_sentences`, `max_wait_ms`, `max_queue_sentences` | 32, 5, 1024 | yes | `max_queue_sentences >= max_texts` |
 | `max_texts`, `max_text_chars`, `max_body_bytes` | 64, 5000, 1 MiB | yes | at most 64, 100,000 and 64 MiB |
-| `request_timeout_seconds`, `shutdown_timeout_seconds` | 30, 20 | yes | |
+| `request_timeout_seconds`, `shutdown_timeout_seconds` | 30, 20 | yes | `shutdown_timeout_seconds` at least 1; at a stop the requests in flight get half of it ("The stop") |
 | `log_level` | `info` | yes | |
 | `script_converter` (`ct2_dir`, `spm_model`) | none | `--script-converter-ct2` and `-spm` | environment: `RINCHEN_SERVE_SCRIPT_CONVERTER_CT2_DIR` and `..._SPM_MODEL` |
 
@@ -835,7 +870,8 @@ error: unknown environment variable RINCHEN_SERVE_PROT (did you mean RINCHEN_SER
 ServeConfig; the model is --model or RINCHEN_MODEL, not a setting
 ```
 
-`RINCHEN_SERVE__PORT` (a double underscore) is refused the same way, `RINCHEN_SERVE_MAX_QUEUE_SENTENCE` suggests `..._SENTENCES`. **Every refused
+A Kubernetes Service named `rinchen-serve` makes the cluster set `RINCHEN_SERVE_SERVICE_HOST`, `RINCHEN_SERVE_SERVICE_PORT` and `RINCHEN_SERVE_PORT_8000_TCP...` in every pod of
+its namespace, and the refusal reads them as typos: the start stops with exit 2 and the message names the variable (known limit 17). `RINCHEN_SERVE__PORT` (a double underscore) is refused the same way, `RINCHEN_SERVE_MAX_QUEUE_SENTENCE` suggests `..._SENTENCES`. **Every refused
 value names the layer that supplied it** (**measured**): `invalid serve config: port (from RINCHEN_SERVE_PORT): Input should be less than or equal to
 65535`; `max_texts (from $W/serve/bad.yaml): Input should be less than or equal to 64`; `max_text_chars (from --max-text-chars): Input should be greater
 than or equal to 1`; `compute_type (from --compute-type): Value error, the compute type `auto` is refused: ...`. An environment variable that is empty
@@ -1056,8 +1092,8 @@ the D3 gates assigned to D4, the D5 gates that need real text or a reader and th
 - **The start period for a real model** (hash + load + warm-up before the port opens).
 - **A document model of any quality**, the throughput of a document request and the service's `doc_mode` against a real document model (it ran against a fake engine only).
 - **`KeyboardInterrupt` with a real CTranslate2 call** (exit 130 is tested with fakes; the real call is a blocking C++ call that delivers the signal when its batch returns).
-- **CI**: no CI run covers D3 to D11. **Windows and macOS** were not run. **The scoped re-review of the fix wave**: it was running when this runbook was written, and its verdict is
-  not recorded.
+- **CI**: no CI run covers D3 to D11. **Windows and macOS** were not run. **A re-review of the final wave** (`330250a..039d1d7`) was not asked for: its fixes are small, each has a failing test
+  first and a mutation check, and the full gate ran.
 
 ### Known limits, left open on purpose
 
@@ -1081,7 +1117,7 @@ Findings of the reviews that were parked and not fixed, and limits of the build,
     checkpoint's own `manifest.json` is not among the export manifest's inputs (review M-11, as in D10); `ModelRecord` is frozen but not hashable (review M-14); `_load_processor`,
     `_require_no_directory` and `_hashed` exist in more than one module; the parent directories of `--out-dir` are made as the converter would have made them, and two exports into one
     `--out-dir` name share `<out_dir>.export.log`; a hard kill of an export leaves a hidden `.<name>.<random>` directory (as D10).
-11. **Files near the 900-line cap**: `infer/engine.py` has 769 lines and `infer/engine_types.py` 581; `tests/support/distill_gate_stages.py` has two pre-existing mypy complaints (tests are not
+11. **Files near the 900-line cap**: `infer/engine.py` has 769 lines and `infer/engine_types.py` 594; `tests/support/distill_gate_stages.py` has two pre-existing mypy complaints (tests are not
     type-checked). New behaviour of the engine will have to move code out first.
 12. **The Docker recipe**: the image is `linux/amd64` only (the vendored `pyonmttok` wheel is x86_64); the build needs the network (`uv sync`, `hatchling` by build isolation and the
     `kiwipiepy-model` source distribution, which `uv.lock` names no wheel for); a `README.md` edit reinstalls every dependency (the layer-cache note); `cap_drop` and `no-new-privileges`
@@ -1095,6 +1131,21 @@ Findings of the reviews that were parked and not fixed, and limits of the build,
 16. **Disclosed process slips of the wave**, one line each: the design agent ran `ctranslate2.get_cuda_device_count()` once without hiding the GPU (a driver query: no model, no kernel);
     Task 10 ran `docker compose version` (read-only, outside the allowed list) and issued a `pkill -f` against its own crashed harness, which the permission classifier denied (nothing was
     killed); Task 11 dispatched a trivial subagent with the prompt "noop" against the rule that implementers dispatch none (it read no file and ran no command).
+17. **Kubernetes service links collide with the refused prefix** (re-review m-3): a Service named `rinchen-serve` gets `RINCHEN_SERVE_SERVICE_HOST`, `RINCHEN_SERVE_SERVICE_PORT` and
+    `RINCHEN_SERVE_PORT_8000_TCP`, `..._TCP_ADDR`, `..._TCP_PORT`, `..._TCP_PROTO` injected into the environment of every pod of its namespace, and `ServeEnvSettings` refuses every name under
+    `RINCHEN_SERVE_` that is no field, so the service does not start (exit 2; the message names the variable and no value, so it is diagnosable). Kubernetes also documents
+    `RINCHEN_SERVE_PORT=tcp://<ip>:<port>` for such a Service, which is the name of a real field with a value that is not an integer, refused as a bad `port` (from the documented naming of
+    service-link variables; no cluster was available, so the whole item is UNMEASURED). Set `enableServiceLinks: false` in the
+    pod spec, or name the Service otherwise. Not fixed: an allow-list of such names would hide real typos of `RINCHEN_SERVE_PORT`.
+18. **A stop cuts a request that outlasts half the budget** (re-review m-4): `uvicorn` gets `ceil(T/2)` (10 s at T=20) while `request_timeout_seconds` is 30 in `tiny.yaml`, so a legitimate
+    request of 15 s is cut at a stop with a plain 500 (counted `cancelled`). Raise `shutdown_timeout_seconds` to twice the longest request that must finish; the compose
+    `stop_grace_period` must follow (T + 5 s). The alternative that gives the requests the whole budget needs a `uvicorn.Server` subclass (fix wave, I1) and was not built. At T=1
+    (the floor) the drain wait is 0.
+19. **An unknown key of a request is echoed up to 40 characters in the 422** (re-review m-7; the brief of the fix wave allowed a bounded echo): `unknown field 'xxxx...'`. It is a name the
+    client sent, never a text of a translation; a fixed `unknown field` would drop even that.
+20. **What the stop-budget test does not catch**: `tests/integration/test_serving_stop_budget.py` allows T plus 2.5 s (T=4, stuck 12 s); a server that gave BOTH waits the whole timeout ends at
+    about 8 s and fails it, but one that gave only the batcher's wait the whole timeout ends at about 6 s (ARITHMETIC: 2 s of `uvicorn` plus 4 s) and passes it. The unit tests (`graceful + drain == T`, the
+    batcher closed with the second share only) kill that mutant: the integration test passed under it, `test_config_serve.py` failed.
 
 ### The review, its fix wave and the re-review
 
@@ -1121,8 +1172,37 @@ subclass and would lose `uvicorn.run` and its exit status); M-2 was not done; th
 **11768 passed, 1 skipped, 10 deselected** (24 min 1 s, one sequential process; the run before the wave had 11562), `ruff` and `mypy` clean; the integration
 modules once each (109 tests, 502 s; 111 with the two stop-budget tests, 517 s, in the run of this runbook) and D10's gate (44) with every number unchanged.
 
-**The scoped re-review** of the fix wave (`b6d57a4..4bfaa5e`, read-only) was RUNNING when this runbook was written, in parallel with it. **Its verdict is not recorded here**; a follow-up edit
-of this runbook, `STATE.md`, `DECISIONS.md`, `CLAUDE.md` and the spec adds it, as D9 and D10 did.
+**The scoped re-review** of the fix wave (`b6d57a4..4bfaa5e`, an independent reviewer, read-only) found that the wave **needed one small fix**: 0 Critical, 1 Important
+finding and 8 Minor ones. It ran 388 targeted unit tests and the two stop-budget tests (2 passed, 5.96 s) and probed real servers and real exports on the CPU with the GPU hidden. The
+records of Task 12 were written while it ran and said so; this section closes that.
+
+- **I-1 (Important): the fix of the review's I-1 was incomplete.** `<sep>` was still suppressed for a lone sentence of a document model in the mode `always` and in the second pass of
+  `retry`, so the model ran on and invented text while the status stayed `ok`. Reproduced on the gate's own document model (400 toy test sentences as plain rows, beam 1): `off` 400 `ok`
+  chrF 88.23; `retry` 400 `ok` 88.42 with 5 retries whose replaced texts carry invented trailing sentences; `always` 400 `ok` 81.80 with 358 of 400 texts different from `off`. Not a
+  regression of the wave, but the shipped default is `retry`. **Fixed in `330250a`**: after it `off` 88.23, `retry` 88.49, `always` 88.49 (5 of 400 texts differ from `off`) and no invented trailing sentence ("Documents"; 2 failing tests, 5 mutants killed).
+- **What the probes showed that held**: A-I1's first pass in the default mode, windows and sentence exports unaffected, a truncated hypothesis stays truncated, n-best alternatives cut
+  separately, the reserved check on the head; A-I2 (pieces for rows, normalised text for documents, zero-width characters inside `<sep>` refused in both, placeholders excluded, messages
+  with the symbol only, exit 3, the service isolating each request, counters untouched on a refusal); `torch` in the tool versions; `Engine.require_request` in the real call order;
+  the broken-pipe handling (`/dev/full` is exit 1 with one error line); the parity digests; the converter's message; `MAX_SOURCE_PIECES`; the `auto` refusal of `TeacherOptions`; the
+  warm-up prebuild; the stop budget (below); the `n_best` paths over a real `uvicorn` (a 400 in API terms when the service's beam is the limit, a 422 on `n_best` when the request names
+  the beam, beam 0 and 9 a 422, 4 and 4 a 200); the environment refusal (case-insensitive, empty values, `RINCHEN_MODEL*` untouched, the compose variables are fields, values never
+  quoted); redirect_slashes, HEAD, the probe log level, `RequestTextError`, the AST scan (52 entries with a reason each), the public `ServingEngine`, `platform: linux/amd64`, the 22
+  packages (44 flags); and that no existing test was weakened.
+- **The stop budget, measured again** (fake engine stuck 6 s on a real `uvicorn`, SIGTERM to the process group): T=0.5 ended at 0.72 s, T=1 at 1.17 s, T=1.5 at 1.67 s, T=2 at 2.17 to
+  2.22 s, T=3 at 3.18 s, i.e. T plus about 0.2 s; `graceful + drain` equals T exactly; the cancelled request is recorded once and the `CancelledError` re-raised (nothing swallowed).
+- **The minors fixed in `55629cd`** (`D11: re-review minors`; tests first, 14 mutants killed; two survived: a redundant `continue` after the new counter, which was removed, and a graceful wait equal to the whole timeout, which leaves graceful plus drain at T and so changes nothing a test can see): **m-1** a hypothesis (or an n-best
+  alternative) that starts with `<sep>` is counted `reserved_symbol` (the row stays `no_output`); **m-2** `shutdown_timeout_seconds` below 1 is refused naming the field, the layer and the
+  floor, and `graceful_wait_seconds` lost its branch for T under a second (graceful plus drain still equal T); **m-5** `rinchen translate` names a refused text by one number counted from 1
+  (`line 4`, `document 2`), also in a chunk after the first ("`rinchen translate`"); **m-6** the overlong prose lines of the Dockerfile header and of the serve command's docstring are
+  reflowed (the exec-form `HEALTHCHECK` and `CMD` stay on one line, as Docker needs them readable); **m-8** the margin of the stop-budget test is 2.5 s (it was 1.5 s).
+- **Left as limits, on purpose**: **m-3** Kubernetes service links (limit 17), **m-4** the first half of the budget for requests in flight (limit 18), **m-7** the 40-character echo of an unknown
+  key (limit 19). The stop-budget test's margin is also limit 20.
+- **Existing tests changed because the code forced it** (the same list is in the commit messages): `test_the_list_of_a_window_is_a_list_of_its_own` took its lone sentence from a
+  sentence model (the old form pinned the defect: a lone sentence of a document model suppressing `<sep>`); the bound and budget tests of `shutdown_timeout_seconds`
+  (`test_config_serve.py`: values below 1 moved to the refused side, two budget rows and three no-overshoot values removed because T under 1 is no longer valid); the shutdown test
+  of `test_serve_app_shutdown.py` that used T=0.2 now uses 1.5; the reserved-symbol test of `test_cli_translate_exits.py` expects the new message.
+- **The final wave** (`330250a`, `55629cd` and `039d1d7`, the last a gate test of the three script modes on the real document model): the full gate **11778 passed, 1 skipped, 10 deselected** (26 min 51 s, one sequential process;
+  11768 before), `ruff` and `mypy` clean; the integration modules once each: 112 passed in 604 s: parity 13, surfaces 25, serving gate 13, process 15, stop budget 2, D10 gate 44.
 
 ## Measured numbers
 
@@ -1144,20 +1224,21 @@ gates' own; nothing was written under `data/` or `models/`.
 | the target-tag engine against raw CTranslate2 | mask off: 400 of 400 equal, chrF 58.329; mask `retry`: 2 rows differ (retried), chrF 58.386 |
 | `rinchen translate` (5 lines; int8; jsonl; `--strict`; 50 dev lines; closed pipe) | 1.10 s, 1.05 s, 1.02 s, 1.06 s, 1.00 s, 0.98 s; exit 0, 0, 0, 4, 0, 1 |
 | the document model: `docify`, `launch --continue-from` (2,500 steps), `export convert` | 1.5 s, 104.3 s (88.1 s in the gate), 3.5 s; 1,194 windows (514, 368, 312 of sizes 2, 3, 4); `document level: derived from the saved config (true)` |
-| documents (gate options): 66 documents, 400 sentences | 106 windows, 101 aligned, 18 singles, 5 fallbacks; 400 `ok`; chrF 84.747 (plain rows 88.419); sizes 325/334, 260/268, 191/202; cap 20: 94 of 106 fall back |
+| documents (gate options): 66 documents, 400 sentences | 106 windows, 101 aligned, 18 singles, 5 fallbacks; 400 `ok`; chrF 84.747 (plain rows 88.419 at `4bfaa5e`, 88.494 at `039d1d7`); sizes 325/334, 260/268, 191/202; cap 20: 94 of 106 fall back |
+| the three script modes on the gate's document model, 400 plain rows (`off` / `retry` / `always`) | chrF 88.23 / 88.49 / 88.49 and 5 texts different from `off` at `039d1d7`; 88.23 / 88.42 / 81.80 and 358 different at `4bfaa5e` |
 | the document path before the fix (the tree at `b6d57a4`) | spike model: 400 `no_output` rows, 382 `ok` + 18 `no_output` documents, chrF 88.465; gate model: 364 + 36, chrF 78.549 |
 | `rinchen translate --doc` over three English documents (6, 8, 8 sentences) | 0.89 s, `ok 3` |
 | `rinchen serve` (float32): spawn to ready; 64 x 1; 64 x 8; the stop of an idle server | 0.80 s; p50 48.5 / p95 57.7 ms; 76.8 / 115.1 ms; exit -15 at 0.21 s |
 | `rinchen serve` (int8): ready; 64 x 1; 64 x 8 | 0.74 s; 53.7 / 58.3 ms; 70.0 / 115.0 ms |
-| the stop budget (fake engine on a real uvicorn) | T=2, stuck 8 s: 2.17 s (three runs); T=4, stuck 12 s: 4.18 s; T=20, stuck 30 s: 20.17 s; T=6, a 0.8 s request: 0.87 s |
+| the stop budget (fake engine on a real uvicorn) | T=2, stuck 8 s: 2.17 s (three runs); T=4, stuck 12 s: 4.18 s; T=20, stuck 30 s: 20.17 s; T=6, a 0.8 s request: 0.87 s; the re-review, stuck 6 s: T=0.5 0.72 s (now refused), 1 1.17 s, 1.5 1.67 s, 2 2.17 to 2.22 s, 3 3.18 s |
 | refused settings (thirteen cases: typos, out-of-range values, `auto`, an unknown key, the old format, a flipped byte, no `--model`) | exit 2 each, 0.8 to 1.0 s, nothing listening, the planted value absent |
 | `import rinchen`; `rinchen.Translator`; the engine with its libraries; `rinchen.cli.main` | 0.019 s / 11.3 MB; 0.252 s / 47.6 MB; 0.278 s / 55.1 MB; 1.134 s / 170.9 MB |
 | `uv build --wheel` offline from a copy | 0.3 s; 211 files, 538,483 B; the registry byte-equal; no `configs/` entry |
 | `uv sync --frozen --no-dev --dry-run`, with and without the 22 `--no-install-package` names | 160 packages; 138 packages and none of the torch, triton, cuda or nvidia family |
 | `docker --version`; `docker compose -f docker/compose.serve.yaml config -q` | Docker 29.9.3; exit 0 |
-| the integration modules once (one pytest process) | 111 passed in 517 s: parity 13, surfaces 24, serving gate 13, process 15, stop budget 2, D10 gate 44 |
+| the integration modules once (one pytest process) | 111 passed in 517 s at `4bfaa5e`: parity 13, surfaces 24, serving gate 13, process 15, stop budget 2, D10 gate 44; at `039d1d7`: 112 passed in 604 s: parity 13, surfaces 25, serving gate 13, process 15, stop budget 2, D10 gate 44 |
 | `ruff format --check .`, `ruff check .`, `mypy src` | clean (545 files formatted; 195 source files) on this tree, run for this record (the code is unchanged since `4bfaa5e`) |
-| the full gate | not re-run for this record: only documents differ from `4bfaa5e`, whose gate gave 11768 passed, 1 skipped, 10 deselected (24:01); the unit tests that read documents were run |
+| the full gate | at `4bfaa5e`: 11768 passed, 1 skipped, 10 deselected (24:01); at `039d1d7`: 11778 passed, 1 skipped, 10 deselected (26 min 51 s) |
 
 **The numbers agree between the spike, the gates and this run** wherever they are not times: the parity counts and deltas, the chrF scores and the `model.bin` sizes, the masking counts, the
 document counts, the windows per size, the leak of the D5 converter and the `/metrics` deltas. The differences are times (the stop of 2.17 s against 2.12 to 2.22 s, the serving latencies, the
