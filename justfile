@@ -17,3 +17,15 @@ tiny:
 
 accept:
     echo "just accept: not implemented until the full project-wide definition of done is met. See <mission> in docs/research/2026-10-29-rinchen-dev-agent-prompt.md."
+
+# The CPU container of the tiny export (D11). Documentation: nothing runs these two recipes in CI
+# and the image was never built (UNMEASURED). The model directory is RINCHEN_MODEL_DIR (default
+# models/tiny).
+
+# Builds and starts the service in its container (never run here).
+serve-tiny:
+    docker compose -f docker/compose.serve.yaml up
+
+# Validates the compose file only (read only, builds and starts nothing, needs no daemon).
+docker-check:
+    docker compose -f docker/compose.serve.yaml config -q

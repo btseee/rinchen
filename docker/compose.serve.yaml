@@ -1,0 +1,79 @@
+# CPU service of the tiny export (D11, ruling T20): `rinchen serve` in the image of
+# docker/Dockerfile.cpu, over a model directory mounted read only.
+#
+#   RINCHEN_MODEL_DIR=/path/to/export docker compose -f docker/compose.serve.yaml up --build
+#
+# Nobody built the image or ran this file: the machine it was written on has no network and no
+# authorisation to build, pull or run an image. UNMEASURED, all of it:
+#   - the image was never built (its size and its start time are unknown), and
+#     `docker compose up` was never run;
+#   - the stop behaviour of PID 1 (`init: true` puts a small init in front of `rinchen`; whether
+#     SIGTERM reaches it, the queue drains inside stop_grace_period and the container exits with
+#     143) and the health check inside a container were never run;
+#   - the cpus and memory limits are a guess for the toy model, not a measurement;
+#   - no GPU service exists: there is no device, runtime or reservation anywhere in this file.
+# What `docker compose config -q` (read only, no daemon) and tests/unit/test_compose_file.py prove
+# by reading it: the file parses and is valid, builds the Dockerfile of this repository from its
+# root, publishes the loopback only, mounts the model read only, keeps the root file system read
+# only, stops later than the service's own shutdown timeout, and runs the command of the image,
+# whose every option `rinchen serve --help` lists.
+#
+# No restart policy: a refused model or setting is exit status 2 and must stop the container,
+# not restart it in a loop.
+name: rinchen-serve
+
+services:
+  rinchen-serve:
+    build:
+      # Relative to this file: the repository root, the context the Dockerfile expects.
+      context: ..
+      dockerfile: docker/Dockerfile.cpu
+    image: rinchen-serve:cpu
+    # The ENTRYPOINT of the image is `rinchen`; this replaces its CMD with the same words.
+    command:
+      - serve
+      - --model
+      - /models/tiny
+      - --config
+      - /app/configs/serve/tiny.yaml
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+    environment:
+      # The GPU stays hidden even where the host has one.
+      CUDA_VISIBLE_DEVICES: ""
+      # `RINCHEN_SERVE_<FIELD>` of rinchen.config.serve.ServeConfig; they outrank the YAML file.
+      RINCHEN_SERVE_INTER_THREADS: "2"
+      RINCHEN_SERVE_INTRA_THREADS: "1"
+    ports:
+      # The loopback of the host only: the service has no authentication.
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - type: bind
+        source: "${RINCHEN_MODEL_DIR:-../models/tiny}"
+        target: /models/tiny
+        read_only: true
+    read_only: true
+    tmpfs:
+      - /tmp
+    init: true
+    # Longer than shutdown_timeout_seconds (20) of configs/serve/tiny.yaml.
+    stop_grace_period: 30s
+    # The same probe as the HEALTHCHECK of the image (a test compares them): /readyz answers
+    # 200 once the model is loaded and the queue is open.
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/readyz', timeout=2).status == 200 else 1)
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "4"
+          memory: 2g
