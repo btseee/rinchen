@@ -11,6 +11,7 @@ own. Nothing starts the real Eole and nothing touches a GPU.
 
 from __future__ import annotations
 
+import errno
 import fcntl
 import json
 import os
@@ -166,7 +167,7 @@ def world(tmp_path: Path) -> World:
 def is_running(pid: int) -> bool:
     try:
         state = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
-    except FileNotFoundError:
+    except FileNotFoundError, ProcessLookupError:
         return False
     return state != "Z"  # a zombie has exited; only its parent has not reaped it
 
@@ -218,6 +219,23 @@ def started_processes(world: World) -> Iterator[list[subprocess.Popen[bytes]]]:
                     os.killpg(pid, signal.SIGKILL)
                 except ProcessLookupError:
                     pass
+
+
+@pytest.mark.parametrize(
+    ("error", "code"),
+    [(FileNotFoundError, errno.ENOENT), (ProcessLookupError, errno.ESRCH)],
+)
+def test_a_process_that_exits_while_its_state_is_read_is_not_running(
+    error: type[OSError], code: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The kernel answers ESRCH, not ENOENT, for a /proc entry of a process that exits during
+    # the read (136 of 400 short-lived processes, measured); waiting for a rank to end raced.
+    def vanished(self: Path, *args: object, **kwargs: object) -> str:
+        raise error(code, os.strerror(code))
+
+    monkeypatch.setattr(Path, "read_text", vanished)
+
+    assert is_running(4242) is False
 
 
 def test_each_eole_command_holds_the_lock_through_a_descriptor_it_inherited(
