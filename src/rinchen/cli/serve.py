@@ -20,7 +20,8 @@ opened in the lifespan of the app, after `uvicorn` started it; a model that then
 ends the server with a non-zero status. One process serves: more processes would load the model
 more times, so scale with `--inter-threads` and with replicas. On SIGTERM the server stops
 accepting, waits for the requests in flight, drains the queue and exits with the status of the
-signal (143 in a shell), not 0.
+signal (143 in a shell), not 0; the whole stop takes `--shutdown-timeout-seconds` at most (and the
+half-second of `uvicorn`'s own polling), the requests in flight getting the first half of it.
 
 `--script-converter-ct2` and `--script-converter-spm` (both or neither) attach D5's script
 converter, as `rinchen translate` does. `--device cuda` is an operator's choice that was never
@@ -34,7 +35,6 @@ the command.
 from __future__ import annotations
 
 import logging
-import math
 import os
 from pathlib import Path
 from typing import Annotated, Literal
@@ -56,8 +56,9 @@ def run_server(app: FastAPI, config: ServeConfig) -> None:
     """Serve `app` with `uvicorn`, in this process, until it is stopped. The one place the
     command binds a port (the tests replace it). `uvicorn` logs nothing of its own (`log_config`
     is None: the service logs through `rinchen.utils.logging`, and the access log is off:
-    a request is logged without its text by the service itself) and waits the shutdown timeout
-    of the config for the requests in flight."""
+    a request is logged without its text by the service itself) and waits the first share of
+    the shutdown budget (`ServeConfig.graceful_wait_seconds`) for the requests in flight: the
+    end of the lifespan has the rest, so a stop takes the whole timeout at most."""
     # Configures the JSON handler that uvicorn's own few lines go through as well.
     rinchen_logging.get("rinchen.serve")
     logging.getLogger("rinchen").setLevel(config.log_level.upper())
@@ -68,7 +69,7 @@ def run_server(app: FastAPI, config: ServeConfig) -> None:
         log_config=None,
         log_level=config.log_level,
         access_log=False,
-        timeout_graceful_shutdown=math.ceil(config.shutdown_timeout_seconds),
+        timeout_graceful_shutdown=config.graceful_wait_seconds,
         server_header=False,
     )
 
@@ -173,7 +174,8 @@ def serve_command(
         float | None,
         typer.Option(
             "--shutdown-timeout-seconds",
-            help="How long a stop waits for the requests in flight.",
+            help="The whole budget of a stop: half of it (rounded up) for the requests "
+            "in flight, the rest for the queue and the batches still running.",
         ),
     ] = None,
     log_level: Annotated[

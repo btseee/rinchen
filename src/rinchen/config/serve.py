@@ -9,10 +9,16 @@ is an unmeasured prior: nothing here was timed on a real model, and no GPU was u
 `device` is `cpu` or `cuda` and `compute_type` anything but `auto` (it quantises a float32
 export to int8 on a CPU: measured in the D11 spike). Relative paths stay relative: the
 service resolves them from its working directory, as the command line does.
+
+`shutdown_timeout_seconds` is the budget of the WHOLE stop, not of each step of it: the server
+waits for the requests in flight for `graceful_wait_seconds` of it and the end of the lifespan
+for `drain_wait_seconds`, the rest. A container's stop grace period must be longer than the budget
+(`docker/compose.serve.yaml`).
 """
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Annotated, Any, Final, Literal
@@ -119,6 +125,22 @@ class ServeConfig(BaseModel):
     shutdown_timeout_seconds: _PositiveNumber = 20.0
     log_level: Literal["critical", "error", "warning", "info", "debug"] = "info"
     script_converter: ScriptConverterConfig | None = None
+
+    @property
+    def graceful_wait_seconds(self) -> int:
+        """The first share of the stop budget: whole seconds (`uvicorn` takes no fraction)
+        that the server waits for the connections and the requests in flight, half of
+        `shutdown_timeout_seconds` rounded up, and none when the timeout is under a second."""
+        if self.shutdown_timeout_seconds < 1:
+            return 0
+        return math.ceil(self.shutdown_timeout_seconds / 2)
+
+    @property
+    def drain_wait_seconds(self) -> float:
+        """The rest of the stop budget: what the end of the lifespan waits for the queue and
+        the batches still running. `uvicorn` runs the lifespan only after its own wait, so the
+        two shares must add up to `shutdown_timeout_seconds`."""
+        return self.shutdown_timeout_seconds - self.graceful_wait_seconds
 
     @field_validator("max_queue_sentences")
     @classmethod

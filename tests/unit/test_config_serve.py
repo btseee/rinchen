@@ -454,3 +454,44 @@ def test_a_file_that_is_not_utf8_is_a_config_error(tmp_path: Path) -> None:
 def test_a_directory_in_place_of_the_file_is_a_config_error(tmp_path: Path) -> None:
     with pytest.raises(ConfigError, match=r"not found.*" + str(tmp_path)):
         load_serve_config(tmp_path, env={})
+
+
+# ---- the budget of a stop -----------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("timeout", "graceful", "drain"),
+    [
+        (30.0, 15, 15.0),
+        (20.0, 10, 10.0),
+        (5.0, 3, 2.0),
+        (2.5, 2, 0.5),
+        (2.0, 1, 1.0),
+        (1.5, 1, 0.5),
+        (1.0, 1, 0.0),
+        (0.5, 0, 0.5),
+        (0.2, 0, 0.2),
+    ],
+)
+def test_the_shutdown_timeout_is_one_budget_shared_by_the_server_and_the_drain(
+    timeout: float, graceful: int, drain: float
+) -> None:
+    config = ServeConfig(shutdown_timeout_seconds=timeout)
+
+    assert config.graceful_wait_seconds == graceful
+    assert type(config.graceful_wait_seconds) is int
+    assert config.drain_wait_seconds == pytest.approx(drain)
+
+
+@pytest.mark.parametrize(
+    "timeout", [0.001, 0.2, 0.999, 1.0, 1.7, 2.0, 3.3, 7.0, 20.0, 59.9]
+)
+def test_the_two_waits_of_a_stop_never_add_up_to_more_than_the_timeout(
+    timeout: float,
+) -> None:
+    config = ServeConfig(shutdown_timeout_seconds=timeout)
+
+    assert config.drain_wait_seconds >= 0
+    assert config.graceful_wait_seconds + config.drain_wait_seconds == pytest.approx(
+        timeout
+    )

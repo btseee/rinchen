@@ -544,6 +544,43 @@ def test_the_service_answers_again_after_a_request_timed_out(
     assert quick.json()["translations"] == ["<quick>"]
 
 
+def test_a_request_cancelled_by_the_server_is_counted_and_logged_as_a_500(
+    recording_log: RecordingLog,
+) -> None:
+    # `uvicorn` cancels the requests still running when its graceful wait is over and answers
+    # them itself with a plain-text 500: the service never sees that response, so it records
+    # the cancellation (a `CancelledError` is not an `Exception`).
+    async def scenario() -> tuple[str, bool]:
+        engine = FakeEngine()
+        async with make_client(recording_log, engine, inter_threads=1) as svc:
+            engine.hold()
+            running = asyncio.create_task(post(svc.client, texts=["held"]))
+            await engine_started(engine, 1)
+            running.cancel()
+            cancelled = False
+            try:
+                await running
+            except asyncio.CancelledError:
+                cancelled = True
+            engine.release()
+            await asyncio.to_thread(engine.wait_for_finished, 1)
+            return (await svc.client.get("/metrics")).text, cancelled
+
+    metrics, cancelled = run(scenario())
+
+    assert cancelled
+    assert (
+        sample(metrics, "rinchen_requests_total", route="translate", status="500") == 1
+    )
+    (event,) = [
+        fields
+        for fields in recording_log.named("request")
+        if fields["route"] == "translate"
+    ]
+    assert event["status"] == 500
+    assert event["code"] == "cancelled"
+
+
 # ---- 500: the engine fails ----------------------------------------------------------------
 
 

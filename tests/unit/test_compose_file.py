@@ -54,6 +54,10 @@ UNMEASURED_NOTES = (
     "no gpu",
 )
 COMPOSE_TIMEOUT_SECONDS = 60
+# What a stop may take beyond `shutdown_timeout_seconds`: `uvicorn` polls every 0.1 s and the
+# process has to exit (0.1 to 0.2 s measured on a fake engine; the rest is room for a loaded
+# host). The compose file states the formula.
+STOP_MARGIN_SECONDS = 5
 DURATION = re.compile(r"(\d+(?:\.\d+)?)(ms|us|h|m|s)")
 SIZE = re.compile(r"(\d+)([bkmg])b?", re.IGNORECASE)
 DURATION_SECONDS = {"h": 3600.0, "m": 60.0, "s": 1.0, "ms": 0.001, "us": 0.000001}
@@ -213,12 +217,14 @@ def test_the_container_has_an_init_process(service: dict[str, Any]) -> None:
     assert service["init"] is True
 
 
-def test_the_stop_grace_period_outlasts_the_shutdown_timeout_of_the_tiny_config(
+def test_the_stop_grace_period_covers_the_whole_stop_of_the_tiny_config(
     service: dict[str, Any],
 ) -> None:
+    # The whole stop takes `shutdown_timeout_seconds` at most (the server and the end of the
+    # lifespan share it), so Docker's SIGKILL must come later by a margin.
     timeout = load_serve_config(TINY_CONFIG, env={}).shutdown_timeout_seconds
 
-    assert seconds(str(service["stop_grace_period"])) > timeout
+    assert seconds(str(service["stop_grace_period"])) >= timeout + STOP_MARGIN_SECONDS
 
 
 def test_cpu_and_memory_are_limited(service: dict[str, Any]) -> None:

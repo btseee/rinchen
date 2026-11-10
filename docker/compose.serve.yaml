@@ -58,7 +58,11 @@ services:
     tmpfs:
       - /tmp
     init: true
-    # Longer than shutdown_timeout_seconds (20) of configs/serve/tiny.yaml.
+    # stop_grace_period >= shutdown_timeout_seconds + 5 s. The whole stop takes
+    # shutdown_timeout_seconds at most (20 in configs/serve/tiny.yaml): the server waits for the
+    # requests in flight for the first half and the end of the lifespan for the queue and the
+    # batches still running for the rest; the 5 s are room for the server's own polling and the
+    # exit of the process. With less, Docker sends SIGKILL (137) before `shutdown_drained`.
     stop_grace_period: 30s
     # The same probe as the HEALTHCHECK of the image (a test compares them): /readyz answers
     # 200 once the model is loaded and the queue is open.

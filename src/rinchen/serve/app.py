@@ -22,7 +22,8 @@ keeps one refused request from failing the others of its batch.
 The stop (T16): `uvicorn` has already stopped accepting and waited for the requests in flight;
 the end of the lifespan flips readiness to false FIRST (a probe must see a service that is going
 away before anything else is done), then closes the micro-batcher (which runs what is queued and
-waits for what is in flight, up to `shutdown_timeout_seconds`, and fails the rest with a 503),
+waits for what is in flight, up to `drain_wait_seconds` of the config, the share of the shutdown
+budget that `uvicorn`'s own wait left, and fails the rest with a 503),
 then closes the engine, but only when no batch is still running in it (a timed-out batch keeps
 its thread; unloading the model under it is the engine's documented hazard), and logs what the
 drain completed and failed. No GPU was used and none is claimed.
@@ -273,7 +274,7 @@ async def _stop(state: ServeState) -> None:
     engine, batcher = state.engine, state.batcher
     assert engine is not None and batcher is not None
     state.log.info("shutdown_begin", queued=batcher.depth, inflight=batcher.inflight)
-    unanswered = await batcher.close(state.config.shutdown_timeout_seconds)
+    unanswered = await batcher.close(state.config.drain_wait_seconds)
     try:
         if batcher.inflight:
             state.log.warning("engine_left_loaded", batches=batcher.inflight)

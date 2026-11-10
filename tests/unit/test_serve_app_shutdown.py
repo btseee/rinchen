@@ -3,9 +3,9 @@
 `uvicorn` stops accepting connections on SIGTERM, waits for the requests in flight and then runs
 the end of the lifespan; the end of the lifespan flips readiness to false FIRST, then closes
 the batcher (it runs what is queued, waits for what is in flight and fails with a 503 what is
-still unanswered after the shutdown timeout) and only then closes the engine. These tests run
-the end of the lifespan by hand, with the engine held on a gate so that requests are in flight
-while it runs.
+still unanswered after its share of the shutdown budget) and only then closes the engine. These
+tests run the end of the lifespan by hand, with the engine held on a gate so that requests are in
+flight while it runs.
 """
 
 from __future__ import annotations
@@ -16,12 +16,14 @@ from typing import Any
 import pytest
 
 from rinchen.errors import UpstreamError
+from rinchen.serve.batcher import MicroBatcher
 from tests.support.serve_app import (
     FakeEngine,
     RecordingLog,
     engine_started,
     error_of,
     make_app,
+    make_client,
     post,
     run,
     sample,
@@ -233,3 +235,27 @@ def test_an_engine_that_fails_to_close_still_gets_its_drain_logged(
     run(scenario())
 
     assert recording_log.named("shutdown_drained") == [{"completed": 0, "failed": 0}]
+
+
+def test_the_stop_gives_the_batcher_only_the_second_share_of_the_shutdown_budget(
+    recording_log: RecordingLog, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The server has waited for the connections and the requests in flight before the end of
+    # the lifespan runs (the first share, `graceful_wait_seconds`): giving the batcher the
+    # whole timeout as well would let a stop take twice the timeout.
+    timeouts: list[float] = []
+    close = MicroBatcher.close
+
+    async def recording_close(self: MicroBatcher[Any, Any, Any], timeout: float) -> int:
+        timeouts.append(timeout)
+        return await close(self, timeout)
+
+    monkeypatch.setattr(MicroBatcher, "close", recording_close)
+
+    async def scenario() -> None:
+        async with make_client(recording_log, shutdown_timeout_seconds=5.0):
+            pass
+
+    run(scenario())
+
+    assert timeouts == [2.0]

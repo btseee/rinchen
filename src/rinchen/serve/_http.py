@@ -11,7 +11,8 @@ Two pure ASGI middlewares (no `BaseHTTPMiddleware`, whose body handling would hi
   400, which is why the service parses its one body by hand.
 - `RequestRecorder` counts every response in `rinchen_requests_total` and times it by route, and
   logs one `request` event, at the moment the response starts (so a client that has seen the
-  response finds it counted). It sees 404s, 405s, 413s and 500s as it sees a 200.
+  response finds it counted). It sees 404s, 405s, 413s and 500s as it sees a 200, and counts a
+  request the server cancelled at the end of its graceful wait as a 500 with the code `cancelled`.
 
 `register_error_handlers` makes every error the service answers `{"error": {"code": str,
 "message": str}}`: an unknown path (404), a wrong method (405), a refused parameter (422), a body
@@ -22,6 +23,7 @@ client sent.
 
 from __future__ import annotations
 
+import asyncio
 import time
 from dataclasses import dataclass
 from http import HTTPStatus
@@ -216,6 +218,12 @@ class RequestRecorder:
             await self.app(scope, receive, recording_send)
         except Exception:
             # Nothing answered yet: the server's own 500 follows, which is what is counted.
+            record(500)
+            raise
+        except asyncio.CancelledError:
+            # `uvicorn` cancels the requests still running when its graceful wait is over and
+            # answers them with a plain-text 500 of its own, which never passes through `send`.
+            note.code = "cancelled"
             record(500)
             raise
 

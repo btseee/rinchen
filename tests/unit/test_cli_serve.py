@@ -428,7 +428,7 @@ def rinchen_logger_level() -> Iterator[None]:
     logger.setLevel(before)
 
 
-def test_run_server_gives_uvicorn_its_own_logging_off_and_the_timeout_of_the_config(
+def test_run_server_gives_uvicorn_its_own_logging_off_and_the_first_half_of_the_stop_budget(
     uvicorn_calls: list[tuple[Any, dict[str, Any]]],
     recording_log: RecordingLog,
     rinchen_logger_level: None,
@@ -454,7 +454,7 @@ def test_run_server_gives_uvicorn_its_own_logging_off_and_the_timeout_of_the_con
                 "log_config": None,
                 "log_level": "info",
                 "access_log": False,
-                "timeout_graceful_shutdown": 20,
+                "timeout_graceful_shutdown": 10,
                 "server_header": False,
             },
         )
@@ -479,7 +479,7 @@ def test_run_server_takes_the_host_the_port_and_the_log_level_from_the_config(
         9100,
         "warning",
     )
-    assert kwargs["timeout_graceful_shutdown"] == 3
+    assert kwargs["timeout_graceful_shutdown"] == 2
     assert logging.getLogger("rinchen").level == logging.WARNING
 
 
