@@ -219,7 +219,24 @@ SIGNS_UNITS_AND_FOREIGN_DIGITS = [
     case("$5 x $3", None, "5 /$", "3 /$"),
     case(f"{TUGRIK}5 3", None, f"5 /{TUGRIK}", "3"),
     case(f"price {TUGRIK} 3", None, f"3 /{TUGRIK}"),
-    case("5 $7", None, "5 /$", "7"),
+    # A symbol after a number is the number's when it touches the number's digits or
+    # stands after a space and is not glued to a digit; a symbol after a space that is
+    # glued to the next number's digits is that number's own.
+    case("5 $7", None, "5", "7 /$"),
+    case("$5 $7", None, "5 /$", "7 /$"),
+    case("$7 $5", None, "7 /$", "5 /$"),
+    case("$5 $7 $9", None, "5 /$", "7 /$", "9 /$"),
+    case(f"{TUGRIK}5 {TUGRIK}7", None, f"5 /{TUGRIK}", f"7 /{TUGRIK}"),
+    case(f"5{TUGRIK} 7{TUGRIK}", None, f"5 /{TUGRIK}", f"7 /{TUGRIK}"),
+    case(f"5{TUGRIK} 7", None, f"5 /{TUGRIK}", "7"),
+    case("5$ 7", None, "5 /$", "7"),
+    case("5 $ 7", None, "5 /$", "7"),
+    case("5 $x7", None, "5 /$", "7"),
+    case("$5 $ 7", None, "5 /$", "7"),
+    case(f"5{NBSP}${NBSP}7", None, "5 /$", "7"),
+    case("$5, $7", None, "5 /$", "7 /$"),
+    case("$5 and $7", None, "5 /$", "7 /$"),
+    case("5$7", None, "5 /$", "7"),
     case(f"12:30{TUGRIK} 5", None, "12", "30", f"5 /{TUGRIK}"),
 ]
 
@@ -505,6 +522,19 @@ SCORES = [
         exact=True,
         lang="khk_Cyrl",
     ),
+    # A symbol glued to the next number belongs to it: reordering such text keeps units.
+    unit_score("$5 $7", "$7 $5", counts=(2, 2, 0), exact=True),
+    unit_score("$5 $7 $9", "$9 $7 $5", counts=(3, 3, 0), exact=True),
+    unit_score(f"{T}5 {T}7", f"{T}7 {T}5", counts=(2, 2, 0), exact=True),
+    unit_score(f"5{T} 7{T}", f"{T}5 {T}7", counts=(2, 2, 0), exact=True),
+    unit_score(f"{T}5 {T}7", f"5{T} 7{T}", counts=(2, 2, 0), exact=True),
+    unit_score("5$ 7", "7 $5", counts=(2, 2, 0), exact=True),
+    unit_score("$5, $7", "$7, $5", counts=(2, 2, 0), exact=True),
+    unit_score("$5 and $7", "$7 and $5", counts=(2, 2, 0), exact=True),
+    # The symbol did not move with its number: `5 $7` is 5 and 7 $, `7 $5` is 7 and 5 $.
+    unit_score("5 $7", "7 $5", counts=(2, 2, 0), exact=False, units=False),
+    unit_score("7 $5", "5 $7", counts=(2, 2, 0), exact=False, units=False),
+    unit_score("5 $7", "5 $7", counts=(2, 2, 0), exact=True),
 ]
 
 

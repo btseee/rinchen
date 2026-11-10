@@ -55,7 +55,9 @@ _COMPONENT_BREAK = re.compile(r"[:/\-]")
 _DECIMAL_MARK = re.compile(r"[.,]")
 _DIGITS = re.compile(r"[0-9]+")
 _GROUP_SPACE = re.compile(f"[{_SPACES}]")
-_UNIT_AFTER = re.compile(f"[{_SPACES}]?([{_CURRENCY}])")
+# A symbol touching the digits, or one after a group space that is not glued to the next
+# number's digits (that one is the next number's).
+_UNIT_AFTER = re.compile(f"(?:([{_CURRENCY}])|[{_SPACES}]([{_CURRENCY}])(?![0-9]))")
 _UNIT_BEFORE = re.compile(f"([{_CURRENCY}])[{_SPACES}]?\\Z")
 
 
@@ -91,8 +93,10 @@ class NumberOutcome:
 def numbers_in(text: str, lang: str | None = None) -> tuple[NumberToken, ...]:
     """The numbers of `text` in written order, read under the conventions of `lang`
     (`None` when unknown). Numbered placeholders are not numbers. A currency symbol is the
-    unit of one number: a symbol after a number is that number's, so `5 $7` is `5 $` and
-    `7`. At most `MAX_NUMBER_TOKENS + 1` tokens are produced, and the scan stops there."""
+    unit of one number: the symbol that touches a number's digits or follows it after a
+    space and is not glued to the next number's digits is that number's, so `$5 $7` is
+    `5 $` and `7 $`, `5 $7` is `5` and `7 $`, and `5 $ 7` is `5 $` and `7`. At most
+    `MAX_NUMBER_TOKENS + 1` tokens are produced, and the scan stops there."""
     bare = _placeholder_pattern().sub(" ", fold_numerals(text))
     return tuple(islice(_scan(bare, lang), MAX_NUMBER_TOKENS + 1))
 
@@ -268,13 +272,15 @@ def _is_negated(text: str, start: int) -> bool:
 def _currency_beside(
     text: str, start: int, end: int, claimed_up_to: int
 ) -> tuple[str | None, int]:
-    """The currency symbol after the number, else the one before it, with at most one
-    group space between. A symbol belongs to one number: a number before this one that
-    took it after itself keeps it (`claimed_up_to` is the end of that symbol). Returns the
-    unit and the end of the symbol this number took after itself (0 when it took none)."""
+    """The currency symbol after the number (touching its digits, or behind one group
+    space and not glued to a digit: that one is the next number's), else the one before it,
+    with at most one group space between. A symbol belongs to one number: a number before
+    this one that took it after itself keeps it (`claimed_up_to` is the end of that
+    symbol). Returns the unit and the end of the symbol this number took after itself (0
+    when it took none)."""
     after = _UNIT_AFTER.match(text, end)
     if after:
-        return after.group(1), after.end()
+        return after.group(1) or after.group(2), after.end()
     window = max(start - 2, 0)
     before = _UNIT_BEFORE.search(text[window:start])
     if before and window + before.start(1) >= claimed_up_to:

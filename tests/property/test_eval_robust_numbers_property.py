@@ -76,17 +76,25 @@ NUMBER_ITEMS = [
 UNIT_PIECES = ["5", "5", "7", " ", " ", NBSP, "x", TUGRIK, "$"]
 UNIT_TEXT = st.lists(st.sampled_from(UNIT_PIECES), max_size=24).map("".join)
 SMALL_UNIT_TEXT = st.lists(st.sampled_from(UNIT_PIECES), max_size=14).map("".join)
-UNIT_ITEMS = ["5", "5 " + TUGRIK, TUGRIK + "5", "7", "7 $", "5 $", "$7"]
-# A symbol written BEFORE a number that follows another number with one space (`5 $7`) is
-# read as the unit of the first (a symbol after a number wins), so such items are only
-# reordered behind a letter; items with the symbol after the number go behind any separator.
-POSTFIX_ITEMS = ["5", "5 " + TUGRIK, "7", "7 $", "5 $", "7" + TUGRIK]
-ITEMS_AND_SEPARATORS = st.one_of(
-    st.tuples(st.lists(st.sampled_from(UNIT_ITEMS), max_size=8), st.just(" x ")),
-    st.tuples(
-        st.lists(st.sampled_from(POSTFIX_ITEMS), max_size=8),
-        st.sampled_from([" ", " x ", "x"]),
-    ),
+# Every item keeps its symbol where the touch rule reads it: glued to its own digits, or after
+# a space and not glued to the next number's digits. The honest limit, not generated: a symbol
+# with a space on BOTH sides (`5 ` + ` 7`, as in `5 $ 7`) is the unit of the number before it, so
+# an item written `$ 7` would change its unit when it moves.
+UNIT_ITEMS = [
+    "5",
+    "7",
+    "5 " + TUGRIK,
+    TUGRIK + "5",
+    "7 $",
+    "5 $",
+    "$7",
+    "$5",
+    "7" + TUGRIK,
+    "5$",
+]
+ITEMS_AND_SEPARATORS = st.tuples(
+    st.lists(st.sampled_from(UNIT_ITEMS), max_size=8),
+    st.sampled_from([" ", " x ", "x", NBSP, ", "]),
 )
 
 
