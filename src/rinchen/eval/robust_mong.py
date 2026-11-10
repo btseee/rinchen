@@ -7,8 +7,9 @@ script converter is attached, `converted` (the traditional source converted to C
 first). The key figure is the retention, the corpus chrF of the direct arm over the corpus
 chrF of the control, both against the references; it is not clipped (a direct arm may do
 better than the control) and it is `None`, never 0 or 1, when the control scores 0 (there is
-nothing to retain). The converted arm measures the converter as much as the model, which is
-why it is optional and reported beside the direct one."""
+nothing to retain); it says nothing when the control's chrF is near zero (two poor scores give a
+ratio near 1), so a report shows both. The converted arm measures the converter as much as the
+model, which is why it is optional and reported beside the direct one."""
 
 from __future__ import annotations
 
@@ -21,8 +22,9 @@ from rinchen.metrics.bleu_chrf import corpus_scores
 @dataclass(frozen=True, slots=True)
 class MongScores:
     """The corpus chrF of each arm, the retention of the direct and of the converted arm
-    (`None` without a converted arm, or when the control scores 0) and `agreement`, the
-    share of rows whose `cyrl` and `mong` texts are equal."""
+    (`None` without a converted arm, or when the control scores 0), `agreement`, the
+    share of rows whose `cyrl` and `mong` texts are equal, and the `chrf_signature` of the
+    sacrebleu scorer (its settings and version: no timestamp, the same on every run)."""
 
     rows: int
     chrf_cyrl: float
@@ -31,6 +33,7 @@ class MongScores:
     agreement: float
     chrf_converted: float | None
     retention_converted: float | None
+    chrf_signature: str
 
 
 def score_mong(
@@ -50,7 +53,8 @@ def score_mong(
     _require_one_text_per_reference("mong", mong, references)
     if converted is not None:
         _require_one_text_per_reference("converted", converted, references)
-    chrf_cyrl = _chrf(cyrl, references)
+    control = corpus_scores(cyrl, references)
+    chrf_cyrl = control.chrf
     chrf_mong = _chrf(mong, references)
     chrf_converted = None if converted is None else _chrf(converted, references)
     return MongScores(
@@ -63,6 +67,7 @@ def score_mong(
         retention_converted=(
             None if chrf_converted is None else _retention(chrf_converted, chrf_cyrl)
         ),
+        chrf_signature=control.chrf_signature,
     )
 
 

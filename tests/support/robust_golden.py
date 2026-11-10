@@ -35,6 +35,13 @@ GOLDEN_SUITE_SHA256: Final = (
 GOLDEN_HYPOTHESES_SHA256: Final = (
     "78bb56fc23e7cc07ea27df868ead4f35d52208779f2e7c67d05efcbb755e07a8"
 )
+# The golden result is written from `RobustnessResult.to_bytes()` after every literal of the
+# tests that read it was checked against an independent computation; its size and digest pin
+# that file (the suite and the hypotheses files are the spike's, byte for byte).
+GOLDEN_RESULT_SHA256: Final = (
+    "80d08ddf242132570c0f033dbc59df6ad3121fc47fb2c1dc2f84f9e4ac2fc87c"
+)
+GOLDEN_RESULT_BYTES: Final = 13614
 # The units each of the six values is a share of, in the unit of its section (rows; mentions
 # for the entities and the terms), counted by hand from the golden suite
 # (`spike/logs/make_golden.txt`): the `coverage` of the report.
@@ -70,7 +77,10 @@ def golden_hypotheses() -> dict[RequestKey, Hypothesis]:
     return hypotheses_from_bytes(GOLDEN_HYPOTHESES.read_bytes(), golden_requests())
 
 
-GOLDEN_SYSTEM: Final = RobustnessSystem(name="golden")
+# The command scores the golden file through `--hypotheses`, which records its digest.
+GOLDEN_SYSTEM: Final = RobustnessSystem(
+    name="golden", hypotheses_sha256=GOLDEN_HYPOTHESES_SHA256
+)
 EKH, KHK, RUS = "eng_Latn", "khk_Cyrl", "rus_Cyrl"
 MONGOLIAN: Final = "".join(chr(code) for code in (0x1820, 0x1828, 0x1821))
 

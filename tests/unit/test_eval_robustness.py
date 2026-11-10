@@ -11,15 +11,20 @@ that are not the golden ones and the document are in `test_eval_robustness_rows`
 
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import Any
 
 import pytest
+import sacrebleu
 
 from rinchen.eval.robustness import RESULT_SCHEMA, robustness_block
 from tests.support.robust_golden import (
     EKH,
+    GOLDEN_HYPOTHESES_SHA256,
     GOLDEN_RESULT,
+    GOLDEN_RESULT_BYTES,
+    GOLDEN_RESULT_SHA256,
     GOLDEN_SUITE_SHA256,
     KHK,
     RUS,
@@ -35,6 +40,11 @@ SIX_KEYS = (
     "mong_source_retention",
 )
 EN_KH, EN_RU, KH_EN = f"{EKH}-{KHK}", f"{EKH}-{RUS}", f"{KHK}-{EKH}"
+# The signature sacrebleu gives its default chrF (the settings and its version), which says how
+# every chrF of the section was computed.
+MONG_CHRF_SIGNATURE = (
+    "nrefs:1|case:mixed|eff:yes|nc:6|nw:0|space:no|version:" + sacrebleu.__version__
+)
 
 
 def sections() -> dict[str, Any]:
@@ -76,6 +86,7 @@ def test_the_golden_suite_description_is_in_the_result() -> None:
         "name": "golden",
         "model_sha256": None,
         "manifest_sha256": None,
+        "hypotheses_sha256": GOLDEN_HYPOTHESES_SHA256,
         "options": None,
     }
     assert document["robustness"] == robustness_block(golden_result())
@@ -212,9 +223,11 @@ def test_the_golden_mong_section() -> None:
         "chrf_converted",
         "chrf_cyrl",
         "chrf_mong",
+        "chrf_signature",
         "retention_converted",
         "rows",
     ]
+    assert details["chrf_signature"] == MONG_CHRF_SIGNATURE
     assert details["rows"] == 3
     assert details["chrf_cyrl"] == 100.0
     assert details["chrf_mong"] == pytest.approx(50.17570743156548, abs=1e-9)
@@ -301,6 +314,7 @@ ROW_FIELDS = (
     "expected",
     "found",
     "value",
+    "value_cyrl",
 )
 
 
@@ -321,8 +335,29 @@ def test_every_row_of_the_golden_run_has_its_outcome_in_file_order(
             assert got[8] == pytest.approx(want[8], abs=1e-3)
 
 
+def test_a_mong_row_stores_the_chrf_of_both_arms_and_no_other_row_stores_one() -> None:
+    outcomes = golden_result().to_dict()["rows"]
+
+    # Independent of this code: sacrebleu's sentence chrF of each arm against the reference
+    # (the Cyrillic arm of the golden hypotheses is the reference itself).
+    assert [o["value"] for o in outcomes["mong"]] == pytest.approx(
+        [100.0, 52.96190894473853, 0.0], abs=1e-9
+    )
+    assert [o["value_cyrl"] for o in outcomes["mong"]] == [100.0, 100.0, 100.0]
+    for section, rows in outcomes.items():
+        if section != "mong":
+            assert [o["value_cyrl"] for o in rows] == [None] * len(rows), section
+
+
 def test_the_golden_file_is_the_serialisation_of_the_golden_run() -> None:
     assert golden_result().to_bytes() == GOLDEN_RESULT.read_bytes()
+
+
+def test_the_golden_file_is_the_one_whose_size_and_digest_are_pinned() -> None:
+    data = GOLDEN_RESULT.read_bytes()
+
+    assert len(data) == GOLDEN_RESULT_BYTES
+    assert hashlib.sha256(data).hexdigest() == GOLDEN_RESULT_SHA256
 
 
 def test_the_golden_file_is_the_result_as_json() -> None:

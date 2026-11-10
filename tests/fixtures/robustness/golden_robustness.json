@@ -18,7 +18,8 @@
         "ok": true,
         "reason": null,
         "scored": true,
-        "value": null
+        "value": null,
+        "value_cyrl": null
       },
       {
         "category": "person_city",
@@ -29,7 +30,8 @@
         "ok": false,
         "reason": null,
         "scored": true,
-        "value": null
+        "value": null,
+        "value_cyrl": null
       },
       {
         "category": "person_city",
@@ -40,7 +42,8 @@
         "ok": true,
         "reason": null,
         "scored": true,
-        "value": null
+        "value": null,
+        "value_cyrl": null
       },
       {
         "category": "city",
@@ -51,7 +54,8 @@
         "ok": false,
         "reason": null,
         "scored": true,
-        "value": null
+        "value": null,
+        "value_cyrl": null
       }
     ],
     "mong": [
@@ -64,7 +68,8 @@
         "ok": true,
         "reason": null,
         "scored": true,
-        "value": 100.0
+        "value": 100.0,
+        "value_cyrl": 100.0
       },
       {
         "category": "base",
@@ -75,7 +80,8 @@
         "ok": false,
         "reason": null,
         "scored": true,
-        "value": 52.96190894473853
+        "value": 52.96190894473853,
+        "value_cyrl": 100.0
       },
       {
         "category": "base",
@@ -86,7 +92,8 @@
         "ok": false,
         "reason": null,
         "scored": true,
-        "value": 0.0
+        "value": 0.0,
+        "value_cyrl": 100.0
       }
     ],
     "numbers": [
@@ -99,7 +106,8 @@
         "ok": true,
         "reason": null,
         "scored": true,
-        "value": null
+        "value": null,
+        "value_cyrl": null
       },
       {
         "category": "date",
@@ -110,7 +118,8 @@
         "ok": true,
         "reason": null,
         "scored": true,
-        "value": null
+        "value": null,
+        "value_cyrl": null
       },
       {
         "category": "currency",
@@ -121,7 +130,8 @@
         "ok": false,
         "reason": null,
         "scored": true,
-        "value": null
+        "value": null,
+        "value_cyrl": null
       },
       {
         "category": "int",
@@ -132,7 +142,8 @@
         "ok": false,
         "reason": null,
         "scored": true,
-        "value": null
+        "value": null,
+        "value_cyrl": null
       },
       {
         "category": "none",
@@ -143,7 +154,8 @@
         "ok": null,
         "reason": "no_numbers",
         "scored": false,
-        "value": null
+        "value": null,
+        "value_cyrl": null
       },
       {
         "category": "words",
@@ -154,7 +166,8 @@
         "ok": null,
         "reason": "source_reference_disagree",
         "scored": false,
-        "value": null
+        "value": null,
+        "value_cyrl": null
       },
       {
         "category": "int",
@@ -165,7 +178,8 @@
         "ok": true,
         "reason": null,
         "scored": true,
-        "value": null
+        "value": null,
+        "value_cyrl": null
       },
       {
         "category": "percent",
@@ -176,7 +190,8 @@
         "ok": false,
         "reason": null,
         "scored": true,
-        "value": null
+        "value": null,
+        "value_cyrl": null
       }
     ],
     "placeholders": [
@@ -189,7 +204,8 @@
         "ok": true,
         "reason": null,
         "scored": true,
-        "value": null
+        "value": null,
+        "value_cyrl": null
       },
       {
         "category": "reorder",
@@ -200,7 +216,8 @@
         "ok": true,
         "reason": null,
         "scored": true,
-        "value": null
+        "value": null,
+        "value_cyrl": null
       },
       {
         "category": "noun",
@@ -211,7 +228,8 @@
         "ok": false,
         "reason": null,
         "scored": true,
-        "value": null
+        "value": null,
+        "value_cyrl": null
       },
       {
         "category": "noun",
@@ -222,7 +240,8 @@
         "ok": false,
         "reason": null,
         "scored": true,
-        "value": null
+        "value": null,
+        "value_cyrl": null
       },
       {
         "category": "noun",
@@ -233,7 +252,8 @@
         "ok": false,
         "reason": null,
         "scored": true,
-        "value": null
+        "value": null,
+        "value_cyrl": null
       },
       {
         "category": "none",
@@ -244,7 +264,8 @@
         "ok": null,
         "reason": "no_placeholders",
         "scored": false,
-        "value": null
+        "value": null,
+        "value_cyrl": null
       }
     ],
     "script": [
@@ -257,7 +278,8 @@
         "ok": true,
         "reason": null,
         "scored": true,
-        "value": 1.0
+        "value": 1.0,
+        "value_cyrl": null
       },
       {
         "category": "trained",
@@ -268,7 +290,8 @@
         "ok": false,
         "reason": null,
         "scored": true,
-        "value": 0.25
+        "value": 0.25,
+        "value_cyrl": null
       },
       {
         "category": "untrained",
@@ -279,7 +302,8 @@
         "ok": null,
         "reason": "no_letters",
         "scored": false,
-        "value": null
+        "value": null,
+        "value_cyrl": null
       },
       {
         "category": "mong_output",
@@ -290,7 +314,8 @@
         "ok": true,
         "reason": null,
         "scored": true,
-        "value": 1.0
+        "value": 1.0,
+        "value_cyrl": null
       },
       {
         "category": "mong_output",
@@ -301,7 +326,8 @@
         "ok": false,
         "reason": null,
         "scored": true,
-        "value": 0.5
+        "value": 0.5,
+        "value_cyrl": null
       },
       {
         "category": "untrained",
@@ -312,7 +338,8 @@
         "ok": true,
         "reason": null,
         "scored": true,
-        "value": 1.0
+        "value": 1.0,
+        "value_cyrl": null
       }
     ],
     "terms": [
@@ -325,7 +352,8 @@
         "ok": true,
         "reason": null,
         "scored": true,
-        "value": null
+        "value": null,
+        "value_cyrl": null
       },
       {
         "category": "glossary",
@@ -336,7 +364,8 @@
         "ok": true,
         "reason": null,
         "scored": true,
-        "value": null
+        "value": null,
+        "value_cyrl": null
       },
       {
         "category": "glossary",
@@ -347,7 +376,8 @@
         "ok": false,
         "reason": null,
         "scored": true,
-        "value": null
+        "value": null,
+        "value_cyrl": null
       }
     ]
   },
@@ -405,6 +435,7 @@
         "chrf_converted": null,
         "chrf_cyrl": 100.0,
         "chrf_mong": 50.17570743156548,
+        "chrf_signature": "nrefs:1|case:mixed|eff:yes|nc:6|nw:0|space:no|version:2.6.0",
         "retention_converted": null,
         "rows": 3
       },
@@ -598,6 +629,7 @@
     "sha256": "2767112dc06c61b62fbc66ad7336b3dffeff81c33ce7e7e124875a44503e75b0"
   },
   "system": {
+    "hypotheses_sha256": "78bb56fc23e7cc07ea27df868ead4f35d52208779f2e7c67d05efcbb755e07a8",
     "manifest_sha256": null,
     "model_sha256": null,
     "name": "golden",

@@ -7,7 +7,8 @@ section (`robust_sections`) and returns a `RobustnessResult`. Its `to_bytes` is 
 schema `rinchen.robustness/1`: sorted keys, two-space indent, one final LF, no timestamp and no
 text of the suite or of a hypothesis, so the same inputs give the same bytes. Layout:
 
-    system {name, model_sha256, manifest_sha256, options}  suite {name, sha256, rows}
+    system {name, model_sha256, manifest_sha256, hypotheses_sha256, options}
+    suite {name, sha256, rows}
     robustness {the six values}   sections {section: {unit, rows, scored, excluded, ok, value,
     details, by_category, by_direction, statuses}}   rows {section: [one outcome per row]}
 
@@ -63,7 +64,9 @@ _SHA256: Final = re.compile(r"[0-9a-f]{64}")
 class RobustnessSystem:
     """The system that wrote the hypotheses: a `name` (the characters of an id), the SHA-256
     of its `model.bin` and of the manifest that vouches for the export (None for a hypotheses
-    file) and the decode `options` it ran with (None for a hypotheses file).
+    file), the SHA-256 of the hypotheses file that was scored (None for a model run, whose
+    `hypotheses.jsonl` is an output of the run) and the decode `options` it ran with (None
+    for a hypotheses file).
 
     Raises:
         ValueError: the name is not an id, or a digest is not a SHA-256 hex digest or None.
@@ -73,6 +76,7 @@ class RobustnessSystem:
     name: str
     model_sha256: str | None = None
     manifest_sha256: str | None = None
+    hypotheses_sha256: str | None = None
     options: Mapping[str, str | int | bool] | None = None
 
     def __post_init__(self) -> None:
@@ -80,7 +84,7 @@ class RobustnessSystem:
             raise ValueError(
                 "name must be 1 to 64 characters: letters, digits, '.', '_' and '-'"
             )
-        for field in ("model_sha256", "manifest_sha256"):
+        for field in ("model_sha256", "manifest_sha256", "hypotheses_sha256"):
             value = getattr(self, field)
             if value is not None and not _is_sha256(value):
                 raise ValueError(f"{field} must be a SHA-256 hex digest or None")
@@ -97,6 +101,7 @@ class RobustnessSystem:
             "name": self.name,
             "model_sha256": self.model_sha256,
             "manifest_sha256": self.manifest_sha256,
+            "hypotheses_sha256": self.hypotheses_sha256,
             "options": None if self.options is None else dict(self.options),
         }
 
@@ -162,13 +167,13 @@ def robustness_block(result: RobustnessResult) -> dict[str, float | None]:
 
 def robustness_coverage(
     result: RobustnessResult,
-) -> dict[str, dict[str, float | int | None]]:
+) -> dict[str, dict[str, Any]]:
     """What each of the six values rests on, in the order of the block: the units `scored`,
     those `excluded` (under any reason) and their `total`, in the unit of the section (rows;
     mentions for the entities and the terms). All three are 0 for a section the suite does not
     have. The entry of `mong_source_retention` also holds the corpus chrF of both arms the
     ratio is made of (`chrf_cyrl`, `chrf_mong`; None without rows)."""
-    coverage: dict[str, dict[str, float | int | None]] = {}
+    coverage: dict[str, dict[str, Any]] = {}
     for key, name in _BLOCK:
         section = result.sections.get(name)
         coverage[key] = {

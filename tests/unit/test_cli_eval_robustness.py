@@ -34,6 +34,7 @@ from tests.support.robust_cli import (
 from tests.support.robust_golden import (
     GOLDEN,
     GOLDEN_COVERAGE,
+    GOLDEN_HYPOTHESES_SHA256,
     golden_requests,
     golden_suite,
     suite_of,
@@ -164,6 +165,7 @@ def test_without_a_name_the_system_is_the_stem_of_the_hypotheses_file(
         "name": "golden_hypotheses",
         "model_sha256": None,
         "manifest_sha256": None,
+        "hypotheses_sha256": GOLDEN_HYPOTHESES_SHA256,
         "options": None,
     }
 
@@ -480,6 +482,7 @@ def test_the_result_names_the_model_by_the_engine_and_records_the_options(
         "name": workspace.export.record.name,
         "model_sha256": workspace.export.sha256["model.bin"],
         "manifest_sha256": workspace.export.manifest_sha256,
+        "hypotheses_sha256": None,
         "options": {
             "beam_size": 2,
             "converter": False,

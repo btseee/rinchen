@@ -9,6 +9,7 @@ from __future__ import annotations
 import dataclasses
 
 import pytest
+import sacrebleu
 
 from rinchen.eval.robust_mong import MongScores, score_mong
 
@@ -20,6 +21,10 @@ GOLDEN_CHRF_MONG = 50.17570743156548
 GOLDEN_RETENTION = 0.5017570743156547
 NOT_CLIPPED_RETENTION = 100.0 / GOLDEN_CHRF_MONG
 EMPTY = ["", "", ""]
+# What sacrebleu's default chrF calls itself (its settings and its version).
+SIGNATURE = (
+    "nrefs:1|case:mixed|eff:yes|nc:6|nw:0|space:no|version:" + sacrebleu.__version__
+)
 
 
 def test_arms_equal_to_the_references_keep_everything() -> None:
@@ -33,6 +38,7 @@ def test_arms_equal_to_the_references_keep_everything() -> None:
         agreement=1.0,
         chrf_converted=None,
         retention_converted=None,
+        chrf_signature=SIGNATURE,
     )
 
 
@@ -46,6 +52,17 @@ def test_the_golden_rows() -> None:
     assert scores.agreement == pytest.approx(1 / 3)
     assert scores.chrf_converted is None
     assert scores.retention_converted is None
+    assert scores.chrf_signature == SIGNATURE
+
+
+def test_the_signature_is_the_same_whatever_the_texts_and_the_arms() -> None:
+    signatures = {
+        score_mong(REFERENCES, EMPTY, GOLDEN_MONG).chrf_signature,
+        score_mong(REFERENCES, REFERENCES, EMPTY, EMPTY).chrf_signature,
+        score_mong(REFERENCES[:1], REFERENCES[:1], REFERENCES[:1]).chrf_signature,
+    }
+
+    assert signatures == {SIGNATURE}
 
 
 def test_a_direct_arm_that_wrote_nothing_retains_nothing() -> None:
@@ -241,6 +258,7 @@ def test_the_scores_are_a_frozen_value_without_a_dict() -> None:
         "agreement",
         "chrf_converted",
         "retention_converted",
+        "chrf_signature",
     ]
 
 

@@ -387,7 +387,9 @@ def _run_hypotheses(suite_path: Path, plan: HypothesesPlan, target: Path) -> Mea
             suite,
             hypotheses,
             suite_sha256=suite_entry.sha256,
-            system=RobustnessSystem(name=plan.name),
+            system=RobustnessSystem(
+                name=plan.name, hypotheses_sha256=file_entry.sha256
+            ),
         ),
         hypotheses=None,
         config={"mode": "hypotheses"},

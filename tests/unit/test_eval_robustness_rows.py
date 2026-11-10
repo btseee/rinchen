@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 import pytest
+import sacrebleu
 
 from rinchen.errors import DataError
 from rinchen.eval.robust_hypotheses import Hypothesis
@@ -149,6 +150,7 @@ def test_a_section_the_suite_holds_empty_is_present_with_nothing_scored() -> Non
         "rows": 0,
         "chrf_cyrl": None,
         "chrf_mong": None,
+        "chrf_signature": None,
         "agreement": None,
         "chrf_converted": None,
         "retention_converted": None,
@@ -415,6 +417,33 @@ def arms(**by_arm: list[str]) -> dict[RequestKey, Hypothesis]:
         for i, text in enumerate(texts_of_arm, start=1):
             found[key("mong", f"m{i}", arm)] = Hypothesis(text, "ok")
     return found
+
+
+def test_the_cyrillic_arm_of_a_row_is_scored_beside_the_direct_one() -> None:
+    suite = mong_suite()
+    hypotheses = arms(
+        cyrl=["This is a book.", "The star is here."],
+        mong=["This is a book.", "The water is here."],
+    )
+
+    document = run(suite, hypotheses)
+
+    # sacrebleu's sentence chrF of "The star is here." against "The water is here.".
+    rows = document["rows"]["mong"]
+    assert [row["value"] for row in rows] == [100.0, 100.0]
+    assert [row["value_cyrl"] for row in rows] == [100.0, 52.96190894473853]
+    assert [row["ok"] for row in rows] == [True, False]
+
+
+def test_the_signature_of_the_chrf_that_scored_the_arms_is_recorded() -> None:
+    document = run(mong_suite(), arms(cyrl=["", ""], mong=["This is a book.", ""]))
+
+    signature = document["sections"]["mong"]["details"]["chrf_signature"]
+
+    assert signature == (
+        "nrefs:1|case:mixed|eff:yes|nc:6|nw:0|space:no|version:" + sacrebleu.__version__
+    )
+    assert document["sections"]["mong"]["value"] is None
 
 
 def test_the_arms_of_a_row_agree_when_they_wrote_the_same_text_not_the_same_score() -> (

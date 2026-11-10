@@ -169,7 +169,7 @@ REVIEWED: Final[tuple[tuple[str, str, str, str], ...]] = (
         "eval/robustness.py",
         "RobustnessSystem.__post_init__",
         "field",
-        "`model_sha256` or `manifest_sha256`, literals of a fixed tuple",
+        "`model_sha256`, `manifest_sha256` or `hypotheses_sha256`, literals of a fixed tuple",
     ),
     (
         "eval/robustness.py",

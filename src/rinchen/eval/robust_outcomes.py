@@ -35,7 +35,7 @@ __all__ = [
 ]
 
 Hypotheses = Mapping[RequestKey, Hypothesis]
-Details = Mapping[str, float | int | None]
+Details = Mapping[str, float | int | str | None]
 Breakdown = Mapping[str, Mapping[str, int]]
 
 _UNKNOWN_SOURCE: Final = "und"
@@ -45,8 +45,9 @@ _UNKNOWN_SOURCE: Final = "und"
 class RowOutcome:
     """What one row came to: whether it was `scored` (else the `reason` it was not), whether
     it was `ok`, how many numbers, placeholders or mentions were `expected` and `found`, and a
-    `value` (the purity of a script row, the sentence chrF of a mong row's `mong` arm). A field
-    that does not apply is None."""
+    `value` (the purity of a script row, the sentence chrF of a mong row's `mong` arm) and, for a
+    mong row, `value_cyrl` (the sentence chrF of its `cyrl` arm, the control), so that a
+    bootstrap can resample both. A field that does not apply is None."""
 
     id: str
     category: str
@@ -57,6 +58,7 @@ class RowOutcome:
     expected: int | None
     found: int | None
     value: float | None
+    value_cyrl: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -145,9 +147,19 @@ def scored_outcome(
     expected: int | None = None,
     found: int | None = None,
     value: float | None = None,
+    value_cyrl: float | None = None,
 ) -> RowOutcome:
     return RowOutcome(
-        row.id, row.category, direction(row), True, None, ok, expected, found, value
+        row.id,
+        row.category,
+        direction(row),
+        True,
+        None,
+        ok,
+        expected,
+        found,
+        value,
+        value_cyrl,
     )
 
 

@@ -134,7 +134,12 @@ from tests.support.robust_gate import (
     rotate_hypotheses,
     run_robustness,
 )
-from tests.support.robust_golden import GOLDEN_HYPOTHESES, GOLDEN_RESULT, GOLDEN_SUITE
+from tests.support.robust_golden import (
+    GOLDEN_HYPOTHESES,
+    GOLDEN_RESULT,
+    GOLDEN_RESULT_SHA256,
+    GOLDEN_SUITE,
+)
 from tests.support.tiny_converter import TinyRun
 
 pytestmark = [
@@ -687,6 +692,8 @@ def test_rescoring_the_hypotheses_a_run_wrote_gives_the_same_measurement(
     assert system["model_sha256"] is None
     assert system["manifest_sha256"] is None
     assert system["options"] is None
+    assert system["hypotheses_sha256"] == sha256_of(main_run.out_dir / HYPOTHESES_FILE)
+    assert main_run.result["system"]["hypotheses_sha256"] is None
     assert main_run.result["system"]["model_sha256"] is not None
     # A rescoring has no model, so it writes no hypotheses of its own.
     assert not (rescored_run.out_dir / HYPOTHESES_FILE).exists()
@@ -808,5 +815,5 @@ def test_the_golden_suite_scores_to_the_golden_bytes_and_no_excluded_row_passes(
         "term_acc": 0.75,
     }
     assert hashlib.sha256(GOLDEN_RESULT.read_bytes()).hexdigest() == (
-        "995e81766fd139349abc2ed19ef1953b3036cedcbf28b4f0440e0ce088ee76d0"
+        GOLDEN_RESULT_SHA256
     )

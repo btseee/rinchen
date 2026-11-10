@@ -84,7 +84,9 @@ def test_scoring_any_hypotheses_never_raises_and_loses_nothing(
         assert 0 <= section["ok"] <= section["scored"]
         assert section["scored"] + sum(section["excluded"].values()) == units
         assert finite_or_none(section["value"])
-        assert all(finite_or_none(v) for v in section["details"].values())
+        assert all(
+            isinstance(v, str) or finite_or_none(v) for v in section["details"].values()
+        )
         assert len(document["rows"][name]) == section["rows"]
         assert sum(section["statuses"].values()) == len(
             [k for k in KEYS if k.section == name]

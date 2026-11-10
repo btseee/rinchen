@@ -143,7 +143,27 @@ def test_a_model_system_is_recorded_with_its_digests_and_options() -> None:
         "name": "tiny.v1",
         "model_sha256": "a" * 64,
         "manifest_sha256": "b" * 64,
+        "hypotheses_sha256": None,
         "options": {"beam_size": 4, "converter": False, "script_mask": "retry"},
+    }
+
+
+def test_a_system_that_wrote_a_hypotheses_file_is_recorded_with_its_digest() -> None:
+    system = RobustnessSystem(name="baseline", hypotheses_sha256="c" * 64)
+
+    document = compute_robustness(
+        golden_suite(),
+        golden_hypotheses(),
+        suite_sha256=golden_suite_sha256(),
+        system=system,
+    ).to_dict()
+
+    assert document["system"] == {
+        "name": "baseline",
+        "model_sha256": None,
+        "manifest_sha256": None,
+        "hypotheses_sha256": "c" * 64,
+        "options": None,
     }
 
 
@@ -167,7 +187,9 @@ def test_a_system_name_that_is_not_an_id_is_refused(name: object) -> None:
 
 
 @pytest.mark.parametrize("digest", ["", "a" * 63, "A" * 64, "g" * 64, 5, "a" * 65])
-@pytest.mark.parametrize("field", ["model_sha256", "manifest_sha256"])
+@pytest.mark.parametrize(
+    "field", ["model_sha256", "manifest_sha256", "hypotheses_sha256"]
+)
 def test_a_system_digest_must_be_a_sha256_or_none(field: str, digest: object) -> None:
     with pytest.raises(ValueError, match=field):
         RobustnessSystem(name="s", **{field: digest})  # type: ignore[arg-type]

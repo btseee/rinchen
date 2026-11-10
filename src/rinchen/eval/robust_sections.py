@@ -332,7 +332,14 @@ def _mong(rows: Sequence[SuiteRow], hypotheses: Hypotheses) -> SectionResult:
     ):
         agree = control == direct
         tally.add(row, 1, agree)
-        outcomes.append(scored_outcome(row, ok=agree, value=chrf(direct, reference)))
+        outcomes.append(
+            scored_outcome(
+                row,
+                ok=agree,
+                value=chrf(direct, reference),
+                value_cyrl=chrf(control, reference),
+            )
+        )
     return build_section(
         section="mong",
         unit="row",
@@ -352,6 +359,7 @@ def _mong_details(scores: MongScores | None) -> Details:
             "rows": 0,
             "chrf_cyrl": None,
             "chrf_mong": None,
+            "chrf_signature": None,
             "agreement": None,
             "chrf_converted": None,
             "retention_converted": None,
@@ -360,6 +368,7 @@ def _mong_details(scores: MongScores | None) -> Details:
         "rows": scores.rows,
         "chrf_cyrl": scores.chrf_cyrl,
         "chrf_mong": scores.chrf_mong,
+        "chrf_signature": scores.chrf_signature,
         "agreement": scores.agreement,
         "chrf_converted": scores.chrf_converted,
         "retention_converted": scores.retention_converted,
