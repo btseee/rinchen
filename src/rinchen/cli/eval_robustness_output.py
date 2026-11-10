@@ -179,8 +179,12 @@ def _terms_line(name: str, section: SectionResult) -> str:
     return f"{name}: {_headline(section, _mentions(section))}{_excluded(section)}"
 
 
+def _rows(count: int) -> str:
+    return f"{count} row" if count == 1 else f"{count} rows"
+
+
 def _script_line(name: str, section: SectionResult) -> str:
-    detail = f"mean of {section.scored} rows"
+    detail = f"mean of {_rows(section.scored)}"
     below_floor = int(section.details["below_floor"] or 0)
     return (
         f"{name}: {_headline(section, detail)}, below floor {below_floor}"
@@ -196,7 +200,7 @@ def _mong_line(name: str, section: SectionResult) -> str:
         return f"{name}: {_NOTHING_SCORED}"
     figure = "n/a" if section.value is None else f"{section.value:.4f}"
     chrfs = f"chrF {section.details['chrf_mong']:.2f} over {chrf_cyrl:.2f} Cyrillic"
-    return f"{name}: {figure} (retention over {section.rows} rows, {chrfs})"
+    return f"{name}: {figure} (retention over {_rows(section.rows)}, {chrfs})"
 
 
 _LINES: Final[dict[str, Callable[[str, SectionResult], str]]] = {

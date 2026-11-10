@@ -35,6 +35,7 @@ from tests.support.robust_golden import (
     GOLDEN,
     GOLDEN_COVERAGE,
     GOLDEN_HYPOTHESES_SHA256,
+    golden_hypotheses,
     golden_requests,
     golden_suite,
     suite_of,
@@ -253,7 +254,7 @@ def test_a_suite_with_one_section_prints_that_section_only(
 
     assert result.exit_code == 0, result.output
     assert lines_of(result)[2:-3] == [
-        "mong: 1.0000 (retention over 1 rows, chrF 100.00 over 100.00 Cyrillic)"
+        "mong: 1.0000 (retention over 1 row, chrF 100.00 over 100.00 Cyrillic)"
     ]
     report = json.loads(workspace.report.read_text(encoding="utf-8"))
     assert report["robustness"] == {
@@ -264,6 +265,26 @@ def test_a_suite_with_one_section_prints_that_section_only(
         "entity_acc": None,
         "mong_source_retention": 1.0,
     }
+
+
+def test_a_script_section_of_one_scored_row_prints_one_row() -> None:
+    row = golden_suite().sections["script"][0]
+    hypotheses = {
+        request.key: golden_hypotheses()[request.key]
+        for request in golden_requests()
+        if request.key.section == "script" and request.key.id == row.id
+    }
+
+    result = compute_robustness(
+        suite_of(script=(row,)),
+        hypotheses,
+        suite_sha256="0" * 64,
+        system=RobustnessSystem(name="s"),
+    )
+
+    assert result_lines(result)[2:] == [
+        "script: 1.0000 (mean of 1 row), below floor 0, excluded 0"
+    ]
 
 
 def test_a_mong_section_without_rows_prints_n_a_and_no_chrf() -> None:
@@ -295,7 +316,7 @@ def test_a_control_that_scores_zero_leaves_no_retention_and_shows_both_chrfs(
 
     assert result.exit_code == 0, result.output
     assert lines_of(result)[2:-3] == [
-        "mong: n/a (retention over 1 rows, chrF 100.00 over 0.00 Cyrillic)"
+        "mong: n/a (retention over 1 row, chrF 100.00 over 0.00 Cyrillic)"
     ]
     report = json.loads(workspace.report.read_text(encoding="utf-8"))
     assert report["robustness"]["mong_source_retention"] is None
@@ -707,3 +728,19 @@ def test_the_help_of_robustness_lists_every_option_and_marks_the_required_ones()
     ):
         assert option in result.stdout, option
     assert result.stdout.count("[required]") == 2
+
+
+def test_the_help_of_robustness_wraps_its_description_by_width_not_by_the_docstring() -> (
+    None
+):
+    result = invoke(["eval", "robustness", "--help"])
+
+    # Everything above the line that opens the options box.
+    above_the_options = result.stdout.split("Options", 1)[0].splitlines()[:-1]
+    paragraphs = "\n".join(line.rstrip() for line in above_the_options).split("\n\n")
+    description = [p for p in paragraphs if "Usage:" not in p and p.strip()]
+    assert len(description) == 2
+    for paragraph in description:
+        lines = paragraph.splitlines()
+        # A line of the paragraph that stops short of the width is a break of the docstring.
+        assert all(len(line) >= 60 for line in lines[:-1]), paragraph

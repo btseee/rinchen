@@ -132,6 +132,8 @@ def load_converter(ct2_dir: Path, spm_model: Path, device: str) -> ScriptConvert
     return ScriptConverter(ct2_dir, spm_model, device=device)
 
 
+# The docstring below is the help text: typer keeps a line break inside a paragraph, so each
+# paragraph is one source line and the help wraps it by the width of the terminal.
 def robustness_command(
     suite: Annotated[
         Path, typer.Option("--suite", help="The robustness suite file (JSON).")
@@ -229,8 +231,7 @@ def robustness_command(
 ) -> None:
     """Measure numbers, placeholders, names, terms, script purity and a traditional-script source.
 
-    The suite is scored with what the engine writes for it (--model) or with the hypotheses of
-    a file (--hypotheses). It measures and has no threshold: exit 0 whenever it measured."""
+    The suite is scored with what the engine writes for it (--model) or with the hypotheses of a file (--hypotheses). It measures and has no threshold: exit 0 whenever it measured."""
     with rinchen_errors_as_exit_codes():
         plan = plan_of(
             model, hypotheses, system, script_converter_ct2, script_converter_spm

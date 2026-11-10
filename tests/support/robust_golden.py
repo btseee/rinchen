@@ -37,7 +37,13 @@ GOLDEN_HYPOTHESES_SHA256: Final = (
 )
 # The golden result is written from `RobustnessResult.to_bytes()` after every literal of the
 # tests that read it was checked against an independent computation; its size and digest pin
-# that file (the suite and the hypotheses files are the spike's, byte for byte).
+# that file (the suite and the hypotheses files are the spike's, byte for byte). The file also
+# holds the chrF signature of the installed sacrebleu (`version:2.6.0`, the version
+# pyproject.toml pins): a sacrebleu bump fails the golden-file tests (the stored version is no
+# longer the run's) and this size and digest, on purpose, since the signature is part of what
+# the result vouches for. To regenerate after a bump, or after any change of the result: check
+# each changed literal independently, write `golden_result().to_bytes()` to `GOLDEN_RESULT`,
+# and copy its size and SHA-256 below.
 GOLDEN_RESULT_SHA256: Final = (
     "0dbf112712a739b558eed9e441d5cdeeb95f688467e68c99f5f37a8f10043770"
 )

@@ -85,7 +85,10 @@ def test_scoring_any_hypotheses_never_raises_and_loses_nothing(
         assert section["scored"] + sum(section["excluded"].values()) == units
         assert finite_or_none(section["value"])
         assert all(
-            isinstance(v, str) or finite_or_none(v) for v in section["details"].values()
+            (v is None or isinstance(v, str))
+            if k == "chrf_signature"
+            else finite_or_none(v)
+            for k, v in section["details"].items()
         )
         assert len(document["rows"][name]) == section["rows"]
         assert sum(section["statuses"].values()) == len(

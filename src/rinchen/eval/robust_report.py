@@ -7,9 +7,11 @@ A value is a share of the units that were scored: read it with its `coverage`, w
 many were left out. The retention is a ratio of two chrF scores, can exceed 1 and means nothing
 when the Cyrillic chrF beside it is near zero.
 
-D13 owns the full report: its writer embeds `robustness_block` as it is. When it exists this
-module and the command's `report.json` line are removed or kept as a per-suite artefact; the
-block, `robustness.json` and the command stay."""
+D13 owns the full report: its writer embeds `robustness_block` as it is and `robustness_coverage`
+beside it: the coverage is not part of the block, so a report that carries only the block hides
+how many units each value left out. When it exists this module and the command's `report.json`
+line are removed or kept as a per-suite artefact; the block, `robustness.json` and the command
+stay."""
 
 from __future__ import annotations
 
