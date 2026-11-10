@@ -20,10 +20,12 @@
 #
 # What tests/unit/test_docker_files.py proves by reading this file: the base images and their
 # tags, `uv sync --frozen --no-dev` with a skip list EQUAL to the torch and CUDA packages of
-# uv.lock (22 packages in this lock, counted from the lock by the test; serving imports none of them; the repository's own environment holds 3.2 GB of nvidia
-# wheels and 1.2 GB of torch, which the list keeps out of the image), the vendored wheels the lock names copied before the sync, a user that is not
-# root, the hidden GPU, a health check on /readyz, the exec form of ENTRYPOINT and CMD, and that
-# every COPY source exists and the .dockerignore leaves it in the context.
+# uv.lock (22 packages in this lock, counted from the lock by the test; serving imports none
+# of them; the repository's own environment holds 3.2 GB of nvidia wheels and 1.2 GB of torch,
+# which the list keeps out of the image), the vendored wheels the lock names copied before the
+# sync, a user that is not root, the hidden GPU, a health check on /readyz, the exec form of
+# ENTRYPOINT and CMD, and that every COPY source exists and the .dockerignore leaves it in the
+# context.
 #
 # Build and run (the operator's steps, never run here), from the repository root:
 #   docker compose -f docker/compose.serve.yaml up --build

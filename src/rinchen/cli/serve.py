@@ -11,19 +11,21 @@
 `--model` (or `RINCHEN_MODEL`) is the export directory `rinchen export convert` made. The
 settings are layered, the last one winning: the defaults of `rinchen.config.serve.ServeConfig`,
 the YAML file of `--config` (`configs/serve/*.yaml`), the `RINCHEN_SERVE_<FIELD>` environment
-variables (a name under that prefix that is no field is refused, not ignored) and these flags. The service listens on 127.0.0.1 unless told otherwise and has no
-authentication: put a gateway in front of it.
+variables (a name under that prefix that is no field is refused, not ignored) and these flags.
+The service listens on 127.0.0.1 unless told otherwise and has no authentication: put a gateway
+in front of it.
 
 The command builds the settings and has the manifest vouch for the export BEFORE it binds a
 port, so a refused model or setting is an exit code and nothing listens. The engine itself is
 opened in the lifespan of the app, which `uvicorn` starts before it binds the port: the port
 opens only once the export is hashed again, loaded and warmed up (a health check sees a refused
 connection until then: size its start period for the model, UNMEASURED for a real one), and a
-model that fails to load ends the server with a non-zero status. One process serves: more processes would load the model
-more times, so scale with `--inter-threads` and with replicas. On SIGTERM the server stops
-accepting, waits for the requests in flight, drains the queue and exits with the status of the
-signal (143 in a shell), not 0; the whole stop takes `--shutdown-timeout-seconds` at most (and the
-half-second of `uvicorn`'s own polling), the requests in flight getting the first half of it.
+model that fails to load ends the server with a non-zero status. One process serves: more
+processes would load the model more times, so scale with `--inter-threads` and with replicas. On
+SIGTERM the server stops accepting, waits for the requests in flight, drains the queue and exits
+with the status of the signal (143 in a shell), not 0; the whole stop takes
+`--shutdown-timeout-seconds` (1 or more) at most, and the half-second of `uvicorn`'s own
+polling, the requests in flight getting the first half of it.
 
 `--script-converter-ct2` and `--script-converter-spm` (both or neither) attach D5's script
 converter, as `rinchen translate` does. `--device cuda` is an operator's choice that was never
@@ -176,8 +178,8 @@ def serve_command(
         float | None,
         typer.Option(
             "--shutdown-timeout-seconds",
-            help="The whole budget of a stop: half of it (rounded up) for the requests "
-            "in flight, the rest for the queue and the batches still running.",
+            help="The whole budget of a stop, 1 or more: half of it (rounded up) for the "
+            "requests in flight, the rest for the queue and the batches still running.",
         ),
     ] = None,
     log_level: Annotated[

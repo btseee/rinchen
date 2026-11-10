@@ -46,6 +46,7 @@ lines; the chunks written before it stay written.
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
@@ -77,6 +78,7 @@ from rinchen.infer.engine import Engine
 from rinchen.infer.engine_types import (
     DecodeOptions,
     LoadOptions,
+    RequestTextError,
     Row,
     ScriptMode,
     ScriptName,
@@ -86,6 +88,8 @@ from rinchen.infer.engine_types import (
 from rinchen.script_conv.runtime import ScriptConverter
 
 _SINGULAR: Final = {"lines": "line", "documents": "document"}
+# How the engine names the text of a refusal: its place in the call, counted from 0.
+_ENGINE_PLACE: Final = re.compile(r"(?:row|document) (\d+)")
 # What a text of the input is joined with when a document has several lines.
 _LINE_JOINER: Final = " "
 
@@ -510,6 +514,23 @@ def _span(unit: Unit, first: int, count: int) -> str:
     return f"{unit} {first} to {first + count - 1}"
 
 
+def _named_by_place(
+    error: DataError | UpstreamError, unit: Unit, first: int, count: int
+) -> DataError | UpstreamError:
+    """`error` as the command reports it. A refusal of one text names that text by its place
+    in the input (`line 4`, `document 2`, counted from 1): the engine counted from 0 inside the
+    call, and `first` is the number of the call's first text. Any other error says which texts
+    the call was translating (`lines 3 to 4`), and then whatever the engine said."""
+    span = _span(unit, first, count)
+    if isinstance(error, RequestTextError):
+        place = _ENGINE_PLACE.fullmatch(error.label)
+        if place is None:
+            return DataError(f"{span}: {error}")
+        label = f"{_SINGULAR[unit]} {first + int(place[1])}"
+        return RequestTextError(label, error.problem)
+    return type(error)(f"{span}: {error}")
+
+
 def _answered[T](
     ask: Callable[[], Sequence[T]], unit: Unit, first: int, count: int
 ) -> Sequence[T]:
@@ -519,7 +540,7 @@ def _answered[T](
     try:
         answers = ask()
     except (DataError, UpstreamError) as error:
-        raise type(error)(f"{_span(unit, first, count)}: {error}") from error
+        raise _named_by_place(error, unit, first, count) from error
     if len(answers) != count:
         raise UpstreamError(
             f"{_span(unit, first, count)}: the engine answered {len(answers)} times for "

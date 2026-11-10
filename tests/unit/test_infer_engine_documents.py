@@ -267,6 +267,33 @@ def test_a_hypothesis_that_starts_with_the_separator_is_no_output_for_a_document
     assert (result.status, result.text) == ("no_output", "")
 
 
+def test_a_hypothesis_that_starts_with_the_separator_is_counted_as_a_reserved_symbol(
+    tmp_path: Path,
+) -> None:
+    fixture = documents(tmp_path, script=lambda line: [hyp(SEP, SP + "y", END)])
+
+    (result,) = fixture.engine.translate([Row("hello", None, ENG)])
+
+    assert (result.status, result.text) == ("no_output", "")
+    counted(fixture, sources=1, no_output=1, reserved_symbol=1)
+
+
+def test_an_alternative_that_starts_with_the_separator_is_dropped_and_counted(
+    tmp_path: Path,
+) -> None:
+    def script(line: tuple[str, ...]) -> Sequence[Hypothesis]:
+        return [hyp(SP + "x", SEP, END), hyp(SEP, SP + "y", END), hyp(SP + "v", END)]
+
+    fixture = documents(tmp_path, script=script)
+
+    (result,) = fixture.engine.translate(
+        [Row("hello", None, ENG)], DecodeOptions(n=3, script_mask="off")
+    )
+
+    assert (result.status, result.text, result.alternatives) == ("ok", "x", ("v",))
+    counted(fixture, sources=1, reserved_symbol=1)
+
+
 def test_a_hypothesis_cut_by_the_length_cap_after_a_separator_is_a_finished_sentence(
     tmp_path: Path,
 ) -> None:

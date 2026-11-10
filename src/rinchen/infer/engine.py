@@ -19,7 +19,7 @@ What CTranslate2 does silently, the engine does not (measured in the D10 and D11
 - a document model (the record's `document_level`) writes `<sep>` after a sentence decoded
   alone, because it was continued on windows of 2 to 4 sentences only: its hypothesis is cut at
   the first `<sep>` and the head is the translation, finished (the separator is the model
-  saying so); one that starts with `<sep>` is dropped. The suppression list of a document
+  saying so); one that starts with `<sep>` is dropped and counted. The suppression list of a document
   model lets `<sep>` through in every call (a window writes it between sentences), or the
   model would run on past the sentence and invent the ones that follow.
 
@@ -607,6 +607,10 @@ class Engine:
                 # The separator is the model saying the sentence is finished.
                 pieces = pieces[: pieces.index(SEGMENT_SEPARATOR)]
                 complete = True
+                if not pieces:
+                    # It started with the separator: a reserved symbol with no text before
+                    # it, which is dropped below as an empty text.
+                    tally["reserved_symbol"] += 1
             if any(piece in reserved for piece in pieces):
                 tally["reserved_symbol"] += 1
                 continue

@@ -48,8 +48,9 @@ from tests.support.serving_gate import (
 )
 
 # What the stop may take beyond the timeout: the loop of `uvicorn` looks at its flag and at the
-# requests every 0.1 s, and the machine is shared.
-MARGIN_SECONDS: Final = 1.5
+# requests every 0.1 s, and the machine is shared. A server that gave both waits the whole
+# timeout ends at about 8 s with the timeout of 4 s below, 1.5 s past the 6.5 s allowed here.
+MARGIN_SECONDS: Final = 2.5
 POLL_SECONDS: Final = 0.02
 DEADLINE_SECONDS: Final = 60.0
 

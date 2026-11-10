@@ -87,7 +87,11 @@ def test_the_defaults_bind_the_loopback_on_the_cpu() -> None:
         ("max_body_bytes", [1023, 64 * MIB + 1], [1024, 64 * MIB]),
         ("max_wait_ms", [0, -1.0, 0.0, float("inf"), float("nan")], [0.001, 50.0]),
         ("request_timeout_seconds", [0, -5.0, float("inf")], [0.5, 300.0]),
-        ("shutdown_timeout_seconds", [0, -1.0, float("nan")], [0.5, 60.0]),
+        (
+            "shutdown_timeout_seconds",
+            [0, -1.0, 0.5, 0.999, float("nan"), float("inf")],
+            [1.0, 1.5, 60.0],
+        ),
         ("device", ["auto", "tpu", ""], ["cpu", "cuda"]),
         ("script_mask", ["sometimes", "RETRY", ""], ["retry", "always", "off"]),
         ("log_level", ["loud", "INFO"], ["critical", "error", "warning", "debug"]),
@@ -469,8 +473,6 @@ def test_a_directory_in_place_of_the_file_is_a_config_error(tmp_path: Path) -> N
         (2.0, 1, 1.0),
         (1.5, 1, 0.5),
         (1.0, 1, 0.0),
-        (0.5, 0, 0.5),
-        (0.2, 0, 0.2),
     ],
 )
 def test_the_shutdown_timeout_is_one_budget_shared_by_the_server_and_the_drain(
@@ -483,9 +485,7 @@ def test_the_shutdown_timeout_is_one_budget_shared_by_the_server_and_the_drain(
     assert config.drain_wait_seconds == pytest.approx(drain)
 
 
-@pytest.mark.parametrize(
-    "timeout", [0.001, 0.2, 0.999, 1.0, 1.7, 2.0, 3.3, 7.0, 20.0, 59.9]
-)
+@pytest.mark.parametrize("timeout", [1.0, 1.7, 2.0, 3.3, 7.0, 20.0, 59.9])
 def test_the_two_waits_of_a_stop_never_add_up_to_more_than_the_timeout(
     timeout: float,
 ) -> None:
@@ -495,6 +495,42 @@ def test_the_two_waits_of_a_stop_never_add_up_to_more_than_the_timeout(
     assert config.graceful_wait_seconds + config.drain_wait_seconds == pytest.approx(
         timeout
     )
+
+
+def test_a_shutdown_timeout_under_a_second_is_refused_naming_the_field_and_the_floor(
+    tmp_path: Path,
+) -> None:
+    # uvicorn takes whole seconds: under one, the requests in flight would be cut at once.
+    path = write_yaml(tmp_path, {"shutdown_timeout_seconds": 0.5})
+
+    with pytest.raises(ConfigError) as caught:
+        load_serve_config(path, env={})
+
+    assert str(caught.value) == (
+        f"invalid serve config: shutdown_timeout_seconds (from {path}): "
+        "Input should be greater than or equal to 1"
+    )
+
+
+@pytest.mark.parametrize(
+    ("env", "overrides", "layer"),
+    [
+        (
+            {"RINCHEN_SERVE_SHUTDOWN_TIMEOUT_SECONDS": "0.2"},
+            {},
+            "(from RINCHEN_SERVE_SHUTDOWN_TIMEOUT_SECONDS)",
+        ),
+        ({}, {"shutdown_timeout_seconds": 0.9}, "(from --shutdown-timeout-seconds)"),
+    ],
+)
+def test_the_floor_of_the_shutdown_timeout_holds_for_the_environment_and_the_flag(
+    env: dict[str, str], overrides: dict[str, Any], layer: str
+) -> None:
+    with pytest.raises(ConfigError, match="shutdown_timeout_seconds") as caught:
+        load_serve_config(None, env=env, overrides=overrides)
+
+    assert layer in str(caught.value)
+    assert str(caught.value).endswith("Input should be greater than or equal to 1")
 
 
 # ---- a name of the environment that is no setting -----------------------------------------

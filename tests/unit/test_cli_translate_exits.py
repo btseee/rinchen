@@ -19,7 +19,7 @@ import pytest
 
 from rinchen.cli import translate as translate_module
 from rinchen.errors import ConfigError, DataError, UpstreamError
-from rinchen.infer.engine_types import LoadOptions
+from rinchen.infer.engine_types import LoadOptions, RequestTextError
 from tests.support.engines import (
     engine_environment,  # noqa: F401 - the fixture of the test over the real engine
     scripted_engine,
@@ -394,11 +394,58 @@ def test_a_reserved_symbol_in_a_line_is_exit_3_naming_the_line_and_not_the_text(
         stdin=f"fine\n{NOT_ASCII_SECRET} <2eng_Latn> {NOT_ASCII_SECRET}\nfine\n".encode(),
     )
 
-    assert_one_error(
-        result, 3, "lines 1 to 3: row 1 contains the reserved symbol <2eng_Latn>"
-    )
+    assert_one_error(result, 3, "line 2 contains the reserved symbol <2eng_Latn>")
     assert "private" not in result.stderr
     assert result.stdout == ""
+
+
+@pytest.mark.usefixtures("engine_environment")
+def test_a_reserved_symbol_in_a_later_chunk_names_its_line_of_the_input(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    install(monkeypatch, scripted_engine(tmp_path, processor=symbol_processor()).engine)
+
+    result = invoke(
+        translate_args("--batch-size", "2"),
+        stdin=b"a\nb\nc\n<2eng_Latn> d\ne\n",
+    )
+
+    # The engine counts from 0 inside its chunk (`row 1`); the input is counted from 1.
+    assert_one_error(result, 3, "line 4 contains the reserved symbol <2eng_Latn>")
+    assert "row" not in result.stderr
+    assert result.stdout == "a\nb\n"
+
+
+@pytest.mark.usefixtures("engine_environment")
+def test_a_reserved_symbol_in_a_document_names_its_number_in_the_input(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    engine = scripted_engine(
+        tmp_path, processor=symbol_processor(), document_level=True
+    ).engine
+    install(monkeypatch, engine)
+
+    result = invoke(
+        translate_args("--doc", "--src", SRC, "--batch-size", "1"),
+        stdin=b"fine\n\nfine\n\ngood <sep> bad\n",
+    )
+
+    assert_one_error(result, 3, "document 3 contains the reserved symbol <sep>")
+    assert "document 0" not in result.stderr
+    assert result.stdout.count("\n") == 3
+
+
+def test_a_refusal_of_a_text_that_is_not_a_row_or_a_document_keeps_the_span(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install(
+        monkeypatch,
+        FakeEngine(error=RequestTextError("window 3", "cannot be encoded")),
+    )
+
+    result = invoke(translate_args(), stdin=b"a\nb\nc\n")
+
+    assert_one_error(result, 3, "lines 1 to 3: window 3 cannot be encoded")
 
 
 # --- exit 4: the library --------------------------------------------------------------------

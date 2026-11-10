@@ -18,8 +18,9 @@ D10's export code for one check, so the import stays.
 
 `shutdown_timeout_seconds` is the budget of the WHOLE stop, not of each step of it: the server
 waits for the requests in flight for `graceful_wait_seconds` of it and the end of the lifespan
-for `drain_wait_seconds`, the rest. A container's stop grace period must be longer than the budget
-(`docker/compose.serve.yaml`).
+for `drain_wait_seconds`, the rest. It is at least 1 (`SHUTDOWN_TIMEOUT_FLOOR`): the server's
+wait is in whole seconds and a shorter budget would cut every request in flight at once. A
+container's stop grace period must be longer than the budget (`docker/compose.serve.yaml`).
 """
 
 from __future__ import annotations
@@ -75,6 +76,9 @@ _CONVERTER_FLAGS: Final = {
 # Strict so a quoted number or a YAML boolean is a typo to report, not a value to coerce.
 _Count = Annotated[int, Field(strict=True, ge=1)]
 _PositiveNumber = Annotated[float, Field(strict=True, gt=0, allow_inf_nan=False)]
+# `uvicorn` takes its wait in whole seconds, so a shorter budget would give the requests in flight
+# no wait at all.
+SHUTDOWN_TIMEOUT_FLOOR: Final = 1
 
 
 def _reject_blank(value: str) -> str:
@@ -136,7 +140,9 @@ class ServeConfig(BaseModel):
     max_wait_ms: _PositiveNumber = 5.0
     max_queue_sentences: _Count = 1024
     request_timeout_seconds: _PositiveNumber = 30.0
-    shutdown_timeout_seconds: _PositiveNumber = 20.0
+    shutdown_timeout_seconds: Annotated[
+        float, Field(strict=True, ge=SHUTDOWN_TIMEOUT_FLOOR, allow_inf_nan=False)
+    ] = 20.0
     log_level: Literal["critical", "error", "warning", "info", "debug"] = "info"
     script_converter: ScriptConverterConfig | None = None
 
@@ -144,9 +150,7 @@ class ServeConfig(BaseModel):
     def graceful_wait_seconds(self) -> int:
         """The first share of the stop budget: whole seconds (`uvicorn` takes no fraction)
         that the server waits for the connections and the requests in flight, half of
-        `shutdown_timeout_seconds` rounded up, and none when the timeout is under a second."""
-        if self.shutdown_timeout_seconds < 1:
-            return 0
+        `shutdown_timeout_seconds` rounded up (at least one: the timeout has a floor of 1)."""
         return math.ceil(self.shutdown_timeout_seconds / 2)
 
     @property

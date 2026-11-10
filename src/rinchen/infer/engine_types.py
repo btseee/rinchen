@@ -401,9 +401,15 @@ def shown(value: object) -> str:
 
 class RequestTextError(DataError):
     """A text of a request that the engine refuses by a fixed rule (a lone surrogate, a
-    reserved symbol). Its message names the text by its place (`row 3`, `document 1`) and what
-    is wrong with it and never quotes it, so a service may pass it on; any other `DataError` may
-    carry whatever its raiser put in it."""
+    reserved symbol). Its message names the text by its `label`, its place in the call
+    (`row 3`, `document 1`, counted from 0), and says what is `problem` with it; it never
+    quotes the text, so a service may pass it on. Any other `DataError` may carry whatever its
+    raiser put in it."""
+
+    def __init__(self, label: str, problem: str) -> None:
+        super().__init__(f"{label} {problem}")
+        self.label = label
+        self.problem = problem
 
 
 def require_encodable(text: str, label: str) -> None:
@@ -417,8 +423,8 @@ def require_encodable(text: str, label: str) -> None:
         text.encode()
     except UnicodeEncodeError as error:
         raise RequestTextError(
-            f"{label} cannot be encoded as UTF-8: a lone surrogate at position "
-            f"{error.start}"
+            label,
+            f"cannot be encoded as UTF-8: a lone surrogate at position {error.start}",
         ) from error
 
 
@@ -427,9 +433,9 @@ def reserved_symbol_error(label: str, symbol: str) -> RequestTextError:
     its place (`label`) and the symbol, a fixed entry of the model's vocabulary, never the
     text."""
     return RequestTextError(
-        f"{label} contains the reserved symbol {symbol}, which the model reads as a control "
-        "piece and not as text (a direction tag would change the language asked for): "
-        "remove it"
+        label,
+        f"contains the reserved symbol {symbol}, which the model reads as a control piece "
+        "and not as text (a direction tag would change the language asked for): remove it",
     )
 
 

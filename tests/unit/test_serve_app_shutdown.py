@@ -200,7 +200,7 @@ def test_what_is_still_unanswered_after_the_shutdown_timeout_is_a_503_and_the_en
     async def scenario() -> tuple[list[Any], FakeEngine]:
         engine = FakeEngine()
         async with make_app(
-            recording_log, engine, inter_threads=1, shutdown_timeout_seconds=0.2
+            recording_log, engine, inter_threads=1, shutdown_timeout_seconds=1.5
         ) as svc:
             lifespan = svc.app.router.lifespan_context(svc.app)
             await lifespan.__aenter__()

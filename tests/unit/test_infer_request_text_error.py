@@ -52,3 +52,17 @@ def test_a_text_that_encodes_is_not_refused() -> None:
 
 def test_a_plain_data_error_is_not_a_request_text_error() -> None:
     assert not isinstance(DataError("anything"), RequestTextError)
+
+
+def test_the_place_and_the_problem_of_a_refusal_are_kept_apart() -> None:
+    error = reserved_symbol_error("row 3", "<sep>")
+
+    assert error.label == "row 3"
+    assert error.problem.startswith("contains the reserved symbol <sep>, which")
+    assert str(error) == f"{error.label} {error.problem}"
+    with pytest.raises(RequestTextError) as caught:
+        require_encodable("ab" + LONE_SURROGATE, "document 2")
+    assert caught.value.label == "document 2"
+    assert caught.value.problem == (
+        "cannot be encoded as UTF-8: a lone surrogate at position 2"
+    )
