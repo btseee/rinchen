@@ -184,11 +184,19 @@ def test_the_gpu_scan_lets_a_source_that_never_asks_through() -> None:
 
 
 def test_the_scan_covers_the_package_and_the_robustness_tests() -> None:
-    assert PACKAGE / "robust_numbers.py" in MODULES
-    assert TESTS / "unit" / "test_eval_robust_numbers.py" in ROBUSTNESS_TESTS
-    assert TESTS / "property" / "test_eval_robust_numbers_property.py" in (
-        ROBUSTNESS_TESTS
-    )
+    for module in ("robust_numbers", "robust_placeholders", "robust_spans"):
+        assert PACKAGE / f"{module}.py" in MODULES
+    for unit_test in (
+        "test_eval_robust_numbers",
+        "test_eval_robust_placeholders",
+        "test_eval_robust_spans",
+    ):
+        assert TESTS / "unit" / f"{unit_test}.py" in ROBUSTNESS_TESTS
+    for property_test in (
+        "test_eval_robust_numbers_property",
+        "test_eval_robust_spans_property",
+    ):
+        assert TESTS / "property" / f"{property_test}.py" in ROBUSTNESS_TESTS
 
 
 @pytest.mark.parametrize("path", MODULES, ids=lambda path: path.name)
