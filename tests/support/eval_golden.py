@@ -257,3 +257,30 @@ MEAN_POINT_A: Final = 0.836
 MEAN_POINT_B: Final = 0.8175
 MEAN_INTERVAL_A: Final = (0.7785, 0.89)
 MEAN_INTERVAL_DIFFERENCE: Final = (0.0033333333333333335, 0.034333333333333334)
+
+# ---- Scoring and the result documents (Task 6) ----------------------------------------------
+# The signatures sacrebleu 2.6.0 reports for the golden corpus (target `eng_Latn` and `khk_Cyrl`:
+# BLEU's tokenizer is `13a` for both) and what the bootstrap of the golden suite records.
+GOLDEN_SIGNATURES: Final[Mapping[str, str]] = {
+    "bleu": "nrefs:1|case:mixed|eff:no|tok:13a|smooth:exp|version:2.6.0",
+    "chrf": "nrefs:1|case:mixed|eff:yes|nc:6|nw:0|space:no|version:2.6.0",
+    "chrf_pp": "nrefs:1|case:mixed|eff:yes|nc:6|nw:2|space:no|version:2.6.0",
+}
+GOLDEN_BOOTSTRAP_DOCUMENT: Final[Mapping[str, object]] = {
+    "resamples": GOLDEN_RESAMPLES,
+    "seed": GOLDEN_SEED,
+    "alpha": GOLDEN_ALPHA,
+    "interval": "percentile",
+    "rng": "splitmix64-counter/1",
+    "unit": "document",
+    "units": 5,
+}
+GOLDEN_BOOTSTRAP_SEGMENT: Final[Mapping[str, object]] = {
+    **GOLDEN_BOOTSTRAP_DOCUMENT,
+    "unit": "segment",
+    "units": 10,
+}
+# The words of the reason every neural metric carries when no segment scores were given.
+GOLDEN_NO_SCORER_REASON: Final = (
+    "no segment scores were given: no scorer is built (B1 and B2 are open)"
+)

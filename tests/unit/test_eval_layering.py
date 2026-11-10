@@ -273,6 +273,20 @@ def test_the_scan_covers_the_outputs_the_systems_and_the_runner() -> None:
         assert PACKAGE / f"{module}.py" in MODULES
 
 
+def test_the_scan_covers_the_scoring_the_result_documents_and_the_robustness_input() -> (
+    None
+):
+    for module in (
+        "field_rules",
+        "scoring",
+        "segment_scores",
+        "result",
+        "run_record",
+        "robustness_input",
+    ):
+        assert PACKAGE / f"{module}.py" in MODULES
+
+
 def test_the_scan_covers_the_suite_sources_and_the_suite_commands() -> None:
     assert PACKAGE / "suite_sources.py" in MODULES
     for name in (

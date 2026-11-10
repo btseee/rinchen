@@ -42,6 +42,7 @@ COMMAND_MODULES: Final = (
 NAMES: Final = ERROR_NAMES | {
     "refusal",
     "_refused",
+    "problem",
     "ValueError",
     "TypeError",
     "exit_cannot_write",
@@ -61,6 +62,10 @@ REQUEST = (
     "an arm of the format) and no text of a file otherwise"
 )
 LINE_PLACE = "the number of a line and a request named by `request_place`: well-formed parts only"
+DOTTED = (
+    "the dotted path of a field of the format, built from names the reader chose "
+    "(`bootstrap.units`, `directions.2.state`): never a key or a value of the file"
+)
 CALLER_PLACE = (
     "the place of a refusal, made by the callers that are listed here, see them"
 )
@@ -1094,6 +1099,310 @@ REVIEWED: Final[tuple[tuple[str, str, str, str], ...]] = (
     ),
     ("eval/runner.py", "_translated", "len(answers)", COUNT),
     ("eval/runner.py", "_translated", "len(requests)", COUNT),
+    # ---- scoring, the result documents and D12's files (D13, Task 6) ----
+    # The helper `problem` of `field_rules` builds the message of every field check; the
+    # callers' arguments are listed with it.
+    ("eval/field_rules.py", "problem", "field", DOTTED),
+    (
+        "eval/field_rules.py",
+        "problem",
+        "reason",
+        "the sentence of the caller: a literal or an f-string that is reviewed at its own call",
+    ),
+    ("eval/field_rules.py", "_finite", "field", DOTTED),
+    (
+        "eval/field_rules.py",
+        "_finite",
+        "alternative",
+        "a fixed phrase: ' or null' or nothing",
+    ),
+    (
+        "eval/field_rules.py",
+        "load_document",
+        "label",
+        "what the file should have been, a fixed phrase of the caller (`an evaluation result`)",
+    ),
+    ("eval/field_rules.py", "require_choice", "field", DOTTED),
+    (
+        "eval/field_rules.py",
+        "require_choice",
+        "', '.join(choices)",
+        "the choices are constants of the format (statuses, states, kinds, purposes)",
+    ),
+    ("eval/field_rules.py", "require_digest", "field", DOTTED),
+    (
+        "eval/field_rules.py",
+        "require_digest",
+        "' or null' if nullable else ''",
+        "a fixed phrase: ' or null' or nothing",
+    ),
+    ("eval/field_rules.py", "require_direction", "field", DOTTED),
+    (
+        "eval/field_rules.py",
+        "require_direction",
+        "rule",
+        "a constant sentence of the module",
+    ),
+    (
+        "eval/field_rules.py",
+        "require_direction",
+        "code",
+        (
+            "a language code that is equal to an entry of FORBIDDEN_LANGUAGES (`khk_Mong`), named "
+            "by the rule that refuses it by name; any other string is never quoted"
+        ),
+    ),
+    ("eval/field_rules.py", "require_fields", "field", DOTTED),
+    (
+        "eval/field_rules.py",
+        "require_fields",
+        "name",
+        (
+            "a field name of the format: one of the names the caller passed in, never a key of "
+            "the file"
+        ),
+    ),
+    ("eval/field_rules.py", "require_flag", "field", DOTTED),
+    ("eval/field_rules.py", "require_id", "field", DOTTED),
+    (
+        "eval/field_rules.py",
+        "require_integer",
+        "bound",
+        "'at least N' or 'from N to M' with the bounds the caller passed in: constants",
+    ),
+    ("eval/field_rules.py", "require_integer", "field", DOTTED),
+    ("eval/field_rules.py", "require_object", "field", DOTTED),
+    ("eval/field_rules.py", "require_text", "field", DOTTED),
+    ("eval/scoring.py", "BootstrapRecord.__post_init__", "INTERVAL_KIND", CONSTANT),
+    ("eval/scoring.py", "BootstrapRecord.__post_init__", "RNG_NAME", CONSTANT),
+    ("eval/scoring.py", "direction_rows", "len(outputs)", COUNT),
+    ("eval/scoring.py", "direction_rows", "len(view.ids)", COUNT),
+    (
+        "eval/scoring.py",
+        "_checked_scores",
+        "', '.join(SEGMENT_SCORE_METRICS)",
+        "the three metric names of the format, constants",
+    ),
+    ("eval/scoring.py", "_checked_scores", "len(scores)", COUNT),
+    ("eval/scoring.py", "_checked_scores", "segments", COUNT),
+    (
+        "eval/result.py",
+        "result_from_bytes",
+        "error",
+        (
+            "the ValueError of a field check, which names a field of the format and never a value "
+            "(`field_rules.problem`)"
+        ),
+    ),
+    (
+        "eval/result.py",
+        "_checked_intervals",
+        "field",
+        "`ci95.` and a metric name of the format, constants",
+    ),
+    (
+        "eval/result.py",
+        "_interval",
+        "field",
+        "`ci95.` and a metric name of the format, constants",
+    ),
+    (
+        "eval/result.py",
+        "_checked_unmeasured",
+        "name",
+        "a metric name of the format: the loop runs over METRIC_NAMES, constants",
+    ),
+    (
+        "eval/result.py",
+        "_checked_unmeasured",
+        "what",
+        "one of two fixed phrases",
+    ),
+    (
+        "eval/result.py",
+        "_checked_robustness",
+        "name",
+        "one of the three field names of the format, constants",
+    ),
+    (
+        "eval/run_record.py",
+        "run_from_bytes",
+        "error",
+        (
+            "the ValueError of a field check, which names a field of the format and never a value "
+            "(`field_rules.problem`)"
+        ),
+    ),
+    ("eval/run_record.py", "_check_directions", "where", "`directions.` and an index"),
+    ("eval/run_record.py", "_check_directions", "index", "an index"),
+    ("eval/run_record.py", "_check_directions", "RESULT_FILE", CONSTANT),
+    ("eval/run_record.py", "_checked_files", "RUN_FILE", CONSTANT),
+    ("eval/run_record.py", "_checked_files", "_MAX_PATH_CHARS", CONSTANT),
+    (
+        "eval/run_record.py",
+        "_checked_files",
+        "path",
+        (
+            "the hypotheses file or the result path of a direction that matched the registry "
+            "check and whose path was required to equal `<direction>/result.json`: never a path "
+            "taken from the file"
+        ),
+    ),
+    (
+        "eval/run_record.py",
+        "_checked_scores",
+        "', '.join(SEGMENT_SCORE_METRICS)",
+        "the three metric names of the format, constants",
+    ),
+    (
+        "eval/robustness_input.py",
+        "read_robustness",
+        "error",
+        (
+            "the ValueError of a field check, which names a field of the format and never a value "
+            "(`field_rules.problem`)"
+        ),
+    ),
+    ("eval/robustness_input.py", "_read", "ROBUSTNESS_FILE", CONSTANT),
+    ("eval/robustness_input.py", "_read", "_FILE", CONSTANT),
+    (
+        "eval/robustness_input.py",
+        "_read",
+        "_DOTTED[field]",
+        "a dotted field name of the format from a constant table",
+    ),
+    ("eval/robustness_input.py", "_entry", "field", DOTTED),
+    ("eval/robustness_input.py", "_require_same_block", "ROBUSTNESS_FILE", CONSTANT),
+    (
+        "eval/robustness_input.py",
+        "_require_same_block",
+        "key",
+        "one of the six keys of the block, constants",
+    ),
+    ("eval/robustness_input.py", "_require_backed", "ROBUSTNESS_FILE", CONSTANT),
+    (
+        "eval/robustness_input.py",
+        "_require_backed",
+        "key",
+        "one of the six keys of the block, constants",
+    ),
+    (
+        "eval/robustness_input.py",
+        "_require_backed",
+        "name",
+        "one of the two chrF names of the retention, constants",
+    ),
+    (
+        "eval/robustness_input.py",
+        "checked_source",
+        "', '.join(BINDINGS)",
+        "the two bindings of the format, constants",
+    ),
+    ("eval/robustness_input.py", "checked_source", "field", DOTTED),
+    (
+        "eval/robustness_input.py",
+        "bind",
+        "_named(inp.system_name)",
+        (
+            "the name of a system, quoted only after it matched the id pattern; any other "
+            "string is replaced by a fixed phrase"
+        ),
+    ),
+    (
+        "eval/robustness_input.py",
+        "bind",
+        "_named(system.name)",
+        (
+            "the name of a system, quoted only after it matched the id pattern; any other "
+            "string is replaced by a fixed phrase"
+        ),
+    ),
+    (
+        "eval/robustness_input.py",
+        "source_record",
+        "', '.join(BINDINGS)",
+        "the two bindings of the format, constants",
+    ),
+    (
+        "eval/segment_scores.py",
+        "_refused",
+        "place",
+        (
+            "a line number and a segment named by `output_place` (well-formed parts only), or "
+            "`the file`"
+        ),
+    ),
+    (
+        "eval/segment_scores.py",
+        "_refused",
+        "problem",
+        "the sentence of the caller, reviewed at its own call",
+    ),
+    ("eval/segment_scores.py", "_object", "place", "the number of a line"),
+    (
+        "eval/segment_scores.py",
+        "_check_header",
+        "place",
+        "a constant naming line 1, the header",
+    ),
+    (
+        "eval/segment_scores.py",
+        "_check_header",
+        "field",
+        "a field name of the header format: the loop runs over constants",
+    ),
+    (
+        "eval/segment_scores.py",
+        "_check_header",
+        "_WHAT[field]",
+        "a fixed word from a constant table (metric, suite, hypotheses file)",
+    ),
+    (
+        "eval/segment_scores.py",
+        "_score_line",
+        "place",
+        "the number of a line and a segment named by `output_place`: well-formed parts only",
+    ),
+    (
+        "eval/segment_scores.py",
+        "_score_line",
+        "field",
+        "a field name of the format: the loop runs over constants",
+    ),
+    ("eval/segment_scores.py", "_score_line", "_MAX_ABS_SCORE", CONSTANT),
+    ("eval/segment_scores.py", "scores_to_bytes", "_MAX_ABS_SCORE", CONSTANT),
+    (
+        "eval/segment_scores.py",
+        "_require_arguments",
+        "', '.join(SEGMENT_SCORE_METRICS)",
+        "the three metric names of the format, constants",
+    ),
+    (
+        "eval/segment_scores.py",
+        "_require_arguments",
+        "name",
+        "`suite_sha256` or `hypotheses_sha256`, the two argument names",
+    ),
+    (
+        "eval/segment_scores.py",
+        "read_scores",
+        "MAX_SCORES_BYTES // 2 ** 20",
+        CONSTANT,
+    ),
+    (
+        "eval/segment_scores.py",
+        "read_scores",
+        "place",
+        "a line number and a segment named by `output_place`",
+    ),
+    ("eval/segment_scores.py", "read_scores", "len(missing)", COUNT),
+    ("eval/segment_scores.py", "read_scores", "len(wanted)", COUNT),
+    (
+        "eval/segment_scores.py",
+        "read_scores",
+        "output_place(*missing[0])",
+        "the first segment of the run that the file lacks: well-formed parts only (`output_place`)",
+    ),
 )
 
 
@@ -1196,6 +1505,21 @@ def test_the_scan_covers_the_outputs_the_systems_and_the_runner() -> None:
     covered = {f.path for f in scanned()}
 
     assert {"eval/outputs.py", "eval/systems.py", "eval/runner.py"} <= covered
+
+
+def test_the_scan_covers_the_scoring_the_result_documents_and_the_robustness_input() -> (
+    None
+):
+    covered = {f.path for f in scanned()}
+
+    assert {
+        "eval/field_rules.py",
+        "eval/scoring.py",
+        "eval/segment_scores.py",
+        "eval/result.py",
+        "eval/run_record.py",
+        "eval/robustness_input.py",
+    } <= covered
 
 
 # ---- the scan itself ----------------------------------------------------------------------

@@ -1,0 +1,69 @@
+{
+  "bleu_signature": "nrefs:1|case:mixed|eff:no|tok:13a|smooth:exp|version:2.6.0",
+  "bootstrap": {
+    "alpha": 0.05,
+    "interval": "percentile",
+    "resamples": 1000,
+    "rng": "splitmix64-counter/1",
+    "seed": 20261110,
+    "unit": "document",
+    "units": 5
+  },
+  "chrf_pp_signature": "nrefs:1|case:mixed|eff:yes|nc:6|nw:2|space:no|version:2.6.0",
+  "chrf_signature": "nrefs:1|case:mixed|eff:yes|nc:6|nw:0|space:no|version:2.6.0",
+  "ci95": {
+    "bleu": [
+      36.33559622758536,
+      72.13730354815289
+    ],
+    "chrf": [
+      53.758259687838795,
+      85.62747863272854
+    ],
+    "chrf_pp": [
+      54.90789038028186,
+      85.48385757545739
+    ],
+    "comet22": null,
+    "metricx24": null,
+    "metricx24_qe": null
+  },
+  "direction": "khk_Cyrl-eng_Latn",
+  "manifest_sha": null,
+  "metrics": {
+    "bleu": 59.40481339822236,
+    "chrf": 72.43951493593927,
+    "chrf_pp": 73.08276683393322,
+    "comet22": null,
+    "metricx24": null,
+    "metricx24_qe": null
+  },
+  "n_segments": 10,
+  "provenance": {
+    "outputs_sha256": "0708a74060c85c5d579d55d907a36ff7bb0ce419c4ab558d1cb16314c5aca2da",
+    "suite_sha256": "b707518d39133bd206092e6df28bf0bcf1e42c776ad5c16900995bf783ebc761",
+    "system": {
+      "kind": "hypotheses",
+      "manifest_sha256": null,
+      "model_sha256": null,
+      "name": "alpha",
+      "options": {},
+      "outputs_sha256": "0708a74060c85c5d579d55d907a36ff7bb0ce419c4ab558d1cb16314c5aca2da"
+    }
+  },
+  "robustness": null,
+  "robustness_coverage": null,
+  "robustness_source": null,
+  "schema": "rinchen.eval/1",
+  "statuses": {
+    "ok": 10
+  },
+  "suite": "golden",
+  "system": "alpha",
+  "trained": true,
+  "unmeasured": {
+    "comet22": "no segment scores were given: no scorer is built (B1 and B2 are open)",
+    "metricx24": "no segment scores were given: no scorer is built (B1 and B2 are open)",
+    "metricx24_qe": "no segment scores were given: no scorer is built (B1 and B2 are open)"
+  }
+}
