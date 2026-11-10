@@ -110,9 +110,17 @@ def decode_options(body: TranslateRequest, config: ServeConfig) -> DecodeOptions
     request that names no beam gets the config's.
 
     Raises:
-        ConfigError: more hypotheses were asked for than the beam holds.
+        ConfigError: more hypotheses were asked for than the beam holds, said in the terms of
+            the API (the schema has refused a request that names a beam too small itself).
     """
-    beam = body.beam_size if "beam_size" in body.model_fields_set else config.beam_size
+    named = "beam_size" in body.model_fields_set
+    beam = body.beam_size if named else config.beam_size
+    if body.n_best > beam:
+        raise ConfigError(
+            f"n_best ({body.n_best}) must not exceed beam_size ({beam}): the beam holds "
+            f"no more hypotheses, and this service decodes with a beam_size of {beam} "
+            "when a request names none"
+        )
     return DecodeOptions(
         beam_size=beam,
         n=body.n_best,

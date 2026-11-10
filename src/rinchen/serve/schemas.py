@@ -23,11 +23,12 @@ from pydantic import (
     Field,
     SerializerFunctionWrapHandler,
     StringConstraints,
-    ValidationInfo,
+    ValidationError,
     create_model,
-    field_validator,
     model_serializer,
+    model_validator,
 )
+from pydantic_core import InitErrorDetails
 
 from rinchen.config.serve import (
     DEFAULT_MAX_TEXT_CHARS,
@@ -72,7 +73,10 @@ class TranslateRequest(BaseModel):
 
     `src` is a registry code or `auto` (the script hint: `mn_Mong` or `und`); `script`
     asks for a target script on a Mongolian target; `doc_mode` translates the texts as
-    documents. An empty text is allowed: it is answered with the status `empty`."""
+    documents; `beam_size` is the beam of this request (4 is what the schema says when none is
+    sent: the service decodes with the beam of its own config then); `n_best` is how many
+    hypotheses to return, at most the beam's size. An empty text is allowed: it is answered
+    with the status `empty`."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
@@ -84,17 +88,29 @@ class TranslateRequest(BaseModel):
     n_best: Annotated[int, Field(ge=1)] = 1
     doc_mode: bool = False
 
-    @field_validator("n_best")
-    @classmethod
-    def _within_the_beam(cls, value: int, info: ValidationInfo) -> int:
-        beam_size = info.data.get("beam_size")
-        # A beam that failed its own check is reported once, under its own name.
-        if isinstance(beam_size, int) and value > beam_size:
-            raise ValueError(
-                f"n_best ({value}) must not exceed beam_size ({beam_size}): the beam "
-                "holds no more hypotheses"
+    @model_validator(mode="after")
+    def _within_the_beam_that_was_sent(self) -> TranslateRequest:
+        # Without a `beam_size` the service decodes with the beam of its config, which a schema
+        # cannot know: `serve._translate.decode_options` judges `n_best` against that one. A
+        # beam that failed its own check never gets here and is reported once, under its name.
+        if "beam_size" in self.model_fields_set and self.n_best > self.beam_size:
+            message = (
+                f"n_best ({self.n_best}) must not exceed beam_size ({self.beam_size}): "
+                "the beam holds no more hypotheses"
             )
-        return value
+            # Raised as an error of the field, so that the refusal names `n_best`.
+            raise ValidationError.from_exception_data(
+                type(self).__name__,
+                [
+                    InitErrorDetails(
+                        type="value_error",
+                        loc=("n_best",),
+                        input=self.n_best,
+                        ctx={"error": ValueError(message)},
+                    )
+                ],
+            )
+        return self
 
 
 def bounded_request_model(

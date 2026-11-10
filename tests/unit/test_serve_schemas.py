@@ -130,6 +130,34 @@ def test_n_best_is_judged_against_a_beam_that_is_itself_valid_only() -> None:
     assert refused_fields(valid(beam_size=0, n_best=3)) == [("beam_size",)]
 
 
+def test_hypotheses_are_judged_against_a_beam_only_when_the_request_names_one() -> None:
+    # Without `beam_size` the service decodes with the beam of its config, which the schema does
+    # not know: `decode_options` judges `n_best` against it.
+    assert TranslateRequest.model_validate(valid(n_best=6)).n_best == 6
+    assert TranslateRequest.model_validate(valid(n_best=6)).beam_size == 4
+    assert refused_fields(valid(n_best=6, beam_size=4)) == [("n_best",)]
+    assert TranslateRequest.model_validate(valid(n_best=6, beam_size=6)).n_best == 6
+
+
+def test_the_refusal_of_hypotheses_over_the_named_beam_says_so_in_the_terms_of_the_api() -> (
+    None
+):
+    with pytest.raises(ValidationError) as caught:
+        TranslateRequest.model_validate_json(
+            '{"texts": ["a"], "tgt": "x", "beam_size": 3, "n_best": 5}'
+        )
+
+    assert [(e["loc"], e["msg"]) for e in caught.value.errors()] == [
+        (
+            ("n_best",),
+            (
+                "Value error, n_best (5) must not exceed beam_size (3): the beam holds "
+                "no more hypotheses"
+            ),
+        )
+    ]
+
+
 def test_a_request_cannot_be_changed_after_it_is_read() -> None:
     request = TranslateRequest.model_validate(valid())
 
