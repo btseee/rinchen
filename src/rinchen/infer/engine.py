@@ -22,9 +22,12 @@ What CTranslate2 does silently, the engine does not (measured in the D10 and D11
   saying so); one that starts with `<sep>` is dropped. A window lets `<sep>` through instead.
 
 A request is all-or-nothing in its errors (an unknown target, a `script` for a target that is not
-Mongolian, the same source and target, a lone surrogate raise before anything is sent), a
-text-level problem is a status, a failed call adds nothing to the counters, the arguments are
-never mutated and no message or log names a text.
+Mongolian, the same source and target, a lone surrogate or a reserved symbol in a text raise
+before anything is sent), a text-level problem is a status, a failed call adds nothing to the
+counters, the arguments are never mutated and no message or log names a text. A reserved symbol
+(a direction tag, `<sep>`, `<doc>`, `<bt>`: SentencePiece keeps each as one piece wherever it
+stands) in the text of a request would be read by the model as a control piece, so it is refused;
+the numbered placeholders are text.
 
 Thread safety: the library's `translate_batch` is thread-safe and SentencePiece too; the only
 mutable state is the counters (one lock, one update per call) and the suppression lists (each
@@ -227,16 +230,41 @@ class Engine:
             unload()
 
     def warmup(self) -> None:
-        """One fixed translation into the first target of the model, so that the first
-        request pays no load. It is not counted.
+        """One fixed translation into the first target of the model, in the default script
+        mode, so that the first request pays no load; and every suppression list a call can
+        ask for, built now, so that no request builds one under the lock (the script list of
+        a 64,000-piece vocabulary took 0.3 s on the machine of the review; unmeasured for a
+        real model here). It is not counted.
 
         Raises:
             UpstreamError: the library fails.
         """
         self._require_open()
-        options = DecodeOptions(beam_size=1, max_decoding_length=8, script_mask="off")
+        options = DecodeOptions(beam_size=1, max_decoding_length=8)
         row = Row(_WARMUP_TEXT, None, self._record.targets[0])
         self._translate_rows([row], options, new_tally())
+        self._build_every_list()
+
+    def require_request(
+        self,
+        src: str | None,
+        tgt: str,
+        script: ScriptName | None = None,
+        *,
+        documents: bool = False,
+    ) -> None:
+        """Raise what `translate` (or, with `documents`, `translate_documents`) would raise
+        for a request with these languages, before any text is looked at: a command can then
+        refuse a request it would only meet at the first text, as it must for an empty
+        input and before it opens an output file. Sends nothing, counts nothing.
+
+        Raises:
+            ConfigError: as `translate` and `translate_documents` for the languages.
+        """
+        self._require_open()
+        if documents:
+            require_document_model(self._record, src)
+        self._route(src, tgt, script)
 
     def translate(
         self, rows: Sequence[Row], options: DecodeOptions | None = None
@@ -246,7 +274,10 @@ class Engine:
         Raises:
             ConfigError: a row asks for a target the model does not write (and no converter
                 makes), a `script` for a non-Mongolian target, or the same source and target.
-            DataError: a text holds a lone surrogate; the message names the row.
+            DataError: a text holds a lone surrogate, or spells a reserved symbol of the
+                project other than a numbered placeholder (`<2eng_Latn>`, `<sep>`, `<doc>`):
+                the model would read it as a control piece. The message names the row (and
+                the symbol), never the text.
             UpstreamError: the library fails or answers wrongly; never quotes a text.
             TypeError: a row is not a `Row` or its text is not text.
         """
@@ -275,8 +306,9 @@ class Engine:
         Raises:
             ConfigError: the model is no document model of placement `src`, `src` is None, or
                 the rules of `translate` for the languages.
-            DataError: a document holds a lone surrogate or the literal `<sep>`; the message
-                names the document and never quotes it.
+            DataError: a document holds a lone surrogate or spells a reserved symbol other
+                than a numbered placeholder (`<sep>` included); the message names the
+                document and never quotes it.
             UpstreamError: as `translate`.
         """
         self._require_open()
@@ -355,7 +387,13 @@ class Engine:
     def _convert(self, text: str, tally: dict[str, int]) -> str:
         assert self._converter is not None
         with self._converter_lock:
-            conversion = self._converter.convert(text, "Mong")
+            try:
+                conversion = self._converter.convert(text, "Mong")
+            except UpstreamError as error:
+                # The converter's message names the word it failed on: not ours to repeat.
+                raise UpstreamError(
+                    f"the script converter failed ({type(error).__name__})"
+                ) from error
         tally["script_conversions"] += 1
         tally["converter_rule_fallbacks"] += conversion.rule_fallbacks
         tally["converter_invalid_outputs"] += conversion.invalid_outputs
@@ -478,7 +516,9 @@ class Engine:
         parsed: dict[int, Parsed] = {}
         for key, positions in groups.items():
             batch = [jobs[position] for position in positions]
-            suppressed = self._suppression(key, batch[0])
+            suppressed = self._suppression(
+                key, batch[0].route.decode_tgt, batch[0].allow_separator
+            )
             results = self._translate_batch(batch, suppressed, options)
             for position, job, result in zip(positions, batch, results, strict=True):
                 parsed[position] = self._parse(job, result, tally)
@@ -488,21 +528,36 @@ class Engine:
         forbidden = forbidden_scripts(job.route.decode_tgt) if scripts else None
         return (forbidden, job.allow_separator, scripts)
 
-    def _suppression(self, key: ListKey, job: Job) -> list[list[str]]:
-        """The suppression list of `key`, built once however many threads ask for it."""
+    def _suppression(
+        self, key: ListKey, decode_tgt: str, allow_separator: bool
+    ) -> list[list[str]]:
+        """The suppression list of `key` (for a decode into `decode_tgt`), built once however
+        many threads ask for it."""
         with self._lists_lock:
             listed = self._lists.get(key)
             if listed is None:
                 listed = suppression_list(
                     self._vocabulary,
                     self._processor,
-                    job.route.decode_tgt,
+                    decode_tgt,
                     end_token=self._end,
-                    allow=(SEGMENT_SEPARATOR,) if job.allow_separator else (),
+                    allow=(SEGMENT_SEPARATOR,) if allow_separator else (),
                     scripts=key[2],
                 )
                 self._lists[key] = listed
             return listed
+
+    def _build_every_list(self) -> None:
+        """The list of every kind of call into every target of the model (a document model
+        also decodes windows, which let `<sep>` through)."""
+        separators = (False, True) if self._record.document_level else (False,)
+        for target in self._record.targets:
+            for allow_separator in separators:
+                for scripts in (False, True):
+                    forbidden = forbidden_scripts(target) if scripts else None
+                    self._suppression(
+                        (forbidden, allow_separator, scripts), target, allow_separator
+                    )
 
     def _translate_batch(
         self,

@@ -16,7 +16,15 @@ import pytest
 
 from rinchen.errors import ConfigError, DataError
 from rinchen.infer.doc_chunker import ChunkStats
-from rinchen.infer.engine_types import ENGINE_COUNTERS, DecodeOptions, Row
+from rinchen.infer.engine_types import (
+    ENGINE_COUNTERS,
+    DecodeOptions,
+    DocumentResult,
+    Row,
+    Status,
+    Translation,
+    document_status,
+)
 from tests.support.engines import (
     END,
     ENG,
@@ -34,6 +42,7 @@ from tests.support.engines import (
     scripted_engine,
 )
 from tests.support.fake_ct2 import Hypothesis
+from tests.support.translate_cli import NO_STATS
 
 SEP = "<sep>"
 DOC = "Энэ ном. Энэ ус. Энэ гэр."
@@ -668,3 +677,40 @@ def test_a_document_that_is_not_text_is_a_type_error(tmp_path: Path) -> None:
         fixture.engine.translate_documents([DOC, 5], KHK, RUS, OFF)  # type: ignore[list-item]
 
     assert fixture.ct2.calls == []
+
+
+# -- the status of a document
+
+
+def sentence(status: Status) -> Translation:
+    return Translation("x", status, (), ENG, KHK, None, False, False)
+
+
+@pytest.mark.parametrize(
+    ("statuses", "expected"),
+    [
+        ((), "empty"),
+        (("empty", "empty"), "empty"),
+        (("ok", "ok"), "ok"),
+        (("ok", "empty"), "ok"),
+        (("ok", "truncated"), "truncated"),
+        (("truncated", "empty"), "truncated"),
+        (("ok", "too_long", "truncated"), "too_long"),
+        (("truncated", "no_output", "too_long"), "no_output"),
+        (("no_output", "ok"), "no_output"),
+    ],
+)
+def test_the_status_of_a_document_is_the_worst_of_its_sentences(
+    statuses: tuple[Status, ...], expected: Status
+) -> None:
+    result = DocumentResult(
+        "x", tuple(sentence(status) for status in statuses), NO_STATS
+    )
+
+    assert document_status(result) == expected
+
+
+def test_the_command_reads_the_status_of_a_document_from_the_one_definition() -> None:
+    from rinchen.cli import translate_io
+
+    assert translate_io.document_status is document_status

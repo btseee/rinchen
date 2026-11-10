@@ -16,6 +16,7 @@ asked.
 from __future__ import annotations
 
 import io
+import os
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -116,23 +117,50 @@ class DocumentsCall:
     script: str | None
 
 
+@dataclass(frozen=True)
+class RequestCheck:
+    """One call of `require_request`: the languages of the request and whether it is for
+    documents."""
+
+    src: str | None
+    tgt: str
+    script: str | None
+    documents: bool
+
+
 @dataclass
 class FakeEngine:
     """The engine as the command sees it. `answer` gives the translation of a row;
     `on_call` is called with the number (from 1) of each `translate` or `translate_documents`
     call before it answers; `error` is raised by the call number `error_on` (default the
-    first); `counter_values` are the engine counters (the others are 0)."""
+    first); `request_error` is raised by `require_request`, which records its calls in
+    `checked` and is not a call of the numbering; `counter_values` are the engine counters
+    (the others are 0)."""
 
     answer: Answer = default_answer
     on_call: Callable[[int], None] | None = None
     error: BaseException | None = None
     error_on: int = 1
     counter_values: dict[str, int] = field(default_factory=dict)
+    request_error: BaseException | None = None
+    checked: list[RequestCheck] = field(default_factory=list)
     events: list[str] = field(default_factory=list)
     calls: list[RowsCall] = field(default_factory=list)
     document_calls: list[DocumentsCall] = field(default_factory=list)
     closed: int = 0
     _call_number: int = 0
+
+    def require_request(
+        self,
+        src: str | None,
+        tgt: str,
+        script: str | None = None,
+        *,
+        documents: bool = False,
+    ) -> None:
+        self.checked.append(RequestCheck(src, tgt, script, documents))
+        if self.request_error is not None:
+            raise self.request_error
 
     def translate(
         self, rows: Sequence[Row], options: DecodeOptions | None = None
@@ -223,6 +251,31 @@ def install(
 
     monkeypatch.setattr("rinchen.cli.translate.open_engine", open_engine)
     return opened
+
+
+@dataclass
+class BrokenStdout:
+    """A standard output whose reader has gone away: writing and flushing it raises
+    `BrokenPipeError`, as `rinchen translate ... | head -1` does once `head` has exited. It
+    has a real descriptor (`stream.fileno()`), so that a test can see what the command does
+    with it."""
+
+    stream: Any
+    descriptor: int
+
+
+def broken_stdout(monkeypatch: pytest.MonkeyPatch) -> BrokenStdout:
+    """Make the command's standard output a `BrokenStdout`; the caller closes `stream`."""
+    reader, writer = os.pipe()
+    os.close(reader)
+    stdout = BrokenStdout(os.fdopen(writer, "wb"), writer)
+    real = typer.get_binary_stream
+
+    def get_binary_stream(name: Any, *args: Any, **kwargs: Any) -> Any:
+        return stdout.stream if name == "stdout" else real(name, *args, **kwargs)
+
+    monkeypatch.setattr(typer, "get_binary_stream", get_binary_stream)
+    return stdout
 
 
 class ReadProbe(io.BytesIO):

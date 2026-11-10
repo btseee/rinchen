@@ -95,6 +95,8 @@ class _Hashed(NamedTuple):
     entries: list[ManifestFile]
     sources: list[Path]
     weights_sha256: str
+    config_sha256: str
+    vocab_sha256: str
 
 
 def parity_command(
@@ -170,7 +172,12 @@ def parity_command(
         require_out_apart_from_inputs(out_dir, hashed.sources, option="--out-dir")
         refuse_foreign_manifest(target, _STAGE)
         # Before the old result is removed: a model that cannot be checked must not cost it.
-        require_checkpoint_of_export(verified.record, hashed.weights_sha256)
+        require_checkpoint_of_export(
+            verified.record,
+            hashed.weights_sha256,
+            config_sha256=hashed.config_sha256,
+            vocab_sha256=hashed.vocab_sha256,
+        )
         dev = load_dev_rows(
             corpus, max_lines=max_lines, directions=verified.record.directions
         )
@@ -225,6 +232,8 @@ def _hash_inputs(
             *(Path(entry.path) for entry in (*exported, weights, config, vocabulary)),
         ],
         weights_sha256=weights.sha256,
+        config_sha256=config.sha256,
+        vocab_sha256=vocabulary.sha256,
     )
 
 

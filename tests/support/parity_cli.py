@@ -24,12 +24,15 @@ from rinchen.export.record import CheckpointRecord
 from rinchen.export.verified import VerifiedExport
 from rinchen.train.export_parity import ParityReport, ParitySource
 from tests.support.corpus_rows import corpus_row, write_rows
-from tests.support.fake_parity_eole import WEIGHTS_SHA256, write_checkpoint
+from tests.support.fake_parity_eole import (
+    CONFIG_SHA256,
+    VOCAB_SHA256,
+    WEIGHTS_SHA256,
+    write_checkpoint,
+)
 from tests.support.model_exports import (
     CHECKPOINT_MANIFEST_SHA256,
-    CONFIG_SHA256,
     TOY_DIRECTIONS,
-    VOCAB_SHA256,
     WrittenModel,
     write_model_export,
 )

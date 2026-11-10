@@ -483,6 +483,40 @@ def run_translate(model: Path, lines: Sequence[str], *args: str | Path) -> Trans
     )
 
 
+def run_translate_into_a_closed_pipe(
+    model: Path, input_file: Path, *args: str | Path
+) -> Translated:
+    """`rinchen translate --model <model> --input <input_file> <args>` whose standard output
+    is a pipe that is closed after the first line, as `... | head -1` does: the result
+    holds that one line, the exit status and what the command said on standard error."""
+    started = time.perf_counter()
+    process = subprocess.Popen(
+        [RINCHEN, "translate", "--model", str(model), "--input", str(input_file)]
+        + [str(arg) for arg in args],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    assert process.stdout is not None and process.stderr is not None
+    try:
+        first = process.stdout.readline()
+        process.stdout.close()
+        stderr = process.stderr.read()
+        returncode = process.wait(timeout=SUBPROCESS_TIMEOUT_SECONDS)
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+        process.stderr.close()
+    return Translated(
+        returncode=returncode,
+        lines=[first.decode("utf-8").removesuffix("\n")],
+        stdout=first,
+        stderr=stderr.decode("utf-8", "replace"),
+        seconds=time.perf_counter() - started,
+    )
+
+
 # ---- no GPU ------------------------------------------------------------------------------
 
 # Spelled in two parts so that this file does not hold what it looks for.

@@ -45,12 +45,7 @@ from tests.support.fake_ct2 import (
     Hypothesis,
     ScriptedCt2,
 )
-from tests.support.model_exports import (
-    CHECKPOINT_MANIFEST_SHA256,
-    CONFIG_SHA256,
-    VOCAB_SHA256,
-    write_model_export,
-)
+from tests.support.model_exports import CHECKPOINT_MANIFEST_SHA256, write_model_export
 
 END: Final = "</s>"
 TARGET: Final = "khk_Cyrl"
@@ -59,6 +54,11 @@ TAG: Final = direction_tag(TARGET)
 PIECE_LOG_PROB: Final = -0.125
 WEIGHTS_BYTES: Final = b"fabricated weights of the checkpoint"
 WEIGHTS_SHA256: Final = hashlib.sha256(WEIGHTS_BYTES).hexdigest()
+# The checkpoint's two other files, which the export's record names by digest as well.
+CONFIG_BYTES: Final = b"{}"
+CONFIG_SHA256: Final = hashlib.sha256(CONFIG_BYTES).hexdigest()
+VOCAB_BYTES: Final = b'{"vocabulary": []}'
+VOCAB_SHA256: Final = hashlib.sha256(VOCAB_BYTES).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -91,6 +91,7 @@ class FakeParityEole:
     answers: Sequence[tuple[Sequence[str], float]] = ()
     raw_lines: Sequence[str] | None = None
     writes_output: bool = True
+    output_bytes: bytes | None = None
     extra_lines: int = 0
     error: BaseException | None = None
     launches: list[EoleLaunch] = field(default_factory=list)
@@ -129,6 +130,9 @@ class FakeParityEole:
             else list(self.raw_lines)
         )
         lines.extend(self._line([], 0.0) for _ in range(self.extra_lines))
+        if self.output_bytes is not None:
+            Path(config["output"]).write_bytes(self.output_bytes)
+            return
         Path(config["output"]).write_text(
             "".join(f"{line}\n" for line in lines), encoding="utf-8"
         )
@@ -189,8 +193,8 @@ def write_checkpoint(directory: Path) -> Path:
     """A checkpoint directory with the three files an export's record names."""
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "model.00.safetensors").write_bytes(WEIGHTS_BYTES)
-    (directory / "config.json").write_bytes(b"{}")
-    (directory / "vocab.json").write_bytes(b"{}")
+    (directory / "config.json").write_bytes(CONFIG_BYTES)
+    (directory / "vocab.json").write_bytes(VOCAB_BYTES)
     return directory
 
 

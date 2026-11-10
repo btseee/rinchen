@@ -376,10 +376,21 @@ def _checkpoint_record(checkpoint: Mapping[str, Any]) -> CheckpointRecord:
 
 def _directions(value: object) -> tuple[str, ...]:
     problem = _directions_problem(value)
+    if problem == _UNKNOWN_LANGUAGE:
+        # The record was written when the registry had the language: the export is stale.
+        problem += (
+            ": the registry changed since the export: re-export the checkpoint with "
+            "`rinchen export convert`"
+        )
     if problem is not None:
         raise _not_a_record(problem)
     assert isinstance(value, list)
     return tuple(value)
+
+
+_UNKNOWN_LANGUAGE: Final = (
+    "'directions' holds a language that is not in the language registry"
+)
 
 
 def _directions_problem(value: object) -> str | None:
@@ -397,7 +408,7 @@ def _directions_problem(value: object) -> str | None:
         if len(parts) != 2 or not all(parts):
             return "'directions' holds an entry that is not <source>-<target>"
         if not set(parts) <= known:
-            return "'directions' holds a language that is not in the language registry"
+            return _UNKNOWN_LANGUAGE
         if parts[0] == parts[1]:
             return "'directions' holds a direction from a language to itself"
     if list(value) != sorted(set(value)):

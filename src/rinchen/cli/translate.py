@@ -68,7 +68,6 @@ from rinchen.cli.translate_io import (
     Summary,
     Unit,
     document_line,
-    document_status,
     read_blocks,
     read_lines,
     translation_line,
@@ -81,6 +80,7 @@ from rinchen.infer.engine_types import (
     Row,
     ScriptMode,
     ScriptName,
+    document_status,
     selected_target,
 )
 from rinchen.script_conv.runtime import ScriptConverter
@@ -296,6 +296,8 @@ def translate_command(
         _require_output_apart_from_input(input_file, output_file)
         engine = open_engine(Path(os.path.abspath(model)), load, converter_paths)
         try:
+            # Before the output file is opened (and so emptied) and for an empty input too.
+            engine.require_request(src, tgt, script, documents=doc)
             summary = _translate(
                 engine, request, input_file, output_file, documents=doc
             )
@@ -364,6 +366,23 @@ def _cannot_write(output_file: Path | None, error: OSError) -> NoReturn:
     exit_with_error(f"cannot write the output {where}: {error}", FAILURE_EXIT_CODE)
 
 
+def _discard_what_standard_output_still_holds(stream: IO[bytes]) -> None:
+    """Standard output cannot be written (a closed pipe: `... | head -1`), and what its buffer
+    still holds would fail again when the interpreter flushes it at exit, with a second
+    message and the status 120 instead of ours: point its descriptor at the null device, so
+    that the flush has somewhere to go."""
+    try:
+        descriptor = stream.fileno()
+    except OSError, ValueError:
+        # No descriptor behind it (a stream of a test): nothing is flushed at exit.
+        return
+    null = os.open(os.devnull, os.O_WRONLY)
+    try:
+        os.dup2(null, descriptor)
+    finally:
+        os.close(null)
+
+
 def _input_stream(input_file: Path | None, stack: ExitStack) -> IO[bytes]:
     if input_file is None:
         return typer.get_binary_stream("stdin")
@@ -423,6 +442,8 @@ def _translate(
             try:
                 output.write(lines)
             except OSError as error:
+                if output_file is None:
+                    _discard_what_standard_output_still_holds(sink)
                 _cannot_write(output_file, error)
     summary.counters = engine.counters()
     return summary

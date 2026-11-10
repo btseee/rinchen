@@ -27,7 +27,10 @@ steps of the tiny config):
         and in none with it
     G5  the surfaces: `Translator` equals `Engine` on 50 sentences, `rinchen translate` writes
         exactly `Engine`'s 50 lines (one line per input line, exit 0, `ok 50` on stderr), exit 2
-        and nothing on stdout for an unknown target, the traditional script through the D5
+        and nothing on stdout for an unknown target (and an output file that held something
+        stays as it was, an empty input exits 2 as well), exit 1 and one `error:` line, with no
+        "Exception ignored", when standard output is a pipe that was closed after the first line
+        (`| head -1`), the traditional script through the D5
         converter has Mongolian letters and at least one conversion, `Cyrl` none
     G6  documents: every document has one translation per sentence, at least 90 % of the windows
         (of each size 2 to 4, and over the whole test set) are aligned, a 20-piece cap makes at
@@ -94,6 +97,7 @@ from tests.support.d11_gate import (
     outputs_with_forbidden_letters,
     raw_greedy_texts,
     run_translate,
+    run_translate_into_a_closed_pipe,
     trained_requests,
     untrained_requests,
 )
@@ -369,6 +373,51 @@ def test_rinchen_translate_refuses_a_target_the_model_does_not_write_and_prints_
 
     assert done.returncode == 2
     assert done.stdout == b""
+
+
+def test_rinchen_translate_refuses_a_target_before_it_empties_the_output_file(
+    d11_exports: Exports, sentences: list[str], tmp_path: Path
+) -> None:
+    out = tmp_path / "out.txt"
+    out.write_bytes(b"PRECIOUS\n")
+
+    done = run_translate(
+        d11_exports.float32.directory,
+        sentences[:3],
+        "--tgt",
+        "khk_Cyrll",
+        "--output",
+        out,
+    )
+    empty = run_translate(d11_exports.float32.directory, [], "--tgt", "khk_Cyrll")
+
+    assert done.returncode == 2
+    assert out.read_bytes() == b"PRECIOUS\n"
+    assert empty.returncode == 2
+
+
+def test_rinchen_translate_into_a_closed_pipe_exits_1_and_says_so_once(
+    d11_exports: Exports, sentences: list[str], tmp_path: Path
+) -> None:
+    lines = tmp_path / "lines.txt"
+    lines.write_text("".join(f"{sentence}\n" for sentence in sentences * 40), "utf-8")
+
+    done = run_translate_into_a_closed_pipe(
+        d11_exports.float32.directory,
+        lines,
+        "--tgt",
+        "khk_Cyrl",
+        "--src",
+        "eng_Latn",
+        "--batch-size",
+        "8",
+    )
+
+    assert done.stdout.endswith(b"\n") and len(done.stdout) > 1
+    assert done.returncode == 1, done.stderr
+    assert "error: cannot write the output to standard output" in done.stderr
+    assert "Exception ignored" not in done.stderr
+    assert "Traceback" not in done.stderr
 
 
 def test_rinchen_translate_through_the_target_tag_export_gives_text_without_the_tag(

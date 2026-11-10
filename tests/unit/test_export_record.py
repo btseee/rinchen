@@ -583,6 +583,43 @@ def test_directions_that_are_not_sorted_distinct_registry_pairs_are_refused(
 
 
 @pytest.mark.parametrize(
+    "directions",
+    [["eng_Latn-xxx_Latn"], ["xxx_Latn-eng_Latn"]],
+    ids=["target", "source"],
+)
+def test_a_language_the_registry_no_longer_has_says_to_re_export_with_the_command(
+    directions: list[str],
+) -> None:
+    document = document_of(a_record())
+    document["directions"] = directions
+
+    message = refuses_the_document(document)
+
+    assert "the registry changed since the export: re-export the checkpoint" in message
+    assert "`rinchen export convert`" in message
+    assert "xxx_Latn" not in message
+
+
+def test_the_other_problems_of_the_directions_do_not_send_the_reader_to_re_export() -> (
+    None
+):
+    document = document_of(a_record())
+    document["directions"] = ["khk_Cyrl-eng_Latn", "eng_Latn-khk_Cyrl"]
+
+    assert "rinchen export convert" not in refuses_the_document(document)
+
+
+def test_a_command_line_with_a_language_the_registry_lacks_is_not_told_to_re_export() -> (
+    None
+):
+    with pytest.raises(ConfigError) as raised:
+        require_directions(["eng_Latn-xxx_Latn"])
+
+    assert "not in the language registry" in str(raised.value)
+    assert "rinchen export convert" not in str(raised.value)
+
+
+@pytest.mark.parametrize(
     "languages",
     [
         ["eng_Latn"],

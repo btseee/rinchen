@@ -42,6 +42,7 @@ from typing import Any, Final, Literal, Protocol
 
 from rinchen.config.languages import direction_tag, known_language_codes
 from rinchen.errors import ConfigError, DataError, UpstreamError
+from rinchen.export.quantize import require_compute_type
 from rinchen.export.record import CT2_FILES, SPM_FILE
 from rinchen.export.verified import (
     VerifiedExport,
@@ -49,6 +50,7 @@ from rinchen.export.verified import (
     shared_vocabulary,
     verified_bytes,
 )
+from rinchen.infer.engine_types import MAX_SOURCE_PIECES
 from rinchen.infer.source_tokens import ct2_source_tokens, reserved_pieces
 from rinchen.spm.symbols import user_defined_symbols
 from rinchen.synth._candidates import clean_candidates
@@ -67,10 +69,6 @@ COUNTER_KEYS: Final = (
 )
 
 _VOCABULARY_FILE: Final = CT2_FILES[1]
-
-# CTranslate2's `max_input_length` is 1,024 and cuts a longer source silently; a tag in the
-# source takes one place of it.
-MAX_SOURCE_PIECES: Final = 1023
 
 _DEVICES: Final = ("cpu", "cuda")
 _NUMBERS: Final = (
@@ -96,7 +94,8 @@ class TeacherOptions:
     Raises:
         ConfigError: a number is not an integer of at least 1 (a bool is not one), `n` is
             above `beam_size`, `max_source_pieces` is above 1,023, `device` is not `cpu`
-            or `cuda` (`auto` is refused with the reason) or `compute_type` is blank.
+            or `cuda` (`auto` is refused with the reason) or `compute_type` is blank or
+            `auto` (refused with the reason).
     """
 
     beam_size: int = 4
@@ -142,6 +141,8 @@ class TeacherOptions:
                 "TeacherOptions.compute_type must be a non-empty string, "
                 f"got {self.compute_type!r}"
             )
+        # `auto` would quantise a float32 teacher to int8 on a CPU (measured, D11 spike).
+        require_compute_type(self.compute_type)
 
 
 class _Translation(Protocol):

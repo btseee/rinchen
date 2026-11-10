@@ -221,16 +221,29 @@ def parity_config(
     }
 
 
-def require_checkpoint_of_export(record: ModelRecord, weights_sha256: str) -> None:
+def require_checkpoint_of_export(
+    record: ModelRecord,
+    weights_sha256: str,
+    *,
+    config_sha256: str | None = None,
+    vocab_sha256: str | None = None,
+) -> None:
     """Raise ConfigError unless `weights_sha256` is the SHA-256 of the weights the export
-    `record` says it was made from: a parity of two different models says nothing."""
-    expected = record.checkpoint.weights_sha256
-    if weights_sha256 != expected:
-        raise ConfigError(
-            f"the checkpoint's weights have SHA-256 {weights_sha256[:_SHOWN]}... but the "
-            f"export {record.name} was made from weights with {expected[:_SHOWN]}...: "
-            "a parity of two different models says nothing"
-        )
+    `record` says it was made from, and, when they are given, `config_sha256` that of its
+    `config.json` and `vocab_sha256` that of its `vocab.json`: weights alone leave room for
+    another architecture or vocabulary (a parity of two different models says nothing)."""
+    checkpoint = record.checkpoint
+    for subject, origin, got, expected in (
+        ("weights have", "weights", weights_sha256, checkpoint.weights_sha256),
+        ("config.json has", "a config.json", config_sha256, checkpoint.config_sha256),
+        ("vocab.json has", "a vocab.json", vocab_sha256, checkpoint.vocab_sha256),
+    ):
+        if got is not None and got != expected:
+            raise ConfigError(
+                f"the checkpoint's {subject} SHA-256 {got[:_SHOWN]}... but the export "
+                f"{record.name} was made from {origin} with {expected[:_SHOWN]}...: "
+                "a parity of two different models says nothing"
+            )
 
 
 def strict_parity(
@@ -260,12 +273,13 @@ def strict_parity(
     took already; the file is hashed here when it is None.
 
     Raises:
-        ValueError: no source, `threads` below 1, or a text with no piece.
+        ValueError: no source or `threads` below 1.
         ConfigError: a source asks for a language the export has no tag for; the checkpoint's
             weights are not the export's (before Eole starts); a path holds `$`, or the
             checkpoint's a glob character; a file of the export changed since it was
             verified; the library cannot run the export.
-        DataError: the weights or the library's model cannot be read.
+        DataError: the weights or the library's model cannot be read; a text has no piece
+            (it names the source by its number); the output of Eole cannot be read.
         UpstreamError: Eole or CTranslate2 fails, or answers with another number of results
             or with a line of another shape, or a hypothesis does not start with the forced
             tag; messages never quote a text.
@@ -364,9 +378,7 @@ def _pieces_of(
         each = processor.encode(source.text, out_type=str)
         if not each:
             # Eole drops such a line without a word, and there would be nothing to compare.
-            raise ValueError(
-                f"source {number} has no piece: its text is empty or blank"
-            )
+            raise DataError(f"source {number} has no piece: its text is empty or blank")
         pieces.append(each)
     return pieces
 
@@ -410,7 +422,15 @@ def _eole_answers(
         raise UpstreamError(
             f"eole predict exited with code 0 but wrote no output file {files.token_output}"
         )
-    written = split_lines(files.token_output.read_text(encoding="utf-8", newline="\n"))
+    try:
+        text = files.token_output.read_text(encoding="utf-8", newline="\n")
+    except (OSError, UnicodeDecodeError) as error:
+        # A read failure is the data's, not a failure to write the result: say so.
+        reason = error.strerror if isinstance(error, OSError) else "not valid UTF-8"
+        raise DataError(
+            f"cannot read the output of eole predict {files.token_output}: {reason}"
+        ) from error
+    written = split_lines(text)
     if len(written) != len(lines):
         raise UpstreamError(
             f"eole predict wrote {len(written)} lines for {len(lines)} source lines: "

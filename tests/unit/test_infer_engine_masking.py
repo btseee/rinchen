@@ -415,3 +415,88 @@ def test_a_decode_that_never_asks_for_a_script_list_does_not_build_one(
     fixture.engine.translate(khk("Энэ"), mode("retry"))
 
     assert built == [False]
+
+
+# -- the warm-up builds the lists
+
+
+def counting_lists(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, bool]]:
+    """The (target, scripts) of every suppression list the engine builds from now on."""
+    built: list[tuple[str, bool]] = []
+    real = engine_module.suppression_list
+
+    def counting(*args: Any, **kwargs: Any) -> list[list[str]]:
+        built.append((args[2], kwargs.get("scripts", True)))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(engine_module, "suppression_list", counting)
+    return built
+
+
+def every_kind_of_call(fixture: ScriptedEngine) -> None:
+    """A call in each script mode, into each target of the model, the impure outputs of the
+    leaky model retried."""
+    for target in fixture.engine.info.targets:
+        for name in ("off", "retry", "always"):
+            fixture.engine.translate([Row("x", None, target)], mode(name))
+
+
+def test_the_warmup_builds_every_list_a_call_in_any_mode_can_ask_for(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    built = counting_lists(monkeypatch)
+    fixture = scripted_engine(tmp_path, answer=leaky)
+
+    fixture.engine.warmup()
+    after_the_warmup = list(built)
+    every_kind_of_call(fixture)
+
+    # The control list is one for every target; the script list is one per set of scripts.
+    assert [scripts for _, scripts in after_the_warmup].count(False) == 1
+    assert (KHK, True) in after_the_warmup
+    assert built == after_the_warmup
+
+
+def test_without_a_warmup_the_first_impure_request_builds_the_script_list(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    built = counting_lists(monkeypatch)
+    fixture = scripted_engine(tmp_path, answer=leaky)
+
+    fixture.engine.translate(khk("x"), mode("retry"))
+
+    assert (KHK, True) in built
+
+
+def test_the_warmup_decodes_in_the_default_script_mode_and_counts_nothing(
+    tmp_path: Path,
+) -> None:
+    def cyrillic_unless_suppressed(
+        line: tuple[str, ...], suppressed: frozenset[str]
+    ) -> Sequence[Hypothesis]:
+        return [hyp(LATIN, END)] if SP + "Энэ" in suppressed else [hyp(SP + "Энэ", END)]
+
+    fixture = scripted_engine(tmp_path, answer=cyrillic_unless_suppressed)
+
+    fixture.engine.warmup()
+
+    # English is the first target and the model writes Cyrillic into it: the default mode
+    # (`retry`) decodes it again with the list, the mode `off` would not.
+    assert len(fixture.ct2.calls) == 2
+    counted(fixture)
+
+
+def test_the_warmup_builds_the_lists_of_the_windows_of_a_document_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    built = counting_lists(monkeypatch)
+    fixture = scripted_engine(tmp_path, document_level=True, answer=leaky)
+
+    fixture.engine.warmup()
+    after_the_warmup = list(built)
+    for name in ("off", "retry", "always"):
+        fixture.engine.translate_documents(
+            ["Hello world. Hello book."], "eng_Latn", KHK, mode(name)
+        )
+
+    assert built == after_the_warmup

@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import ast
 from dataclasses import FrozenInstanceError
+from pathlib import Path
 
 import pytest
 
+from rinchen.config import serve as serve_config
 from rinchen.errors import ConfigError
+from rinchen.infer import engine_types
+from rinchen.train import distill_teacher
 from rinchen.train.distill_teacher import TeacherOptions, ct2_source_tokens
 from tests.support.distill_teachers import SP, TAG
 
@@ -142,3 +147,32 @@ def test_cuda_is_an_explicit_choice_that_is_accepted():
 def test_a_compute_type_is_a_non_empty_string(compute_type):
     with pytest.raises(ConfigError, match="TeacherOptions.compute_type"):
         TeacherOptions(compute_type=compute_type)
+
+
+@pytest.mark.parametrize("compute_type", ["auto", "AUTO", " auto "])
+def test_a_compute_type_of_auto_is_refused_because_it_would_quantise_the_teacher(
+    compute_type,
+):
+    with pytest.raises(ConfigError, match="compute type `auto` is refused"):
+        TeacherOptions(compute_type=compute_type)
+
+
+def test_the_other_compute_types_are_unchanged():
+    for compute_type in ("default", "float32", "int8", "int8_float32"):
+        assert TeacherOptions(compute_type=compute_type).compute_type == compute_type
+
+
+def test_the_source_limit_is_one_number_in_the_teacher_the_engine_and_the_service():
+    teacher = ast.parse(Path(distill_teacher.__file__).read_text(encoding="utf-8"))
+    assigned = {
+        target.id
+        for node in teacher.body
+        if isinstance(node, ast.AnnAssign | ast.Assign)
+        for target in (node.targets if isinstance(node, ast.Assign) else [node.target])
+        if isinstance(target, ast.Name)
+    }
+
+    assert "MAX_SOURCE_PIECES" not in assigned
+    assert distill_teacher.MAX_SOURCE_PIECES == engine_types.MAX_SOURCE_PIECES == 1023
+    # The service's configuration may not import the engine, so it keeps a copy.
+    assert serve_config._MAX_SOURCE_PIECES == engine_types.MAX_SOURCE_PIECES

@@ -163,6 +163,16 @@ def test_the_auto_device_is_not_a_choice(
     assert_nothing_done(workspace, seam)
 
 
+def test_the_auto_compute_type_is_not_a_choice(
+    workspace: GenerateWorkspace, seam: TeacherSeam
+) -> None:
+    result = invoke(workspace.args("--compute-type", "auto"))
+
+    assert result.exit_code == 2, result.output
+    assert "compute type `auto` is refused" in result.stderr
+    assert_nothing_done(workspace, seam)
+
+
 @pytest.mark.parametrize(
     "option",
     ["--beam-size", "--n", "--max-decoding-length", "--max-source-pieces"]

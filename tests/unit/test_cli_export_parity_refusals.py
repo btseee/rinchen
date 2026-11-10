@@ -18,7 +18,7 @@ from typing import Any
 import pytest
 
 from rinchen.cli import export_parity
-from rinchen.errors import ConfigError, UpstreamError
+from rinchen.errors import ConfigError, DataError, UpstreamError
 from rinchen.manifest import store
 from tests.support.corpus_rows import corpus_row, write_rows
 from tests.support.distill_cli import write_foreign_manifest
@@ -172,6 +172,19 @@ def test_a_checkpoint_of_other_weights_than_the_export_s_is_refused_before_anyth
 
     assert_one_error(result, 2, "the checkpoint's weights")
     assert WEIGHTS_SHA256[:12] in result.stderr
+    assert_refused(workspace, parity, result, 2)
+
+
+@pytest.mark.parametrize("name", ["config.json", "vocab.json"])
+def test_a_checkpoint_of_the_export_s_weights_but_another_config_or_vocabulary_is_refused(
+    workspace: ParityWorkspace, parity: FakeStrictParity, name: str
+) -> None:
+    (workspace.checkpoint / name).write_bytes(b"the file of another model")
+
+    result = invoke(workspace.args())
+
+    assert_one_error(result, 2, f"the checkpoint's {name} has SHA-256 ")
+    assert "a parity of two different models says nothing" in result.stderr
     assert_refused(workspace, parity, result, 2)
 
 
@@ -393,6 +406,36 @@ def test_a_result_that_cannot_be_written_exits_1_and_leaves_no_manifest(
         result, 1, f"cannot write the parity result under {workspace.out_dir}"
     )
     assert "disk full" in result.stderr
+    assert not workspace.manifest.exists()
+
+
+def test_a_file_of_the_parity_that_cannot_be_read_is_exit_3_not_a_write_failure(
+    workspace: ParityWorkspace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    install_parity(
+        monkeypatch,
+        error=DataError("cannot read the output of eole predict out/parity.tokens.out"),
+    )
+
+    result = invoke(workspace.args())
+
+    assert_one_error(result, 3, "cannot read the output of eole predict")
+    assert "cannot write" not in result.stderr
+    assert not workspace.manifest.exists()
+    assert not workspace.result.exists()
+
+
+def test_a_file_of_the_parity_that_cannot_be_written_is_exit_1(
+    workspace: ParityWorkspace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    install_parity(monkeypatch, error=OSError("read-only file system"))
+
+    result = invoke(workspace.args())
+
+    assert_one_error(
+        result, 1, f"cannot write the parity result under {workspace.out_dir}"
+    )
+    assert "read-only file system" in result.stderr
     assert not workspace.manifest.exists()
 
 

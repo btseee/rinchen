@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from rinchen.errors import ConfigError
+from rinchen.errors import ConfigError, UpstreamError
 from rinchen.infer.engine_types import ENGINE_COUNTERS, DecodeOptions, Row
 from rinchen.script_conv.runtime import ScriptConverter
 from tests.support.engines import (
@@ -342,6 +342,42 @@ def test_a_converter_that_fails_fails_the_request_and_counts_nothing(
     assert fixture.engine.counters() == dict.fromkeys(ENGINE_COUNTERS, 0)
 
 
+class _NoHypothesis:
+    hypotheses: tuple[list[str], ...] = ()
+
+
+class _BrokenTranslator:
+    """A CTranslate2 stand-in of the converter that fails in the two ways that put the word
+    being converted in the message of D5's `UpstreamError`."""
+
+    def __init__(self, how: str) -> None:
+        self._how = how
+
+    def translate_batch(
+        self, source: list[list[str]], **kwargs: object
+    ) -> list[object]:
+        if self._how == "raises":
+            raise RuntimeError("cannot decode the word " + "".join(source[0][2:]))
+        return [_NoHypothesis() for _ in source]
+
+
+@pytest.mark.parametrize("how", ["raises", "no_hypothesis"])
+def test_a_failure_of_the_real_converter_is_an_upstream_error_that_does_not_quote_the_word(
+    tmp_path: Path, how: str
+) -> None:
+    secret = "тусгаарлагдсан"
+    converter = ScriptConverter.from_parts(_BrokenTranslator(how), StubProcessor())  # type: ignore[arg-type]
+    fixture = scripted_engine(tmp_path, converter=converter)  # type: ignore[arg-type]
+
+    with pytest.raises(UpstreamError) as raised:
+        fixture.engine.translate([Row(secret, RUS, KHK, "Mong")], OPTIONS)
+
+    assert str(raised.value) == "the script converter failed (UpstreamError)"
+    assert isinstance(raised.value.__cause__, UpstreamError)
+    assert secret in str(raised.value.__cause__)
+    assert fixture.engine.counters() == dict.fromkeys(ENGINE_COUNTERS, 0)
+
+
 def test_a_long_target_code_is_cut_in_the_message(tmp_path: Path) -> None:
     fixture = scripted_engine(tmp_path)
 
@@ -380,3 +416,68 @@ def test_the_real_script_converter_of_d5_fits_what_the_engine_asks_of_one(
 
     assert (result.text, result.tgt, result.script_purity) == (mongol, MON, 1.0)
     assert fixture.engine.counters()["script_conversions"] == 1
+
+
+# -- the request, checked before any text
+
+
+def test_a_request_the_model_can_serve_passes_the_check_and_sends_nothing(
+    tmp_path: Path,
+) -> None:
+    fixture = scripted_engine(tmp_path)
+
+    fixture.engine.require_request(ENG, KHK)
+    fixture.engine.require_request(None, KHK, "Cyrl")
+    fixture.engine.require_request(None, RUS)
+
+    assert fixture.ct2.calls == []
+    assert fixture.engine.counters() == dict.fromkeys(ENGINE_COUNTERS, 0)
+
+
+@pytest.mark.parametrize(
+    ("src", "tgt", "script"),
+    [
+        (ENG, "deu_Latn", None),
+        (ENG, "khk_Cyrll", None),
+        (KHK, KHK, None),
+        (ENG, RUS, "Mong"),
+        (ENG, KHK, "Latn"),
+        ("xxx_Latn", KHK, None),
+        (ENG, MON, None),
+    ],
+)
+def test_the_check_refuses_what_translate_refuses_with_the_same_message(
+    tmp_path: Path, src: str, tgt: str, script: str | None
+) -> None:
+    fixture = scripted_engine(tmp_path)
+
+    with pytest.raises(ConfigError) as from_the_check:
+        fixture.engine.require_request(src, tgt, script)  # type: ignore[arg-type]
+    with pytest.raises(ConfigError) as from_translate:
+        fixture.engine.translate([Row("hello", src, tgt, script)], OPTIONS)  # type: ignore[arg-type]
+
+    assert str(from_the_check.value) == str(from_translate.value)
+
+
+def test_the_check_for_documents_needs_a_document_model_and_a_source(
+    tmp_path: Path,
+) -> None:
+    sentences = scripted_engine(tmp_path / "sentences")
+    documents = scripted_engine(tmp_path / "documents", document_level=True)
+
+    with pytest.raises(ConfigError, match="does not translate documents"):
+        sentences.engine.require_request(ENG, KHK, documents=True)
+    with pytest.raises(ConfigError, match="needs its source language"):
+        documents.engine.require_request(None, KHK, documents=True)
+    with pytest.raises(ConfigError, match="does not translate into"):
+        documents.engine.require_request(ENG, "deu_Latn", documents=True)
+    documents.engine.require_request(ENG, KHK, documents=True)
+    documents.engine.require_request(ENG, KHK)
+
+
+def test_the_check_of_a_closed_engine_is_refused(tmp_path: Path) -> None:
+    fixture = scripted_engine(tmp_path)
+    fixture.engine.close()
+
+    with pytest.raises(ConfigError, match="closed"):
+        fixture.engine.require_request(ENG, KHK)

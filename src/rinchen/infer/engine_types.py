@@ -215,6 +215,21 @@ class DocumentResult:
     stats: ChunkStats
 
 
+# The worst status of a document first. `empty` is no problem of a sentence (a sentence of a
+# document with no letter is normal): a document is `empty` only when nothing in it is not.
+_SEVERITY: Final[tuple[Status, ...]] = ("no_output", "too_long", "truncated")
+
+
+def document_status(result: DocumentResult) -> Status:
+    """The status of a document: the worst of its sentences (`no_output`, `too_long`,
+    `truncated`), else `ok`, and `empty` when no sentence is anything but empty."""
+    statuses = {translation.status for translation in result.translations}
+    for status in _SEVERITY:
+        if status in statuses:
+            return status
+    return "ok" if "ok" in statuses else "empty"
+
+
 @dataclass(frozen=True, slots=True)
 class ModelInfo:
     """What a loaded engine knows about its model: the record's `name`, `quantization`,

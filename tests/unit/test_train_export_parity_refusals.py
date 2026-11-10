@@ -24,7 +24,11 @@ import sentencepiece
 import rinchen.train.export_parity as module
 from rinchen.errors import ConfigError, DataError, UpstreamError
 from rinchen.export.record import SPM_FILE
-from rinchen.train.export_parity import ParitySource, strict_parity
+from rinchen.train.export_parity import (
+    ParitySource,
+    require_checkpoint_of_export,
+    strict_parity,
+)
 from tests.support.fake_ct2 import SPIECE
 from tests.support.fake_parity_eole import (
     TAG,
@@ -109,7 +113,7 @@ def test_a_text_without_a_piece_is_refused_naming_its_number_and_not_its_text(
 ) -> None:
     sources = [case.sources[0], ParitySource("   ", "khk_Cyrl"), case.sources[1]]
 
-    with pytest.raises(ValueError, match="source 2") as raised:
+    with pytest.raises(DataError, match="source 2") as raised:
         strict_parity(
             case.checkpoint,
             case.export,
@@ -142,6 +146,55 @@ def test_a_checkpoint_of_the_export_s_weights_is_accepted(case: ParityCase) -> N
     run(case)
 
     assert len(case.eole.launches) == 1
+
+
+def test_the_config_and_the_vocabulary_of_the_checkpoint_are_compared_when_given(
+    case: ParityCase,
+) -> None:
+    checkpoint = case.export.record.checkpoint
+
+    require_checkpoint_of_export(
+        case.export.record,
+        checkpoint.weights_sha256,
+        config_sha256=checkpoint.config_sha256,
+        vocab_sha256=checkpoint.vocab_sha256,
+    )
+    with pytest.raises(ConfigError, match=r"config\.json") as other_config:
+        require_checkpoint_of_export(
+            case.export.record,
+            checkpoint.weights_sha256,
+            config_sha256="b" * 64,
+            vocab_sha256=checkpoint.vocab_sha256,
+        )
+    with pytest.raises(ConfigError, match=r"vocab\.json") as other_vocabulary:
+        require_checkpoint_of_export(
+            case.export.record,
+            checkpoint.weights_sha256,
+            config_sha256=checkpoint.config_sha256,
+            vocab_sha256="c" * 64,
+        )
+
+    assert "b" * 12 in str(other_config.value)
+    assert checkpoint.config_sha256[:12] in str(other_config.value)
+    assert "c" * 12 in str(other_vocabulary.value)
+    assert checkpoint.vocab_sha256[:12] in str(other_vocabulary.value)
+
+
+def test_the_weights_are_compared_before_the_config_and_the_vocabulary(
+    case: ParityCase,
+) -> None:
+    with pytest.raises(ConfigError, match="weights"):
+        require_checkpoint_of_export(
+            case.export.record, "a" * 64, config_sha256="b" * 64, vocab_sha256="c" * 64
+        )
+
+
+def test_the_config_and_the_vocabulary_are_not_compared_unless_given(
+    case: ParityCase,
+) -> None:
+    require_checkpoint_of_export(
+        case.export.record, case.export.record.checkpoint.weights_sha256
+    )
 
 
 def test_the_digest_a_caller_took_is_used_and_the_weights_are_not_hashed_again(
@@ -221,6 +274,36 @@ def test_eole_failing_is_an_upstream_error_that_leaves_no_report(
     case.eole.error = UpstreamError("eole predict exited with code 1")
 
     with pytest.raises(UpstreamError, match="exited with code 1"):
+        run(case)
+
+    assert case.ct2.calls == []
+
+
+def test_an_output_of_eole_that_cannot_be_read_is_a_data_error_not_a_write_failure(
+    case: ParityCase, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real = Path.read_text
+
+    def read_text(self: Path, *args: Any, **kwargs: Any) -> str:
+        if self.name == "parity.tokens.out":
+            raise PermissionError(13, "Permission denied")
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read_text)
+
+    with pytest.raises(
+        DataError, match="cannot read the output of eole predict"
+    ) as raised:
+        run(case)
+
+    assert "Permission denied" in str(raised.value)
+    assert case.ct2.calls == []
+
+
+def test_an_output_of_eole_that_is_not_utf_8_is_a_data_error(case: ParityCase) -> None:
+    case.eole.output_bytes = b"\xff\xfe not utf-8\n"
+
+    with pytest.raises(DataError, match="cannot read the output of eole predict"):
         run(case)
 
     assert case.ct2.calls == []

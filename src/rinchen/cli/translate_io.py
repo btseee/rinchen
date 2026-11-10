@@ -22,7 +22,13 @@ from collections.abc import Iterator, Mapping, Sequence
 from typing import IO, Final, Literal
 
 from rinchen.errors import DataError
-from rinchen.infer.engine_types import LINE_BREAKS, DocumentResult, Status, Translation
+from rinchen.infer.engine_types import (
+    LINE_BREAKS,
+    DocumentResult,
+    Status,
+    Translation,
+    document_status,
+)
 
 OutputFormat = Literal["text", "jsonl"]
 Unit = Literal["lines", "documents"]
@@ -34,9 +40,6 @@ STATUSES: Final[tuple[Status, ...]] = (
     "truncated",
     "no_output",
 )
-# The worst status of a document first. `empty` is no problem of a sentence (a sentence of a
-# document with no letter is normal): a document is `empty` only when nothing in it is not.
-_SEVERITY: Final[tuple[Status, ...]] = ("no_output", "too_long", "truncated")
 # Engine counters the summary names, when they are not zero: the pair was not one the model was
 # trained for, and everything about the script (the retry, the purity, the converter).
 SUMMARY_COUNTERS: Final = (
@@ -145,16 +148,6 @@ def translation_line(translation: Translation, output_format: OutputFormat) -> s
         tgt=translation.tgt,
         script_purity=translation.script_purity,
     )
-
-
-def document_status(result: DocumentResult) -> Status:
-    """The status of a document: the worst of its sentences (`no_output`, `too_long`,
-    `truncated`), else `ok`, and `empty` when no sentence is anything but empty."""
-    statuses = {translation.status for translation in result.translations}
-    for status in _SEVERITY:
-        if status in statuses:
-            return status
-    return "ok" if "ok" in statuses else "empty"
 
 
 def document_line(
