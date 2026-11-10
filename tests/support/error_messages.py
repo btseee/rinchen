@@ -5,6 +5,7 @@
 `UpstreamError` or `RequestTextError` (by name or as an attribute), each expression that goes into
 its message: the value of an f-string field, an argument of `.format`, the right side of `%`, a
 non-literal operand of `+`, or the argument itself when it is a bare expression (`DataError(str(x))`).
+`names` says which call names count, for a package whose errors are made by a helper.
 Each finding names the file, the enclosing function (`Class.method` inside a class) and the source
 of the expression, as `ast.unparse` writes it, so that a reformatting of the code changes nothing.
 """
@@ -27,8 +28,10 @@ class Finding:
     expression: str
 
 
-def interpolations(source: str, path: str) -> list[Finding]:
-    scanner = _Scanner(path)
+def interpolations(
+    source: str, path: str, *, names: frozenset[str] = ERROR_NAMES
+) -> list[Finding]:
+    scanner = _Scanner(path, names)
     scanner.visit(ast.parse(source))
     return scanner.found
 
@@ -47,8 +50,9 @@ def _call_name(node: ast.Call) -> str | None:
 
 
 class _Scanner(ast.NodeVisitor):
-    def __init__(self, path: str) -> None:
+    def __init__(self, path: str, names: frozenset[str]) -> None:
         self.path = path
+        self._names = names
         self.found: list[Finding] = []
         self._scope: list[str] = []
 
@@ -67,7 +71,7 @@ class _Scanner(ast.NodeVisitor):
         self._enter(node, node.name)
 
     def visit_Call(self, node: ast.Call) -> None:
-        if _call_name(node) in ERROR_NAMES:
+        if _call_name(node) in self._names:
             for argument in [*node.args, *(k.value for k in node.keywords)]:
                 for expression in _expressions(argument):
                     finding = Finding(

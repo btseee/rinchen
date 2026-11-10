@@ -1,0 +1,606 @@
+{
+  "robustness": {
+    "entity_acc": 0.5714285714285714,
+    "mong_source_retention": 0.5017570743156547,
+    "numbers_acc": 0.5,
+    "placeholder_acc": 0.4,
+    "script_purity": 0.75,
+    "term_acc": 0.75
+  },
+  "rows": {
+    "entities": [
+      {
+        "category": "person_city",
+        "direction": "eng_Latn-khk_Cyrl",
+        "expected": 2,
+        "found": 2,
+        "id": "e1",
+        "ok": true,
+        "reason": null,
+        "scored": true,
+        "value": null
+      },
+      {
+        "category": "person_city",
+        "direction": "eng_Latn-khk_Cyrl",
+        "expected": 2,
+        "found": 0,
+        "id": "e2",
+        "ok": false,
+        "reason": null,
+        "scored": true,
+        "value": null
+      },
+      {
+        "category": "person_city",
+        "direction": "khk_Cyrl-eng_Latn",
+        "expected": 2,
+        "found": 2,
+        "id": "e3",
+        "ok": true,
+        "reason": null,
+        "scored": true,
+        "value": null
+      },
+      {
+        "category": "city",
+        "direction": "eng_Latn-khk_Cyrl",
+        "expected": 1,
+        "found": 0,
+        "id": "e4",
+        "ok": false,
+        "reason": null,
+        "scored": true,
+        "value": null
+      }
+    ],
+    "mong": [
+      {
+        "category": "base",
+        "direction": "khk_Cyrl-eng_Latn",
+        "expected": null,
+        "found": null,
+        "id": "m1",
+        "ok": true,
+        "reason": null,
+        "scored": true,
+        "value": 100.0
+      },
+      {
+        "category": "base",
+        "direction": "khk_Cyrl-eng_Latn",
+        "expected": null,
+        "found": null,
+        "id": "m2",
+        "ok": false,
+        "reason": null,
+        "scored": true,
+        "value": 52.96190894473853
+      },
+      {
+        "category": "base",
+        "direction": "khk_Cyrl-eng_Latn",
+        "expected": null,
+        "found": null,
+        "id": "m3",
+        "ok": false,
+        "reason": null,
+        "scored": true,
+        "value": 0.0
+      }
+    ],
+    "numbers": [
+      {
+        "category": "grouped",
+        "direction": "eng_Latn-khk_Cyrl",
+        "expected": 1,
+        "found": 1,
+        "id": "n1",
+        "ok": true,
+        "reason": null,
+        "scored": true,
+        "value": null
+      },
+      {
+        "category": "date",
+        "direction": "eng_Latn-rus_Cyrl",
+        "expected": 5,
+        "found": 5,
+        "id": "n2",
+        "ok": true,
+        "reason": null,
+        "scored": true,
+        "value": null
+      },
+      {
+        "category": "currency",
+        "direction": "eng_Latn-khk_Cyrl",
+        "expected": 1,
+        "found": 1,
+        "id": "n3",
+        "ok": false,
+        "reason": null,
+        "scored": true,
+        "value": null
+      },
+      {
+        "category": "int",
+        "direction": "eng_Latn-khk_Cyrl",
+        "expected": 1,
+        "found": 0,
+        "id": "n4",
+        "ok": false,
+        "reason": null,
+        "scored": true,
+        "value": null
+      },
+      {
+        "category": "none",
+        "direction": "eng_Latn-khk_Cyrl",
+        "expected": null,
+        "found": null,
+        "id": "n5",
+        "ok": null,
+        "reason": "no_numbers",
+        "scored": false,
+        "value": null
+      },
+      {
+        "category": "words",
+        "direction": "eng_Latn-khk_Cyrl",
+        "expected": null,
+        "found": null,
+        "id": "n6",
+        "ok": null,
+        "reason": "source_reference_disagree",
+        "scored": false,
+        "value": null
+      },
+      {
+        "category": "int",
+        "direction": "eng_Latn-khk_Cyrl",
+        "expected": 2,
+        "found": 2,
+        "id": "n7",
+        "ok": true,
+        "reason": null,
+        "scored": true,
+        "value": null
+      },
+      {
+        "category": "percent",
+        "direction": "eng_Latn-khk_Cyrl",
+        "expected": 1,
+        "found": 0,
+        "id": "n8",
+        "ok": false,
+        "reason": null,
+        "scored": true,
+        "value": null
+      }
+    ],
+    "placeholders": [
+      {
+        "category": "noun",
+        "direction": "eng_Latn-khk_Cyrl",
+        "expected": 1,
+        "found": 1,
+        "id": "p1",
+        "ok": true,
+        "reason": null,
+        "scored": true,
+        "value": null
+      },
+      {
+        "category": "reorder",
+        "direction": "eng_Latn-khk_Cyrl",
+        "expected": 2,
+        "found": 2,
+        "id": "p2",
+        "ok": true,
+        "reason": null,
+        "scored": true,
+        "value": null
+      },
+      {
+        "category": "noun",
+        "direction": "eng_Latn-khk_Cyrl",
+        "expected": 1,
+        "found": 0,
+        "id": "p3",
+        "ok": false,
+        "reason": null,
+        "scored": true,
+        "value": null
+      },
+      {
+        "category": "noun",
+        "direction": "eng_Latn-khk_Cyrl",
+        "expected": 1,
+        "found": 1,
+        "id": "p4",
+        "ok": false,
+        "reason": null,
+        "scored": true,
+        "value": null
+      },
+      {
+        "category": "noun",
+        "direction": "eng_Latn-khk_Cyrl",
+        "expected": 1,
+        "found": 0,
+        "id": "p5",
+        "ok": false,
+        "reason": null,
+        "scored": true,
+        "value": null
+      },
+      {
+        "category": "none",
+        "direction": "eng_Latn-khk_Cyrl",
+        "expected": null,
+        "found": null,
+        "id": "p6",
+        "ok": null,
+        "reason": "no_placeholders",
+        "scored": false,
+        "value": null
+      }
+    ],
+    "script": [
+      {
+        "category": "trained",
+        "direction": "eng_Latn-khk_Cyrl",
+        "expected": null,
+        "found": null,
+        "id": "s1",
+        "ok": true,
+        "reason": null,
+        "scored": true,
+        "value": 1.0
+      },
+      {
+        "category": "trained",
+        "direction": "eng_Latn-khk_Cyrl",
+        "expected": null,
+        "found": null,
+        "id": "s2",
+        "ok": false,
+        "reason": null,
+        "scored": true,
+        "value": 0.25
+      },
+      {
+        "category": "untrained",
+        "direction": "und-khk_Cyrl",
+        "expected": null,
+        "found": null,
+        "id": "s3",
+        "ok": null,
+        "reason": "no_letters",
+        "scored": false,
+        "value": null
+      },
+      {
+        "category": "mong_output",
+        "direction": "eng_Latn-khk_Cyrl",
+        "expected": null,
+        "found": null,
+        "id": "s4",
+        "ok": true,
+        "reason": null,
+        "scored": true,
+        "value": 1.0
+      },
+      {
+        "category": "mong_output",
+        "direction": "eng_Latn-khk_Cyrl",
+        "expected": null,
+        "found": null,
+        "id": "s5",
+        "ok": false,
+        "reason": null,
+        "scored": true,
+        "value": 0.5
+      },
+      {
+        "category": "untrained",
+        "direction": "eng_Latn-eng_Latn",
+        "expected": null,
+        "found": null,
+        "id": "s6",
+        "ok": true,
+        "reason": null,
+        "scored": true,
+        "value": 1.0
+      }
+    ],
+    "terms": [
+      {
+        "category": "glossary",
+        "direction": "eng_Latn-khk_Cyrl",
+        "expected": 1,
+        "found": 1,
+        "id": "t1",
+        "ok": true,
+        "reason": null,
+        "scored": true,
+        "value": null
+      },
+      {
+        "category": "glossary",
+        "direction": "eng_Latn-khk_Cyrl",
+        "expected": 2,
+        "found": 2,
+        "id": "t2",
+        "ok": true,
+        "reason": null,
+        "scored": true,
+        "value": null
+      },
+      {
+        "category": "glossary",
+        "direction": "eng_Latn-khk_Cyrl",
+        "expected": 1,
+        "found": 0,
+        "id": "t3",
+        "ok": false,
+        "reason": null,
+        "scored": true,
+        "value": null
+      }
+    ]
+  },
+  "schema": "rinchen.robustness/1",
+  "sections": {
+    "entities": {
+      "by_category": {
+        "city": {
+          "ok": 0,
+          "scored": 1
+        },
+        "person_city": {
+          "ok": 4,
+          "scored": 6
+        }
+      },
+      "by_direction": {
+        "eng_Latn-khk_Cyrl": {
+          "ok": 2,
+          "scored": 5
+        },
+        "khk_Cyrl-eng_Latn": {
+          "ok": 2,
+          "scored": 2
+        }
+      },
+      "details": {
+        "rows_all_found": 2
+      },
+      "excluded": {},
+      "ok": 4,
+      "rows": 4,
+      "scored": 7,
+      "statuses": {
+        "ok": 4
+      },
+      "unit": "mention",
+      "value": 0.5714285714285714
+    },
+    "mong": {
+      "by_category": {
+        "base": {
+          "ok": 1,
+          "scored": 3
+        }
+      },
+      "by_direction": {
+        "khk_Cyrl-eng_Latn": {
+          "ok": 1,
+          "scored": 3
+        }
+      },
+      "details": {
+        "agreement": 0.3333333333333333,
+        "chrf_converted": null,
+        "chrf_cyrl": 100.0,
+        "chrf_mong": 50.17570743156548,
+        "retention_converted": null,
+        "rows": 3
+      },
+      "excluded": {},
+      "ok": 1,
+      "rows": 3,
+      "scored": 3,
+      "statuses": {
+        "empty": 1,
+        "ok": 5
+      },
+      "unit": "row",
+      "value": 0.5017570743156547
+    },
+    "numbers": {
+      "by_category": {
+        "currency": {
+          "ok": 0,
+          "scored": 1
+        },
+        "date": {
+          "ok": 1,
+          "scored": 1
+        },
+        "grouped": {
+          "ok": 1,
+          "scored": 1
+        },
+        "int": {
+          "ok": 1,
+          "scored": 2
+        },
+        "percent": {
+          "ok": 0,
+          "scored": 1
+        }
+      },
+      "by_direction": {
+        "eng_Latn-khk_Cyrl": {
+          "ok": 2,
+          "scored": 5
+        },
+        "eng_Latn-rus_Cyrl": {
+          "ok": 1,
+          "scored": 1
+        }
+      },
+      "details": {
+        "ambiguous_rows": 0,
+        "capped_rows": 0,
+        "extra_tokens": 1,
+        "recall": 0.8181818181818182,
+        "surface_exact_rows": 4,
+        "unit_failures": 1
+      },
+      "excluded": {
+        "no_numbers": 1,
+        "source_reference_disagree": 1
+      },
+      "ok": 3,
+      "rows": 8,
+      "scored": 6,
+      "statuses": {
+        "empty": 1,
+        "ok": 7
+      },
+      "unit": "row",
+      "value": 0.5
+    },
+    "placeholders": {
+      "by_category": {
+        "noun": {
+          "ok": 1,
+          "scored": 4
+        },
+        "reorder": {
+          "ok": 1,
+          "scored": 1
+        }
+      },
+      "by_direction": {
+        "eng_Latn-khk_Cyrl": {
+          "ok": 2,
+          "scored": 5
+        }
+      },
+      "details": {
+        "damaged": 2,
+        "exact_rows": 2,
+        "extra": 1,
+        "missing": 2,
+        "order_ok_rows": 1
+      },
+      "excluded": {
+        "no_placeholders": 1
+      },
+      "ok": 2,
+      "rows": 6,
+      "scored": 5,
+      "statuses": {
+        "ok": 6
+      },
+      "unit": "row",
+      "value": 0.4
+    },
+    "script": {
+      "by_category": {
+        "mong_output": {
+          "ok": 1,
+          "scored": 2
+        },
+        "trained": {
+          "ok": 1,
+          "scored": 2
+        },
+        "untrained": {
+          "ok": 1,
+          "scored": 1
+        }
+      },
+      "by_direction": {
+        "eng_Latn-eng_Latn": {
+          "ok": 1,
+          "scored": 1
+        },
+        "eng_Latn-khk_Cyrl": {
+          "ok": 2,
+          "scored": 4
+        }
+      },
+      "details": {
+        "below_floor": 2,
+        "floor": 0.98,
+        "mean": 0.75,
+        "min": 0.25,
+        "no_letters": 1,
+        "pure_share": 0.6
+      },
+      "excluded": {
+        "no_letters": 1
+      },
+      "ok": 3,
+      "rows": 6,
+      "scored": 5,
+      "statuses": {
+        "empty": 1,
+        "ok": 5
+      },
+      "unit": "row",
+      "value": 0.75
+    },
+    "terms": {
+      "by_category": {
+        "glossary": {
+          "ok": 3,
+          "scored": 4
+        }
+      },
+      "by_direction": {
+        "eng_Latn-khk_Cyrl": {
+          "ok": 3,
+          "scored": 4
+        }
+      },
+      "details": {
+        "rows_all_found": 2
+      },
+      "excluded": {
+        "absent_in_source": 1
+      },
+      "ok": 3,
+      "rows": 3,
+      "scored": 4,
+      "statuses": {
+        "ok": 3
+      },
+      "unit": "mention",
+      "value": 0.75
+    }
+  },
+  "suite": {
+    "name": "golden",
+    "rows": {
+      "entities": 4,
+      "mong": 3,
+      "numbers": 8,
+      "placeholders": 6,
+      "script": 6,
+      "terms": 3
+    },
+    "sha256": "2767112dc06c61b62fbc66ad7336b3dffeff81c33ce7e7e124875a44503e75b0"
+  },
+  "system": {
+    "manifest_sha256": null,
+    "model_sha256": null,
+    "name": "golden",
+    "options": null
+  }
+}

@@ -1,0 +1,33 @@
+{"arm": "main", "id": "n1", "section": "numbers", "status": "ok", "text": "Үнэ 1 250,50 доллар."}
+{"arm": "main", "id": "n2", "section": "numbers", "status": "ok", "text": "Встреча 03/12/2024 в 10:30."}
+{"arm": "main", "id": "n3", "section": "numbers", "status": "ok", "text": "Үнэ 1 500."}
+{"arm": "main", "id": "n4", "section": "numbers", "status": "ok", "text": "Хуудас 7592."}
+{"arm": "main", "id": "n5", "section": "numbers", "status": "ok", "text": "Энд тоо алга."}
+{"arm": "main", "id": "n6", "section": "numbers", "status": "ok", "text": "Ойролцоогоор 3 000 000."}
+{"arm": "main", "id": "n7", "section": "numbers", "status": "ok", "text": "Тэр 7, тэр 5."}
+{"arm": "main", "id": "n8", "section": "numbers", "status": "empty", "text": ""}
+{"arm": "main", "id": "p1", "section": "placeholders", "status": "ok", "text": "⟦3⟧ хаана байна вэ?"}
+{"arm": "main", "id": "p2", "section": "placeholders", "status": "ok", "text": "⟦0⟧ ⟦1⟧ийн."}
+{"arm": "main", "id": "p3", "section": "placeholders", "status": "ok", "text": "Энэ бол."}
+{"arm": "main", "id": "p4", "section": "placeholders", "status": "ok", "text": "Энэ бол ⟦5⟧ ⟦5⟧."}
+{"arm": "main", "id": "p5", "section": "placeholders", "status": "ok", "text": "Энэ бол ⟦ 6 ⟧."}
+{"arm": "main", "id": "p6", "section": "placeholders", "status": "ok", "text": "Тэмдэг алга."}
+{"arm": "main", "id": "e1", "section": "entities", "status": "ok", "text": "Бат Улаанбаатарт амьдардаг."}
+{"arm": "main", "id": "e2", "section": "entities", "status": "ok", "text": "Дорж Дарханд амьдардаг."}
+{"arm": "main", "id": "e3", "section": "entities", "status": "ok", "text": "Bat is in Ulan Bator's office."}
+{"arm": "main", "id": "e4", "section": "entities", "status": "ok", "text": "Улаанбаатарынхаа зам."}
+{"arm": "main", "id": "t1", "section": "terms", "status": "ok", "text": "Ширээ хаана байна вэ?"}
+{"arm": "main", "id": "t2", "section": "terms", "status": "ok", "text": "Ширээ ба цонхнууд."}
+{"arm": "main", "id": "t3", "section": "terms", "status": "ok", "text": "Тавиур энд байна."}
+{"arm": "main", "id": "s1", "section": "script", "status": "ok", "text": "Энэ бол ном."}
+{"arm": "main", "id": "s2", "section": "script", "status": "ok", "text": "This is Эн."}
+{"arm": "main", "id": "s3", "section": "script", "status": "empty", "text": ""}
+{"arm": "main", "id": "s4", "section": "script", "status": "ok", "text": "ᠡᠨᠡ ᠪᠣᠯ ᠨᠣᠮ"}
+{"arm": "main", "id": "s5", "section": "script", "status": "ok", "text": "ᠡᠨᠡ бол"}
+{"arm": "main", "id": "s6", "section": "script", "status": "ok", "text": "It is fine."}
+{"arm": "cyrl", "id": "m1", "section": "mong", "status": "ok", "text": "This is a book."}
+{"arm": "mong", "id": "m1", "section": "mong", "status": "ok", "text": "This is a book."}
+{"arm": "cyrl", "id": "m2", "section": "mong", "status": "ok", "text": "The water is here."}
+{"arm": "mong", "id": "m2", "section": "mong", "status": "ok", "text": "The star is here."}
+{"arm": "cyrl", "id": "m3", "section": "mong", "status": "ok", "text": "Where is the tree?"}
+{"arm": "mong", "id": "m3", "section": "mong", "status": "empty", "text": ""}

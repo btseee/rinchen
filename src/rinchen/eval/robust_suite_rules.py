@@ -139,6 +139,12 @@ def object_at(
     return value
 
 
+def is_id(value: object) -> bool:
+    """Whether `value` is a well-formed id or name of the format: the only kind of string
+    of a file that a message may name."""
+    return isinstance(value, str) and _ID.fullmatch(value) is not None
+
+
 def checked_name(value: object, place: str, field: str) -> str:
     """A name or an id of the format: 1 to 64 letters, digits, '.', '_' and '-'."""
     if not isinstance(value, str) or not _ID.fullmatch(value):
@@ -177,7 +183,7 @@ def row_place(section: str, index: int, row_id: object = None) -> str:
     """Where a row is, for a message: its section, its index and, when it is a well-formed
     id, the id."""
     place = f"section {section!r}, row index {index}"
-    if isinstance(row_id, str) and _ID.fullmatch(row_id):
+    if is_id(row_id):
         place = f"{place} (id {row_id!r})"
     return place
 

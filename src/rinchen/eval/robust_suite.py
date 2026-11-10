@@ -48,6 +48,7 @@ from rinchen.eval.robust_suite_rules import (
 from rinchen.utils.part_file import replace_file
 
 __all__ = [
+    "ARMS",
     "MAX_SUITE_BYTES",
     "MAX_TEXT_CHARS",
     "SECTIONS",
@@ -65,6 +66,7 @@ __all__ = [
 
 SUITE_SCHEMA: Final = "rinchen.robustness.suite/1"
 MAX_SUITE_BYTES: Final = 8 * 1024 * 1024
+ARMS: Final = ("main", "cyrl", "mong", "converted")
 
 _TOP_KEYS: Final = ("schema", "name", "entities", "sections")
 _TABLE_ID: Final = re.compile(r"[a-z0-9_]{1,32}")
