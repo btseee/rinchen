@@ -15,6 +15,12 @@ model the serving gate serves) and `d11_document_model` a document model continu
 first teacher and exported. Each runs its stage once per session, the first time a test asks.
 The serving gate's own fixtures (`d11_serving_log`, `d11_test_log`, `d11_sentences` and the two
 reference engines) live in `tests/support/serving_gate_fixtures.py`.
+
+The `d12_*` fixtures are the robustness gate's (`tests/integration/test_robustness_gate.py`):
+`d12_robust_workspace` is the robustness toy's corpus file and SentencePiece model,
+`d12_robust_teacher` the tiny teacher trained on it once for 6,000 steps (about 190 s),
+`d12_robust_export` its float32 CTranslate2 export and `d12_suites` the four suite files of the gate.
+They run under the same `d11_gpu_hidden`.
 """
 
 from __future__ import annotations
@@ -41,8 +47,15 @@ from tests.support.d11_gate import (
     trained_teachers,
 )
 from tests.support.d11_gate_doc import DocumentModel, build_document_model
-from tests.support.distill_gate_stages import Workspace, make_workspace
+from tests.support.distill_gate_stages import Teacher, Workspace, make_workspace
 from tests.support.engines import SilentLog
+from tests.support.robust_gate import (
+    Suites,
+    export_robust,
+    robust_workspace,
+    train_robust_teacher,
+    write_suites,
+)
 from tests.support.script_reference import FIXTURE_DIR
 from tests.support.serving_gate_fixtures import (  # noqa: F401 - re-exported for pytest
     d11_float32_engine,
@@ -170,3 +183,36 @@ def d11_document_model(
     d11_workspace: Workspace, d11_teacher: Teachers
 ) -> DocumentModel:
     return build_document_model(d11_workspace, d11_teacher.source)
+
+
+@pytest.fixture(scope="session")
+def d12_robust_workspace(
+    d11_gpu_hidden: None, tmp_path_factory: pytest.TempPathFactory
+) -> Workspace:
+    return robust_workspace(tmp_path_factory.mktemp("d12_gate"))
+
+
+@pytest.fixture(scope="session")
+def d12_robust_teacher(d12_robust_workspace: Workspace) -> Teacher:
+    """The tiny teacher trained on the robustness toy: paid for once per session."""
+    return train_robust_teacher(d12_robust_workspace)
+
+
+@pytest.fixture(scope="session")
+def d12_robust_export(
+    d12_robust_workspace: Workspace,
+    d12_robust_teacher: Teacher,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Path:
+    """The float32 export of the robustness teacher (tag in the source)."""
+    return export_robust(
+        d12_robust_workspace,
+        d12_robust_teacher,
+        tmp_path_factory.mktemp("d12_export") / "model",
+    ).directory
+
+
+@pytest.fixture(scope="session")
+def d12_suites(tmp_path_factory: pytest.TempPathFactory) -> Suites:
+    """The main suite and the three control suites of the robustness toy, as files."""
+    return write_suites(tmp_path_factory.mktemp("d12_suites"))
