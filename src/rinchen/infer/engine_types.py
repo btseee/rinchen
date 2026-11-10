@@ -393,6 +393,17 @@ def require_encodable(text: str, label: str) -> None:
         ) from error
 
 
+def reserved_symbol_error(label: str, symbol: str) -> DataError:
+    """The refusal of a request whose text spells a reserved `symbol`: it names the request by
+    its place (`label`) and the symbol, a fixed entry of the model's vocabulary, never the
+    text."""
+    return DataError(
+        f"{label} contains the reserved symbol {symbol}, which the model reads as a control "
+        "piece and not as text (a direction tag would change the language asked for): "
+        "remove it"
+    )
+
+
 def has_alnum(text: str) -> bool:
     """Whether `text` has a letter or a digit: a text without one is empty to the engine."""
     return any(character.isalnum() for character in text)

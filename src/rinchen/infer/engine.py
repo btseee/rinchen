@@ -89,6 +89,7 @@ from rinchen.infer.engine_types import (
     refusal,
     require_document_model,
     require_encodable,
+    reserved_symbol_error,
     selected_target,
     shown,
     source_language,
@@ -101,7 +102,11 @@ from rinchen.infer.script_mask import (
     script_purity,
     suppression_list,
 )
-from rinchen.infer.source_tokens import ct2_source_tokens, reserved_pieces
+from rinchen.infer.source_tokens import (
+    ct2_source_tokens,
+    reserved_pieces,
+    source_symbols,
+)
 from rinchen.split.rules import split
 from rinchen.text.normalize import normalize
 from rinchen.utils import logging as rinchen_logging
@@ -139,6 +144,10 @@ class Engine:
         self._reserved_in_windows = reserved_pieces(
             processor, end, vocabulary, allow=(SEGMENT_SEPARATOR,)
         )
+        # What a request's text must not spell (see `source_symbols`), in the order of the
+        # vocabulary for a text and as a set for the pieces of one.
+        self._source_symbols = source_symbols()
+        self._source_symbol_set = frozenset(self._source_symbols)
         self._lists: dict[ListKey, list[list[str]]] = {}
         self._lists_lock = threading.Lock()
         self._counters = dict.fromkeys(ENGINE_COUNTERS, 0)
@@ -408,6 +417,9 @@ class Engine:
         pieces = self._processor.encode(text, out_type=str) if has_alnum(text) else []
         if not pieces:
             return Prepared(route, src, "empty", None)
+        for piece in pieces:
+            if piece in self._source_symbol_set:
+                raise reserved_symbol_error(label, piece)
         if len(pieces) > options.max_source_pieces:
             return Prepared(route, src, "too_long", None)
         tokens, prefix = ct2_source_tokens(self._placement, route.tag, pieces)
@@ -574,11 +586,12 @@ class Engine:
                 )
             require_encodable(document, f"document {index}")
             text = normalize(document, src)
-            if SEGMENT_SEPARATOR in text:
-                raise DataError(
-                    f"document {index} contains the literal {SEGMENT_SEPARATOR!r}, which "
-                    "a window would read as the boundary of two sentences"
-                )
+            for symbol in self._source_symbols:
+                # The engine writes `<sep>` and `<doc>` into a window itself: only the text of
+                # the request is checked, and a window would read its `<sep>` as the boundary
+                # of two sentences.
+                if symbol in text:
+                    raise reserved_symbol_error(f"document {index}", symbol)
             texts.append(text)
         return texts
 

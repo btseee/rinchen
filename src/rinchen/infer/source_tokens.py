@@ -1,5 +1,6 @@
 """The rules CTranslate2 does not have, shared by the teacher of D10 and the engine of D11:
-where the direction tag goes, and the pieces no translation of ours holds.
+where the direction tag goes, the pieces no translation of ours holds, and the symbols no
+request may spell.
 
 A translation never holds the unknown piece of the SentencePiece model (decoded, it reads as
 the text of U+2047 between spaces), the end token inside the text, a reserved symbol of the
@@ -47,6 +48,15 @@ def ct2_source_tokens(
     if placement == "src":
         return [tag, *pieces], None
     return list(pieces), [tag]
+
+
+def source_symbols() -> tuple[str, ...]:
+    """The reserved symbols the text of a request must not hold, in vocabulary order: every
+    one of the project but the numbered placeholders (which the engine is meant to read and
+    write, T7). SentencePiece keeps each as one piece wherever it stands in a text, so a
+    request that spells one hands the model a control piece (a direction tag asks for another
+    language, `<sep>` and `<doc>` steer a document model) instead of text."""
+    return tuple(user_defined_symbols()[:-PLACEHOLDER_COUNT])
 
 
 def reserved_pieces(

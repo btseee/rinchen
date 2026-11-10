@@ -20,6 +20,11 @@ import pytest
 from rinchen.cli import translate as translate_module
 from rinchen.errors import ConfigError, DataError, UpstreamError
 from rinchen.infer.engine_types import LoadOptions
+from tests.support.engines import (
+    engine_environment,  # noqa: F401 - the fixture of the test over the real engine
+    scripted_engine,
+    symbol_processor,
+)
 from tests.support.launch_cli import assert_one_error
 from tests.support.model_exports import write_model_export
 from tests.support.step_dirs import flip_one_byte
@@ -375,6 +380,24 @@ def test_an_error_of_the_engine_in_the_data_is_exit_3_and_names_the_lines(
     result = invoke(translate_args(), stdin=b"a\nb\nc\n")
 
     assert_one_error(result, 3, "lines 1 to 3: row 1 cannot be encoded")
+    assert result.stdout == ""
+
+
+@pytest.mark.usefixtures("engine_environment")
+def test_a_reserved_symbol_in_a_line_is_exit_3_naming_the_line_and_not_the_text(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    install(monkeypatch, scripted_engine(tmp_path, processor=symbol_processor()).engine)
+
+    result = invoke(
+        translate_args(),
+        stdin=f"fine\n{NOT_ASCII_SECRET} <2eng_Latn> {NOT_ASCII_SECRET}\nfine\n".encode(),
+    )
+
+    assert_one_error(
+        result, 3, "lines 1 to 3: row 1 contains the reserved symbol <2eng_Latn>"
+    )
+    assert "private" not in result.stderr
     assert result.stdout == ""
 
 

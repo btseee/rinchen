@@ -25,6 +25,7 @@ The stand-ins of the library:
 
 from __future__ import annotations
 
+import re
 import sys
 import threading
 from collections.abc import Callable, Sequence
@@ -40,6 +41,7 @@ from rinchen.infer.engine import Engine
 from rinchen.infer.engine_types import LoadOptions
 from rinchen.spm.symbols import user_defined_symbols
 from tests.support.fake_ct2 import (
+    SPIECE,
     Ct2Result,
     FakeProcessor,
     Hypothesis,
@@ -107,6 +109,37 @@ def copy_windows(line: tuple[str, ...]) -> Sequence[Hypothesis]:
     if len(line) > 1 and line[1] == "<doc>":
         return [hyp(*["<sep>" if p == SP + "<sep>" else p for p in line[2:]], END)]
     return echo(line)
+
+
+class SymbolProcessor(FakeProcessor):
+    """A `FakeProcessor` that cuts a reserved symbol out of a text as SentencePiece does: the
+    symbol is one piece of its own, without the dummy prefix, wherever it stands in a word
+    (the model keeps every reserved symbol as a user-defined piece)."""
+
+    def __init__(self, pieces: Sequence[str], symbols: Sequence[str]) -> None:
+        super().__init__(pieces)
+        self._symbol_pattern = re.compile(
+            "("
+            + "|".join(re.escape(s) for s in sorted(symbols, key=len, reverse=True))
+            + ")"
+        )
+        self._symbols = frozenset(symbols)
+
+    def encode(self, text: str, out_type: type = str) -> list[str]:
+        self.encoded.append(text)
+        pieces: list[str] = []
+        for word in text.split():
+            for part in self._symbol_pattern.split(word):
+                if part in self._symbols:
+                    pieces.append(part)
+                elif part:
+                    pieces.append(SPIECE + part)
+        return pieces
+
+
+def symbol_processor() -> SymbolProcessor:
+    """The processor of the engine's pieces that knows every reserved symbol of the project."""
+    return SymbolProcessor(ENGINE_PIECES, user_defined_symbols())
 
 
 class LiveCt2(ScriptedCt2):

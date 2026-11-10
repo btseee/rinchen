@@ -1,5 +1,6 @@
 """Tests for `rinchen.infer.source_tokens`: where the direction tag goes for each placement,
-and the pieces no translation of ours holds (the rule D10's teacher and the engine share).
+the pieces no translation of ours holds (the rule D10's teacher and the engine share) and the
+symbols no request may spell.
 
 The processor is `FakeProcessor` over the pieces a model of ours has; one test also reads the
 pieces of a real SentencePiece model (the toy one) to see the rule agree with the library.
@@ -11,7 +12,11 @@ import pytest
 import sentencepiece
 
 from rinchen.infer import source_tokens
-from rinchen.infer.source_tokens import ct2_source_tokens, reserved_pieces
+from rinchen.infer.source_tokens import (
+    ct2_source_tokens,
+    reserved_pieces,
+    source_symbols,
+)
 from rinchen.spm.symbols import STRUCTURAL_SYMBOLS, user_defined_symbols
 from rinchen.train import distill_teacher
 from tests.support.fake_ct2 import SPIECE, FakeProcessor
@@ -230,3 +235,28 @@ def test_the_rule_agrees_with_the_pieces_of_a_real_model(
     assert {"<unk>", END, "<sep>", TAG, "<bt>", *FOREIGN} <= reserved
     assert not reserved & {BYTE, "<0xE0>", "<s>", SPIECE, *PLACEHOLDERS}
     assert reserved == frozenset({"<unk>", END, *NON_PLACEHOLDERS, *FOREIGN})
+
+
+# -- the symbols a request may not spell
+
+
+def test_the_symbols_of_a_request_are_the_tags_and_the_structural_ones_and_no_placeholder() -> (
+    None
+):
+    symbols = source_symbols()
+
+    assert {"<2khk_Cyrl>", "<2eng_Latn>", "<2mn_Mong>"} <= set(symbols)
+    assert set(STRUCTURAL_SYMBOLS) <= set(symbols)
+    assert not set(symbols) & set(PLACEHOLDERS)
+    assert len(symbols) == len(set(symbols))
+    assert list(symbols) == NON_PLACEHOLDERS
+
+
+def test_a_real_model_reads_each_of_them_in_a_text_as_one_piece_and_a_placeholder_too(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    model = train_toy_spm(tmp_path_factory.mktemp("source_symbols_spm"))
+    real = sentencepiece.SentencePieceProcessor(model_file=str(model))
+
+    for symbol in [*source_symbols(), PLACEHOLDERS[1]]:
+        assert symbol in real.encode(f"hello {symbol} world", out_type=str)
