@@ -11,7 +11,7 @@
 `--model` (or `RINCHEN_MODEL`) is the export directory `rinchen export convert` made. The
 settings are layered, the last one winning: the defaults of `rinchen.config.serve.ServeConfig`,
 the YAML file of `--config` (`configs/serve/*.yaml`), the `RINCHEN_SERVE_<FIELD>` environment
-variables and these flags. The service listens on 127.0.0.1 unless told otherwise and has no
+variables (a name under that prefix that is no field is refused, not ignored) and these flags. The service listens on 127.0.0.1 unless told otherwise and has no
 authentication: put a gateway in front of it.
 
 The command builds the settings and has the manifest vouch for the export BEFORE it binds a

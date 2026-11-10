@@ -339,6 +339,31 @@ def test_a_bad_environment_and_an_unknown_key_of_the_file_are_exit_2(
     assert started.events == []
 
 
+def test_a_mistyped_setting_of_the_environment_is_exit_2_that_names_it_and_binds_nothing(
+    started: Started, export: Path
+) -> None:
+    result = serve(
+        "--model",
+        str(export),
+        env={"RINCHEN_SERVE_PROT": "SECRET-VALUE-12345", "RINCHEN_SERVE_PORT": "9300"},
+    )
+
+    assert result.exit_code == 2
+    assert "RINCHEN_SERVE_PROT (did you mean RINCHEN_SERVE_PORT?)" in result.stderr
+    assert "SECRET-VALUE-12345" not in result.stderr + result.stdout
+    assert started.events == []
+
+
+def test_a_value_of_the_environment_out_of_range_names_its_variable_in_the_exit_message(
+    started: Started, export: Path
+) -> None:
+    result = serve("--model", str(export), env={"RINCHEN_SERVE_PORT": "70000"})
+
+    assert result.exit_code == 2
+    assert "port (from RINCHEN_SERVE_PORT)" in result.stderr
+    assert started.events == []
+
+
 # ---- the script converter -----------------------------------------------------------------
 
 

@@ -18,8 +18,10 @@ for `drain_wait_seconds`, the rest. A container's stop grace period must be long
 
 from __future__ import annotations
 
+import difflib
 import math
-from collections.abc import Mapping
+import os
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Annotated, Any, Final, Literal
 
@@ -57,6 +59,12 @@ DEFAULT_MAX_TEXT_CHARS: Final = 5000
 # What the engine allows of a source (`rinchen.infer.engine_types.MAX_SOURCE_PIECES`; a
 # test pins the two equal): CTranslate2 cuts a longer source silently.
 _MAX_SOURCE_PIECES: Final = 1023
+
+# The flags of the converter's two paths are not the names of the fields.
+_CONVERTER_FLAGS: Final = {
+    ("script_converter", "ct2_dir"): "--script-converter-ct2",
+    ("script_converter", "spm_model"): "--script-converter-spm",
+}
 
 # Strict so a quoted number or a YAML boolean is a typo to report, not a value to coerce.
 _Count = Annotated[int, Field(strict=True, ge=1)]
@@ -217,6 +225,7 @@ class _GivenEnvironment(ServeEnvSettings):
 
 
 def _environment_layer(env: Mapping[str, str] | None) -> dict[str, Any]:
+    _refuse_unknown_names(os.environ if env is None else env)
     try:
         if env is None:
             return ServeEnvSettings().layer()
@@ -228,13 +237,49 @@ def _environment_layer(env: Mapping[str, str] | None) -> dict[str, Any]:
         return _GivenEnvironment(**given).layer()
     except ValidationError as error:
         raise ConfigError(
-            f"invalid {ENV_PREFIX}* environment: {_where(error)}"
+            f"invalid {ENV_PREFIX}* environment: {_where(error, variable=True)}"
         ) from error
 
 
-def _where(error: ValidationError) -> str:
+def _refuse_unknown_names(env: Mapping[str, str]) -> None:
+    """A name under the prefix that is no field is a typo, and a setting that is silently
+    ignored is worse than one that is refused. Only names are reported, never values."""
+    fields = tuple(ServeEnvSettings.model_fields)
+    unknown = sorted(
+        name
+        for name in env
+        if name.upper().startswith(ENV_PREFIX)
+        and name[len(ENV_PREFIX) :].lower() not in fields
+    )
+    if not unknown:
+        return
+    noun = "variable" if len(unknown) == 1 else "variables"
+    named = ", ".join(_with_suggestion(name, fields) for name in unknown)
+    raise ConfigError(
+        f"unknown environment {noun} {named}: a setting is {ENV_PREFIX}<FIELD> for a "
+        "field of ServeConfig; the model is --model or RINCHEN_MODEL, not a setting"
+    )
+
+
+def _with_suggestion(name: str, fields: Sequence[str]) -> str:
+    close = difflib.get_close_matches(name[len(ENV_PREFIX) :].lower(), fields, n=1)
+    if not close:
+        return name
+    return f"{name} (did you mean {ENV_PREFIX}{close[0].upper()}?)"
+
+
+def _where(error: ValidationError, *, variable: bool = False) -> str:
+    """The complaints of `error` as `<field>: <what is wrong>`; with `variable`, the field is
+    named by the environment variable that sets it."""
+
+    def named(location: tuple[str | int, ...]) -> str:
+        field = ".".join(str(part) for part in location)
+        if not field:
+            return "config"
+        return f"{ENV_PREFIX}{field.upper()}" if variable else field
+
     return "; ".join(
-        f"{'.'.join(str(part) for part in item['loc']) or 'config'}: {item['msg']}"
+        f"{named(item['loc'])}: {item['msg']}"
         for item in error.errors(include_input=False)
     )
 
@@ -271,6 +316,49 @@ def _stack(layers: list[Mapping[str, Any]]) -> dict[str, Any]:
     return merged
 
 
+def _flag_of(location: tuple[str | int, ...]) -> str:
+    if location in _CONVERTER_FLAGS:
+        return _CONVERTER_FLAGS[location]
+    return "--" + "-".join(str(part) for part in location).replace("_", "-")
+
+
+def _holds(layer: Mapping[str, Any], location: tuple[str | int, ...]) -> bool:
+    node: Any = layer
+    for part in location:
+        if not isinstance(node, Mapping) or part not in node:
+            return False
+        node = node[part]
+    return True
+
+
+def _where_from(
+    error: ValidationError,
+    *,
+    path: Path | None,
+    layers: Sequence[tuple[str, Mapping[str, Any]]],
+) -> str:
+    """The complaints of `error`, each with the layer that supplied the value it is about
+    (the last one that holds that key, as the merge resolves it): the file, the environment
+    variable or the flag. A key no layer holds (a missing field) names none."""
+
+    def source(location: tuple[str | int, ...]) -> str:
+        for kind, layer in reversed(layers):
+            if _holds(layer, location):
+                if kind == "file":
+                    return f" (from {path})"
+                if kind == "env":
+                    names = "_".join(str(part) for part in location).upper()
+                    return f" (from {ENV_PREFIX}{names})"
+                return f" (from {_flag_of(location)})"
+        return ""
+
+    return "; ".join(
+        f"{'.'.join(str(part) for part in item['loc']) or 'config'}"
+        f"{source(item['loc'])}: {item['msg']}"
+        for item in error.errors(include_input=False)
+    )
+
+
 def load_serve_config(
     path: Path | None,
     *,
@@ -283,14 +371,21 @@ def load_serve_config(
 
     Raises:
         ConfigError: the file is missing, unreadable, not a mapping, or names an unknown key
-            (the key is named), a value in any layer is of the wrong type or out of range,
-            or `device` or `compute_type` is `auto`.
+            (the key is named), a name of the environment under the prefix is no field (the
+            name is given, never its value), a value in any layer is of the wrong type or out
+            of range (the layer that supplied it is named), or `device` or `compute_type` is
+            `auto`.
     """
     file_layer = _read_yaml(path) if path is not None else {}
+    env_layer = _environment_layer(env)
     given = {k: v for k, v in (overrides or {}).items() if v is not None}
-    merged = _stack([file_layer, _environment_layer(env), given])
+    merged = _stack([file_layer, env_layer, given])
     try:
         return ServeConfig.model_validate(merged)
     except ValidationError as error:
-        origin = f" {path}" if path is not None else ""
-        raise ConfigError(f"invalid serve config{origin}: {_where(error)}") from error
+        where = _where_from(
+            error,
+            path=path,
+            layers=[("file", file_layer), ("env", env_layer), ("flag", given)],
+        )
+        raise ConfigError(f"invalid serve config: {where}") from error

@@ -290,11 +290,11 @@ def test_an_empty_variable_of_the_process_environment_is_not_set(
     assert (config.port, config.beam_size) == (8000, 5)
 
 
-def test_what_is_not_ours_in_the_environment_is_ignored() -> None:
+def test_what_is_not_under_the_prefix_in_the_environment_is_ignored() -> None:
     env = {
         "RINCHEN_MODEL": "models/tiny",
-        "RINCHEN_SERVE_MODEL": "models/tiny",
-        "RINCHEN_SERVE_NO_SUCH_THING": "1",
+        "RINCHEN_MODEL_DIR": "models/tiny",
+        "RINCHEN_SERVER_PORT": "1",
         "PORT": "1",
         "RINCHEN_SEED": "7",
     }
@@ -494,4 +494,233 @@ def test_the_two_waits_of_a_stop_never_add_up_to_more_than_the_timeout(
     assert config.drain_wait_seconds >= 0
     assert config.graceful_wait_seconds + config.drain_wait_seconds == pytest.approx(
         timeout
+    )
+
+
+# ---- a name of the environment that is no setting -----------------------------------------
+
+SECRET_VALUE = "SECRET-VALUE-12345"
+
+
+@pytest.mark.parametrize(
+    ("name", "message"),
+    [
+        (
+            "RINCHEN_SERVE_PROT",
+            (
+                "unknown environment variable RINCHEN_SERVE_PROT (did you mean "
+                "RINCHEN_SERVE_PORT?): a setting is RINCHEN_SERVE_<FIELD> for a field of "
+                "ServeConfig; the model is --model or RINCHEN_MODEL, not a setting"
+            ),
+        ),
+        (
+            "RINCHEN_SERVE__PORT",
+            (
+                "unknown environment variable RINCHEN_SERVE__PORT (did you mean "
+                "RINCHEN_SERVE_PORT?): a setting is RINCHEN_SERVE_<FIELD> for a field of "
+                "ServeConfig; the model is --model or RINCHEN_MODEL, not a setting"
+            ),
+        ),
+        (
+            "RINCHEN_SERVE_MAX_QUEUE_SENTENCE",
+            (
+                "unknown environment variable RINCHEN_SERVE_MAX_QUEUE_SENTENCE (did you mean "
+                "RINCHEN_SERVE_MAX_QUEUE_SENTENCES?): a setting is RINCHEN_SERVE_<FIELD> for a "
+                "field of ServeConfig; the model is --model or RINCHEN_MODEL, not a setting"
+            ),
+        ),
+        (
+            "RINCHEN_SERVE_MODEL",
+            (
+                "unknown environment variable RINCHEN_SERVE_MODEL: a setting is "
+                "RINCHEN_SERVE_<FIELD> for a field of ServeConfig; the model is --model or "
+                "RINCHEN_MODEL, not a setting"
+            ),
+        ),
+        (
+            "rinchen_serve_prot",
+            (
+                "unknown environment variable rinchen_serve_prot (did you mean "
+                "RINCHEN_SERVE_PORT?): a setting is RINCHEN_SERVE_<FIELD> for a field of "
+                "ServeConfig; the model is --model or RINCHEN_MODEL, not a setting"
+            ),
+        ),
+        (
+            "RINCHEN_SERVE_",
+            (
+                "unknown environment variable RINCHEN_SERVE_: a setting is "
+                "RINCHEN_SERVE_<FIELD> for a field of ServeConfig; the model is --model or "
+                "RINCHEN_MODEL, not a setting"
+            ),
+        ),
+    ],
+)
+def test_a_mistyped_setting_of_the_environment_is_refused_by_name_and_never_by_value(
+    name: str, message: str
+) -> None:
+    with pytest.raises(ConfigError) as caught:
+        load_serve_config(None, env={name: SECRET_VALUE})
+
+    assert str(caught.value) == message
+
+
+def test_a_mistyped_setting_is_refused_even_when_its_value_is_empty() -> None:
+    with pytest.raises(ConfigError, match="RINCHEN_SERVE_PROT"):
+        load_serve_config(None, env={"RINCHEN_SERVE_PROT": ""})
+
+
+def test_every_unknown_name_is_reported_and_the_known_ones_are_not() -> None:
+    env = {
+        "RINCHEN_SERVE_PORT": "9090",
+        "RINCHEN_SERVE_ZZZ": SECRET_VALUE,
+        "RINCHEN_SERVE_AAA": SECRET_VALUE,
+    }
+
+    with pytest.raises(ConfigError) as caught:
+        load_serve_config(None, env=env)
+
+    message = str(caught.value)
+    assert message.startswith(
+        "unknown environment variables RINCHEN_SERVE_AAA, RINCHEN_SERVE_ZZZ: "
+    )
+    assert "RINCHEN_SERVE_PORT" not in message
+    assert SECRET_VALUE not in message
+
+
+def test_a_mistyped_setting_of_the_process_environment_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RINCHEN_SERVE_PROT", SECRET_VALUE)
+
+    with pytest.raises(ConfigError) as caught:
+        load_serve_config(None)
+
+    assert "RINCHEN_SERVE_PROT" in str(caught.value)
+    assert SECRET_VALUE not in str(caught.value)
+
+
+def test_a_given_environment_hides_a_mistyped_name_of_the_process_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RINCHEN_SERVE_PROT", "1")
+
+    assert load_serve_config(None, env={}).port == 8000
+
+
+def test_every_field_of_the_settings_class_is_a_known_name() -> None:
+    env = {
+        f"RINCHEN_SERVE_{name.upper()}": "" for name in ServeEnvSettings.model_fields
+    }
+
+    assert load_serve_config(None, env=env).model_dump() == DEFAULTS
+
+
+def test_the_two_flat_variables_of_the_converter_are_known_names() -> None:
+    env = {
+        "RINCHEN_SERVE_SCRIPT_CONVERTER_CT2_DIR": "conv/ct2",
+        "RINCHEN_SERVE_SCRIPT_CONVERTER_SPM_MODEL": "conv/spm.model",
+    }
+
+    assert load_serve_config(None, env=env).script_converter is not None
+
+
+# ---- which layer supplied a value that is refused -----------------------------------------
+
+
+def test_an_environment_value_out_of_range_names_its_variable_and_not_the_file(
+    tmp_path: Path,
+) -> None:
+    path = write_yaml(tmp_path, {"port": 8001})
+
+    with pytest.raises(ConfigError) as caught:
+        load_serve_config(path, env={"RINCHEN_SERVE_PORT": "70000"})
+
+    assert str(caught.value) == (
+        "invalid serve config: port (from RINCHEN_SERVE_PORT): "
+        "Input should be less than or equal to 65535"
+    )
+
+
+def test_a_value_of_the_file_names_the_file(tmp_path: Path) -> None:
+    path = write_yaml(tmp_path, {"max_texts": 65})
+
+    with pytest.raises(ConfigError) as caught:
+        load_serve_config(path, env={"RINCHEN_SERVE_PORT": "9090"})
+
+    assert str(caught.value) == (
+        f"invalid serve config: max_texts (from {path}): "
+        "Input should be less than or equal to 64"
+    )
+
+
+def test_a_flag_out_of_range_names_the_flag(tmp_path: Path) -> None:
+    path = write_yaml(tmp_path, {"port": 8001})
+
+    with pytest.raises(ConfigError) as caught:
+        load_serve_config(path, env={}, overrides={"max_text_chars": 0})
+
+    assert str(caught.value) == (
+        "invalid serve config: max_text_chars (from --max-text-chars): "
+        "Input should be greater than or equal to 1"
+    )
+
+
+def test_each_refused_value_names_the_layer_that_supplied_it(tmp_path: Path) -> None:
+    path = write_yaml(tmp_path, {"max_texts": 65})
+
+    with pytest.raises(ConfigError) as caught:
+        load_serve_config(
+            path,
+            env={"RINCHEN_SERVE_PORT": "70000"},
+            overrides={"max_text_chars": 0},
+        )
+
+    message = str(caught.value)
+    assert f"max_texts (from {path})" in message
+    assert "port (from RINCHEN_SERVE_PORT)" in message
+    assert "max_text_chars (from --max-text-chars)" in message
+
+
+def test_the_last_layer_that_holds_a_key_is_the_one_blamed(tmp_path: Path) -> None:
+    path = write_yaml(tmp_path, {"port": 70001})
+
+    with pytest.raises(ConfigError) as caught:
+        load_serve_config(path, env={"RINCHEN_SERVE_PORT": "70000"})
+
+    assert "port (from RINCHEN_SERVE_PORT)" in str(caught.value)
+    assert str(path) not in str(caught.value)
+
+
+def test_a_converter_path_of_the_flags_is_blamed_by_its_own_flag() -> None:
+    with pytest.raises(ConfigError) as caught:
+        load_serve_config(
+            None,
+            env={},
+            overrides={"script_converter": {"ct2_dir": "   ", "spm_model": "b"}},
+        )
+
+    assert str(caught.value) == (
+        "invalid serve config: script_converter.ct2_dir (from --script-converter-ct2): "
+        "Value error, ct2_dir must not be empty or blank"
+    )
+
+
+def test_a_field_no_layer_holds_names_no_layer() -> None:
+    with pytest.raises(ConfigError) as caught:
+        load_serve_config(
+            None, env={"RINCHEN_SERVE_SCRIPT_CONVERTER_CT2_DIR": "conv/ct2"}
+        )
+
+    assert str(caught.value) == (
+        "invalid serve config: script_converter.spm_model: Field required"
+    )
+
+
+def test_an_environment_value_of_the_wrong_type_names_its_variable() -> None:
+    with pytest.raises(ConfigError) as caught:
+        load_serve_config(None, env={"RINCHEN_SERVE_PORT": "eighty"})
+
+    assert str(caught.value) == (
+        "invalid RINCHEN_SERVE_* environment: RINCHEN_SERVE_PORT: Input should be a "
+        "valid integer, unable to parse string as an integer"
     )
