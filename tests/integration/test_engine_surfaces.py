@@ -60,7 +60,10 @@ or a score never does; the D11 spike measured the same counts and scores):
         78.5: the model was continued on windows of 2 to 4 sentences only, so after one sentence
         it writes `<sep>`, which the engine dropped as a reserved piece and now reads as the end
         of the sentence (it cuts the hypothesis there). The same 400 sentences as plain rows of
-        the document model: 400 `ok`, chrF 88.4 (400 `no_output` before). With a cap of 20
+        the document model: 400 `ok`, chrF 88.5 under `retry` (88.2 with the mask `off`; 400
+        `no_output` before the separator was read as the end of the sentence, and 88.4 under
+        `retry` and 81.8 under `always` before the list of such a sentence let `<sep>` through).
+        With a cap of 20
         pieces 94 of the 106 windows fall back; each of
         the 334 windows of 2 sentences, decoded with a cap two pieces below its own full
         translation (21 distinct lengths), falls back although it has one segment per sentence
@@ -123,6 +126,12 @@ MIN_RETRIES: Final = 10
 PURITY_FLOOR: Final = 0.98
 MIN_CONVERTER_WORDS_WITH_SCRIPT: Final = 400
 MIN_ALIGNMENT: Final = 0.9
+# The script mask must not change what a document model writes for a lone sentence: of 400
+# plain rows at most this many texts differ from the unmasked ones (5 measured; 358 when the
+# list suppressed `<sep>` and the model ran on) and the chrF may drop by this much at most
+# (+0.26 measured; -6.4 with the defect).
+MAX_ROWS_CHANGED_BY_THE_MASK: Final = 20
+MAX_MASK_CHRF_DROP: Final = 1.0
 SURFACE_SENTENCES: Final = 50
 UNTRAINED_OUTPUTS: Final = 500
 TRAINED_OUTPUTS: Final = 400
@@ -622,6 +631,43 @@ def test_every_document_has_one_translation_per_sentence_and_most_windows_line_u
     # (a single the windows left over, or a sentence of a window that did not line up) comes
     # back with a `<sep>` after it; the engine cuts it there, so no sentence is missing.
     assert statuses == {"ok": sentences}
+
+
+def test_plain_rows_of_a_document_model_do_not_run_on_in_any_script_mode(
+    d11_document_model: DocumentModel, document_engine: Engine, record_property: Any
+) -> None:
+    """A sentence decoded alone by a document model is cut at the `<sep>` the model writes
+    after it, so the list of every script mode must let `<sep>` through: with `<sep>`
+    suppressed the model writes the runner-up token and goes on, inventing the sentences that
+    follow, and the status stays `ok` (the mode `always` changed 358 of 400 texts, chrF 88.2
+    to 81.8). The same 400 sentences as plain rows in each mode."""
+    cases = cases_of(d11_document_model.documents.test)
+    rows = [
+        Row(sentence, case.src_lang, case.tgt_lang)
+        for case in cases
+        for sentence in case.sentences
+    ]
+    references = [text for case in cases for text in case.references]
+    runs = {
+        mode: document_engine.translate(rows, replace(GREEDY_128, script_mask=mode))
+        for mode in ("off", "retry", "always")
+    }
+    chrf = {
+        mode: corpus_scores([t.text for t in out], references).chrf
+        for mode, out in runs.items()
+    }
+    changed = {
+        mode: sum(a.text != b.text for a, b in zip(runs["off"], out, strict=True))
+        for mode, out in runs.items()
+    }
+    record_property("plain_rows_chrf", {m: round(v, 2) for m, v in chrf.items()})
+    record_property("plain_rows_changed_by_the_mask", changed)
+
+    for mode, out in runs.items():
+        assert {t.status for t in out} == {"ok"}, mode
+    for mode in ("retry", "always"):
+        assert changed[mode] <= MAX_ROWS_CHANGED_BY_THE_MASK, (mode, changed)
+        assert chrf[mode] >= chrf["off"] - MAX_MASK_CHRF_DROP, (mode, chrf)
 
 
 @pytest.mark.parametrize("size", WINDOW_SIZES)
