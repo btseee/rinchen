@@ -975,9 +975,10 @@ and `report.json` holds all six values at or above the gate's floors (numbers 89
 0.9313 against 0.90, terms 1044 of 1044, script purity 1.0 over 900 rows, `mn_Mong` source retention 0.9976 against 0.95), while the negative controls score far below (hypotheses moved by 7 rows:
 numbers 3 of 960, placeholders 2 of 600; the D11 teacher, which never saw a digit or a placeholder: 0 of 960 and 0 of 600, retention 0.3172; a glossary the model never writes 0 of 1,044;
 placeholder indices 10 and up 0 of 28; script mask `off` leaves 101 of 900 rows under the purity floor).** The branch is stacked on `d11-export-serving` (cut from it at `23dc962` on 2026-11-10), is
-not merged and not pushed, and no CI run covers it. It is 14 commits above `d11-export-serving` at its code tip `ae4e816` (one of design, eight of tasks, five of the fix wave), and one more with the records
-(the design commit is `37634d1`; the tasks are `a6ecb70`, `60ba4d6`, `93d23b9`, `396e85d`, `3e65275`, `f8087f1`, `4f8cba7` and `b2466ef`; the fix wave is `64e45f0`, `40dc2ee`, `ce794ee`, `338bb02` and the code
-tip `ae4e816`, `D12: review minors`; the records are the commit `D12: runbook, spec amendments and state and decision records`). It is an INSTRUMENT, not a mechanism and not a verdict on any model: D12
+not merged and not pushed, and no CI run covers it. It is 19 commits above `d11-export-serving` at its code tip `e92687d` (one of design, eight of tasks, five of the fix wave, three of the final wave after the re-review), and two with the records
+(the design commit is `37634d1`; the tasks are `a6ecb70`, `60ba4d6`, `93d23b9`, `396e85d`, `3e65275`, `f8087f1`, `4f8cba7` and `b2466ef`; the fix wave is `64e45f0`, `40dc2ee`, `ce794ee`, `338bb02` and
+`ae4e816`, `D12: review minors`; the final wave is `d1b25a9` (a currency symbol read as the unit of the wrong number), `e389c2b` (the surface-exact detail sees the layout of a number) and the code
+tip `e92687d`, `D12: re-review minors`; the records are the commits `D12: runbook, spec amendments and state and decision records` and `D12: record the re-review`). It is an INSTRUMENT, not a mechanism and not a verdict on any model: D12
 MEASURES numbers, placeholders, names, glossary terms, the script of the output and a source in the traditional script, and builds no masking, no terminology engine, no `terminology` request field and no
 training row that teaches either (this amends D11's T22; nobody owns the mechanisms or their training data after D12); the only data it ever ran on is the templated toy of `tests/support/robust_toy.py`
 (it ranks nothing), no real corpus, glossary or model exists, **no GPU was used** (the owner did not authorise it; every Eole process, the converter and every CTranslate2 translator ran with
@@ -988,20 +989,25 @@ functions), `robust_suite{,_rules}` (the strict suite file `rinchen.robustness.s
 `mong_source_retention`, amendment C1; `robustness_coverage`), `robust_report` (`report.json`, `rinchen.report.robustness/1`, with a `coverage` map), the command `rinchen eval robustness` (`cli/eval_robustness{,_plan,_output}.py`;
 `--model` or `--hypotheses`, the converter pair, hash before read, the manifest last, exit 0 whenever it measured), the golden files in `tests/fixtures/robustness/`, the test helpers listed in `CLAUDE.md`
 (the toy, its suites and the gate stages) and `docs/runbooks/12_robustness.md`. The design is `docs/superpowers/specs/2026-11-10-d12-robustness-design.md` (amended to the finished code, section 7 listing
-A1 to A21); its rulings T1 to T20 and C1 are condensed in `DECISIONS.md` ("2026-11-10: D12 robustness: the rulings"), made by the design agent, the builders and the controller without a review round of
+A1 to A24); its rulings T1 to T20 and C1 are condensed in `DECISIONS.md` ("2026-11-10: D12 robustness: the rulings"), made by the design agent, the builders and the controller without a review round of
 their own. Built task by task with tests first after a spike on the real Eole and CTranslate2 (Tasks 1 to 8, then ONE combined review by one reviewer, a fix wave, a scoped re-review and these records).
 **The combined review (one independent reviewer, read-only, Tasks 1 to 8, `37634d1..b2466ef`) found: ready with fixes, 0 Critical, 4 Important and 9 Minor findings.** I-1: the numbers metric failed
 identical text when one value appeared twice with different units (`5 and 5` plus a tugrik sign against itself); I-2: the denominators of the values were invisible (a value over 10 scored rows of 1,000, silence
 raising the script mean, a retention over two near-zero chrF scores); I-3: `term_acc` is natural agreement with a glossary, not adherence (the D11 teacher scores 1,041 of 1,044 because the glossary is the toy's noun
 table); I-4: the per-row outcomes could not reproduce the retention. The fix wave (five commits, `b2466ef..ae4e816`) fixed I-1, I-2 and I-4, the D8 race test (a process that exits while `/proc/<pid>/stat` is
 read raises `ProcessLookupError`, which the helper did not catch; the ONE edit to a D8 test) and the stale figures, left I-3 to documentation and parked the rest as limits (the hyphen over-acceptance, the
-converter provenance gap, the trivial-solution scores, no held-out `reorder` row, the floor margins). **The scoped re-review of the fix wave (`b2466ef..ae4e816`) was RUNNING when these records were
-written and its verdict is NOT recorded here; a follow-up edit adds it.** Gates, run for real on Linux, CPython 3.14.10: `ruff format --check .`, `ruff check .` and `mypy src` clean and `pytest -m "not
+converter provenance gap, the trivial-solution scores, no held-out `reorder` row, the floor margins). **The scoped re-review of the fix wave (`b2466ef..ae4e816`, one reader): approved with minors, no Critical and no Important finding.** Its probes (650,000 random cases of the numbers matching against an
+independent reference, 0 mismatches; the `coverage` of 400 random sub-suites; the real r3 run through the real command unchanged: 892 of 960 and the other five headlines) found one minor in the code: M-1, the
+currency-symbol rule was wider than the vector it pinned (`$5 $7` read as `5 $` and `7`, so its faithful reorder `$7 $5` failed the units). The final wave fixed it with a touch-based rule (`d1b25a9`, A22), made the
+surface-exact detail see the layout of a date (`e389c2b`, A23: a copy-through echo is surface-exact on 568 of 960 again, not 720; only the detail and the golden `surface_exact_rows` 4 to 3 changed) and fixed the
+minors (`e92687d`: a string detail only for `chrf_signature`, the golden digest comment, `1 row`, one sentence of `--help` that broke in two lines, the docstring of the narrow report); the rest is wording and limits (A24):
+the per-row `value_cyrl` supports a ratio-of-mean-sentence-chrF PROXY of the retention, not the corpus statistic (golden 0.5099 against 0.5018; real 0.9987 against 0.9976); `coverage` sits outside
+`robustness_block`, so D13 must embed `robustness_coverage` beside it; the real run and the golden numbers rows are unchanged. Gates, run for real on Linux, CPython 3.14.10: `ruff format --check .`, `ruff check .` and `mypy src` clean and `pytest -m "not
 network" -q` -- 11983 passed after Task 1, 12155 after Task 2, 12265 after Task 3, 12967 after Task 4, 13217 after Task 5, 13457 after Task 7, 13491 after Task 8 (22 to 29 min each, one sequential process; Task 6's run, 13311 passed,
 had the one failure of the D8 race test) and **13543 passed, 1 skipped, 10 deselected** after the fix wave (`ae4e816`; the machine was at load 58 to 130, so the suite ran as five parallel pytest processes
-that cover every collected test exactly once, about 19 minutes), against 11778 at the end of D11; the D5 to D11 regression sets stayed green. Mutation checks by hand, one mutant at a time, as recorded per
-task: 63, 68, 57, 93, 122, 68 + 5, 93 and six gate mutants for Tasks 1 to 8, and 13, 18 and 12 for the fix wave; two differential fuzzes against independent references (300,000 random cases of the numbers
-metric against a brute-force unit-aware matching, 0 mismatches).
+that cover every collected test exactly once, about 19 minutes) and 13,583 passed, 1 skipped, 10 deselected (30 min 44 s, one sequential process, load average 6 to 20; 13,543 after the fix wave, so 40 new tests), `ruff format --check .` (598 files), `ruff check .` and `mypy src` (211 files) clean after the final wave (`e92687d`), against 11778 at the end of D11; the D5 to D11 regression sets stayed green. Mutation checks by hand, one mutant at a time, as recorded per
+task: 63, 68, 57, 93, 122, 68 + 5, 93 and six gate mutants for Tasks 1 to 8, and 13, 18 and 12 for the fix wave and 9, 5 and 6 for the final wave (one equivalent: a plural for zero rows that no line prints); differential fuzzes against independent references (300,000 random cases of the numbers
+metric against a brute-force unit-aware matching, 0 mismatches; for the final wave 200,000 pairs and 160,308 texts of the touch-based unit rule and 400,000 pairs of the surface detail, 0 mismatches).
 Evidence of the STOP gate, measured by the gate and again for the runbook on 2026-11-10 (Intel Core Ultra 7 265K, 20 cores, 46 GiB, one thread per command; every count and score below was the same in the
 spike and in the gate wherever the runbook's "Measured numbers" does not say otherwise): the toy's teacher trains in 186.9 s (190.9 s with the export and the suites) and its `model.bin` (2,080,071 bytes, SHA-256
 `e28d1566...a6`) is byte-identical to the design spike's and to the gate's earlier retraining, so the gate's figures are exact, not statistical (the gate records the digest and does not assert it); the toy's
@@ -1020,11 +1026,11 @@ terminology and the training data that would make a model use them (nobody owns 
 spellings; number and magnitude words are not read); suites from real parallel text and real glossaries (D13); a real converter and real traditional-script text; D15's own tiny suite and matching training rows
 (D12's generator is a test helper); the D3 gates assigned to D4, the D5 gates that need real text or a reader and the D6 to D11 gates stay open.
 Known and open: the limits listed in the runbook (`term_acc` is agreement, not adherence; the hyphen and prefix over-acceptance of names; the converter's files are hashed but loaded without re-verification and `ScriptConverter`
-has no `close`; `read_suite` and `read_hypotheses` are used only by tests and the caps bound the parse, not memory; trivial solutions score high; no held-out `reorder` row; `5 $7`; retention above 1; script silence is
-excluded by design; `surface_exact_rows` does not see the layout of a date; the floors have margin and bit-identical training is not asserted; the sacrebleu signature pinned in the golden file fails on a bump on purpose;
+has no `close`; `read_suite` and `read_hypotheses` are used only by tests and the caps bound the parse, not memory; trivial solutions score high; no held-out `reorder` row; a symbol with a space on both sides is the unit of the number before it (`5 $ 7`); retention above 1 and a PROXY from the per-row chrF; script silence is
+excluded by design; `coverage` outside the block; the floors have margin and bit-identical training is not asserted; the sacrebleu signature pinned in the golden file fails on a bump on purpose;
 the disclosed process slips of the wave). NOT verified: any run on a GPU, a real model, corpus or glossary, a real converter, the exit codes 4, 1 and 130 with real failures, memory at large suites, CI, Windows and
-macOS, and the re-review of the fix wave. [EVIDENCE: the gate chain, the two integration modules (31 tests: 442 s under load, 374.7 s on a quiet machine), the read-only drivers of the runbook
-(`scratchpad/d12-t9/`), the spike (`spike-findings.md`) and the review report, 2026-11-10, commits `37634d1` through `ae4e816`.]
+macOS, and a review of the final wave by another reader. [EVIDENCE: the gate chain, the two integration modules (31 tests: 442 s under load, 374.7 s on a quiet machine), the read-only drivers of the runbook
+(`scratchpad/d12-t9/`), the spike (`spike-findings.md`) and the review report, 2026-11-10, commits `37634d1` through `e92687d`.]
 
 Branch status (updated 2026-11-10, after the D12 build): `main` holds D3, the D3 research follow-up, D4
 and D5, and is at `0d534a3` (the commit that records the D5 merge; `862e176` is the D5 merge tip,
@@ -1038,10 +1044,10 @@ on it (cut from `d6-synthetic-data` at `9973319`); D8 lives on `d8-teacher-train
 `d9-document-level` at `7d0c166`; its last code commit is `233ba33`, `D10: re-review minors`, and the records are the commits `D10: runbook, spec amendments and
 state and decision records` and `D10: record the re-review`, `b672aa8`); D11 lives on `d11-export-serving`, stacked on D10 (cut from `d10-distillation` at `b672aa8`; its last code
 commit is `039d1d7` (the final wave `330250a`, `55629cd`, `039d1d7` follows `4bfaa5e`, `D11: review minors (serving)`), and the records are the commits `D11: runbook, spec amendments and state and decision records` and `D11: record the re-review`); D12 lives
-on `d12-robustness`, stacked on D11 (cut from `d11-export-serving` at `23dc962`; its last code commit is `ae4e816`, `D12: review minors`, and the records are the commit `D12: runbook, spec amendments and state and decision records`). None
+on `d12-robustness`, stacked on D11 (cut from `d11-export-serving` at `23dc962`; its last code commit is `e92687d`, `D12: re-review minors`, and the records are the commits `D12: runbook, spec amendments and state and decision records` and `D12: record the re-review`). None
 of the seven is merged into `main` and none is pushed; merging D12 means merging D6, D7, D8, D9, D10 and D11 first. At the D5 merge `main` was 81 commits ahead of `origin/main`
 (`9e7b0ec`); it is unpushed, and no CI run covers D3, D4, D5, D6, D7, D8, D9, D10, D11 or D12. The full local gate was last run
-on the D12 branch: 13543 passed, 1 skipped, 10 deselected (D6 to D12 included), on `ae4e816` (in five parallel parts; 13491 on `D12: the robustness gate`, `b2466ef`; 11983 after Task 1); on the D11 branch it gave
+on the D12 branch: 13,583 passed, 1 skipped, 10 deselected (D6 to D12 included), on `e92687d` (13543 on `ae4e816`, in five parallel parts; 13491 on `D12: the robustness gate`, `b2466ef`; 11983 after Task 1); on the D11 branch it gave
 11778 passed, 1 skipped, 10 deselected (D6 to D11 included), on `039d1d7` (11768 on `D11: review minors (serving)`, `4bfaa5e`; 11562 on `D11: the serving gate`, `b6d57a4`; 10258 after Task 1);
 on the D10 branch it gave 9750 passed, 1 skipped, 10 deselected, on `D10: re-review minors` (`233ba33`; 9706 on `D10: fix the vocabulary
 padding that a teacher hypothesis could hold`, `cc917e2`; 9439 on `D10: the tiny student gate`, `e67b05e`; 8517 after Task 1); on the D9
@@ -1057,9 +1063,9 @@ that needed code is fixed (`D8: re-review minors`).
 Next step: D13 (Final eval and release tooling): `eval/suites.py` (FLORES+ `khk_Cyrl` devtest for 16 directions, NTREX where available, the Mongolia-sourced human sets of D2), `eval/runner.py` (systems: Rinchen
 students and teacher, NLLB and MADLAD through CTranslate2, Hy-MT2 through vLLM), `eval/significance.py` (a paired bootstrap of 1,000 resamples with a fixed seed), `eval/report.py` (Markdown and JSON), `export/model_card.py`
 and `export/hub.py` (a dry-run upload with a mock); STOP: a tiny `report.md` and model card generated, a dry-run hub upload. Nothing in D12 blocks it. Its inputs from D12: `rinchen eval robustness` and the six-key block
-`rinchen.eval.robustness.robustness_block` (D13's `result.json` embeds it as it is, with the `coverage` of `robustness_coverage` and the section `details` of `robustness.json` on demand), the hypotheses JSONL file as the
-boundary between systems (a baseline's output enters through it: NLLB, MADLAD and Hy-MT2 are scored without any model of ours), the per-row outcomes of `robustness.json` (`ok`, `value`, `value_cyrl`: what the paired
-bootstrap resamples), the narrow `report.json` (`rinchen.report.robustness/1`, which D13's report writer replaces or keeps per suite), the sacrebleu signature that the result records, and the golden files as a model of a
+`rinchen.eval.robustness.robustness_block` (D13's `result.json` embeds it as it is and MUST embed the `coverage` of `robustness_coverage` beside it, which is not in the block, and the section `details` of `robustness.json` on demand), the hypotheses JSONL file as the
+boundary between systems (a baseline's output enters through it: NLLB, MADLAD and Hy-MT2 are scored without any model of ours), the per-row outcomes of `robustness.json` (`ok`, `value`, `value_cyrl`: the per-row material of the paired
+bootstrap; a ratio of the mean sentence chrF scores is a PROXY of the retention, and an exact bootstrap re-scores the texts), the narrow `report.json` (`rinchen.report.robustness/1`, which D13's report writer replaces or keeps per suite), the sacrebleu signature that the result records, and the golden files as a model of a
 pinned result. What D12 does not give D13: any real suite, model, glossary or reference, a builder of suites from real parallel text, a mechanism for placeholders or terminology, any evidence on a GPU or in `float16`;
 the open gates above and the D3 to D11 gates stay open.
 

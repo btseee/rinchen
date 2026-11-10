@@ -245,7 +245,10 @@ ready with fixes, no Critical finding and four Important ones (identical text fa
 different units; the denominators of the values were invisible; `term_acc` is agreement with a glossary, not adherence; the per-row outcomes
 could not reproduce the retention); its fix wave (five commits, gate 13543 passed, 1 skipped, 10 deselected, in five parallel parts) fixed three,
 repaired a load race in one D8 test and left open on purpose the limits that `docs/runbooks/12_robustness.md` lists under "Known limits". The
-scoped re-review of the fix wave was RUNNING when these records were written and its verdict is NOT recorded here; a follow-up edit adds it.
+scoped re-review of the fix wave approved it with minors (no Critical, no Important); its final wave (three commits, gate 13,583 passed, 1 skipped, 10 deselected) gave a
+currency symbol to the number it touches (`$5 $7` against `$7 $5` is exact, `5 $7` against `7 $5` is not), made the surface-exact detail see the layout
+of a date (a copy-through echo is surface-exact on 568 of 960 again) and fixed five minors; the per-row `value_cyrl` supports a ratio-of-mean-sentence-chrF
+PROXY of the retention, not the corpus statistic, and D13's report must embed `robustness_coverage` beside the six-key block.
 Next up: D13 (Final eval and release tooling). See `STATE.md`, `docs/runbooks/11_serving.md` and `docs/runbooks/12_robustness.md`.
 
 ## Evidence and full plan

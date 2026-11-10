@@ -7,7 +7,7 @@ terms; the script of the output; and a source written in the traditional Mongoli
 (`rinchen.eval.robust_*`); the suite file that carries the triples and their annotations; a runner that asks an engine for the hypotheses or reads them from a file; the result
 `robustness.json` with one outcome per row; the command `rinchen eval robustness` with its manifest; a narrow `report.json` whose `robustness` block is what D13's and D15's reports embed;
 a deterministic toy that a tiny model is trained on in 190 s so that the metrics are measured on a real binary; and the gate. The design, with the rulings T1 to T20, the amendment
-C1 and a section of the amendments made while building (A1 to A21), is `docs/superpowers/specs/2026-11-10-d12-robustness-design.md`; the decisions are condensed in the entries
+C1 and a section of the amendments made while building (A1 to A24), is `docs/superpowers/specs/2026-11-10-d12-robustness-design.md`; the decisions are condensed in the entries
 "2026-11-10: D12 robustness: the rulings" and "2026-11-10: D12 review - corrections and fixes" of `DECISIONS.md`; the upstream facts are in `docs/VERIFY.md` (section "D12 findings"). The
 facts about the engine, the toy and the metrics come from a spike made before the design (`.superpowers/sdd/2026-11-10-d12-robustness/spike-findings.md`; Eole 0.6.4,
 CTranslate2 4.8.4, sacrebleu 2.6.0, CPU, toy data).
@@ -116,19 +116,24 @@ A row of the `numbers` section is SCORED when the reference has at least one num
 excluded (`no_numbers`, `source_reference_disagree`). The expected numbers are the REFERENCE's (what a human wrote in the target language, read under `tgt_lang`). The reference's and the
 hypothesis's numbers are paired one to one by a maximum bipartite matching on shared readings (so no assignment is missed, and order never matters: `5 and 7` equals `7 and 5`, and a date
 may change its layout). The row is `exact` when every reference number found a partner, no hypothesis number is left over and the units are compatible. A missing, extra or changed number,
-a lost decimal point or a transposed digit fails the row. **The unit rule** (a fix of the review, A3): a currency symbol (`₮ $ € £ ¥ ₽ ₩`, with at most one space between) belongs to ONE
-number, the one that took it after itself (so `5 $7` reads as `5 $` and `7`); a reference number that states a unit needs a hypothesis number of the same unit and one without a unit
+a lost decimal point or a transposed digit fails the row. **The unit rule** (a fix of the review, A3, then of the re-review, A22): a currency symbol (`₮ $ € £ ¥ ₽ ₩`, with at most one space between) belongs to ONE
+number, and to the one it TOUCHES: a symbol directly after a number's digits or directly before them, or one that follows the number after a space and is not followed by a digit, is that number's;
+a symbol after a space that is glued to the next number's digits is the NEXT number's (so `$5 $7` reads as `5 $` and `7 $`, `5 $7` as `5` and `7 $`, `5$ 7` as `5 $` and `7`, and `5 $ 7`, a symbol with
+a space on both sides, as `5 $` and `7`: it is the unit of the number before it); a reference number that states a unit needs a hypothesis number of the same unit and one without a unit
 accepts any; `units_ok` holds when SOME maximum matching gives every reference number a unit-compatible partner, so a text scored against itself is always exact even when one value
 appears twice with different units (`5 and 5 ₮`: before the fix it failed; 39,906 of 300,000 random self-comparisons did). **Measured** on the finished code: `7529` against `7592`, `72,5`
 against `725`: not exact; `5 and 7` against `7 and 5`: exact; `The price is 1,250.50 dollars.` against `Price 1 250,50`: exact (and not `surface_exact`); `It costs 1,500₮.` against
-`It costs 1,500.`: the number is found but `units_ok` is false, so the row fails (`unit_failures`); `It costs 20%.` against `It costs 20.`: exact (`%` is not measured).
+`It costs 1,500.`: the number is found but `units_ok` is false, so the row fails (`unit_failures`); `It costs 20%.` against `It costs 20.`: exact (`%` is not measured); `$5 $7` against `$7 $5`, `5₮ 7₮` against `₮5 ₮7` and `5$ 7`
+against `7 $5`: exact (the symbol moves with its number); `5 $7` against `7 $5`: not exact (the symbol did not move with its number: a plain 5 and 7 dollars against a plain 7 and 5 dollars). **The one limit of the unit rule:** a symbol with
+a space on both sides is the unit of the number before it, so a number written `$ 7` changes its unit when it moves.
 
 Beside the value, `details` holds `recall` (matched over expected tokens), `extra_tokens`, `surface_exact_rows`, `unit_failures`, `ambiguous_rows` and `capped_rows`. At most 65 numbers are
 read per text (the scan stops there; a runaway hypothesis of 100,000 numbers was read in 0.011 s against 0.31 s for a full scan: the build's own measurement, from the ledger), the first 64 are matched and the rest count as extra. **Limits, on purpose:** number
 words (`three`, `гурав`) and magnitude words (`сая`, `million`) are not read; `1e5` is 1 and 5; `.5` is 5; `10.30` is a decimal, not a time; digits glued to letters count (`COVID-19`,
 `A4`); an ordinal (`3-р`) is its digit; `%` is not measured, so a dropped `%` is invisible (the toy's `percent` category scores 120 of 120 whatever the model writes for the sign);
-`surface_exact_rows` compares the sorted multiset of the numbers as written, so it sees grouping spaces and decimal marks but NOT the layout of a date (`03/12/2024` and `12.03.2024` both
-give the surfaces 12, 03 and 2024); and `numbers_acc` is value preservation, not format (the format question has no headline).
+`surface_exact_rows` compares the sorted multiset of the numbers as written (the components of a date, a time or a range share the run as written, separators included), so it sees grouping spaces, decimal marks and the
+layout of a date: `12.03.2024` against `03/12/2024` is exact and not surface-exact (A23; before the final wave it did not see a date's layout and a copy-through echo scored 720 of 960, where the spike's control, and now the code, say 568); a range
+`5-6` and a list `5, 6` have the same values and other surfaces; and `numbers_acc` is value preservation, not format (the format question has no headline).
 
 ### `placeholder_acc`: `⟦n⟧` survive (spec T5)
 
@@ -319,7 +324,9 @@ hypotheses: the hypotheses file whose `text` is the request's own text.
   (as above), `by_category` and `by_direction` (`{scored, ok}`; `<src>-<tgt>`, `und` for a null source language) and `statuses` (the engine's status counts over EVERY hypothesis of the section, the
   excluded rows' included: a failure the engine flagged itself stays visible beside the metric).
 - `rows.<section>`: one outcome per row in file order: `{id, category, direction, scored, reason, ok, expected, found, value, value_cyrl}` (the fields that do not apply are `null`; `value` is the purity of a script row
-  and the sentence chrF of a `mong` row's direct arm, `value_cyrl` the sentence chrF of its control arm). These are what D13's paired bootstrap resamples.
+  and the sentence chrF of a `mong` row's direct arm, `value_cyrl` the sentence chrF of its control arm). These are the per-row material of D13's significance: **a ratio of the mean sentence chrF scores is a PROXY of the retention, not the corpus
+statistic** (corpus chrF is not a mean of sentence scores: the golden suite gives 0.5099 against the stored 0.5018, the real main suite 0.9987 against 0.9976); an exact bootstrap re-scores the texts of each resample
+(`hypotheses.jsonl` and the suite's references) or keeps per-row n-gram statistics.
 
 `report.json` (schema `rinchen.report.robustness/1`, the file the STOP gate reads) holds `{schema, system: {name, model_sha256, manifest_sha256}, suite: {name, sha256}, robustness: {six values},
 coverage, robustness_file, robustness_sha256}`. **`coverage` is the denominator of each value** (review I-2): for each of the six keys `{scored, excluded, total}` in the unit of its section (rows;
@@ -337,6 +344,8 @@ Why it matters: a `numbers_acc` of 1.0 over 10 scored rows of a suite that exclu
 scores is a useless control. Read `coverage` first. `manifest.json` repeats the non-null values and holds `scored.<section>` and `excluded.<section>` beside `rows.<section>`; the golden manifest
 is 2,212 bytes, a model run's 4,118 (`inputs`: the suite, the five files of the export and its manifest, the converter's files when attached; `outputs`: the files written, with `rows` for
 `hypotheses.jsonl`). Two runs give equal `robustness.json`, `report.json` and `hypotheses.jsonl` (**measured**) and manifests that differ only in `created` (and, here, in the output paths, because the two runs used two directories).
+**`coverage` is not part of `robustness_block`** (the block has exactly the six keys): a writer that embeds only the block loses the denominators, so D13's report embeds `robustness_coverage` beside it. `rows.<section>` and
+`scored.<section>` are in different units for the names and the terms (the section's rows against its mentions). `report.json` was edited in place under schema `/1` in the fix wave: nothing consumed it then.
 
 **Reading the main run** (**measured**). `numbers_acc` 892 of 960: the 68 failing rows are 63 of `two_numbers` (57 of 120 exact), 3 of `currency` (117 of 120: the model drops the `₮` in three rows, which the unit rule
 counts), 2 of `grouped` (118 of 120); `int`, `decimal`, `percent`, `date` and `time` are 120 of 120. `placeholder_acc` 599 of 600: one `mn_Mong` row loses a placeholder at beam 4 (beam 1 loses none: D15's
@@ -433,7 +442,7 @@ thousands of rows (one `Engine.translate` call is one batch in memory: D13 chunk
 ## What D13 takes over
 
 The FLORES+ and NTREX suites and the Mongolia-sourced human sets; the runner over systems (Rinchen students and teacher, NLLB, MADLAD, Hy-MT2: their outputs enter through the hypotheses file); `result.json` of
-`rinchen.eval/1` (it embeds `robustness_block` as it is); significance (it reads the per-row `ok`, `value` and `value_cyrl` of `robustness.json`); the Markdown and JSON report (`report.json` of D12 is the
+`rinchen.eval/1` (it embeds `robustness_block` as it is, and `robustness_coverage` beside it: the coverage is not in the block); significance (it reads the per-row `ok`, `value` and `value_cyrl` of `robustness.json`); the Markdown and JSON report (`report.json` of D12 is the
 narrow one: D13 removes `eval/robust_report.py` and the command's `report.json` line or keeps them as a per-suite artefact; `robustness_block`, `robustness.json` and the command stay); the model card and the hub
 upload. D12 leaves room by keeping the metrics pure functions of rows, the runner over a protocol (`translate(rows, options)`), the hypotheses file as the system boundary and the result per row. Left out on
 purpose: a generic builder of suites from real parallel text, a repair policy, a `--min-*` threshold, per-language conventions beyond the table, entity extraction without a table, number words, document-level
@@ -460,7 +469,7 @@ and the ledger's, except where the last column says so):
 | R10, R11 no GPU; the exclusions | the AST scans; the golden suite through the real binary equals the golden result byte for byte | clean; equal (the main suite excludes no row, so R11 and the unit golden file are the only guards against a metric that counts exclusions as passes) |
 
 The gate was run for real in the fix wave (**gate**: the two modules 31 passed in 442 s on a machine at load 58 to 130; 374.7 s, 6 min 14 s, on a quiet one at Task 8) and the whole gate gave
-13,543 passed, 1 skipped, 10 deselected. **What the figures show:** that the instrument can fail (every control collapses) and passes on a model that reads and writes the toy's numbers, placeholders,
+13,543 passed, 1 skipped, 10 deselected; after the final wave the two modules were run once more on their own: 31 passed in 363 s (6 min 3 s), the floors unchanged, and the whole gate 13,583 passed, 1 skipped, 10 deselected in 30 min 44 s. **What the figures show:** that the instrument can fail (every control collapses) and passes on a model that reads and writes the toy's numbers, placeholders,
 names and scripts. **What they do not show:** anything about quality, a real model, a real glossary, the traditional script as people write it, a GPU or a mechanism.
 
 ## Open gates
@@ -479,7 +488,7 @@ at beam 4); and the gates assigned to D4 and the D5 to D11 gates that need real 
 - **A converter on real traditional-script text**: the D5 tiny converter is a scaffold (it restores 5 of 37 toy nouns).
 - **The command's exit codes 4, 1 and 130 with real failures** (fakes only), `KeyboardInterrupt` with a real CTranslate2 call, memory at large suites.
 - **CI**: no CI run covers D3 to D12. **Windows and macOS** were not run.
-- **The scoped re-review of the fix wave** (`b2466ef..ae4e816`): it was running when this was written and its verdict is not recorded.
+- **A second re-review of the final wave** (`d1b25a9`, `e389c2b`, `e92687d`): the final wave was tested and mutation-checked by its own author and was not reviewed by another reader.
 
 ### Known limits, left open on purpose
 
@@ -496,17 +505,21 @@ Findings of the review that were parked, and limits of the build, one each:
    (**measured** for the echo: entities 0.25, terms 0.0038, purity 0.5556, retention 0.40). Read `numbers_acc` and `placeholder_acc` next to chrF, never alone (review minor 7).
 6. **No held-out `reorder` row**: the toy's training split takes every sentence of the one- and two-placeholder templates, genitive included, so the held-out split holds no genitive item and `order_ok` is exercised
    only by unit tests and the golden file (review minor 8).
-7. **`5 $7` reads as `5 $` and `7`** ("the symbol after the number wins"): a reorder of such text cannot be faithful under any rule; pinned as a vector.
+7. **A symbol with a space on both sides is the unit of the number before it** (`5 $ 7` reads as `5 $` and `7`; the touch-based rule of A22 gives a symbol glued to a digit to that number: `5 $7` is `5` and `7 $`):
+   so a number written `$ 7` changes its unit when it moves, and `5 $7` against `7 $5` is not exact (the symbol did not move with its number); pinned as vectors. The first version of the rule (a symbol after a space wins even
+   when glued to the next number) failed the faithful reorder `$7 $5` of `$5 $7` and was replaced after the re-review.
 8. **Retention can exceed 1 and is meaningless near a zero Cyrillic chrF** (read `coverage.mong_source_retention.chrf_cyrl`); with a Cyrillic chrF of exactly 0 it is `null`.
 9. **Script silence is excluded by design**: empty and `no_output` hypotheses leave the mean untouched and raise `excluded` (T8); read `coverage.script_purity` beside the mean.
-10. **`surface_exact_rows` does not see the layout of a date** (the components are separate numbers: `03/12/2024` and `12.03.2024` have the same surfaces); a copy-through echo scores 720 of 960 (the spike's
-    prototype, which compared digit strings with their separators, gave 568).
+10. **`surface_exact_rows` is a detail with no headline** (fixed in the final wave, A23: it did not see the layout of a date and a copy-through echo scored 720 of 960; it now compares the run as written and the echo
+    scores 568, as the spike measured). A range `5-6` and a list `5, 6` have equal values and different surfaces; a unit and a `%` are not part of a surface.
 11. **Floors have margin and bit-identical training is not asserted**: numbers 892 against the floor 0.90 (864 rows) leaves 28 rows, entities 447 of 480 against 432 leaves 15 mentions; the gate records
     `model.bin`'s digest and does not assert it, so another CPU may move a count by a few rows (a miss is answered with more steps, never a lower floor).
-12. **The sacrebleu signature pinned in the golden file fails on a sacrebleu bump on purpose** (`nrefs:1|case:mixed|eff:yes|nc:6|nw:0|space:no|version:2.6.0`): regenerate the golden result after checking the scores.
+12. **The sacrebleu signature pinned in the golden file fails on a sacrebleu bump on purpose** (`nrefs:1|case:mixed|eff:yes|nc:6|nw:0|space:no|version:2.6.0`; `pyproject.toml` pins 2.6.0): the golden-file tests and the pinned size and
+    digest (`GOLDEN_RESULT_SHA256`, `GOLDEN_RESULT_BYTES` in `tests/support/robust_golden.py`) fail until the golden result is regenerated from `to_bytes()` after each changed literal was checked independently (the comment there says so).
 13. **Priors**: the conventions table, the 4-letter suffix, the currency symbols and the 0.98 floor; `10.30` is a decimal; digits glued to letters count; number words are not read; Khalkha `1,250` is ambiguous.
 14. **One `Engine.translate` call per run** (a suite of tens of thousands of rows is one batch in memory), and an engine error names a row by its index in the call (`row N`), not by section, id and arm.
-15. **`--help` of the command breaks a sentence over two lines** (an embedded newline of its docstring; cosmetic).
+15. **`--help`: fixed for this command, left alone for the others.** The help of `rinchen eval robustness` broke a sentence over two lines because typer keeps a line break inside a paragraph of the command docstring; the docstring is now one source line
+    per paragraph (a test reads the rendered help). The other commands of the project (`translate`, `serve`, `train launch`, `export parity`, `distill generate`) show the same breaks and were not touched.
 16. **A load race in a D8 test, fixed here as the ONE edit to a D8 test**: `tests/unit/test_train_launch_orphan.py::test_a_crashed_eole_leaves_no_rank_running_and_the_next_launch_is_accepted` polled `/proc/<pid>/stat` and
     caught only `FileNotFoundError`; a process that exits during the read raises `ProcessLookupError` (the reviewer's probe of 400 short-lived processes: 264 `FileNotFoundError`, 136 `ProcessLookupError`). The test failed
     twice under load (D11's Part A and D12's Task 6) and passed alone; the helper now catches both, as its sister `tests/unit/test_utils_logged_process.py` does, with a deterministic test (`338bb02`).
@@ -514,7 +527,13 @@ Findings of the review that were parked, and limits of the build, one each:
     dangling commit `d538088`), both restored byte for byte (the reviewer compared the stash trees with the later commits; the stash list is empty and the tree clean); several launchers ignored signals (a first gate launch in
     Tasks 5 and 7 was killed by pid with its leftover test processes and relaunched; scratch trainings started with `&` ran with SIGINT ignored); one stray foreground `sleep 1` (Task 8); the fix wave's mutation harness
     gave false kills until a git repository was added to its copy; and in this runbook's own measurements two short foreground `sleep` calls (3 s and 20 s) while a launch and a training ran (nothing was killed or signalled; every
-    driver ran in a session of its own). The design agent ran no GPU query of any kind, no docker command and no network access; the ledger records no `pkill -f`.
+    driver ran in a session of its own). The design agent ran no GPU query of any kind, no docker command and no network access; the ledger records no `pkill -f`. The final wave had one slip of its own: a stray foreground `sleep 1` after
+    the four differential runs were launched (nothing was killed; every long run was started in the background, the gate from a launcher with default signal dispositions: `SigIgn` 0).
+18. **The per-row `value_cyrl` supports a PROXY of the retention** (M-2): the ratio of the mean sentence chrF scores of the two arms is not the corpus statistic (golden 0.5099 against the stored 0.5018; the real main suite's 480 rows
+    0.9987 against 0.9976). The commit title of `ce794ee` ("make the per-row outcomes reproduce the retention") overstates it. An exact paired bootstrap needs the texts re-scored for each resample or per-row n-gram statistics (D13).
+19. **`coverage` sits outside `robustness_block`** (M-5): D13's writer must embed both. `rows.<section>` and `scored.<section>` are in different units for the names and the terms (rows against mentions). `report.json` was edited in place
+    under schema `/1`. `units_ok` is true when a reference unit has no hypothesis number to carry it and a spare plain number takes the pairing (`5 ₮ and 5` against `5 and 7`): the row still fails through the counts, and
+    `unit_failures` counts only the rows whose units cannot be satisfied by any maximum matching.
 
 ### The review, its fix wave and the re-review
 
@@ -532,7 +551,7 @@ section appear in training, and no `mn_Mong` source is in training), the effecti
 | **I-1** | the numbers metric FALSE-FAILED identical text when one value appeared twice with different units (`5 and 5 ₮` against itself: `exact=False`), because `units_ok` was computed on an arbitrary pairing; a symbol between two numbers was claimed by both (`859 571₮ 3 ширхэг`) | `64e45f0`: `units_ok` = a maximum matching over unit-compatible edges is as large as the unit-blind one; a currency symbol belongs to one number. 14 failing tests first; differential 300,000 random cases against brute force, 0 mismatches (11,659 legitimate unit failures; the old code mismatched 47,554); the gate's 892 of 960 unchanged |
 | **I-2** | denominators invisible: `numbers_acc` over 10 scored rows of 1,000 looked perfect; silence raised the script mean; retention hid a useless control | `40dc2ee`: the `coverage` map of `report.json`, `scored.<section>` and `excluded.<section>` in the manifest, the retention line of the command with both chrF scores and `excluded N` on the script line |
 | **I-3** | `term_acc` is not terminology adherence (the D11 teacher scores 1,041 of 1,044) | docs only: spec T7 amendment and Known limit 1 |
-| **I-4** | the per-row outcomes could not reproduce the retention (a `mong` row stored only the direct arm's sentence chrF; corpus chrF is not a mean of sentence chrF) | `ce794ee`: `value_cyrl` per row; also minors 5 and 6: `chrf_signature` and `system.hypotheses_sha256`; the golden result regenerated (12,589 to 13,614 bytes), cross-checked: the new file minus the three additions equals the old |
+| **I-4** | the per-row outcomes could not reproduce the retention (a `mong` row stored only the direct arm's sentence chrF; corpus chrF is not a mean of sentence chrF) | `ce794ee`: `value_cyrl` per row, which supports a ratio-of-mean-sentence-chrF PROXY of the retention and not the corpus statistic (the re-review's M-2, limit 18); also minors 5 and 6: `chrf_signature` and `system.hypotheses_sha256`; the golden result regenerated (12,589 to 13,614 bytes), cross-checked: the new file minus the three additions equals the old |
 | minors | stale 0.9323 and 895 in two CLI docstrings (`ae4e816`); the hyphen over-acceptance, the converter provenance gap, `read_suite` used only by tests, the trivial-solution controls, the missing `reorder` row, the floor margins (limits 2, 3, 4, 5, 6, 11); the D8 race test (`338bb02`); the stash slips | as stated |
 
 **The fix wave** (five commits, `b2466ef..ae4e816`, failing test first, mutation-checked: 13, 18 and 12 mutants, no survivor that mattered) and its **full gate: 13,543 passed, 1 skipped, 10 deselected** (13,491 after
@@ -540,12 +559,31 @@ Task 8; the machine was at load 58 to 130, so the gate ran as five parallel pyte
 unchanged. Existing tests changed because the code forced it (the same list is in the commit messages): the pinned report keys, the stdout lines, the `system` dictionaries, the row fields and the mong details of the
 tests of `eval`, the reviewed-entry wording of the message scan, and additions to the gate and to `tests/support/robust_golden.py`.
 
-**The scoped re-review** of the fix wave (`b2466ef..ae4e816`) was RUNNING when this runbook was written. **Its verdict is NOT recorded here; a follow-up edit adds it**, as D9 to D11 did.
+**The scoped re-review** of the fix wave (`b2466ef..ae4e816`, one read-only reviewer): **approved with minors, no Critical and no Important finding.** It ran 396 targeted tests; through the real command on the real r3 export it
+reproduced 892 of 960 and the other five headlines (`robustness.json` differing from the review's run only by the additive `value_cyrl`, `chrf_signature` and `hypotheses_sha256` keys and a `threads` option; `hypotheses.jsonl`
+byte for byte). Its probes: an independent brute-force matcher and a character-scan reference of the one-symbol-per-number rule over 650,000 random cases (seeds 1 to 4), 0 mismatches and more than 17,000 legitimate unit
+failures, so not vacuous (the code before the fix wave: 558 mismatches and 447 texts not exact against themselves in 20,000 cases); the spike's reference on 60,000 random texts (tokens identical, the unit fields differing as
+intended); the `coverage` of 400 random sub-suites of the golden suite (`total == scored + excluded == the units counted independently`, no negative, no division by zero; a section with every row excluded prints
+`n/a (no scored row), excluded 3`); Cyrillic chrF 0.0 told apart from `null`; the golden diff of the fix wave was additions only.
+
+| Finding | What | Handled |
+|---|---|---|
+| **M-1** | the unit rule was WIDER than its pinned vector: a number took a symbol after one group space even when that symbol was glued to the next number (`$5 $7` read as `5 $` and `7`, so its faithful reorder `$7 $5` was not exact; also `$5 $7 $9` reversed, `₮5 ₮7`, `5₮ 7₮` against `₮5 ₮7`; the code before the fix wave accepted them by accident) | `d1b25a9`: the touch-based rule (A22): 9 mutants killed, a differential of 200,000 pairs per check with 0 mismatches against a character-scan reference and an exhaustive search (14,649 legitimate unit failures), the real run unchanged; the pinned vector `5 $7` flipped to `5` and `7 $` with the intent stated, the property test's sidestep removed |
+| **M-2** | the per-row `value_cyrl` does not reproduce the corpus retention (golden 0.5099 against 0.5018; real 0.9987 against 0.9976) | wording: a ratio-of-mean-sentence-chrF PROXY; an exact bootstrap re-scores the texts (limit 18) |
+| **M-3** | the property test let ANY section detail be a string | `e92687d`: only `chrf_signature` (a mutant adding a string detail is killed; the old test let it pass) |
+| **M-4** | the golden digest comment did not say a sacrebleu bump fails it, nor how to regenerate | `e92687d`: the comment says both (limit 12) |
+| **M-5** | `coverage` is outside the block; units of `rows.<s>` and `scored.<s>` differ for the names and the terms; `report.json` edited in place under `/1`; `units_ok` is true when a reference unit has no hypothesis number to carry it and a spare plain number takes the pairing (the row still fails through the counts); `1 rows` | documented (limit 19 and "What D13 takes over"); `1 rows` fixed in `e92687d` (`1 row` on the `mong:` and `script:` lines; the docstring of the narrow report says D13 embeds `robustness_coverage` too) |
+
+**The final wave** (`d1b25a9`, `e389c2b`, `e92687d`, failing test first, mutation-checked with 9, 5 and 6 mutants, one of them equivalent: a plural for zero rows that no line prints): the touch-based unit rule (M-1); the surface-exact detail sees the layout of a date (A23: Task 9 had found that the detail compared per-token surfaces, so a date written
+`03/12/2024` against `12.03.2024` was surface-exact, where T3 says the format also matches and the spike's control gave 568 of 960: the components of a run now share the run as written; only the detail changes; the golden detail is 3 and
+its digest pin follows; the real model run and every headline are unchanged byte for byte); the minors (M-3, M-4, `1 row`, the help paragraph, the docstring of the narrow report). Existing tests changed because the code forced it: the pinned vector `5 $7`
+and the property test's reorder items (the unit rule); the surfaces of `12.03.2024` and the three score vectors that were surface-exact (the layout); the golden `surface_exact_rows` and its digest (`golden_robustness.json`, `robust_golden.py`,
+`test_eval_robustness.py`); the two pinned `mong:` lines (`1 row`). The full gate after the final wave: 13,583 passed, 1 skipped, 10 deselected (30 min 44 s, one sequential process, load average 6 to 20; 13,543 after the fix wave, so 40 new tests), `ruff format --check .` (598 files), `ruff check .` and `mypy src` (211 files) clean
 
 ## Measured numbers
 
 The machine: Intel Core Ultra 7 265K (20 cores as `nproc` reports), 46 GiB of RAM, Linux 7.0.0-42-generic, CPython 3.14.10, eole 0.6.4, ctranslate2 4.8.4, sentencepiece 0.2.1, sacrebleu 2.6.0, regex 2026.9.29; the GPU was
-hidden from every process and every translator was built on `device="cpu"`. All on 2026-11-10, once each, code at `ae4e816` (the tree held only these documents), load average 1 to 5. The drivers were read-only
+hidden from every process and every translator was built on `device="cpu"`. All on 2026-11-10, once each, code at `ae4e816` (the tree held only these documents), load average 1 to 5; the real main run and the source echo were measured again after the final wave (code at `e92687d`, the same toy export and suite, CPU, `CUDA_VISIBLE_DEVICES=""`): every figure of this table is unchanged except the echo's surface-exact rows. The drivers were read-only
 scripts (`scratchpad/d12-t9/`) that use the gate's own helpers (`tests/support/robust_gate.py`), so the numbers are the gate's; nothing was written under `data/` or `models/`. The D11 teacher and the D5 converter
 were the cached artifacts of the D11 spike (`scratchpad/d11-t4/export_f32`, `d11-spike/work/converter`; the teacher verified by `rinchen export verify`, exit 0, `model.bin` `b7f33d88d5fa...`); the robustness model was
 trained fresh.
@@ -564,17 +602,17 @@ trained fresh.
 | R6 masks (beam 4): `off` / `always` | script 0.9389 with 101 under the floor / 1.0 with 0; `always`: numbers 891, placeholders 598, entities 444, retention 0.9977; `off` at beam 1: 110 under, mean 0.9499 |
 | R7 rescoring, two runs | equal; `hypotheses_sha256` `e2bee59d...`; manifests differ only in `created` and the output paths (two directories) |
 | R8 the converter | five sections equal R1's; `retention_converted` 0.5473 (54.58); mong-output suite purity 1.0 over 100 rows; without a converter exit 2, directory absent; round trip equal |
-| R10 a source echo | numbers 960/960, placeholders 600/600, entities 120/480, terms 4/1044, purity 0.5556 (400 under), retention 0.4001 (7.30 over 18.26), surface-exact rows 720 |
+| R10 a source echo | numbers 960/960, placeholders 600/600, entities 120/480, terms 4/1044, purity 0.5556 (400 under), retention 0.4001 (7.30 over 18.26), surface-exact rows 568 (720 before the final wave, A23) |
 | the vectors of `numbers_in`, spans, placeholders | the tables above |
 | costs | the table of "Costs" |
-| the tests | about 1,765 new; 13,543 passed, 1 skipped, 10 deselected after the fix wave (the gate's own run); `ruff format --check`, `ruff check`, `mypy src` clean on this tree |
+| the tests | about 1,765 new; 13,543 passed, 1 skipped, 10 deselected after the fix wave (the gate's own run); after the final wave 13,583 passed, 1 skipped, 10 deselected; `ruff format --check`, `ruff check`, `mypy src` clean on this tree |
 
 **The numbers agree between the spike, the gates and this run** wherever they are not times: the six values of R1 at beam 1 (893, 600, 450, 1,044, 1.0, 1.0030) and the controls, the model's digest and the toy's digest.
 Where they differ: (1) the numbers at beam 4 are 892 of 960 = 0.9292, not the spike's and the plan's 895 = 0.9323: the spike's rougher prototype ignored the currency unit and so counted three rows (`num-0547`, `num-0569`,
 `num-0571`, where the model drops the `₮`) as exact; the spike's reference `numbers_ref.py` and the finished code agree on 892, and beam 1 gives 893 as the spike measured; the floor 0.90 stands with 0.029 of margin;
 (2) mask `off` leaves 101 rows under the floor at beam 4, the command's default and the gate's setting, against the spike's 110 at beam 1 (reproduced exactly here at beam 1: the ledger's note that the 110 belonged to a
-different request set was not right, the request set is the same); (3) the converted arm retains 0.5473 at beam 4 and the spike's 0.562 was at beam 1; (4) a copy-through source echo is surface-exact on 720 rows
-of 960 where the spike's prototype said 568 (Known limit 10); (5) the machine's metric cost is 0.04 s per 1,000 requests where the plan assumed 0.1.
+different request set was not right, the request set is the same); (3) the converted arm retains 0.5473 at beam 4 and the spike's 0.562 was at beam 1; (4) a copy-through source echo was surface-exact on 720 rows
+of 960 where the spike's prototype said 568, because the detail did not see the layout of a date; since the final wave (A23) it is 568 (currency 60, date 0, decimal 60, grouped 60, int 120, percent 102, time 120, two numbers 46, of 120 each, as in the spike); (5) the machine's metric cost is 0.04 s per 1,000 requests where the plan assumed 0.1.
 
 ## Where the code lives
 
