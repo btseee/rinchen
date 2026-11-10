@@ -12,7 +12,6 @@ from rinchen.cli import (
     doctor,
     export,
     mine,
-    serve,
     spm,
     synth,
     tiny,
@@ -24,6 +23,7 @@ from rinchen.cli import (
 from rinchen.cli import (
     filter as filter_cli,
 )
+from rinchen.cli.serve import serve_command
 from rinchen.cli.translate import translate_command
 
 app = typer.Typer(name="rinchen", no_args_is_help=True)
@@ -38,8 +38,8 @@ app.add_typer(train.app, name="train")
 app.add_typer(distill.app, name="distill")
 app.add_typer(export.app, name="export")
 app.add_typer(eval_cli.app, name="eval")
-app.add_typer(serve.app, name="serve")
 app.add_typer(annotate.app, name="annotate")
 app.add_typer(doctor.app, name="doctor")
 app.add_typer(tiny.app, name="tiny")
 app.command(name="translate")(translate_command)
+app.command(name="serve")(serve_command)
