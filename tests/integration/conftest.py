@@ -10,8 +10,11 @@ by `COMMAND_TIMEOUT_SECONDS`.
 The `d11_*` fixtures are the D11 gates': `d11_gpu_hidden` hides every device for the
 session, `d11_workspace` is the toy corpus and SentencePiece model, `d11_teacher` the two
 tiny teachers (tag in the source, tag as the forced target prefix), `d11_exports` their
-CTranslate2 exports and `d11_document_model` a document model continued from the first
-teacher and exported. Each runs its stage once per session, the first time a test asks.
+CTranslate2 exports, `d11_tiny_export_dir` the float32 one of the source-tag teacher (the tiny
+model the serving gate serves) and `d11_document_model` a document model continued from the
+first teacher and exported. Each runs its stage once per session, the first time a test asks.
+The serving gate's own fixtures (`d11_serving_log`, `d11_test_log`, `d11_sentences` and the two
+reference engines) live in `tests/support/serving_gate_fixtures.py`.
 """
 
 from __future__ import annotations
@@ -41,6 +44,14 @@ from tests.support.d11_gate_doc import DocumentModel, build_document_model
 from tests.support.distill_gate_stages import Workspace, make_workspace
 from tests.support.engines import SilentLog
 from tests.support.script_reference import FIXTURE_DIR
+from tests.support.serving_gate_fixtures import (  # noqa: F401 - re-exported for pytest
+    d11_float32_engine,
+    d11_int8_engine,
+    d11_no_server_is_left,
+    d11_sentences,
+    d11_serving_log,
+    d11_test_log,
+)
 from tests.support.tiny_converter import (
     COMMAND_TIMEOUT_SECONDS,
     DIRECTION_TAGS,
@@ -146,6 +157,12 @@ def d11_teacher(d11_workspace: Workspace) -> Teachers:
 @pytest.fixture(scope="session")
 def d11_exports(d11_workspace: Workspace, d11_teacher: Teachers) -> Exports:
     return converted_exports(d11_workspace, d11_teacher)
+
+
+@pytest.fixture(scope="session")
+def d11_tiny_export_dir(d11_exports: Exports) -> Path:
+    """The float32 export of the source-tag teacher: the tiny model the serving gate serves."""
+    return d11_exports.float32.directory
 
 
 @pytest.fixture(scope="session")
