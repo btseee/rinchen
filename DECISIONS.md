@@ -2791,3 +2791,179 @@ Left open on purpose (the controller's decisions; each is in the runbook's "Know
 - Exports made before the placement check hold no saved config and cannot be re-checked; re-export is the remedy.
 - Shards generated before `cc917e2` were made without the reserved-symbol filter, and the fingerprint has no rule version, so a rerun with the same inputs reuses them; delete the `shards-*` directories made before that commit (or use `--force`). The fingerprint is not changed.
 - The nits: `saved_tag_placement` is used by tests only, `verified_content` and `json_object` live in `distill_saved_config.py`, the reserved set of a teacher is built after the model is loaded, and an interrupt between the rename and the `published` flag of the staged export (not exercised).
+
+## 2026-11-09: D11 export, quantisation, serving: the rulings
+
+D11 (`src/rinchen/export/{record,verified,quantize,ct2}.py`, `src/rinchen/infer/{source_tokens,script_mask,engine_types,engine,translator}.py`,
+`src/rinchen/train/export_parity.py`, `src/rinchen/serve/*`, `src/rinchen/config/serve.py`, `src/rinchen/cli/{export,export_parity,translate,
+translate_io,serve}.py`, `docker/`, `configs/serve/`, the hatch `force-include` of `pyproject.toml`) filled gaps in the master plan with the rulings
+below. **They were made by the design agent, the builders and the controller without a review round of their own.** None is an approved decision; each
+lists what it costs if wrong so that it can be undone. (One combined review of the code ran after Task 11; it reviewed the work, not these rulings, and
+its findings and fixes are in "2026-11-10: D11 review - corrections and fixes" below.) The design with the full wording is
+`docs/superpowers/specs/2026-11-09-d11-export-serving-design.md` (T1 to T22, amended to match the finished code, and its section 7, "Amendments made while
+building", A1 to A23; the numbers below are the same); procedures, measured numbers and the known limits are in `docs/runbooks/11_serving.md`; the
+upstream facts are in `docs/VERIFY.md`, section "D11 findings". The work lives on branch `d11-export-serving`, stacked on `d10-distillation` (cut from it
+at `b672aa8`); it is not merged and not pushed. The wording below is "as amended": where the finished code differs from the design, the amended text is given.
+
+[DESIGN: T1 and T2. The export is a directory of the converter's three files, `spm.model`, `rinchen.json` (schema `rinchen.model/1`) and, last,
+`manifest.json` (stage `export`); the record, its reader and the conversion live in `rinchen.export`, the source-token and reserved-piece rules in
+`rinchen.infer`, and `train/distill_export_files.py` is deleted.] `rinchen.json` carries what the converter's files cannot: the tag placement, the directions
+the model was trained for (derived from the saved config's corpus names), the tag of each target, the document level, the quantisation, the checkpoint's
+digests and the sizes. The vocabulary does not say which languages a model was trained for (every vocabulary holds all 118 reserved symbols since D9), so
+"the tag is in the vocabulary" is vacuous for an untrained language; the saved config is the source. The reader is as strict as the writer; the old-format
+check comes first; `verify_export` hashes each file once before it parses it. The layering is AST-scanned (`export` imports nothing of `train`, `infer`, `serve`;
+`infer` nothing of `train`, `cli`, `serve`; `serve` nothing of `train`, `cli`, `synth`, `script_conv`). Cost if wrong: a record schema change bumps the string and
+refuses every export; the pinned file set of `infer/` changes with every new module; `ModelRecord` is not hashable.
+
+[DESIGN: T3. `rinchen.json` REPLACES `export.json`; there is no second reader; `rinchen distill export` is the same function as `rinchen export convert`.] A
+D10 directory is refused with the remedy (re-export with `rinchen export convert`, a few seconds for a small model; no real export exists). D10's gate numbers did
+not move (3,599 rows, 3,583 matches, chrF 98.2 and 98.58, 200 of 200, `model.bin` 2,034,311 and 1,835,438 bytes); the KD fingerprint recipe is unchanged (its value moves
+only with the workspace's `spm.model`). The numbered placeholders are allowed by the shared reserved-piece rule and unioned back by D10's teacher. Cost if wrong: an
+old export must be re-exported; no migration tool exists.
+
+[DESIGN: T4. `convert` writes into a private directory beside the output, the manifest last, and renames the child onto the output.] The output appears whole or not at
+all; any failure removes the private directory and the output only if this call put it there; a hard kill leaves the hidden directory. Cost if wrong: the same as D10's
+staging; the manifest and the files are hashed once.
+
+[DESIGN: T5. `QUANTIZATIONS = float32, float16, int8, int8_float16`; quantisation is applied at conversion and recorded; at load the engine passes `default`; `auto` is
+refused for the compute type and the device.] `compute_type="auto"` loaded every export as `int8_float32` on this CPU, float32 ones included (spike): a gate that used it would
+have measured int8 and called it float32. An explicit type the device cannot run is a `ConfigError`; D10's `TeacherOptions` refuses `auto` too (a hole the spike found, closed
+in the fix wave). Cost if wrong: `float16` and `int8_float16` as GPU types were converted and never run; the converter accepts four more settings that are not offered.
+
+[DESIGN: T6, T7, T8, T11. The engine is thread-safe and batch-level; a row gets a status (`ok`, `empty`, `too_long`, `truncated`, `no_output`), never a silent cut; the
+target must be a key of the record's tags; a pair that was not trained is allowed and counted `zero_shot`; a `Mong` request for a model with no `mn_Mong` target is
+translated into Cyrillic and converted by D5's converter.] CTranslate2 maps an unknown tag to `<unk>`, cuts a hypothesis and a source of 1,024 pieces without a sign and returns
+a forced prefix as the first token: the engine asks for the end token, caps the source itself, drops a hypothesis with a reserved piece, keeps a truncated text and says so.
+Decisions the design left open and the builders made: the library's error carries the exception type name only; empty and duplicate hypotheses are dropped without a counter; window
+decodes are counted by `windows` and `window_fallbacks`; the converter's calls take a lock and its message is not repeated; `rinchen.Translator` resolves without loading the two
+libraries. A reserved symbol in a request text is REFUSED (a `RequestTextError` naming the row and the symbol, never the text), a decision of the fix wave that closed the item the
+ledger had deferred to D12. Cost if wrong: the numbered placeholders stay text until D12; `infer/engine.py` has 769 lines and `engine_types.py` 581, near the 900-line cap.
+
+[DESIGN: T9. Script masking: the forbidden scripts of a target are those the registry does not give it; modes `retry` (default), `always`, `off`; purity floor 0.98.] The list holds
+the entries that are no SentencePiece piece, the control pieces, the reserved symbols, the pieces of a forbidden script and the byte pieces of ASCII letters when Latin is forbidden, never
+the end token and only vocabulary entries; it costs 0.55 microseconds per entry per call. `retry` retries impure outputs only. Whether a hard mask helps a real model is unmeasured, which
+is why `retry` is the default. Cost if wrong: the floor and the policy for the eight other languages are priors; a legitimate Latin name in Cyrillic output is impossible under `always`.
+
+[DESIGN: T10. Document mode: `translate_documents` runs D9's chunker; a window is one CTranslate2 call asked for the end token, and a window that lacks it falls back whole; the sentence
+callable is the row path; for a document-level export a hypothesis is cut at its first `<sep>`.] The last clause is the amendment: a document model continued on windows of 2 to 4 sentences
+writes `<sep>` after a lone sentence and the engine used to drop it as reserved (400 of 400 plain rows `no_output` with the spike's model, 18 of 400 document sentences). The fix is
+a cut, not a suppression (the runner-up token would be invented text). D9's contract that singles never form a window is kept; they are decoded by the same document model. Cost if
+wrong: the quality of a lone sentence from a model that never saw one is unmeasured beyond the toy; the throughput of a document request (a call per window, sequential) is unmeasured; the
+`tgt` placement for documents is not built.
+
+[DESIGN: T12. Strict parity compares `eole predict` greedy with CTranslate2 greedy and scores Eole's own pieces with `score_batch`, with `length_penalty: none` and, for `tgt`, without the first
+log-probability; the 1e-3 bound is a float32 bound; the checkpoint must be the export's by three digests.] Thresholds: exact share 0.95, mean abs delta 1e-3 per token for float32 only; a
+quantised export is held to the exact share and gated by chrF (drop at most 1.0). Cost if wrong: the margin for a real model is unmeasured; a hypothesis cut at `max_length` adds a spurious delta.
+
+[DESIGN: T13 and T14. `rinchen translate` writes exactly one output line per input line, loads the model before it reads, refuses a target before it opens an output file, and exits 0/2/3/4/1/130
+as the runbook lists; `rinchen.Translator` is the facade; the wheel ships the language registry through a hatch `force-include`.] `--strict` exits 4 after all the output is written; a broken
+pipe is exit 1; a line is read whole with no cap (known). The registry is `rinchen/_data/languages.yaml` in the wheel and the repository copy otherwise. Cost if wrong: the one edit of
+`pyproject.toml`; lazy command loading is not built, so the command pays 1.0 to 1.2 s of imports.
+
+[DESIGN: T15, T16, T17, T18, T19. The service has four routes (HEAD allowed on the probes, trailing slashes are a 404, no OpenAPI), a strict request, one error shape on every path, a micro-batcher, eleven
+metric families and JSON logs; the settings are four layers (defaults, YAML, `RINCHEN_SERVE_*`, flags) and an unknown `RINCHEN_SERVE_*` name is refused; the command verifies the export and the settings before it
+binds a port.] A request that names no `beam_size` is judged against the configured beam. A `RequestTextError` is a 400 with its message, any other `DataError` the fixed message `the model refused a text of
+this request`. Cost if wrong: there is no authentication, rate limit, hot reload or body read timeout (a gateway is assumed); the service hashes the export twice; an engine that fails to open exits with
+uvicorn's status 3; every number of the three YAML files is an unmeasured prior.
+
+[DESIGN: T16 as amended. Readiness and the drain are not observable over HTTP, and the stop has ONE budget.] uvicorn starts the lifespan before it binds the port and ends it after it closes the listener, so
+"not ready" and "draining" are a refused connection on the wire; the 503s exist for an app driven in process. A health check's start period must be sized for the model (hash twice, load, warm-up before the
+port opens), unmeasured for a real model. `shutdown_timeout_seconds` T is the budget of the whole stop: `ceil(T/2)` seconds for uvicorn's wait, T minus that for the batcher's drain; the compose
+`stop_grace_period` must be at least T + 5 s; the exit status is the signal's (-15, 143). Cost if wrong: the requests in flight get half the budget; a T under one second cancels them at once; a stuck batch keeps
+its worker thread.
+
+[DESIGN: T20 and T21. The CPU container recipe is `docker/Dockerfile.cpu` and `docker/compose.serve.yaml`; no `Dockerfile.gpu`; nothing in D11 uses a GPU.] The Dockerfile skips the 22 torch and CUDA packages of
+`uv.lock` (a test derives the set from the lock), is `linux/amd64` only (the vendored `pyonmttok` wheel), runs as uid 10001 and needs the network to build (`uv sync`, `hatchling` by build isolation, the
+`kiwipiepy-model` source distribution). **The image, `docker compose up`, the stop of PID 1 and an in-container health check were never run**; what stands in for them is `docker compose config -q`, the static tests
+and the compose command run natively. Every GPU claim is unmeasured and an AST scan guards the code and tests. Cost if wrong: the image may not build; the base and uv tags are guesses; the limits are priors.
+
+[DESIGN: T22 and the controller's smaller rulings.] D12 takes the placeholder, terminology and robustness suites (the schema refuses `terminology` until then); D13 the evaluation runner, the model card and the
+hub upload. The reviews of D11 use one combined review by two reviewers after Task 11, one fix wave and a scoped re-review, instead of one per task; the review comes BEFORE Task 12 so that the documents describe the
+final code. Implementers dispatch no subagents; the machine's GPU is hidden everywhere; the docker commands allowed are `docker --version`, `docker images` and `docker compose config -q`; the edits to D5 to D10 are limited
+to the lines the plan names (the eight D10 sources and about 17 D10 tests of Task 2, `train/distill_teacher.py`, `train/checkpoints.py`, `config/languages.py`, `lang/scripts.py` (`counted_letters`, unlisted and
+behaviour-neutral), `cli/main.py`, `tests/support/fake_ct2.py` and `distill_gate_stages.train_teacher`, the pinned `infer/` file set). Cost if wrong: each is one place to change.
+
+[EVIDENCE: strict parity.] Through the real `rinchen` binary on the CPU with the GPU hidden, 200 dev sentences (50 per direction): the source-tag teacher float32 **200 of 200 exact, mean abs delta 7.19e-7 per token (max
+3.43e-6)** (the spike: 8.28e-7 and 3.48e-6 on its own training run); the target-tag teacher float32 **200 of 200, 1.37e-6 (max 5.05e-6)**; the same target-tag export with the forced tag's log-probability kept **200 of 200
+exact but 0.0433 per token: FAIL** (0.48 per sentence against 3.9e-6 in the spike); the source-tag int8 export 199 of 200, 1.14e-3 (max 1.6e-2; 1.45e-3 and 2.8e-2 in the spike), not gated; int8_float16 1.69e-3 (spike); a
+checkpoint of other weights than the export's is refused with exit 2 in 1.2 s. Cost if wrong: none to undo; the margin of a real model is unmeasured.
+
+[EVIDENCE: quantisation.] `export convert` of the averaged tiny teacher: `model.bin` 2,034,311 (float32), 1,488,691 (int8, 73.2 %), 844,931 bytes (int8_float16, 41.5 %); the engine's effective compute types on this CPU `float32`,
+`int8_float32`, `int8_float32`; chrF over the 400 dev rows **98.207, 98.268 (+0.061), 98.197 (-0.010)** (the gate allows a drop of 1.0; the toy saturates at 98.2 and says nothing about a real model); `auto` and an explicit
+`int8_float16` on a CPU are `ConfigError`. The spike converted all nine settings (2.2 to 2.6 s each); a 6/6 d512 random-init model's int8 file was 29 % of float32's and int8 was 10 times faster for one sentence on one
+thread (32.9 against 3.2 per second) and 2.3 times at 16 per call, on a loaded machine (a ratio is good to about 1.3). Cost if wrong: the real loss and speed are unmeasured.
+
+[EVIDENCE: script masking.] Greedy, float32 export, 500 requests the toy never trained for: 96 outputs with a forbidden-script letter (731 letters) with the mask off, 0 with `always`, `retry` decoded the 96 again and all 96 improved
+(0 left; floor 0.98 held); the 400 trained requests leaked nothing in any mode; the D5 converter wrote the traditional script in 448 of 448 words without the list and in 0 with it (42 entries listed). The list is 67 entries
+for a Cyrillic target of the toy and 194 for a Latin one; the call-time cost is 0.55 microseconds per entry (30,000 entries 16 ms, extrapolated). What it does not show: whether a mask helps a real model, the loss of a
+legitimate Latin name under `always`, the cost at real vocabulary size.
+
+[EVIDENCE: the thread table.] The mid-size random-init model through raw `translate_batch` (spike, load average about 12): `inter_threads` 1 to 8 raised int8 throughput from 32.9 to 121.2 sentences per second (one sentence per
+call), `intra_threads` lowered a call's latency (59.7, 47.9, 34.3 ms at 1, 2, 4) and raised throughput less per thread. The tiny export through the ENGINE (measured for the runbook, 1,200 requests, 2 x inter Python threads):
+float32 one sentence per call 4,970 per second at 1 x 1, 4,198 at 2 x 1, 1,644 at 4 x 1; 16 per call 9,582, 4,818, 1,794; int8 similar: **more threads lose on the toy** because a call is 0.4 ms and the engine's Python holds the
+GIL. The two tables do not contradict each other; neither is advice for a real model, whose optimum is unmeasured.
+
+[EVIDENCE: packaging.] The built wheel lacked `configs/languages.yaml` and the registry was located from the repository root, so an installed package could not load it; a hatch `force-include` ships it as
+`rinchen/_data/languages.yaml` (offline `uv build --wheel`: 211 files, byte-equal, no `configs/` entry, entry point `rinchen = rinchen.cli.main:app`). `import rinchen` is 11.3 MB and loads neither `ctranslate2`,
+`sentencepiece` nor `torch`; `rinchen.Translator` resolved 47.6 MB; the engine with its libraries 55.1 MB; `rinchen.cli.main` 1.13 s and 170.9 MB. A frozen `uv sync --no-dev` would install 160 packages including torch and
+the CUDA wheels (about 4.4 GB in this repository's environment); skipping the 22 torch/CUDA entries of the lock leaves 138 and none of that family, and the CLI, the engine and the service import with `torch`, `triton`,
+`eole`, `transformers`, `sentence_transformers` and `pyonmttok` blocked (`rinchen translate` of 5 lines in 0.92 s, byte-equal; `serve` ready in 0.75 s). The spike wrote 140 packages for the skipped sync; a dry run on
+2026-11-10 gave 138.
+
+[EVIDENCE: the stop budget.] A fake engine on a real uvicorn, SIGTERM to the process group: stuck 8 s with T=2 s ended the process **4.18 s after the signal before the fix and 2.12 to 2.22 s after it** (2.17 s in three
+runs for the runbook); stuck 12 s with T=4 4.18 s; stuck 30 s with the default T=20 20.17 s (about 40 s by construction before); the stuck request got uvicorn's plain 500 at half the budget (+1.13 s, +2.14 s, +10.15 s) and
+was counted `translate/500` with the log code `cancelled`; a 0.8 s request with T=6 was answered 200 and the process ended 0.87 s after the signal. A real server with 24 requests of 8 sentences held in the batcher answered all
+24 by 1.57 s and was gone at 1.68 s with status -15; `shutdown_drained` logged 0 and 0 (vacuous under uvicorn). An idle server stops in 0.21 s.
+
+[EVIDENCE: the document cut.] 66 toy test documents (400 sentences), 400 plain rows, default decode options, the spike's document model: before the fix 400 `no_output` (chrF 0.0) and 382 `ok` + 18 `no_output` (chrF 88.47);
+after, **400 `ok` (chrF 93.86) and 400 `ok` (chrF 92.06)**. The gate's own document model (the tiny teacher continued 2,500 steps on 1,194 windows), gate options: before 364 `ok` + 36 `no_output` (chrF 78.55); after 400 `ok`
+(chrF 84.75; as plain rows 88.42); 101 of 106 windows aligned, 18 singles, per size 325/334, 260/268, 191/202; at a 20-piece cap 94 of 106 windows fall back. All reproduced on 2026-11-10 on the trees before (`b6d57a4`) and
+after (`4bfaa5e`) the fix. Cost if wrong: see T10.
+
+[EVIDENCE: the STOP gate.] Through the real binaries on the CPU with the GPU hidden: 111 integration tests passed in 517 s (parity 13, engine surfaces 24, serving gate 13, serving gate process 15, stop budget 2, D10's gate 44);
+the full gate 11768 passed, 1 skipped, 10 deselected after the fix wave, against 9750 at the end of D10. `rinchen serve` ready 0.7 to 0.8 s after the spawn; 64 x 1 and 64 x 8 concurrent requests all 200, p95 57.7 and
+115.1 ms against a real server (the gate: 70.2 and 165.2 ms; 28.7 and 87.5 ms in process), `/metrics` exact (136 requests, 584 sentences); the compose command run natively ready in 0.75 s. **The toy ranks nothing, and the
+container was not built or run**: the STOP gate's last words ("`docker compose up` serves a tiny model") are proven in parts. No threshold was lowered.
+
+## 2026-11-10: D11 review - corrections and fixes
+
+A combined review of D11's Tasks 1 to 11 by two independent read-only reviewers (R1 on `17549f8..6ed0e72`, R2 on `6ed0e72..b6d57a4`) found: ready with fixes, 0 Critical and 7 Important findings (3 and 4). They checked and found
+sound: the record's strictness, the hash once before any parse, the staging and cleanup on every failure path, the layering (by an independent grep), the deleted D10 tests having successors, the alignment of the forced prefix,
+truncation and counters, the lazy imports, the translate contract, the packaging (offline wheel and sdist), the parity method, the error shape on 404, 405, 413, 422 and 500, shared-batch isolation, the batcher under a 400-round
+seeded stress, closed metric label sets, per-app registries, the precedence of the settings, the command's order, the skip list against the lock, the health check's JSON parse, the honesty of the gates (S3 signals only when
+queued, S5 not vacuous, S6 with a control) and that no request text reached a log or a message (about 40 request shapes with a planted marker). The fix wave (nine commits, `b6d57a4..4bfaa5e`, failing test first, mutation-checked)
+fixed:
+
+- I-1 (`966387a`): a document-level export returned `no_output` for every sentence not decoded inside an aligned window; a hypothesis is now cut at its first `<sep>` (see the evidence block "the document cut"; 5 failing tests, 9
+  mutants and a control).
+- I-2 (`266dbea`): a literal reserved symbol in a request text became a control piece; refused with a `RequestTextError` that names the row or document and the symbol (27 failing tests, 11 mutants); it closes the item the ledger had deferred to D12.
+- I-3 (`814b57d`): `torch` was dropped from the tool versions of the export and parity manifests; restored in both (3 failing tests, 4 mutants). The Task 2 report had called the removal "what the spec says"; the hard constraint wins.
+- I1 (`a291106`): the stop budget (see the evidence block; 10 mutants). Decided differently from the brief: the budget is split in two, not passed as a remaining time to the batcher (that needs a `uvicorn.Server` subclass and
+  would lose `uvicorn.run` and its exit status).
+- I2 (`f464cc0`): `n_best` is judged against the configured beam when the request names none, with a 400 in API terms (8 mutants).
+- I3 (`784361d`): unknown `RINCHEN_SERVE_*` names are refused with a "did you mean", the layer of a refused value is named (16 failing tests, 14 mutants).
+- I4 (`38c490b`): the docstrings and comments of readiness and the stop made honest (they are not observable over HTTP); the in-process tests renamed.
+- The minors of the export and the engine (`765c63c`, 30 mutants): M-1 the target is validated before the output file opens, also for an empty input; M-3 a broken pipe is exit 1; M-4 the parity binds the checkpoint by the weights, `config.json` and
+  `vocab.json` digests; M-5 error mapping (no piece, unreadable Eole output); M-6 the converter's message is not repeated; M-8 one `MAX_SOURCE_PIECES` import and one `document_status`; M-10 `TeacherOptions` refuses `auto`; M-12 the remedy
+  for a language missing from the registry; M-13 the warm-up builds every suppression list.
+- The minors of the service (`4bfaa5e`, 23 mutants): `redirect_slashes` off, HEAD on the probes, a bounded unknown key, a fixed message for a `DataError`, the single `document_status`, the public `ServingEngine`, a probe at debug level,
+  `platform: linux/amd64`, the Dockerfile's disclosures and the corrected skip-list count (22, not 21).
+
+The full gate after the wave: 11768 passed, 1 skipped, 10 deselected (24 min 1 s), `ruff` and `mypy` clean; the integration modules once each and D10's gate with every number unchanged. A first optional run of the committed tree after Part A had one
+failure, `tests/unit/test_train_launch_orphan.py::test_a_crashed_eole_leaves_no_rank_running_and_the_next_launch_is_accepted` (a D8 process-lifetime wait that timed out at a load average of about 12; it passes alone in 4.7 s, is D8 code untouched
+by D11, and did not recur in the final gate).
+
+Left open on purpose (the controller's decisions; each is in the runbook's "Known limits"):
+
+- M-2: a line of `rinchen translate` is read whole with no cap (an 11.5 MB line took 4.9 s and 1.3 GB); a safe pre-encode bound needs the vocabulary's longest piece.
+- M5: `rinchen serve` hashes the export twice, and a swap between the engine's hash and CTranslate2 reading `model.bin` is not caught; M6: an engine that fails to open exits with uvicorn's status 3 after a raw traceback; M7: no body read timeout and no
+  cancellation of a disconnected client's work (a gateway in front); M8: the body is validated before the readiness check; no operator cap on a client's `beam_size` or `n_best`; `tests/unit/conftest.py` imports FastAPI in every unit session.
+- uvicorn's own plain-text errors cannot be shaped; a blank converter path from the environment is accepted; `rinchen translate` names `DecodeOptions.n` in its own error (a test pins it); `doc_chunker._refuse_separators` still raises a plain `DataError` (unreachable).
+- M-7 (`effective_compute_type` is used by tests only), M-9 (`engine_types.py` mixes public and working types), M-11 (the checkpoint's manifest is not among the export manifest's inputs), M-14 (`ModelRecord` is not hashable), the duplicated private
+  helpers (`_load_processor`, `_require_no_directory`, `_hashed`).
+- Docker: the image is amd64 only; the build needs the network (`uv sync`, `hatchling`, the `kiwipiepy-model` sdist); a `README.md` edit reinstalls every dependency; `cap_drop` and `no-new-privileges` are not set.
+
+**The scoped re-review of the fix wave (`b6d57a4..4bfaa5e`) was RUNNING when these records were written and its verdict is NOT recorded here.** A follow-up edit adds it, as D9 and D10 did.
+
+Disclosed process slips of the wave, one line each: the design agent ran `ctranslate2.get_cuda_device_count()` once without hiding the GPU (a driver query, no model, no kernel); Task 10 ran `docker compose version` (read-only, outside the allowed list) and
+issued a `pkill -f` against its own crashed harness (the permission classifier denied it; nothing was killed); Task 11 dispatched a trivial subagent with the prompt "noop" against the rule that implementers dispatch none (it did nothing).

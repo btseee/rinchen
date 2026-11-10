@@ -276,4 +276,17 @@ What the toy cannot answer, and where the code leaves room:
 
 ## As built
 
-(Filled by Task 12.)
+The plan above was written before the build and is kept as written; where the build differs, section 7 of the spec ("Amendments made while building", A1 to A23) and `docs/runbooks/11_serving.md` say what the code does. Code tip `4bfaa5e`; the scoped re-review of the fix wave (`b6d57a4..4bfaa5e`) was running when this note was written and its verdict is NOT recorded here. The points a reader of the tasks needs:
+
+- Task 1 (`05d460e`): the manifest is written LAST into the private child, which is renamed onto `out_dir`; the old-format check comes before anything is hashed; `convert` round-trips a trial record through `from_bytes` before the converter starts.
+- Task 2 (`2fab952`): `rinchen distill export` and `rinchen export convert` are one function registered twice; D10's `train/distill_export_files.py` and `tests/unit/test_train_distill_export_record.py` were deleted and their tests moved into the `test_export_*` files; the D10 gate (44 tests) is unchanged in every number.
+- Task 3 (`48c7125`): the shared reserved-piece rule allows the numbered placeholders and D10's teacher unions them back; `lang/scripts.py` gained `counted_letters` (an unlisted, behaviour-neutral edit).
+- Task 4 (`3b94c3f`): `engine_types.py` also holds the working types of a call (581 lines, with `engine.py` at 769 near the 900-line cap); `rinchen.Translator` resolves without loading `ctranslate2` or `sentencepiece`.
+- Task 5 (`0e7f0e0`): the packaged registry and `rinchen translate`; the offline wheel build is a test (`tests/unit/test_packaging.py`), not skipped.
+- Task 6 (`81ca7e0`): the command is `cli/export_parity.py`; the checkpoint is bound by three digests after the fix wave, not one.
+- Task 7 (`6ed0e72`): the gates G1 to G7 on the real binaries; the document gate first recorded the `<sep>` hole instead of failing on it (see the fix wave).
+- Tasks 8 and 9 (`89ceb57`, `6de792f`): FOUR routes (T15 lists four; the plan's Task 9 text and its brief said "the five routes of T15"); `create_app` takes an `open_engine` because `serve` may not import `script_conv`; `serve/_http.py` and `serve/_translate.py` are extra modules to stay under the line cap.
+- Task 10 (`e98a44c`): two-stage Dockerfile, 22 skipped packages, `platform: linux/amd64`; only `docker --version` and `docker compose config -q` (and one `docker compose version`, disclosed) were run.
+- Task 11 (`b6d57a4`): `tests/integration/test_serving_gate.py` and `test_serving_gate_process.py` (two modules, 28 tests); S3 signals once the queue shows all 192 sentences.
+- The combined review (two reviewers, Tasks 1 to 7 and Tasks 8 to 11) found 0 Critical and 7 Important findings; the fix wave (`814b57d`, `966387a`, `266dbea`, `765c63c`, `a291106`, `f464cc0`, `784361d`, `38c490b`, `4bfaa5e`) changed behaviour the tasks did not list: a document model's hypothesis is cut at its first `<sep>`; a reserved symbol in a request text is refused; `torch` is recorded again; the stop is one budget; `n_best` is judged against the configured beam; unknown `RINCHEN_SERVE_*` names are refused; trailing slashes are a 404 and HEAD works on the probes. Task 12 (this note, the runbook and the records) is the last task.
+- Gate after the wave: 11768 passed, 1 skipped, 10 deselected (one sequential process, 24:01); the limits the review and the fix wave left open on purpose are the runbook's "Known limits".

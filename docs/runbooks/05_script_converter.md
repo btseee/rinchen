@@ -38,7 +38,12 @@ read as one.
 - Conversion is word by word. A homograph gets one spelling whatever its
   sentence says.
 - There is no serving engine yet (D11, D12); `ScriptConverter` is the interface
-  it will call.
+  it will call. [D11: the engine exists (`rinchen.infer.engine.Engine`, behind
+  `rinchen.Translator`, `rinchen translate` and `rinchen serve`) and calls
+  `ScriptConverter` through a `script_converter` seam when a request asks for the
+  traditional script (`--script Mong`) of a model that has no `mn_Mong` target: it
+  translates into Khalkha Cyrillic and converts the text. The converter's limits
+  above stand, and it was not quality-checked by D11: `docs/runbooks/11_serving.md`.]
 
 **Every threshold in this runbook is a prior, and every gate was measured on the
 tiny memorisation fixture.** A gate that passes shows that the machinery works

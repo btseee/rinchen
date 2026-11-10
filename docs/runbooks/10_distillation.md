@@ -15,6 +15,21 @@ while building, is `docs/superpowers/specs/2026-11-09-d10-distillation-design.md
 (section "D10 findings"). The CTranslate2 and Eole facts come from a spike made before the design
 (`.superpowers/sdd/2026-11-09-d10-distillation/spike-findings.md`; Eole 0.6.4, CTranslate2 4.8.4, CPU, toy data).
 
+**D11 update (2026-11-10).** D11 changed four things this runbook describes. The text below is kept as D10 built it (its
+measurements are D10's), and where a sentence is no longer true it carries a bracketed `[D11: ...]` note. (1) The export record
+is now `rinchen.json` (schema `rinchen.model/1`: D10's fields plus the name, the directions, the languages, the target tags, the
+document level and the quantisation) and the manifest stage is `export` (it was `distill_export`); every reader refuses a directory
+that holds `export.json` and no `rinchen.json`, with the remedy `rinchen export convert`. (2) The record, `VerifiedExport`,
+`verify_export`, `verified_bytes`, `shared_vocabulary`, `end_token` and the conversion moved to `rinchen.export` (`record`,
+`verified`, `quantize`, `ct2`); `train/distill_export_files.py` is deleted and `train/distill_export.py` keeps `export_checkpoint`
+(it needs `continuation.verify_source`). (3) `ct2_source_tokens` and the reserved-piece rule moved to `rinchen.infer.source_tokens`
+(the teacher imports them and adds the numbered placeholders back, so its counters did not change); `infer/` also holds
+`script_mask`, `engine`, `engine_types` and `translator`. (4) `rinchen distill export` is the same function as `rinchen export
+convert` (it also takes `--quantization`, `--direction`, `--document-level` and `--name`, and prints `directions:`, `document
+level:` and `quantization:` lines between the placement line and `record:`); `TeacherOptions` refuses `compute_type="auto"`;
+the export manifest records the tool versions of `ctranslate2`, `eole` and `torch`. The gate of this runbook was re-run on the
+D11 tree: every number is unchanged. See `docs/runbooks/11_serving.md`.
+
 **What D10 is.** Tested machinery. The teacher is a checkpoint our launcher wrote and our manifest vouches for (the
 final step of a run `rinchen train launch` finished, or a directory `rinchen train average` wrote). Its export is a
 directory of five files and a manifest. It translates the training sources through CTranslate2 behind D6's `Translator`
@@ -41,7 +56,9 @@ students (16/3 and 12/2 layers); nothing of them was ever trained.
   needs, shaped so that D11 takes it over (the converter call is `rinchen.export.eole_ct2`, the record is
   `export.json`, `verify_export` is the reader). D11 builds `export/ct2.py::convert(eole_ckpt, out, quantization)`
   around `export_ct2` (`int8`, `int8_float16`), `rinchen.json` (languages, tags, version) in place of `export.json`,
-  the engine, the parity and the quantisation gates.
+  the engine, the parity and the quantisation gates. [D11: built, all of it; see `docs/runbooks/11_serving.md`. The parts of
+  this sentence that named `export.json` and `export/ct2.py::convert(eole_ckpt, out, quantization)` are now `rinchen.json` and
+  `convert(checkpoint, out_dir, *, facts, spm_bytes, inputs, ...)`.]
 - **No fine-tuning of anything.** A student starts from random initialisation, always: `train_from` and `reset_optim`
   are not keys of any config of this project and `distill prepare` renders neither (and refuses a base that holds
   them). The teacher of a distillation is a checkpoint OUR launcher wrote and OUR manifest vouches for; an external
@@ -71,10 +88,10 @@ scoped re-review of the fix wave (`e67b05e..cc917e2`: approved with minors, 0 Cr
 | Module | Job |
 |---|---|
 | `rinchen/export/eole_ct2.py` (new package `export`) | `export_environment`, `export_log_path`, `export_ct2(checkpoint, out_dir, *, timeout, log_path, reported_dir)`: the converter call, MOVED from `script_conv/export.py` (which re-exports the three names and keeps `parity`) |
-| `rinchen/train/distill_export.py` | `ExportRecord`, `CheckpointRecord`, `VerifiedExport`, `ExportOutcome` (the record and whether the placement was checked), `export_checkpoint`, `verify_export`: the provenance checks, the staging directory, the record |
+| `rinchen/train/distill_export.py` | `ExportRecord`, `CheckpointRecord`, `VerifiedExport`, `ExportOutcome` (the record and whether the placement was checked), `export_checkpoint`, `verify_export`: the provenance checks, the staging directory, the record [D11: only `export_checkpoint` and `ExportOutcome` stay here; the record, `VerifiedExport` and `verify_export` are `rinchen.export.record` and `rinchen.export.verified`, the staging directory is `rinchen.export.ct2.convert`] |
 | `rinchen/train/distill_saved_config.py` | the tag placement read back from the checkpoint's saved `config.json`, the refusal of a statement that disagrees and `PlacementCheck` (`checked` or `stated`): what a message quotes of that file is escaped and cut to 80 characters |
-| `rinchen/train/distill_export_files.py` | `verified_bytes`, `shared_vocabulary`, `end_token`: the files of an export read only as the bytes that were hashed |
-| `rinchen/train/distill_teacher.py` | `TeacherTranslator`, `TeacherOptions`, `ct2_source_tokens`, `COUNTER_KEYS`: CTranslate2 behind D6's `Translator` |
+| `rinchen/train/distill_export_files.py` | `verified_bytes`, `shared_vocabulary`, `end_token`: the files of an export read only as the bytes that were hashed [D11: deleted; the functions are in `rinchen.export.verified`] |
+| `rinchen/train/distill_teacher.py` | `TeacherTranslator`, `TeacherOptions`, `ct2_source_tokens`, `COUNTER_KEYS`: CTranslate2 behind D6's `Translator` [D11: `ct2_source_tokens` and the reserved-piece rule are imported from `rinchen.infer.source_tokens`] |
 | `rinchen/train/distill_sources.py` | `KdSources`, `kd_sources`: one source per direction and text, from the authentic training rows |
 | `rinchen/train/distill_shards.py` | `shard_candidates`: a shard read back from disk or asked of the teacher and written before the next |
 | `rinchen/train/distill_generate.py` | `generate_kd`, `kd_fingerprint`, `kd_name`, `KdResult`: the loop that joins D6's shards and selection into KD rows and counts |
@@ -86,7 +103,7 @@ scoped re-review of the fix wave (`e67b05e..cc917e2`: approved with minors, 0 Cr
 
 Layering as D7 to D9: `train` never imports `script_conv` or `cli` (a test checks); `export` imports nothing of `train`,
 `synth`, `cli` or `script_conv` (the converter is a subprocess, `ctranslate2` is imported lazily and only where a model
-is loaded); `infer/` is untouched (a test pins its file set).
+is loaded); `infer/` is untouched (a test pins its file set). [D11: `infer/` now holds `doc_chunker`, `engine`, `engine_types`, `script_mask`, `source_tokens` and `translator`, and the test pins that set; `export` still imports nothing of `train`, `synth`, `cli`, `script_conv`, `infer` or `serve`.]
 
 ## The pipeline, in order
 
@@ -106,6 +123,9 @@ tag placement: checked against the saved config
 record: $W/teacher_ct2/export.json
 manifest: $W/teacher_ct2/manifest.json
 ```
+
+[D11: the command now prints `directions: derived from the saved config (4)`, `document level: derived from the saved config
+(false)` and `quantization: float32` after the placement line, and the record is `$W/teacher_ct2/rinchen.json`.]
 
 **2. Plan the generation** (`distill generate --dry-run`, 1.5 s: builds no teacher, loads no model, writes nothing, not
 even the output directory):
@@ -265,8 +285,8 @@ hidden) and writes `model.bin`, `shared_vocabulary.json` and `config.json`; D10 
 | `shared_vocabulary.json` | 8,659 | a list of 344 strings: the model's whole padded vocabulary in Eole's order |
 | `config.json` | 223 | the converter's: `eos_token`, `bos_token`, `unk_token`, `add_source_bos/eos false`; no layer count, no tag, no tokenizer |
 | `spm.model` | 12,612 | a copy of the SentencePiece model the checkpoint was trained with |
-| `export.json` | 710 | the record |
-| `manifest.json` | 3,360 | stage `distill_export`, written last, with every file's SHA-256 |
+| `export.json` | 710 | the record [D11: `rinchen.json`, 1,121 B for the same checkpoint] |
+| `manifest.json` | 3,360 | stage `distill_export`, written last, with every file's SHA-256 [D11: stage `export`] |
 
 (`spm.model` was 12,605 bytes in the gate's run: the toy SentencePiece model is trained afresh in each workspace and the
 byte count moved by 7 between two workspaces with the same sentences; the cause was not looked into. `model.bin`, the
@@ -277,7 +297,9 @@ showed by frequency, the 118 reserved symbols that D9's invariant appended, and 
 `averyunlikelytoken0` up to a multiple of 8); its ORDER depends on the training data, so a student's file differs from a
 teacher's even with the same entries (`D-CT2-EOLE-VOCAB`).
 
-The record, `export.json` (sorted keys, two-space indent, one final LF; schema `rinchen.distill_export/1`):
+The record, `export.json` (sorted keys, two-space indent, one final LF; schema `rinchen.distill_export/1`) [D11: replaced by
+`rinchen.json`, schema `rinchen.model/1`, which keeps these fields and adds `name`, `rinchen_version`, `directions`, `languages`, `tags`,
+`document_level` and `quantization`; runbook 11, "The export directory"]:
 
 ```
 {
@@ -372,7 +394,9 @@ child onto `--out-dir` after one more existence check. Any failure removes the p
 this call put it in place: a directory somebody else makes at that path meanwhile is refused and never touched (the first
 version removed whatever sat there, review M1). A `rename` onto an EMPTY directory that appears in the last instant would
 still replace it, and nothing else: that window is stated in the code and left. The manifest is written after the
-rename; a failure writing it removes `--out-dir`.
+rename; a failure writing it removes `--out-dir`. [D11: `rinchen.export.ct2.convert` writes `rinchen.json` instead of `export.json`
+and writes the manifest LAST into the private child, before the rename, so the output appears whole, manifest included, or not at
+all; a failure writing it removes the private directory.]
 
 **A hard kill (SIGKILL, an out-of-memory kill, power loss) leaves `.<name>.<random>` behind**, since a kill that Python
 cannot catch cannot run the cleanup; SIGINT (exit 130) and SIGTERM (exit 143) do clean it up (**measured** by the re-review on a
@@ -399,7 +423,7 @@ teacher). The real artifacts agree: 344 = 344 (**measured**).
 ### `verify_export`, the reader
 
 Everything that trusts an export (the teacher that translates, the generation that fingerprints it) goes through
-`verify_export(directory)`: the manifest must be of stage `distill_export` with status `export: ok` and list each of the
+`verify_export(directory)`: the manifest must be of stage `distill_export` [D11: `export`] with status `export: ok` and list each of the
 five files once by file name; the SHA-256 of every file, taken once and BEFORE it is parsed, must be the one the manifest
 lists; the record must state the SentencePiece model that is beside it. A directory that was moved is accepted (the
 names are compared, not the paths). **The verification is not atomic with CTranslate2's later load of `model.bin`**: it
@@ -587,7 +611,7 @@ and `seed`. Conservation holds per direction and in total: `sources = no_candida
 
 The manifest (stage `distill_generate`, written last): inputs the corpus files, the selection config
 (`configs/data/synth.yaml` by default; its SHA-256 is a listed input and its `config_sha256`), `spm.model`, `model.bin`,
-`shared_vocabulary.json`, `config.json`, `export.json` and the export's manifest, each hashed before it was read (the
+`shared_vocabulary.json`, `config.json`, `export.json` [D11: `rinchen.json`] and the export's manifest, each hashed before it was read (the
 teacher's digests are the ones `verify_export` took); outputs `kd.parquet` (with its row count) and `counts.json`; metrics
 the counts (`count.<direction>.<name>` and `count.total.<name>`), `matches_reference.*`, `letterless_sources.*`,
 `shards.*`, `teacher.<counter>` and `decoding.*`; `seed` the `--seed`; status `generate: ok`, `qe: ok | skipped: ...`,
@@ -888,7 +912,7 @@ originals-only student 97.01, inside the spread plus 1.6 points: **do not read 9
 
 ## The provenance chain
 
-The teacher's `train_launch` or `train_average` manifest -> `export.json` and the export's manifest (`distill_export`, the
+The teacher's `train_launch` or `train_average` manifest -> `export.json` [D11: `rinchen.json`] and the export's manifest (`distill_export` [D11: `export`], the
 checkpoint's four digests recorded) -> the KD manifest (`distill_generate`: the five export files, `export.json` and the
 export manifest by hash, `teacher.checkpoint_*` and `teacher.model_sha256` as status) -> the prepare manifest
 (`distill_prepare`: the KD files and their manifests by hash, the base config, the corpora) -> the student's `train_launch`
@@ -938,7 +962,7 @@ teacher, a target-tag teacher with a forced prefix, a student). **What they do n
 whether KD helps: the toy ranks nothing (three seeds of the student span 1.9 chrF, and the originals-only student is inside
 the spread), the teacher's KD targets are 99.6 % the references, and the thresholds sit far from the measurements on
 purpose (the student's 95.0 is 3.6 below 98.58 and 1.7 below the lowest of three seeds, 96.68; a margin judged adequate on
-one machine). Nothing ran on a GPU, in float16 or int8, or at a real size; the strict parity and quantisation gates are D11's.
+one machine). Nothing ran on a GPU, in float16 or int8, or at a real size; the strict parity and quantisation gates are D11's [D11: built and run on the CPU; runbook 11].
 
 The measurements agree between the spike, the gate and this run (a seed-fixed, CPU, two-thread run on this machine): the
 teacher's `model.bin` (SHA-256 `b7f33d88d5fa...`), 3,599 rows, 3,583 matches, 28/28/22/22, chrF 98.20 and 98.58, 200 of 200.
@@ -978,7 +1002,7 @@ UNMEASURED: no real corpus, no real teacher and no GPU run exist, and every valu
    and whether a deeper-encoder student converges at the teacher's recipe (3/1 did not at the tiny one).
 6. **Evaluate** teacher and student with `rinchen distill evaluate` over the same dev rows and the same `--max-lines`, each
    with its own SentencePiece model and placement; then export the student with `distill export`. Quantisation and the
-   strict parity gate are D11's.
+   strict parity gate are D11's [D11: `rinchen export convert --quantization`, `rinchen export parity`; runbook 11].
 
 ## Open gates
 
@@ -987,7 +1011,7 @@ student distilled from it; the real mix ratio, the repeat factor that is too hig
 the QE thresholds (the real scorer was never loaded); the real students' training (speed, convergence, learning rate,
 steps, the depth recipe); the real share of Eole's deduplication on real data and whether `<ft>` at inference helps; CTranslate2
 on a device other than the CPU, in float16 or int8, and the export of a 1.1 B-parameter teacher (D11 owns the strict parity
-and the quantisation gates); a document-level teacher, monolingual KD sources and several teachers (extension points:
+and the quantisation gates [D11: built, on the CPU and the toy only; the GPU parts stay open]); a document-level teacher, monolingual KD sources and several teachers (extension points:
 `ct2_source_tokens`, `KdSources`, the loader that merges KD files per direction, `eole_data.data_section`'s `placement`); the
 `tgt` placement for a real student (covered by unit tests only); the D3 gates assigned to D4, the D5 gates that need real
 text or a reader and the D6 to D9 gates stay open as recorded in their runbooks.
@@ -1165,6 +1189,8 @@ eole 0.6.4, ctranslate2 4.8.4, torch 2.14.1+cu130, sentencepiece 0.2.1, polars 2
 was hidden from every process and every CTranslate2 translator was built on `device="cpu"`. All on 2026-11-09, once each,
 code at commit `cc917e2`, **on a machine that was loaded by other work (load average 7 to 11), so every wall time is longer
 than an idle machine's** (the gate's times are in parentheses); the numbers that are not times do not depend on the load.
+[D11: the rows that name `export.json` or the stage `distill_export` are D10's measurements; the same checkpoint now exports to a
+`rinchen.json` of 1,121 B and a manifest of 3,546 B, `model.bin` and every score unchanged.]
 
 | What | Value |
 |---|---|
@@ -1199,6 +1225,9 @@ and asserts the hidden GPU); they reuse the helpers of `tests/support/distill_ga
 was written under `data/` or `models/`.
 
 ## Where the code lives
+
+[D11: `train/distill_export_files.py` and `tests/unit/test_train_distill_export_record.py` are deleted, and the record, the reader and
+the conversion live in `src/rinchen/export/{record,verified,quantize,ct2}.py`; runbook 11 lists them.]
 
 `src/rinchen/export/eole_ct2.py`;
 `src/rinchen/train/{distill_export,distill_export_files,distill_saved_config,distill_teacher,distill_sources,distill_shards,

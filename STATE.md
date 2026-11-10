@@ -906,7 +906,73 @@ KeyboardInterrupt with a real CTranslate2 call, Windows and macOS. [EVIDENCE: th
 real-binary runs and the measurement scripts of the runbook (`scratchpad/d10-t8/`), the spike (`spike-findings.md`) and the
 review reports, 2026-11-09, commits `e5ff644` through `233ba33`.]
 
-Branch status (updated 2026-11-09, after the D10 build): `main` holds D3, the D3 research follow-up, D4
+**D11 (export, quantization, serving, CLI and package) is done on branch `d11-export-serving`; its STOP gate ("`docker compose up` serves a tiny
+model") is met IN PARTS locally, and the container part is UNMEASURED: through the real `rinchen` commands and the real Eole and CTranslate2 on the CPU, the
+tiny teachers are exported to float32, int8 and int8_float16, the strict parity gate (Eole greedy against CTranslate2 float32 greedy: at least 95 % of 200
+sentences equal, mean |delta log-probability| per token at most 1e-3) and the int8 quantisation gate (chrF drop at most 1.0) pass, the script gate (0 forbidden-script
+letters in 500 outputs with suppression, 96 without) passes, `rinchen.Translator` and `rinchen translate` agree with the engine, and `rinchen serve` (the command line the
+compose file holds, run natively) answers 64 concurrent requests, all 200, p95 far below 2 s, exposes its counters on `/metrics` and drains on SIGTERM. No image was
+pulled, built or run and `docker compose up` never ran.** The branch is stacked on `d10-distillation` (cut from it at `b672aa8` on 2026-11-09), is not merged and not
+pushed, and no CI run covers it. It is 21 commits above `d10-distillation` at its code tip (one of design, eleven of tasks, nine of the fix wave), and one more with the records (the design commit is `17549f8`; the tasks are `05d460e`,
+`2fab952`, `48c7125`, `3b94c3f`, `0e7f0e0`, `81ca7e0`, `6ed0e72`, `89ceb57`, `6de792f`, `e98a44c` and `b6d57a4`; the fix wave is `814b57d`, `966387a`, `266dbea`, `765c63c`, `a291106`,
+`f464cc0`, `784361d`, `38c490b` and the code tip `4bfaa5e`, `D11: review minors (serving)`; the records are the commit `D11: runbook, spec amendments and state and decision
+records`). It is machinery, not a model: the only data it ever ran on is the templated toy sentences of `tests/support/tiny_parallel.py` (the toy saturates at chrF 98.2 and
+ranks nothing), no real corpus or model exists, **no GPU was used** (the owner did not authorise it; every Eole process, the converter and every CTranslate2 translator ran
+with `CUDA_VISIBLE_DEVICES=""` and `device="cpu"`, `auto` is refused everywhere, `--device cuda` is validated and never run), and `configs/serve/server.yaml` and `edge.yaml`
+are tables of unmeasured priors. Built: `rinchen.export.{record,verified,quantize,ct2}` (the record `rinchen.json`, schema `rinchen.model/1`, replacing D10's `export.json`; the
+reader `verify_export` moved out of `train`; quantisation chosen at conversion; `convert` with a private staging directory and the manifest last), `rinchen.infer.{source_tokens,
+script_mask,engine_types,engine,translator}` (the engine with the guards CTranslate2 lacks: the tag by placement, the end token, the source limit, the reserved pieces, script
+masking in three modes, documents through D9's chunker; the class `rinchen.Translator`, resolved lazily), `rinchen.train.export_parity` (strict Eole/CTranslate2 parity),
+`rinchen.serve.{schemas,metrics,batcher,engine,_http,_translate,app}` and `rinchen.config.serve` (FastAPI, a micro-batcher, eleven Prometheus families, a stop with one
+budget), the commands `rinchen export convert|verify|parity`, `rinchen translate` and `rinchen serve`, `docker/{Dockerfile.cpu,compose.serve.yaml}`, `.dockerignore`,
+`configs/serve/{tiny,server,edge}.yaml`, the hatch `force-include` that ships the language registry in the wheel, the test helpers listed in `CLAUDE.md`, and
+`docs/runbooks/11_serving.md`. The design is `docs/superpowers/specs/2026-11-09-d11-export-serving-design.md` (amended to the finished code, section 7 listing each of A1 to A23);
+its rulings T1 to T22 are condensed in `DECISIONS.md` ("2026-11-09: D11 export, quantisation, serving: the rulings"), made by the builders and the controller without a review round
+of their own. Built task by task with tests first after a spike on the real Eole, CTranslate2, FastAPI and Docker (Tasks 1 to 11, then ONE combined review by two reviewers, a fix wave,
+a scoped re-review and these records). **The combined review (two independent reviewers, read-only: Tasks 1 to 7 and Tasks 8 to 11) found: ready with fixes, 0 Critical and 7
+Important findings.** R1: a document-level export returned `no_output` for every sentence not decoded inside an aligned window; a literal reserved symbol in a request text became a
+control piece (`<2eng_Latn> This is the star.` silently changed the language); `torch` had been dropped from the tool versions. R2: a stop could take twice the shutdown timeout
+(SIGKILL under the compose grace period); a valid `n_best` was refused with a misleading message when the configured beam was not 4; a mistyped `RINCHEN_SERVE_*` variable was
+silently ignored; readiness and the drain are not observable over HTTP (uvicorn starts the lifespan before it binds and ends it after it closes the listener). The fix wave (nine
+commits) fixed them all and left open on purpose the limits that `docs/runbooks/11_serving.md` lists under "Known limits". **The scoped re-review of the fix wave
+(`b6d57a4..4bfaa5e`) was RUNNING when these records were written and its verdict is NOT recorded here; a follow-up edit adds it.** Gates, run for real on Linux, CPython 3.14.10:
+`ruff format --check .`, `ruff check .` and `mypy src` clean and `pytest -m "not network" -q` -- 10258 passed after Task 1, 10260 after Task 2, 10410 after Task 3, 10650 after Task 4,
+10851 after Task 5, 11004 after Task 6 (four parallel processes), 11049 after Task 7, 11316 after Task 8, 11457 after Task 9, 11534 after Task 10, 11562 after Task 11 and **11768 passed,
+1 skipped, 10 deselected** after the fix wave (`4bfaa5e`, 24 min 1 s, one sequential process), against 9750 at the end of D10; the D5 to D10 regression sets stayed green. Mutation checks by
+hand, one mutant at a time, as recorded per task: 92, 61, 62, 159, 106, 132, about 146, 133 and 196 for Tasks 1 to 6 and 8 to 10, the gates' mutants for Tasks 7 and 11, and 4, 9, 11, 30, 10, 8, 14 and 23 for
+the fix wave.
+Evidence of the STOP gate, through the real `rinchen` binary on the CPU with the GPU hidden (2 threads), measured by the gates and again for the runbook on 2026-11-10 (Intel Core Ultra 7
+265K, 20 cores, 46 GiB; the machine was loaded by other work, so the times are longer than idle; every count and score below was the same in the spike, in the gates and in the runbook's
+run): the tiny teachers (2,000 steps source tag, 1,000 steps target tag; averaged weights SHA-256 `f4e32704b958...`, the same as D10's); `export convert` (4.8 s; `model.bin` 2,034,311 bytes at
+float32, 1,488,691 at int8 (73.2 %), 844,931 at int8_float16 (41.5 %); `rinchen.json` 1,121 bytes); strict parity **200 of 200, mean |delta| 7.19e-7 per token (max 3.43e-6)** for the
+source-tag teacher and **200 of 200, 1.37e-6** for the target-tag teacher, against the gate's 1e-3, **and with the forced tag's log-probability kept 200 of 200 exact but 0.0433 per
+token: FAIL** (only the log-probabilities reveal the trap); the int8 export 199 of 200 exact at 1.14e-3 (reported, not gated: the 1e-3 bound is a float32 bound); chrF over the 400 dev rows 98.207
+(float32), 98.268 (int8, +0.061), 98.197 (int8_float16); effective compute types `float32`, `int8_float32`, `int8_float32`; script masking over 500 requests the toy never trained: 96 outputs
+with a forbidden letter (731 letters) with the mask off, 0 with `always`, `retry` decodes the 96 again and all 96 improve, the 400 trained requests leak nothing, and the D5 converter wrote the
+traditional script in 448 of 448 words without the list and 0 with it; a document model (2,500 continuation steps) over 66 test documents: 400 `ok`, chrF 84.747, 101 of 106 windows aligned,
+94 of 106 falling back at a 20-piece cap; `rinchen serve` ready 0.80 s after the spawn, 64 x 1 and 64 x 8 concurrent requests all 200 (p95 57.7 and 115.1 ms; the gate's 70.2 and 165.2 ms
+against the real server, 28.7 and 87.5 ms in process), `/metrics` counting exactly the 136 requests and 584 sentences, SIGTERM with 24 requests inside the service answered by 1.57 s and the
+process gone at 1.68 s with status -15; the stop budget: a fake engine stuck 8 s with a 2 s timeout ends the process 2.17 s after the signal (4.18 s before the fix). The thresholds (exact
+share 0.95, delta 1e-3 for float32, int8 chrF drop 1.0, 0 forbidden letters, all 200, p95 below 2.0 s) were not lowered. **The toy ranks nothing**: do not read the gate as evidence that int8 is
+lossless, that masking helps a real model or that the thread settings suit one.
+Findings worth knowing: upstream facts about CTranslate2 4.8.4, Eole 0.6.4, uvicorn 0.54.0 and the packaging, in `docs/VERIFY.md` ("D11 findings"). `compute_type="auto"` quantises every export to
+int8 on a CPU (refused); Eole's score needs `length_penalty: none` and excludes a forced target prefix that `score_batch` includes; `score_batch` appends the end token; `suppress_sequences` entries
+must be vocabulary entries and never the end token; a document model continued on windows of 2 to 4 sentences writes `<sep>` after a lone sentence (the engine cuts at the first `<sep>`); uvicorn
+exits by the re-raised signal (143), starts the lifespan before it binds the port and ends it after it closes the listener (readiness and the drain are a refused connection on the wire, and the
+health check's start period must be sized for the model); the built wheel lacked `configs/languages.yaml` (fixed by a `force-include`); a frozen `uv sync` carries torch and the CUDA wheels (22
+packages in this lock, about 4.4 GB) that serving never imports.
+Open gates (none can be done without real data, a GPU or the authority to build an image): everything GPU-side (CTranslate2 on CUDA, `float16`, `int8_float16`, token batching, the speed of a
+1.1 B-parameter teacher and a 190 M student, the thread settings of a real model); the real quantisation loss and parity margin; whether a hard script mask helps a real model; the container (build,
+size, start time, `docker compose up`, the stop of PID 1, an in-container health check, the base and uv tags, the start period for a real model); document throughput and a real document model; the D3
+gates assigned to D4, the D5 gates that need real text or a reader and the D6 to D10 gates stay open.
+Known and open: the limits listed in the runbook (a line of `rinchen translate` is read whole with no cap; `rinchen serve` hashes the export twice; an engine that fails to open exits with uvicorn's
+status 3 after a traceback; no body read timeout and no cancellation of a disconnected client's work; no cap on a client's `beam_size`; uvicorn's plain-text errors cannot be shaped; a blank converter
+path from the environment is accepted; the image is amd64 only and its build needs the network; a flake of a D8 test under load, passing alone); `infer/engine.py` has 769 lines and
+`infer/engine_types.py` 581 (the limit is 900). NOT verified: any run on a GPU or a real model, the container, `KeyboardInterrupt` with a real CTranslate2 call, Windows and macOS, CI, and the
+re-review of the fix wave. [EVIDENCE: the gate chain, the integration modules (111 tests, D10's gate included, 517 s on 2026-11-10), the read-only drivers of the runbook (`scratchpad/d11-t12/`), the
+spike (`spike-findings.md`) and the review reports, 2026-11-09 to 2026-11-10, commits `17549f8` through `4bfaa5e`.]
+
+Branch status (updated 2026-11-10, after the D11 build): `main` holds D3, the D3 research follow-up, D4
 and D5, and is at `0d534a3` (the commit that records the D5 merge; `862e176` is the D5 merge tip,
 `2346cea` was the D3 end, `b38eaae` the D4 merge tip and `4eac98f` the commit that recorded the D4 merge;
 no `d3-research-followup`, `d4-filtering-mining` or `d5-script-converter` ref remains). D6 lives on its own
@@ -916,10 +982,12 @@ on it (cut from `d6-synthetic-data` at `9973319`); D8 lives on `d8-teacher-train
 `d8-teacher-training` at `993f32c`; its last code commit is `135e9f9`, `D9: re-review minors`, and the records are
 `6746ac5` and the commit `D9: record the re-review`); D10 lives on `d10-distillation`, stacked on D9 (cut from
 `d9-document-level` at `7d0c166`; its last code commit is `233ba33`, `D10: re-review minors`, and the records are the commits `D10: runbook, spec amendments and
-state and decision records` and `D10: record the re-review`). None
-of the five is merged into `main` and none is pushed; merging D10 means merging D6, D7, D8 and D9 first. At the D5 merge `main` was 81 commits ahead of `origin/main`
-(`9e7b0ec`); it is unpushed, and no CI run covers D3, D4, D5, D6, D7, D8, D9 or D10. The full local gate was last run
-on the D10 branch: 9750 passed, 1 skipped, 10 deselected (D6 to D10 included), on `D10: re-review minors` (`233ba33`; 9706 on `D10: fix the vocabulary
+state and decision records` and `D10: record the re-review`, `b672aa8`); D11 lives on `d11-export-serving`, stacked on D10 (cut from `d10-distillation` at `b672aa8`; its last code
+commit is `4bfaa5e`, `D11: review minors (serving)`, and the records are the commit `D11: runbook, spec amendments and state and decision records`). None
+of the six is merged into `main` and none is pushed; merging D11 means merging D6, D7, D8, D9 and D10 first. At the D5 merge `main` was 81 commits ahead of `origin/main`
+(`9e7b0ec`); it is unpushed, and no CI run covers D3, D4, D5, D6, D7, D8, D9, D10 or D11. The full local gate was last run
+on the D11 branch: 11768 passed, 1 skipped, 10 deselected (D6 to D11 included), on `D11: review minors (serving)` (`4bfaa5e`; 11562 on `D11: the serving gate`, `b6d57a4`; 10258 after Task 1);
+on the D10 branch it gave 9750 passed, 1 skipped, 10 deselected, on `D10: re-review minors` (`233ba33`; 9706 on `D10: fix the vocabulary
 padding that a teacher hypothesis could hold`, `cc917e2`; 9439 on `D10: the tiny student gate`, `e67b05e`; 8517 after Task 1); on the D9
 branch it gave 8252 passed, 1 skipped, 10 deselected on `D9: re-review minors` (`135e9f9`;
 8214 on `D9: review minors`, `c2d46b5`; 8075 after Task 5, 7187 at the end of D8); on the D8 branch it gave 7114
@@ -930,20 +998,14 @@ commit (`D6: re-review minors`) it gave 4331 passed; on the merged D5 tree `main
 whole-branch review of D8 ran (above); its fix wave's scoped re-review approved it with minors and the minor
 that needed code is fixed (`D8: re-review minors`).
 
-Next step: D11 (Export, quantization, serving, CLI, package): `export/ct2.py` (`convert(eole_ckpt, out, quantization)`:
-the converter, then the SentencePiece models and `rinchen.json`), `export/quantize.py` (`int8`, `int8_float16`),
-`infer/engine.py`, `serve/*`, the `rinchen translate` command and the Python API, the parity and quantisation gates and
-`docs/runbooks/11_serving.md`; STOP: `docker compose up` serves a tiny model. Nothing in D10 blocks it. Its inputs from D10:
-the converter call `rinchen.export.eole_ct2.export_ct2` (with its `log_path`), an export directory of `model.bin`,
-`shared_vocabulary.json`, `config.json`, `spm.model`, `export.json` and a manifest, `verify_export` as its reader and the
-record (tag placement, the checkpoint's digests, layer counts), `ct2_source_tokens` (the source and the forced prefix by
-placement) and the guards of `TeacherTranslator` (the end token, the source limit, the tag check, the reserved-symbol rule:
-CTranslate2 is silent about all of them), a tiny student exported and CTranslate2-equal to Eole on 200 of 200 dev sentences,
-and the CTranslate2 facts of `docs/VERIFY.md` ("D10 findings"). Observation for D11, not a ruling: `verify_export` and the
-record live in `rinchen.train.distill_export`, and `infer/` must not import `train` (a test pins its file set), so the engine
-that reads an export needs the reader moved or re-stated outside `train`. What D10 does not give D11: any real teacher or
-student, the strict parity (log-probabilities) and quantisation measurements, any evidence on a GPU or in float16 or int8, and
-`rinchen.json`; the open gates above and the D3 to D9 gates stay open.
+Next step: D12 (Robustness): `eval/robustness.py` suites (numbers: dates, decimals, currency; entities; markup placeholders; terminology; script purity; `mn_Mong` source input) with
+their metrics, tests first (each metric on synthetic hypotheses with known answers); STOP: a robustness block populated in a tiny report. Nothing in D11 blocks it. Its inputs from D11:
+`rinchen.infer.engine.Engine` (`translate(rows, options)` with a status per row, `translate_documents`, the 16 counters) and `rinchen.Translator`, `script_purity` and
+`forbidden_scripts` (`infer/script_mask.py`; the policy by registry and the purity floor 0.98 are priors to calibrate on real text), `reserved_pieces(allow=...)` (the numbered placeholders are
+already allowed through, so D12's engine can write them; the request side refuses every other reserved symbol with a `RequestTextError` that names the row and the symbol), the request schema
+(which refuses an unknown key until D12 adds `terminology`), `rinchen translate --format jsonl` (one object per line with `status` and `script_purity`), the export record `rinchen.json` (languages,
+targets, tags, document level) as the description of a model under test, and the service's `/metrics` engine events. What D11 does not give D12: any real model, a measured script-mask effect on
+real text, any evidence on a GPU or in `float16`, and the container; the open gates above and the D3 to D10 gates stay open.
 
 D0 (environment, skeleton, doctor): `pyproject.toml` restructured to the
 master plan's toolchain (see `docs/STACK.md` for resolved versions),

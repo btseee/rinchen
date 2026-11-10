@@ -47,7 +47,9 @@ averager makes one model from the last checkpoints.
   rule and the identity covering the source, and nothing else may be continued; see
   `docs/runbooks/09_document_level.md`.)
 - **No export, serving or evaluation suite** (D11 to D13; D10 later added `rinchen distill export`, which exports a
-  checkpoint of ours to CTranslate2 for distillation, and `rinchen distill evaluate`: runbook 10).
+  checkpoint of ours to CTranslate2 for distillation, and `rinchen distill evaluate`: runbook 10; D11 then added the export
+  record, `rinchen export convert|verify|parity`, `rinchen.Translator`, `rinchen translate` and `rinchen serve`: runbook 11;
+  the evaluation suites are D12 and D13).
 
 Tags used below: **measured** (run for this runbook or by a test of the build), **spike** (run in the
 spike, on the CPU), **source-read, unmeasured** (read from Eole's source, never run), **ARITHMETIC**

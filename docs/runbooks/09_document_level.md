@@ -523,7 +523,10 @@ source costs at most `max_pieces` pieces, where the cost is 2 (the tag and `<doc
 text, so what a `<sep>` costs is the counter's own (two pieces for SentencePiece: the word-boundary piece U+2581 in
 front of it). A sentence that does not fit alone is an `oversize` chunk, and a sentence the windows around it left
 alone is a `single` chunk; both go to the sentence translator, never to the window model, which was trained on
-windows of at least two. A sentence that holds the literal `<sep>` refuses the whole document (`DataError` naming the
+windows of at least two. [D11: a document export has no second, sentence-level model. The engine's sentence translator is the SAME
+document model decoding the lone sentence, and a model continued on windows of 2 to 4 sentences writes `<sep>` after it; the engine
+cuts such a hypothesis at its first `<sep>` and reads the head as the translation (`docs/runbooks/11_serving.md`, "Documents").
+Before that fix every such sentence came back empty and was missing from the document.] A sentence that holds the literal `<sep>` refuses the whole document (`DataError` naming the
 index, before anything is translated).
 
 **Splitting and the fallback.** A window's output is split at every `<sep>` with `re.split(r"\s*<sep>\s*",
@@ -543,10 +546,16 @@ windows that fell back, counted from 0 in document order), `singles`, `oversize`
   pieces and the cut is silent (`D-EOLE-PREDICT-TRUNCATION`), so a window whose output was cut inside its LAST segment
   still has the right segment count and is counted aligned, with a truncated last translation. A cut that drops a
   `<sep>` is caught, one that keeps all of them is not. `predict_tokens(max_length=, max_length_ratio=)` lets a caller
-  state both (the gate passes 128 and 0).
-- A `translate_sentence` result that itself holds `<sep>` passes through unchecked.
+  state both (the gate passes 128 and 0). [D11: closed for the engine's use of the chunker. The engine asks for the end token
+  and gives the chunker `""` for a window whose hypothesis lacks it, so the window falls back to its sentences as a whole: 94 of
+  106 windows fell back at a 20-piece cap, and each of the 334 windows of two sentences decoded two pieces short of its own
+  length fell back although it still had one segment per sentence. The chunker itself still counts the source only.]
+- A `translate_sentence` result that itself holds `<sep>` passes through unchecked. [D11: the engine's sentence translator cannot
+  return one: it cuts the hypothesis at the first `<sep>` (document export) or drops it (sentence export).]
 - Only `<sep>` is guarded in the input. A literal `<doc>` or direction tag inside a sentence is not: SentencePiece
-  reads it as the symbol, in `docify` and in the chunker alike.
+  reads it as the symbol, in `docify` and in the chunker alike. [D11: the engine refuses a text, in a document or a plain row,
+  that spells any reserved symbol except the numbered placeholders, with a `DataError` that names the document and the symbol and
+  never the text; `docify` and the chunker alone still do not.]
 - The fallback does not repair content, only the sentence count.
 
 ## Length limits and the predictor's silent truncation
@@ -666,7 +675,9 @@ Not done by D9, because no real data, GPU or reader exists: a document model on 
 quality; the real-corpus doc workflow above (mix ratios, window-size mix, the real continuation schedule); anything on a
 GPU (bf16, NCCL, the 13 GB checkpoint of the teacher shape, the time of the continuation); the CTranslate2 export of a
 document model (D10's `rinchen distill export` takes any checkpoint of ours, a document model's included, but none was
-exported or translated) and the use of the chunker in a serving path (D11); the D3 gates assigned to D4, the D5 gates that need
+exported or translated) and the use of the chunker in a serving path (D11 [D11: a document model was exported and translated on
+the CPU through `Engine.translate_documents` and `rinchen translate --doc`, on toy data; the service's `doc_mode` ran against a fake
+engine only]); the D3 gates assigned to D4, the D5 gates that need
 real text or a reader and the D6, D7 and D8 gates stay open as recorded in their runbooks.
 
 ## What was not verified
@@ -698,14 +709,15 @@ Findings of the reviews that were parked and not fixed, and limits of the build,
    not checked, and an omitted one silently continues with the teacher's value. The shipped configs state them all
    (a test builds Eole's own schema from them), a config of the operator's might not. (Review M2.)
 2. **The chunker's budget counts the SOURCE only**, and `eole predict` silently truncates the target at `max_length` and
-   `max_length_ratio`, so a cut inside the last segment still counts as aligned. For D11. (Review M5.)
+   `max_length_ratio`, so a cut inside the last segment still counts as aligned. For D11. (Review M5.) [D11: closed for the
+   engine, which falls back on a window without an end token; see the bullet above.]
 3. **A `translate_sentence` result that contains `<sep>` passes through** the chunker unchecked: the fallback's output
-   is not validated. For D11. (Review M6.)
+   is not validated. For D11. (Review M6.) [D11: the engine's sentence translator cannot return `<sep>`.]
 4. **Resuming a continuation requires its source to exist and verify.** The provenance chain is re-verified before
    every resume, extension or `--write-only` of a run that has step directories; a source that was deleted or changed
    stops the resume (a finished run needs none). By design. (Review M8.)
 5. **A literal `<doc>` or direction tag inside a sentence is not guarded**, only `<sep>`: SentencePiece reads either as
-   the symbol, in `docify` and at inference. (Review M11.)
+   the symbol, in `docify` and at inference. (Review M11.) [D11: the engine refuses it in a request text; `docify` still does not.]
 6. **`<doc>` and `<sep>` are defined three times** (`spm.symbols`, `train.doc_source`, `infer.doc_chunker`) because the
    inference side must not import the training side; a unit test pins the three equal. (Review M9.)
 7. **The `average` guard and the provenance rule guard against mistakes, not against forgery**: the `average` guard

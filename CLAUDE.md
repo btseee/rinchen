@@ -43,13 +43,15 @@ configs/data/synth.yaml
 configs/eole/converter{,_tiny}.yaml configs/spm/converter_char.yaml
 configs/eole/{multilingual_tiny,ablation_tiny,multilingual_proxy,ablation_priors}.yaml
 configs/eole/{teacher,teacher_tiny}.yaml configs/eole/{teacher_doc,teacher_doc_tiny}.yaml
-configs/eole/student_{server,edge,tiny}.yaml
+configs/eole/student_{server,edge,tiny}.yaml configs/serve/{tiny,server,edge}.yaml
+docker/{Dockerfile.cpu,compose.serve.yaml} .dockerignore
 docs/STACK.md docs/VERIFY.md
 docs/runbooks/00_environment.md docs/runbooks/01_acquisition.md
 docs/runbooks/02_human_testsets.md docs/runbooks/03_tokenizer.md
 docs/runbooks/04_filtering_mining.md docs/runbooks/05_script_converter.md
 docs/runbooks/06_synthetic.md docs/runbooks/07_ablations.md docs/runbooks/08_teacher.md
 docs/runbooks/09_document_level.md docs/runbooks/10_distillation.md
+docs/runbooks/11_serving.md
 docs/research/  docs/superpowers/{specs,plans}/
 src/rinchen/{config,manifest,utils,cli,text,lang,split,spm,corpus,filter,mine,script_conv,synth,metrics,eval,serve,export}/
 src/rinchen/acquire/{http,opus,hf,warc,commoncrawl,registry}.py
@@ -69,12 +71,14 @@ src/rinchen/train/{eole_cfg,eole_run,sampling,variants,mixture,corpus_files,eole
 src/rinchen/train/{ablation_plan,ablation_config,ablation_layout,ablation_prepare,ablation,ablation_records,ablation_report}.py
 src/rinchen/train/{checkpoints,curves,average,launch,gpu_rules,launch_command,run_lock}.py
 src/rinchen/train/{docify,doc_source,doc_pack,doc_corpus,continuation,vocabulary_size,eole_cfg_keys}.py
-src/rinchen/infer/doc_chunker.py src/rinchen/export/eole_ct2.py
-src/rinchen/train/{distill_export,distill_export_files,distill_saved_config,distill_teacher,distill_sources}.py
+src/rinchen/export/{eole_ct2,record,verified,quantize,ct2}.py
+src/rinchen/infer/{doc_chunker,source_tokens,script_mask,engine_types,engine,translator}.py
+src/rinchen/serve/{schemas,metrics,batcher,engine,_http,_translate,app}.py src/rinchen/config/serve.py
+src/rinchen/train/{distill_export,distill_saved_config,distill_teacher,distill_sources}.py src/rinchen/train/export_parity.py
 src/rinchen/train/{distill_shards,distill_generate,distill_corpus,distill_mix,distill_prepare}.py
 src/rinchen/config/ablation.py src/rinchen/cli/{train,train_runs,train_common,train_docify}.py
 src/rinchen/cli/{distill,distill_export,distill_generate,distill_generate_plan,distill_generate_records}.py
-src/rinchen/cli/{distill_prepare,distill_evaluate}.py
+src/rinchen/cli/{distill_prepare,distill_evaluate}.py src/rinchen/cli/{export,export_parity,translate,translate_io,serve}.py
 src/rinchen/utils/{logged_process,integers}.py
 src/rinchen/errors.py src/rinchen/__init__.py
 tests/ scripts/ plans/ reports/ manifests/
@@ -85,7 +89,9 @@ tests/support/ (planted corpus and alignments, fake embedders, tiny LID model,
   synth_cli, fake_llm_server, shard_files, corpus_rows, eole_train_config, tiny_parallel,
   tiny_variant, train_cli, fake_ablation, step_dirs, fake_launch, fake_eole_process, launch_cli,
   signal_handlers, doc_cli, doc_rows, distill_cli, distill_exports, distill_gate, distill_gate_refusals,
-  distill_gate_stages, distill_teachers, fake_ct2, planted_kd, planted_student)
+  distill_gate_stages, distill_teachers, fake_ct2, planted_kd, planted_student, model_exports, engines,
+  error_messages, translate_cli, parity_cli, fake_parity_eole, serve_app, serve_batcher, fake_serve_process,
+  docker_files, d11_gate, d11_gate_doc, serving_gate, serving_gate_fixtures)
 scripts/build_spm_fixture.py (regenerates tests/fixtures/spm/tiny_corpus)
 scripts/build_script_conv_fixtures.py (reference TSV -> lexicon, golden words, tiny fixture)
 data/{raw,clean,mined,synth,test}/ (gitignored content, tracked dirs)
@@ -190,8 +196,30 @@ small wave of its own (`D10: re-review minors`, gate 9750 passed, 1 skipped, 10 
 longer exists, a saved config quoted unbounded and unescaped in a message, and a tag placement that nothing could check going
 unreported: `export` and `evaluate` now print whether it was checked or only stated) and documented the rest (the hidden
 directory a hard-killed export leaves, exports made before the check, shards made before `cc917e2`).
-Next up: D11 (Export, quantization, serving, CLI, package). See `STATE.md`, `docs/runbooks/08_teacher.md`,
-`docs/runbooks/09_document_level.md` and `docs/runbooks/10_distillation.md`.
+D11 (Export, quantization, serving, CLI, package) is done locally on branch `d11-export-serving`, stacked on
+`d10-distillation` (cut from it at `b672aa8`; code tip `4bfaa5e`), not merged and not pushed, and no CI run covers it: its STOP
+gate ("`docker compose up` serves a tiny model") is met IN PARTS and the container part is UNMEASURED. Through the real `rinchen`
+commands and the real Eole and CTranslate2 on the CPU the tiny teachers are exported to float32, int8 and int8_float16 (a record
+`rinchen.json` replaces D10's `export.json`), strict parity passes (200 of 200 exact, mean |delta| 7.19e-7 per token for the
+source-tag teacher and 1.37e-6 for the target-tag one, against 1e-3; the 1e-3 bound is a float32 bound, int8 gave 1.14e-3), the
+int8 chrF drop is -0.06 (the gate allows 1.0), script masking leaves 0 forbidden letters in 500 outputs (96 leak without it),
+`rinchen.Translator` and `rinchen translate` agree with the engine, and `rinchen serve` (the compose command, run natively)
+answers 64 concurrent requests, all 200, p95 far below 2 s, counts them on `/metrics` and drains on SIGTERM (exit 143); no
+threshold was lowered. It is machinery, not a model: the toy saturates at chrF 98.2 and ranks nothing, no GPU was used (the one on
+this machine was not authorised; `auto` is refused everywhere, `--device cuda` is never run), no real model or corpus exists,
+`configs/serve/server.yaml` and `edge.yaml` are tables of unmeasured priors, and no image was pulled, built or run (the Dockerfile
+and the compose file are checked statically and the compose command natively). D11 found that `compute_type="auto"` quantises
+every export to int8 on a CPU, that Eole's score needs `length_penalty: none` and leaves out a forced target prefix that
+`score_batch` counts, that uvicorn exits by the re-raised signal and starts the lifespan before it binds (readiness and the drain
+are a refused connection on the wire), and that a document model writes `<sep>` after a lone sentence. A combined review by two
+reviewers ran: ready with fixes, no Critical finding and seven Important ones (a document export lost every sentence decoded
+alone; a reserved symbol in a request text silently changed the language; `torch` was dropped from the tool versions; a stop could
+take twice the shutdown timeout; `n_best` was judged against the wrong beam; a mistyped `RINCHEN_SERVE_*` variable was ignored;
+readiness is not observable over HTTP); its fix wave (nine commits, gate 11768 passed, 1 skipped, 10 deselected) fixed them and
+left open on purpose the limits that `docs/runbooks/11_serving.md` lists under "Known limits". The scoped re-review of the fix
+wave was running when this was written and its verdict is not recorded here.
+Next up: D12 (Robustness). See `STATE.md`, `docs/runbooks/09_document_level.md`, `docs/runbooks/10_distillation.md` and
+`docs/runbooks/11_serving.md`.
 
 ## Evidence and full plan
 
