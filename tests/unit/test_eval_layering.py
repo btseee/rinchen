@@ -268,6 +268,11 @@ def test_the_scan_covers_the_modules_of_the_evaluation_suite() -> None:
         assert PACKAGE / f"{module}.py" in MODULES
 
 
+def test_the_scan_covers_the_outputs_the_systems_and_the_runner() -> None:
+    for module in ("outputs", "systems", "runner"):
+        assert PACKAGE / f"{module}.py" in MODULES
+
+
 def test_the_scan_covers_the_suite_sources_and_the_suite_commands() -> None:
     assert PACKAGE / "suite_sources.py" in MODULES
     for name in (

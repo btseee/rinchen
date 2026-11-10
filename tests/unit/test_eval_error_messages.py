@@ -953,6 +953,147 @@ REVIEWED: Final[tuple[tuple[str, str, str, str], ...]] = (
         "index",
         "the index of a row of the export",
     ),
+    # ---- the outputs file (D13, Task 5) ----
+    (
+        "eval/outputs.py",
+        "Output.__post_init__",
+        "type(self.text).__name__",
+        "the name of the type of the value, never the value",
+    ),
+    (
+        "eval/outputs.py",
+        "Output.__post_init__",
+        "', '.join(_STATUSES)",
+        "the five statuses of the engine, constants",
+    ),
+    (
+        "eval/outputs.py",
+        "outputs_to_bytes",
+        "output_place(key.direction, key.id)",
+        (
+            "the key of an output being written: `output_place` names a direction of the "
+            "format and an id that matched its pattern, and no text"
+        ),
+    ),
+    (
+        "eval/outputs.py",
+        "outputs_from_bytes",
+        "place",
+        "the number of a line and an output named by `output_place`: well-formed parts only",
+    ),
+    (
+        "eval/outputs.py",
+        "_complete",
+        "direction_place(direction)",
+        "a direction of the suite, named by `direction_place` only when it has the shape of one",
+    ),
+    ("eval/outputs.py", "_complete", "len(missing)", COUNT),
+    ("eval/outputs.py", "_complete", "len(keys)", COUNT),
+    (
+        "eval/outputs.py",
+        "_complete",
+        "output_place(*missing[0])",
+        (
+            "the first row of the suite that the file lacks: `output_place` names a direction of "
+            "the format and an id that matched its pattern, and no text"
+        ),
+    ),
+    (
+        "eval/outputs.py",
+        "_too_large",
+        "MAX_OUTPUTS_BYTES // 2 ** 20",
+        "the cap of the module in MiB, a constant",
+    ),
+    (
+        "eval/outputs.py",
+        "_refused",
+        "place",
+        (
+            "the callers' place: a line number and an output named by `output_place`, or a "
+            "direction named by `direction_place`; never a text or a key of the file"
+        ),
+    ),
+    (
+        "eval/outputs.py",
+        "_refused",
+        "problem",
+        (
+            "the callers' problem: a literal sentence, a field of the format, a count or a "
+            "place made by `output_place`"
+        ),
+    ),
+    (
+        "eval/outputs.py",
+        "_read_line",
+        "where",
+        "`line` and the number of the line",
+    ),
+    (
+        "eval/outputs.py",
+        "_read_line",
+        "place",
+        "the number of a line and an output named by `output_place`: well-formed parts only",
+    ),
+    (
+        "eval/outputs.py",
+        "_read_line",
+        "field",
+        "a field of the format, taken from the module's own tuple `_REQUIRED`",
+    ),
+    (
+        "eval/outputs.py",
+        "_read_line",
+        "', '.join(_STATUSES)",
+        "the five statuses of the engine, constants",
+    ),
+    (
+        "eval/systems.py",
+        "Verdict.__post_init__",
+        "', '.join(_STATES)",
+        "the five states of a direction, constants",
+    ),
+    (
+        "eval/systems.py",
+        "SystemRecord.__post_init__",
+        "', '.join(_KINDS)",
+        "the three kinds of a system, constants",
+    ),
+    (
+        "eval/systems.py",
+        "SystemRecord.__post_init__",
+        "digest_field",
+        "the name of a field of the record, taken from the literal tuple of the loop",
+    ),
+    ("eval/systems.py", "EngineSystem.translate", "len(answers)", COUNT),
+    ("eval/systems.py", "EngineSystem.translate", "len(requests)", COUNT),
+    ("eval/systems.py", "CandidateSystem.translate", "len(candidate_lists)", COUNT),
+    ("eval/systems.py", "CandidateSystem.translate", "len(texts)", COUNT),
+    (
+        "eval/systems.py",
+        "CandidateSystem.translate",
+        "direction_place(direction)",
+        "a direction of a request, named by `direction_place` only when it has the shape of one",
+    ),
+    (
+        "eval/systems.py",
+        "FileSystem.translate",
+        "output_place(request.direction, request.id)",
+        (
+            "the request of the suite: `output_place` names a direction of the format and an id "
+            "that matched its pattern, and no text"
+        ),
+    ),
+    (
+        "eval/runner.py",
+        "_selected",
+        "direction_place(entry)",
+        (
+            "an entry of the operator's selection, named by `direction_place` only when it has "
+            "the shape of a direction and never otherwise"
+        ),
+    ),
+    ("eval/runner.py", "_translated", "len(answers)", COUNT),
+    ("eval/runner.py", "_translated", "len(requests)", COUNT),
 )
 
 
@@ -1049,6 +1190,12 @@ def test_the_scan_covers_the_readers_of_the_sources_of_a_suite() -> None:
     covered = {f.path for f in scanned()}
 
     assert "eval/suite_sources.py" in covered
+
+
+def test_the_scan_covers_the_outputs_the_systems_and_the_runner() -> None:
+    covered = {f.path for f in scanned()}
+
+    assert {"eval/outputs.py", "eval/systems.py", "eval/runner.py"} <= covered
 
 
 # ---- the scan itself ----------------------------------------------------------------------
