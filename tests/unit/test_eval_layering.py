@@ -184,12 +184,20 @@ def test_the_gpu_scan_lets_a_source_that_never_asks_through() -> None:
 
 
 def test_the_scan_covers_the_package_and_the_robustness_tests() -> None:
-    for module in ("robust_numbers", "robust_placeholders", "robust_spans"):
+    for module in (
+        "robust_numbers",
+        "robust_placeholders",
+        "robust_spans",
+        "robust_script",
+        "robust_mong",
+    ):
         assert PACKAGE / f"{module}.py" in MODULES
     for unit_test in (
         "test_eval_robust_numbers",
         "test_eval_robust_placeholders",
         "test_eval_robust_spans",
+        "test_eval_robust_script",
+        "test_eval_robust_mong",
     ):
         assert TESTS / "unit" / f"{unit_test}.py" in ROBUSTNESS_TESTS
     for property_test in (
