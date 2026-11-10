@@ -259,6 +259,11 @@ def test_the_scan_covers_the_bootstrap_modules() -> None:
         assert PACKAGE / f"{module}.py" in MODULES
 
 
+def test_the_scan_covers_the_modules_of_the_evaluation_suite() -> None:
+    for module in ("suite_rules", "suites"):
+        assert PACKAGE / f"{module}.py" in MODULES
+
+
 @pytest.mark.parametrize("path", MODULES, ids=lambda path: path.name)
 def test_a_module_of_eval_imports_no_forbidden_layer_or_heavy_library(
     path: Path,

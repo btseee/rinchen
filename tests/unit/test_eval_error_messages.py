@@ -556,6 +556,327 @@ REVIEWED: Final[tuple[tuple[str, str, str, str], ...]] = (
         "MIN_RESAMPLES",
         CONSTANT,
     ),
+    # ---- the evaluation suite file (D13): the same rule as the robustness suite ----
+    (
+        "eval/suite_rules.py",
+        "refusal",
+        "where",
+        (
+            "the helper that builds every refusal of the suite reader: the place and the field "
+            "its callers chose, listed here"
+        ),
+    ),
+    (
+        "eval/suite_rules.py",
+        "refusal",
+        "problem",
+        (
+            "the helper's argument: a literal, or a constant, a count, a code of the registry or "
+            "a string of the fixed form of a code that its callers made, listed here"
+        ),
+    ),
+    (
+        "eval/suite_rules.py",
+        "object_at",
+        "place",
+        CALLER_PLACE,
+    ),
+    (
+        "eval/suite_rules.py",
+        "object_at",
+        "field",
+        FIELD,
+    ),
+    (
+        "eval/suite_rules.py",
+        "object_at",
+        "problem",
+        (
+            "a literal, or the name of a repeated key that belongs to the format or is a code of "
+            "the language registry (`known`): any other repeated key is not named"
+        ),
+    ),
+    (
+        "eval/suite_rules.py",
+        "checked_name",
+        "place",
+        CALLER_PLACE,
+    ),
+    (
+        "eval/suite_rules.py",
+        "checked_name",
+        "field",
+        FIELD,
+    ),
+    (
+        "eval/suite_rules.py",
+        "checked_name",
+        "_NAME_RULE",
+        CONSTANT,
+    ),
+    (
+        "eval/suite_rules.py",
+        "checked_row_id",
+        "place",
+        PLACE,
+    ),
+    (
+        "eval/suite_rules.py",
+        "checked_row_id",
+        "field",
+        FIELD,
+    ),
+    (
+        "eval/suite_rules.py",
+        "checked_row_id",
+        "_ROW_ID_RULE",
+        CONSTANT,
+    ),
+    (
+        "eval/suite_rules.py",
+        "checked_language",
+        "place",
+        CALLER_PLACE,
+    ),
+    (
+        "eval/suite_rules.py",
+        "checked_language",
+        "field",
+        FIELD,
+    ),
+    (
+        "eval/suite_rules.py",
+        "checked_language",
+        "_LANGUAGE_RULE",
+        CONSTANT,
+    ),
+    (
+        "eval/suite_rules.py",
+        "checked_language",
+        "_FORBIDDEN_RULE",
+        CONSTANT,
+    ),
+    (
+        "eval/suite_rules.py",
+        "checked_language",
+        "forbidden",
+        (
+            "an entry of FORBIDDEN_LANGUAGES, a constant of the module, reached only when the "
+            "value equals it: the rule names the code and quotes nothing of the file"
+        ),
+    ),
+    (
+        "eval/suite_rules.py",
+        "checked_language",
+        "code",
+        (
+            "a code of the registry that the caller excluded (a constant of the module), reached "
+            "only when the value equals it"
+        ),
+    ),
+    (
+        "eval/suite_rules.py",
+        "checked_language",
+        "shaped",
+        (
+            "a string of the fixed form of a language code (three lowercase letters, an "
+            "underscore, a capital letter and three lowercase letters: seven characters, never a "
+            "sentence) that the registry lacks"
+        ),
+    ),
+    (
+        "eval/suite_rules.py",
+        "checked_sentence",
+        "place",
+        PLACE,
+    ),
+    (
+        "eval/suite_rules.py",
+        "checked_sentence",
+        "field",
+        "`text.<code>`: a field of the format and a code of the registry",
+    ),
+    (
+        "eval/suite_rules.py",
+        "checked_sentence",
+        "MAX_SENTENCE_CHARS",
+        CONSTANT,
+    ),
+    (
+        "eval/suite_rules.py",
+        "split_direction",
+        "place",
+        (
+            "the argument of the function: `direction` or the place its callers chose (the "
+            "reader's `suite`, an option of the operator), never the direction itself"
+        ),
+    ),
+    (
+        "eval/suite_rules.py",
+        "split_direction",
+        "field",
+        "`directions[N]` or None: a field of the format and the position of the direction",
+    ),
+    (
+        "eval/suite_rules.py",
+        "split_direction",
+        "_DIRECTION_RULE",
+        CONSTANT,
+    ),
+    (
+        "eval/suite_rules.py",
+        "read_source",
+        "key",
+        "a field of the source's own tuple, a literal of the reader",
+    ),
+    (
+        "eval/suite_rules.py",
+        "read_source",
+        "None",
+        "the absent field of a refusal about the whole source, a constant",
+    ),
+    (
+        "eval/suite_rules.py",
+        "_files",
+        "field",
+        "`files[N]`: a field of the format and the position of the entry in the file",
+    ),
+    (
+        "eval/suite_rules.py",
+        "_files",
+        "_FILE_NAME_RULE",
+        CONSTANT,
+    ),
+    (
+        "eval/suite_rules.py",
+        "read_directions",
+        "field",
+        "`directions[N]`: a field of the format and the position of the direction in the list",
+    ),
+    (
+        "eval/suite_rules.py",
+        "read_directions",
+        "_DIRECTION_RULE",
+        CONSTANT,
+    ),
+    (
+        "eval/suite_rules.py",
+        "require_rows_for_directions",
+        "index",
+        "the position of a direction in the list, an integer",
+    ),
+    (
+        "eval/suite_rules.py",
+        "read_rows",
+        "MAX_ROWS",
+        CONSTANT,
+    ),
+    (
+        "eval/suite_rules.py",
+        "read_rows",
+        "row_place(index, row.id)",
+        PLACE,
+    ),
+    (
+        "eval/suite_rules.py",
+        "_read_row",
+        "place",
+        PLACE,
+    ),
+    (
+        "eval/suite_rules.py",
+        "_read_row",
+        "key",
+        "a field of the row's own tuple (`id`, `doc`, `text`), a literal of the reader",
+    ),
+    (
+        "eval/suite_rules.py",
+        "_read_row",
+        "None",
+        "the absent field of a refusal about a whole row, a constant",
+    ),
+    (
+        "eval/suite_rules.py",
+        "_read_text",
+        "place",
+        PLACE,
+    ),
+    (
+        "eval/suites.py",
+        "Suite.view",
+        "self.name",
+        (
+            "the name of the suite: it matched the id pattern when the suite was read, and a "
+            "suite built in memory is named by its builder"
+        ),
+    ),
+    (
+        "eval/suites.py",
+        "Suite.view",
+        "_named(direction)",
+        (
+            "the direction asked for, only when it has the form of two language codes and "
+            "nothing is quoted otherwise: a direction is an option of the operator, never a "
+            "text of a suite"
+        ),
+    ),
+    (
+        "eval/suites.py",
+        "Suite.from_bytes",
+        "kind",
+        "one of the three kinds of the format: `_member` refused any other value first",
+    ),
+    (
+        "eval/suites.py",
+        "Suite.from_bytes",
+        "' or '.join(SPLITS_OF_KIND[kind])",
+        "the splits a kind may have, constants of the module",
+    ),
+    (
+        "eval/suites.py",
+        "read_suite",
+        "path",
+        OPERATOR_PATH,
+    ),
+    (
+        "eval/suites.py",
+        "_too_large",
+        "MAX_SUITE_BYTES // 2 ** 20",
+        CONSTANT,
+    ),
+    (
+        "eval/suites.py",
+        "_member",
+        "field",
+        "`kind` or `split`, literals of the callers",
+    ),
+    (
+        "eval/suites.py",
+        "_member",
+        "', '.join(allowed)",
+        "the kinds or the splits of the format, constants",
+    ),
+    (
+        "eval/suites.py",
+        "_document",
+        "None",
+        "the absent field of a refusal about the whole document, a constant",
+    ),
+    (
+        "eval/suites.py",
+        "_document",
+        "SUITE_SCHEMA",
+        CONSTANT,
+    ),
+    (
+        "eval/suites.py",
+        "_document",
+        "key",
+        (
+            "a top-level key of the format (`schema`, `name`, `kind`, ...), taken from the "
+            "reader's own tuple"
+        ),
+    ),
 )
 
 
@@ -640,6 +961,12 @@ def test_the_scan_covers_every_module_of_eval() -> None:
         "cli/eval_robustness_output.py",
         "cli/eval_robustness_plan.py",
     } <= covered
+
+
+def test_the_scan_covers_the_modules_of_the_evaluation_suite() -> None:
+    covered = {f.path for f in scanned()}
+
+    assert {"eval/suite_rules.py", "eval/suites.py"} <= covered
 
 
 # ---- the scan itself ----------------------------------------------------------------------

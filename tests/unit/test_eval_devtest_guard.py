@@ -1,0 +1,497 @@
+"""The devtest guard of D13 (spec T2, part c): no module of `src/rinchen` outside `rinchen/eval/`
+and the commands `rinchen/cli/eval*.py` reaches the readers of the suite files
+(`rinchen.eval.suites`, `rinchen.eval.suite_rules`, `rinchen.eval.suite_sources`), so training,
+synthetic-data, distillation, filtering, mining and serving code cannot read a benchmark, devtest
+included. The structural guard has two more parts that are not scans: `Suite.selection_view`
+accepts only a `dev` suite and `rinchen eval report` refuses a `dev` run.
+
+What the scan reads: `import` and `from ... import` statements (relative ones are resolved
+against the package of the file, and `from rinchen.eval import suites` names the submodule it
+takes), calls of `importlib.import_module` and `__import__` (a literal name, or a relative one
+with its literal package; a name the scan cannot read is itself a violation), and attribute
+chains such as `rinchen.eval.suites.read_suite`, also through an alias (`import rinchen.eval as
+ev` then `ev.suites`). It cannot see a computed `getattr`, `exec` or a plugin loader, which
+nothing in the project uses. A mention in a docstring, a comment or a string is not an import.
+
+Every function of the scan is tested on sources that violate it and on sources that do not, and
+the scan of the real tree runs over every file that is not exempt."""
+
+from __future__ import annotations
+
+import ast
+import importlib.util
+from collections.abc import Iterable
+from pathlib import Path
+from typing import Final
+
+import pytest
+
+import rinchen
+from tests.support.no_network import no_network  # noqa: F401 - the fixture of the mark
+
+pytestmark = pytest.mark.usefixtures("no_network")
+
+PACKAGE_ROOT: Final = Path(rinchen.__file__).resolve().parent
+GUARDED: Final = (
+    "rinchen.eval.suites",
+    "rinchen.eval.suite_rules",
+    "rinchen.eval.suite_sources",
+)
+UNREADABLE: Final = "<an import the scan cannot read>"
+DYNAMIC_IMPORTS: Final = ("import_module", "__import__")
+
+
+def inside(name: str, package: str) -> bool:
+    return name == package or name.startswith(f"{package}.")
+
+
+def guarded_of(name: str | None) -> str | None:
+    if name is None:
+        return None
+    return next((module for module in GUARDED if inside(name, module)), None)
+
+
+def absolute_base(node: ast.ImportFrom, package: str) -> str | None:
+    """The module a `from` statement names, a relative one resolved against `package`."""
+    if node.level == 0:
+        return node.module
+    parts = package.split(".")
+    assert node.level - 1 < len(parts), "a relative import that leaves the package"
+    base = parts[: len(parts) - (node.level - 1)]
+    return ".".join([*base, node.module] if node.module else base)
+
+
+def dotted(node: ast.expr, aliases: dict[str, str]) -> str | None:
+    """`a.b.c` for a chain of names and attributes, its first name replaced by what an
+    import bound it to."""
+    parts: list[str] = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if not isinstance(node, ast.Name):
+        return None
+    parts.append(aliases.get(node.id, node.id))
+    return ".".join(reversed(parts))
+
+
+def dynamic_target(node: ast.Call) -> list[str]:
+    """What an `import_module` or `__import__` call imports, as names; `UNREADABLE` when the
+    scan cannot tell."""
+    function = node.func
+    name = (
+        function.id
+        if isinstance(function, ast.Name)
+        else function.attr
+        if isinstance(function, ast.Attribute)
+        else None
+    )
+    if name not in DYNAMIC_IMPORTS:
+        return []
+    package_argument = next(
+        (k.value for k in node.keywords if k.arg == "package"), None
+    )
+    if package_argument is None and len(node.args) > 1:
+        package_argument = node.args[1]
+    first = node.args[0] if node.args else None
+    if not (isinstance(first, ast.Constant) and isinstance(first.value, str)):
+        return [UNREADABLE]
+    if not first.value.startswith("."):
+        return [first.value]
+    if isinstance(package_argument, ast.Constant) and isinstance(
+        package_argument.value, str
+    ):
+        return [importlib.util.resolve_name(first.value, package_argument.value)]
+    return [UNREADABLE]
+
+
+def aliases_of(tree: ast.AST, package: str) -> dict[str, str]:
+    """The names an `import ... as` or `from ... import ... as` binds to a module."""
+    bound: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.asname:
+                    bound[alias.asname] = alias.name
+        elif isinstance(node, ast.ImportFrom):
+            base = absolute_base(node, package)
+            for alias in node.names:
+                bound[alias.asname or alias.name] = f"{base}.{alias.name}"
+    return bound
+
+
+def reached(source: str, module: str, *, is_package: bool = False) -> list[str]:
+    """The guarded modules `source`, the code of `module`, reaches, sorted; `UNREADABLE` stands
+    for a dynamic import the scan cannot read."""
+    package = module if is_package else module.rpartition(".")[0]
+    tree = ast.parse(source)
+    aliases = aliases_of(tree, package)
+    found: set[str] = set()
+    for node in ast.walk(tree):
+        names: Iterable[str | None]
+        if isinstance(node, ast.Import):
+            names = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            base = absolute_base(node, package)
+            names = [base, *(f"{base}.{alias.name}" for alias in node.names)]
+        elif isinstance(node, ast.Call):
+            names = dynamic_target(node)
+        elif isinstance(node, ast.Attribute):
+            names = [dotted(node, aliases)]
+        else:
+            continue
+        for name in names:
+            if name == UNREADABLE:
+                found.add(UNREADABLE)
+            elif (hit := guarded_of(name)) is not None:
+                found.add(hit)
+    return sorted(found)
+
+
+def module_of(path: Path, root: Path) -> tuple[str, bool]:
+    """The dotted name of the file under `root` (the folder that holds `rinchen`) and whether
+    it is a package's `__init__`."""
+    parts = list(path.relative_to(root).with_suffix("").parts)
+    is_package = parts[-1] == "__init__"
+    if is_package:
+        parts.pop()
+    return ".".join(parts), is_package
+
+
+def is_exempt(path: Path, package_root: Path) -> bool:
+    """The files that may read a suite: everything of `rinchen/eval/` and the commands
+    `rinchen/cli/eval*.py`."""
+    relative = path.relative_to(package_root)
+    if relative.parts[0] == "eval":
+        return True
+    return (
+        relative.parts[0] == "cli"
+        and len(relative.parts) == 2
+        and relative.name.startswith("eval")
+    )
+
+
+def scanned_files(package_root: Path) -> list[Path]:
+    return [
+        path
+        for path in sorted(package_root.rglob("*.py"))
+        if "__pycache__" not in path.parts and not is_exempt(path, package_root)
+    ]
+
+
+def violations(package_root: Path) -> dict[str, list[str]]:
+    """The files outside the exempt ones that reach a guarded module, with what they reach."""
+    root = package_root.parent
+    found: dict[str, list[str]] = {}
+    for path in scanned_files(package_root):
+        module, is_package = module_of(path, root)
+        hits = reached(path.read_text(encoding="utf-8"), module, is_package=is_package)
+        if hits:
+            found[path.relative_to(package_root).as_posix()] = hits
+    return found
+
+
+# ---- the real tree ------------------------------------------------------------------------
+
+
+def test_no_module_outside_eval_and_the_eval_commands_reaches_a_suite_reader() -> None:
+    assert violations(PACKAGE_ROOT) == {}
+
+
+def test_the_scan_of_the_real_tree_reads_the_modules_that_must_not_read_a_suite() -> (
+    None
+):
+    scanned = {
+        path.relative_to(PACKAGE_ROOT).as_posix()
+        for path in scanned_files(PACKAGE_ROOT)
+    }
+
+    assert len(scanned) > 150
+    assert {
+        "cli/main.py",
+        "cli/train.py",
+        "cli/synth.py",
+        "cli/translate.py",
+        "train/eole_run.py",
+        "train/mixture.py",
+        "synth/run.py",
+        "serve/__init__.py",
+        "filter/pipeline.py",
+        "mine/pairs.py",
+        "export/record.py",
+        "infer/engine.py",
+        "metrics/segment_stats.py",
+        "config/synth.py",
+        "acquire/hf.py",
+        "__init__.py",
+    } <= scanned
+
+
+def test_the_scan_of_the_real_tree_skips_what_may_read_a_suite() -> None:
+    scanned = {
+        path.relative_to(PACKAGE_ROOT).as_posix()
+        for path in scanned_files(PACKAGE_ROOT)
+    }
+
+    assert not {name for name in scanned if name.startswith("eval/")}
+    assert not {
+        name for name in scanned if name.startswith("cli/eval") and name.count("/") == 1
+    }
+    assert "cli/eval.py" not in scanned
+    assert "cli/eval_robustness.py" not in scanned
+
+
+def test_the_modules_the_guard_names_exist_where_the_guard_says() -> None:
+    for module in ("suites", "suite_rules"):
+        assert (PACKAGE_ROOT / "eval" / f"{module}.py").is_file()
+    assert all(name.startswith("rinchen.eval.suite") for name in GUARDED)
+
+
+# ---- what the scan finds ------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("source", "module", "expected"),
+    [
+        ("import rinchen.eval.suites\n", "rinchen.export.x", ["rinchen.eval.suites"]),
+        (
+            "import rinchen.eval.suite_rules as rules\n",
+            "rinchen.train.x",
+            ["rinchen.eval.suite_rules"],
+        ),
+        (
+            "from rinchen.eval.suites import Suite\n",
+            "rinchen.synth.x",
+            ["rinchen.eval.suites"],
+        ),
+        (
+            "from rinchen.eval import suites\n",
+            "rinchen.serve.x",
+            ["rinchen.eval.suites"],
+        ),
+        (
+            "from rinchen.eval import suite_sources as sources, robust_suite\n",
+            "rinchen.filter.x",
+            ["rinchen.eval.suite_sources"],
+        ),
+        (
+            "from rinchen.eval.suite_rules import checked_language, refusal\n",
+            "rinchen.mine.x",
+            ["rinchen.eval.suite_rules"],
+        ),
+        (
+            "def late():\n    from rinchen.eval.suites import read_suite\n",
+            "rinchen.cli.main",
+            ["rinchen.eval.suites"],
+        ),
+        (
+            "import rinchen.eval.suites, rinchen.eval.suite_sources\n",
+            "rinchen.cli.train",
+            ["rinchen.eval.suite_sources", "rinchen.eval.suites"],
+        ),
+    ],
+)
+def test_an_import_of_a_suite_reader_is_found(
+    source: str, module: str, expected: list[str]
+) -> None:
+    assert reached(source, module) == expected
+
+
+@pytest.mark.parametrize(
+    ("source", "module", "is_package", "expected"),
+    [
+        (
+            "from ..eval.suites import Suite\n",
+            "rinchen.export.x",
+            False,
+            ["rinchen.eval.suites"],
+        ),
+        (
+            "from ..eval import suite_rules\n",
+            "rinchen.train.x",
+            False,
+            ["rinchen.eval.suite_rules"],
+        ),
+        (
+            "from ...eval import suites\n",
+            "rinchen.train.sub.x",
+            False,
+            ["rinchen.eval.suites"],
+        ),
+        ("from .. import eval\n", "rinchen.synth", True, []),
+        (
+            "from ..eval import suite_sources\n",
+            "rinchen.synth",
+            True,
+            ["rinchen.eval.suite_sources"],
+        ),
+        ("from . import suites\n", "rinchen.eval.x", False, ["rinchen.eval.suites"]),
+        ("from .suites import Suite\n", "rinchen.eval", True, ["rinchen.eval.suites"]),
+        (
+            "from .suites import Suite\n",
+            "rinchen.eval.x",
+            False,
+            ["rinchen.eval.suites"],
+        ),
+    ],
+)
+def test_a_relative_import_is_resolved_against_the_package_of_the_file(
+    source: str, module: str, is_package: bool, expected: list[str]
+) -> None:
+    assert reached(source, module, is_package=is_package) == expected
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'import importlib\nimportlib.import_module("rinchen.eval.suites")\n',
+        'from importlib import import_module\nimport_module("rinchen.eval.suite_rules")\n',
+        '__import__("rinchen.eval.suite_sources")\n',
+        'import importlib\nimportlib.import_module(".suites", "rinchen.eval")\n',
+        'import importlib\nimportlib.import_module(".suites", package="rinchen.eval")\n',
+        'import importlib\nimportlib.import_module("rinchen.eval.suites.Suite")\n',
+    ],
+)
+def test_a_dynamic_import_of_a_suite_reader_is_found(source: str) -> None:
+    hits = reached(source, "rinchen.export.x")
+
+    assert len(hits) == 1
+    assert hits[0].startswith("rinchen.eval.suite")
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import importlib\nimportlib.import_module(name)\n",
+        'import importlib\nimportlib.import_module("." + name, "rinchen.eval")\n',
+        'import importlib\nimportlib.import_module(".suites", package)\n',
+        "__import__(name)\n",
+        "import importlib\nimportlib.import_module()\n",
+    ],
+)
+def test_a_dynamic_import_the_scan_cannot_read_is_a_violation_too(source: str) -> None:
+    assert reached(source, "rinchen.export.x") == [UNREADABLE]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import rinchen.eval\nrinchen.eval.suites.read_suite(path)\n",
+        "import rinchen.eval as ev\nev.suites.read_suite(path)\n",
+        "from rinchen import eval as ev\nev.suite_rules.refusal\n",
+        "from rinchen import eval\neval.suite_sources.read_rows\n",
+        "import rinchen\nrinchen.eval.suites\n",
+    ],
+)
+def test_a_use_of_a_suite_reader_through_an_attribute_chain_is_found(
+    source: str,
+) -> None:
+    hits = reached(source, "rinchen.export.x")
+
+    assert len(hits) == 1
+    assert hits[0].startswith("rinchen.eval.suite")
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import rinchen.eval.robust_suite\n",
+        "from rinchen.eval import robust_suite, significance, bootstrap\n",
+        "from rinchen.eval.robust_suite_rules import is_id\n",
+        "from rinchen.eval.report_read import read_report\n",
+        "from rinchen.eval.suite import x\n",
+        "from rinchen.eval.suites_of_others import x\n",
+        "from rinchen.export.record import ModelRecord\n",
+        "from rinchen import eval\n",
+        "import rinchen.eval\n",
+        'import importlib\nimportlib.import_module("eole")\n',
+        "import rinchen.metrics.segment_stats as stats\nstats.statistics_metric\n",
+        "from . import suites\n",
+        "from .suites import Suite\n",
+        "from ..export import suites\n",
+        '"""Reads rinchen.eval.suites and rinchen.eval.suite_rules."""\n# rinchen.eval.suite_sources\n',
+        'MESSAGE = "see rinchen.eval.suites"\nprint(MESSAGE)\n',
+        "suites = 1\nprint(suites)\n",
+        "def eval(x):\n    return x.suites\n",
+    ],
+)
+def test_what_is_not_an_import_of_a_suite_reader_is_not_flagged(source: str) -> None:
+    assert reached(source, "rinchen.export.x") == []
+
+
+# ---- which files are looked at and which are exempt --------------------------------------
+
+
+def build_tree(root: Path, files: dict[str, str]) -> Path:
+    package_root = root / "rinchen"
+    for relative, source in files.items():
+        path = package_root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(source, encoding="utf-8")
+    return package_root
+
+
+LEAK = "from rinchen.eval.suites import read_suite\n"
+RELATIVE_LEAK = "from ..eval import suite_rules\n"
+
+
+def test_the_scan_finds_a_leak_in_any_package_outside_the_exempt_files(
+    tmp_path: Path,
+) -> None:
+    package_root = build_tree(
+        tmp_path,
+        {
+            "__init__.py": "",
+            "export/__init__.py": "",
+            "export/leak.py": LEAK,
+            "train/__init__.py": RELATIVE_LEAK,
+            "train/ok.py": "from rinchen.export.record import ModelRecord\n",
+            "synth/deep/leak.py": "import rinchen.eval.suite_sources\n",
+            "cli/main.py": "def run():\n    from rinchen.eval import suites\n",
+            "cli/robust_eval.py": LEAK,
+            "cli/sub/eval_x.py": LEAK,
+            "evaluate/x.py": LEAK,
+            "metrics/dyn.py": "import importlib\nimportlib.import_module(name)\n",
+        },
+    )
+
+    assert violations(package_root) == {
+        "export/leak.py": ["rinchen.eval.suites"],
+        "train/__init__.py": ["rinchen.eval.suite_rules"],
+        "synth/deep/leak.py": ["rinchen.eval.suite_sources"],
+        "cli/main.py": ["rinchen.eval.suites"],
+        "cli/robust_eval.py": ["rinchen.eval.suites"],
+        "cli/sub/eval_x.py": ["rinchen.eval.suites"],
+        "evaluate/x.py": ["rinchen.eval.suites"],
+        "metrics/dyn.py": [UNREADABLE],
+    }
+
+
+def test_the_scan_exempts_the_eval_package_and_the_eval_commands_only(
+    tmp_path: Path,
+) -> None:
+    package_root = build_tree(
+        tmp_path,
+        {
+            "__init__.py": "",
+            "eval/__init__.py": "",
+            "eval/report.py": LEAK,
+            "eval/suite_sources.py": "from .suites import Suite\n",
+            "cli/eval.py": LEAK,
+            "cli/eval_suite.py": LEAK,
+            "cli/eval_robustness_plan.py": LEAK,
+        },
+    )
+
+    assert violations(package_root) == {}
+    assert [
+        p.relative_to(package_root).as_posix() for p in scanned_files(package_root)
+    ] == ["__init__.py"]
+
+
+def test_a_file_that_is_not_python_source_is_not_read(tmp_path: Path) -> None:
+    package_root = build_tree(
+        tmp_path,
+        {"export/__init__.py": "", "export/notes.txt": LEAK, "export/data.json": LEAK},
+    )
+
+    assert violations(package_root) == {}

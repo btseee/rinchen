@@ -1,0 +1,100 @@
+{
+  "benchmark": "golden",
+  "directions": [
+    "khk_Cyrl-eng_Latn",
+    "eng_Latn-khk_Cyrl"
+  ],
+  "kind": "fixture",
+  "name": "golden",
+  "rows": [
+    {
+      "doc": "d1",
+      "id": "g01",
+      "text": {
+        "eng_Latn": "the cat sat on the mat",
+        "khk_Cyrl": "муур дэвсгэр дээр сууж байв"
+      }
+    },
+    {
+      "doc": "d1",
+      "id": "g02",
+      "text": {
+        "eng_Latn": "a dog runs in the park",
+        "khk_Cyrl": "нохой цэцэрлэгт хүрээлэнд гүйж байна"
+      }
+    },
+    {
+      "doc": "d2",
+      "id": "g03",
+      "text": {
+        "eng_Latn": "she reads a long book",
+        "khk_Cyrl": "тэр урт ном уншдаг"
+      }
+    },
+    {
+      "doc": "d2",
+      "id": "g04",
+      "text": {
+        "eng_Latn": "we eat bread and cheese",
+        "khk_Cyrl": "бид талх бяслаг иддэг"
+      }
+    },
+    {
+      "doc": "d3",
+      "id": "g05",
+      "text": {
+        "eng_Latn": "the sun is hot today",
+        "khk_Cyrl": "өнөөдөр нар халуун байна"
+      }
+    },
+    {
+      "doc": "d3",
+      "id": "g06",
+      "text": {
+        "eng_Latn": "he drinks cold water",
+        "khk_Cyrl": "тэр хүйтэн ус уудаг"
+      }
+    },
+    {
+      "doc": "d4",
+      "id": "g07",
+      "text": {
+        "eng_Latn": "birds fly over the river",
+        "khk_Cyrl": "шувууд голын дээгүүр нисдэг"
+      }
+    },
+    {
+      "doc": "d4",
+      "id": "g08",
+      "text": {
+        "eng_Latn": "my brother plays the piano",
+        "khk_Cyrl": "миний ах төгөлдөр хуур тоглодог"
+      }
+    },
+    {
+      "doc": "d5",
+      "id": "g09",
+      "text": {
+        "eng_Latn": "they walk to school",
+        "khk_Cyrl": "тэд сургууль руу алхаж явна"
+      }
+    },
+    {
+      "doc": "d5",
+      "id": "g10",
+      "text": {
+        "eng_Latn": "the train is late again",
+        "khk_Cyrl": "галт тэрэг дахин хоцорлоо"
+      }
+    }
+  ],
+  "schema": "rinchen.eval.suite/1",
+  "source": {
+    "dataset": null,
+    "files": {},
+    "missing_languages": [],
+    "pinned": false,
+    "revision": null
+  },
+  "split": "devtest"
+}
