@@ -41,7 +41,9 @@ real CTranslate2 on the CPU, on the templated toy sentences of `tests/support/ti
 - **Departures from the master plan's file list** (`docker/{Dockerfile.cpu,Dockerfile.gpu,compose.serve.yaml}`, `infer/{placeholders,
   terminology,preprocess,postprocess,batching}.py`, `serve/` with rate limiting): no `Dockerfile.gpu` (nothing about it can be built or
   run here); no `placeholders` or `terminology` module and no `terminology` field in a request (D12 owns them and the request schema
-  refuses an unknown key until it does); no `preprocess`, `postprocess` or `batching` module (the steps are inline in the engine and the
+  refuses an unknown key until it does) [D12: it does not own them. D12 only MEASURES placeholders and terminology (`rinchen eval robustness`,
+  `docs/runbooks/12_robustness.md`) and builds no mechanism, so the two modules and the field stay unbuilt, with no owner, and the request schema keeps
+  refusing `terminology`; this amends the sentence above and the spec's T22]; no `preprocess`, `postprocess` or `batching` module (the steps are inline in the engine and the
   batcher is `serve/batcher.py`); no rate limiting by client, no authentication, no hot reload, no multi-model server (a gateway in
   front is assumed); no `export/model_card.py` or `export/hub.py` (D13).
 
@@ -454,7 +456,8 @@ the language asked for): remove it
 ```
 
 Before the fix a row `<2eng_Latn> This is the star.` asked of `khk_Cyrl` gave `ok` and `Машин и стол.` with purity 1.0: the language had
-silently changed. The numbered placeholders (`⟦0⟧` to `⟦99⟧`) are text: D12's engine is meant to write them. The windows the engine
+silently changed. The numbered placeholders (`⟦0⟧` to `⟦99⟧`) are text: D12's engine is meant to write them [D12: the engine passes them, but a model copies one only for the
+indices it was trained on (the D11 teacher copies none, 0 of 600 rows) and no training row of D6 to D10 holds one: `docs/runbooks/12_robustness.md`]. The windows the engine
 assembles itself carry `<sep>` and `<doc>` and are not checked.
 
 **Errors.** `ConfigError` (a request that cannot be honoured), `DataError` (a text the engine refuses: a lone surrogate, a reserved
@@ -715,7 +718,7 @@ POST /v1/translate    Content-Type: application/json
 | `doc_mode` | false | translate each text as a document (a document model; `src` is then required by the engine) |
 
 The request is strict: a quoted number or a boolean in the wrong place is refused, and a field it does not know is refused (`terminology` until
-D12). The response, one entry per text in order (**measured**):
+D12) [D12: it stays refused: D12 builds no terminology mechanism]. The response, one entry per text in order (**measured**):
 
 ```
 {"translations":["Энэ бол од."],"detected_src":["eng_Latn"],"model":"rinchen-b7f33d88d5fa","latency_ms":7.483,"statuses":["ok"],"script_purity":[1.0]}
@@ -1057,7 +1060,8 @@ explicit authorisation.
    spurious delta: raise nothing, read `mismatches`).
 3. **Quantise** and measure the cost: `--quantization int8` (CPU) or `int8_float16` (GPU, unmeasured), on the same checkpoint; translate the dev sources of the corpus with
    `rinchen translate --format jsonl` or `rinchen.Translator` and score them (`rinchen.metrics.bleu_chrf.corpus_scores`) against float32: the gate is a drop of at most 1.0 chrF; no
-   command scores an export yet (D12 and D13 will). UNMEASURED: the real int8 loss, the file's share of float32 (29 % on a 6/6 d512 random-init model, 73 % on the toy), the speed.
+   command scores an export for that yet (D12 and D13 will) [D12: `rinchen eval robustness` scores an export for numbers, placeholders, names, glossary terms, script purity and a
+   traditional-script source; it does not score chrF or the int8 drop: D13]. UNMEASURED: the real int8 loss, the file's share of float32 (29 % on a 6/6 d512 random-init model, 73 % on the toy), the speed.
 4. **Choose the script mode**: keep `retry`; read the engine counters (`script_retries`, `script_retry_improved`, `script_impure` in the `counters:` line of `rinchen translate` and in
    `rinchen_engine_events_total`) over real requests, compare `always`, and calibrate the purity floor 0.98 and the policy for the eight other languages (the registry's) on
    real text. UNMEASURED: whether a hard mask helps or hurts, the loss of a legitimate Latin name in Cyrillic output under `always`, the cost of a 30,000-entry list per call.

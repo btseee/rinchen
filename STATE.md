@@ -969,7 +969,64 @@ path from the environment is accepted; the image is amd64 only and its build nee
 `infer/engine_types.py` 594 (the limit is 900); three limits of the re-review (a Kubernetes Service named `rinchen-serve` injects variables the prefix refusal rejects, so set `enableServiceLinks: false`; the requests in flight get `ceil(T/2)` of the stop budget, so a legitimate 15 s request is cut at T=20; an unknown client key is echoed up to 40 characters in the 422). NOT verified: any run on a GPU or a real model, the container, `KeyboardInterrupt` with a real CTranslate2 call, Windows and macOS, and CI. [EVIDENCE: the gate chain, the integration modules (112 passed in 604 s: parity 13, surfaces 25, serving gate 13, process 15, stop budget 2, D10 gate 44, D10's gate included), the read-only drivers of the runbook (`scratchpad/d11-t12/`), the
 spike (`spike-findings.md`) and the review reports, 2026-11-09 to 2026-11-10, commits `17549f8` through `039d1d7`.]
 
-Branch status (updated 2026-11-10, after the D11 build): `main` holds D3, the D3 research follow-up, D4
+**D12 (robustness) is done on branch `d12-robustness`; its STOP gate ("robustness block populated in tiny report") is met on the toy: through the real `rinchen eval robustness` binary and
+the real Eole, CTranslate2 and SentencePiece on the CPU with the GPU hidden, a tiny model trained for the purpose (6,000 steps, 187 s, from random initialisation) is scored over a generated suite
+and `report.json` holds all six values at or above the gate's floors (numbers 892 of 960 = 0.9292 against 0.90, placeholders 599 of 600 = 0.9983 against 0.99, entities 447 of 480 mentions =
+0.9313 against 0.90, terms 1044 of 1044, script purity 1.0 over 900 rows, `mn_Mong` source retention 0.9976 against 0.95), while the negative controls score far below (hypotheses moved by 7 rows:
+numbers 3 of 960, placeholders 2 of 600; the D11 teacher, which never saw a digit or a placeholder: 0 of 960 and 0 of 600, retention 0.3172; a glossary the model never writes 0 of 1,044;
+placeholder indices 10 and up 0 of 28; script mask `off` leaves 101 of 900 rows under the purity floor).** The branch is stacked on `d11-export-serving` (cut from it at `23dc962` on 2026-11-10), is
+not merged and not pushed, and no CI run covers it. It is 14 commits above `d11-export-serving` at its code tip `ae4e816` (one of design, eight of tasks, five of the fix wave), and one more with the records
+(the design commit is `37634d1`; the tasks are `a6ecb70`, `60ba4d6`, `93d23b9`, `396e85d`, `3e65275`, `f8087f1`, `4f8cba7` and `b2466ef`; the fix wave is `64e45f0`, `40dc2ee`, `ce794ee`, `338bb02` and the code
+tip `ae4e816`, `D12: review minors`; the records are the commit `D12: runbook, spec amendments and state and decision records`). It is an INSTRUMENT, not a mechanism and not a verdict on any model: D12
+MEASURES numbers, placeholders, names, glossary terms, the script of the output and a source in the traditional script, and builds no masking, no terminology engine, no `terminology` request field and no
+training row that teaches either (this amends D11's T22; nobody owns the mechanisms or their training data after D12); the only data it ever ran on is the templated toy of `tests/support/robust_toy.py`
+(it ranks nothing), no real corpus, glossary or model exists, **no GPU was used** (the owner did not authorise it; every Eole process, the converter and every CTranslate2 translator ran with
+`CUDA_VISIBLE_DEVICES=""` and `device="cpu"`, `auto` is refused, `--device cuda` is validated and never run), and the conventions table, the 4-letter case suffix, the currency symbols and the 0.98 floor
+are priors. Built: `rinchen.text.numerals` (D4's numeral folding moved out of `filter/numbers.py`, D4 unchanged), `rinchen.eval.robust_{numbers,placeholders,spans,script,mong}` (six metrics as pure
+functions), `robust_suite{,_rules}` (the strict suite file `rinchen.robustness.suite/1`), `robust_hypotheses` (the hypotheses JSONL file and the runner: ONE `Engine.translate` call), `robust_outcomes`,
+`robust_sections`, `robustness` (`robustness.json`, `rinchen.robustness/1`, one outcome per row, no timestamp; `robustness_block` of SIX keys: the master plan's four plus `entity_acc` and
+`mong_source_retention`, amendment C1; `robustness_coverage`), `robust_report` (`report.json`, `rinchen.report.robustness/1`, with a `coverage` map), the command `rinchen eval robustness` (`cli/eval_robustness{,_plan,_output}.py`;
+`--model` or `--hypotheses`, the converter pair, hash before read, the manifest last, exit 0 whenever it measured), the golden files in `tests/fixtures/robustness/`, the test helpers listed in `CLAUDE.md`
+(the toy, its suites and the gate stages) and `docs/runbooks/12_robustness.md`. The design is `docs/superpowers/specs/2026-11-10-d12-robustness-design.md` (amended to the finished code, section 7 listing
+A1 to A21); its rulings T1 to T20 and C1 are condensed in `DECISIONS.md` ("2026-11-10: D12 robustness: the rulings"), made by the design agent, the builders and the controller without a review round of
+their own. Built task by task with tests first after a spike on the real Eole and CTranslate2 (Tasks 1 to 8, then ONE combined review by one reviewer, a fix wave, a scoped re-review and these records).
+**The combined review (one independent reviewer, read-only, Tasks 1 to 8, `37634d1..b2466ef`) found: ready with fixes, 0 Critical, 4 Important and 9 Minor findings.** I-1: the numbers metric failed
+identical text when one value appeared twice with different units (`5 and 5` plus a tugrik sign against itself); I-2: the denominators of the values were invisible (a value over 10 scored rows of 1,000, silence
+raising the script mean, a retention over two near-zero chrF scores); I-3: `term_acc` is natural agreement with a glossary, not adherence (the D11 teacher scores 1,041 of 1,044 because the glossary is the toy's noun
+table); I-4: the per-row outcomes could not reproduce the retention. The fix wave (five commits, `b2466ef..ae4e816`) fixed I-1, I-2 and I-4, the D8 race test (a process that exits while `/proc/<pid>/stat` is
+read raises `ProcessLookupError`, which the helper did not catch; the ONE edit to a D8 test) and the stale figures, left I-3 to documentation and parked the rest as limits (the hyphen over-acceptance, the
+converter provenance gap, the trivial-solution scores, no held-out `reorder` row, the floor margins). **The scoped re-review of the fix wave (`b2466ef..ae4e816`) was RUNNING when these records were
+written and its verdict is NOT recorded here; a follow-up edit adds it.** Gates, run for real on Linux, CPython 3.14.10: `ruff format --check .`, `ruff check .` and `mypy src` clean and `pytest -m "not
+network" -q` -- 11983 passed after Task 1, 12155 after Task 2, 12265 after Task 3, 12967 after Task 4, 13217 after Task 5, 13457 after Task 7, 13491 after Task 8 (22 to 29 min each, one sequential process; Task 6's run, 13311 passed,
+had the one failure of the D8 race test) and **13543 passed, 1 skipped, 10 deselected** after the fix wave (`ae4e816`; the machine was at load 58 to 130, so the suite ran as five parallel pytest processes
+that cover every collected test exactly once, about 19 minutes), against 11778 at the end of D11; the D5 to D11 regression sets stayed green. Mutation checks by hand, one mutant at a time, as recorded per
+task: 63, 68, 57, 93, 122, 68 + 5, 93 and six gate mutants for Tasks 1 to 8, and 13, 18 and 12 for the fix wave; two differential fuzzes against independent references (300,000 random cases of the numbers
+metric against a brute-force unit-aware matching, 0 mismatches).
+Evidence of the STOP gate, measured by the gate and again for the runbook on 2026-11-10 (Intel Core Ultra 7 265K, 20 cores, 46 GiB, one thread per command; every count and score below was the same in the
+spike and in the gate wherever the runbook's "Measured numbers" does not say otherwise): the toy's teacher trains in 186.9 s (190.9 s with the export and the suites) and its `model.bin` (2,080,071 bytes, SHA-256
+`e28d1566...a6`) is byte-identical to the design spike's and to the gate's earlier retraining, so the gate's figures are exact, not statistical (the gate records the digest and does not assert it); the toy's
+generator is pinned by the SHA-256 of its 29,352 rows (`4136d80a...bad1`); the main suite (3,580 rows, 4,060 requests) is scored in 2.10 s at beam 4 and 1.51 s at beam 1 (import and model load included); numbers
+by category (beam 4): integer, decimal, percent, date and time 120 of 120, currency 117, grouped 118, two numbers in one sentence 57 of 120 (no floor); placeholders at beam 1 600 of 600; the converted arm
+(D5's tiny converter) retains 0.5473 against 0.9976 for the direct arm; the traditional-script output suite is pure (1.0 over 100 rows); the golden files score to the golden `robustness.json` byte for byte;
+two runs write equal files. Costs: the metrics 0.04 s per 1,000 requests, the engine 0.11 s (beam 1) and 0.23 s (beam 4) per 1,000 rows. The thresholds (floors and ceilings of the controls) were not lowered.
+**The toy ranks nothing**: do not read the gate as evidence about a real model, a real glossary, the traditional script as people write it or a GPU.
+Findings worth knowing: facts in `docs/VERIFY.md` ("D12 findings"): the vocabulary of a model is the file of tokens its training data showed, so a model trained on a digit-free corpus cannot read or write a
+digit and the engine still says `ok` with purity 1.0; a model copies a placeholder only for the indices it was trained on (0 to 9 copied, 10 and up 0 of 28; the D11 teacher 0 of 600); the engine refuses the
+inline terminology markers; the toy's training is byte-for-byte repeatable on this machine; the numbers metric needs a unit-aware matching (D12-NUMBERS-UNIT-MATCHING) and every value needs its coverage
+(D12-RETENTION-DENOMINATOR); a source echo scores 960 of 960 on the numbers and 600 of 600 on the placeholders (read these two next to chrF); beam 4 drops a placeholder that beam 1 keeps (D15's
+"`placeholder_acc` 1.0" depends on the decode).
+Open gates (none can be done without real data, a GPU or a mechanism): everything GPU-side (CTranslate2 on CUDA, `float16`, `int8_float16` and their effect on these metrics); a MECHANISM for placeholders and
+terminology and the training data that would make a model use them (nobody owns them); real data and real priors (the conventions table, the suffix, the currency symbols, the 0.98 floor; real entities have many
+spellings; number and magnitude words are not read); suites from real parallel text and real glossaries (D13); a real converter and real traditional-script text; D15's own tiny suite and matching training rows
+(D12's generator is a test helper); the D3 gates assigned to D4, the D5 gates that need real text or a reader and the D6 to D11 gates stay open.
+Known and open: the limits listed in the runbook (`term_acc` is agreement, not adherence; the hyphen and prefix over-acceptance of names; the converter's files are hashed but loaded without re-verification and `ScriptConverter`
+has no `close`; `read_suite` and `read_hypotheses` are used only by tests and the caps bound the parse, not memory; trivial solutions score high; no held-out `reorder` row; `5 $7`; retention above 1; script silence is
+excluded by design; `surface_exact_rows` does not see the layout of a date; the floors have margin and bit-identical training is not asserted; the sacrebleu signature pinned in the golden file fails on a bump on purpose;
+the disclosed process slips of the wave). NOT verified: any run on a GPU, a real model, corpus or glossary, a real converter, the exit codes 4, 1 and 130 with real failures, memory at large suites, CI, Windows and
+macOS, and the re-review of the fix wave. [EVIDENCE: the gate chain, the two integration modules (31 tests: 442 s under load, 374.7 s on a quiet machine), the read-only drivers of the runbook
+(`scratchpad/d12-t9/`), the spike (`spike-findings.md`) and the review report, 2026-11-10, commits `37634d1` through `ae4e816`.]
+
+Branch status (updated 2026-11-10, after the D12 build): `main` holds D3, the D3 research follow-up, D4
 and D5, and is at `0d534a3` (the commit that records the D5 merge; `862e176` is the D5 merge tip,
 `2346cea` was the D3 end, `b38eaae` the D4 merge tip and `4eac98f` the commit that recorded the D4 merge;
 no `d3-research-followup`, `d4-filtering-mining` or `d5-script-converter` ref remains). D6 lives on its own
@@ -980,10 +1037,12 @@ on it (cut from `d6-synthetic-data` at `9973319`); D8 lives on `d8-teacher-train
 `6746ac5` and the commit `D9: record the re-review`); D10 lives on `d10-distillation`, stacked on D9 (cut from
 `d9-document-level` at `7d0c166`; its last code commit is `233ba33`, `D10: re-review minors`, and the records are the commits `D10: runbook, spec amendments and
 state and decision records` and `D10: record the re-review`, `b672aa8`); D11 lives on `d11-export-serving`, stacked on D10 (cut from `d10-distillation` at `b672aa8`; its last code
-commit is `039d1d7` (the final wave `330250a`, `55629cd`, `039d1d7` follows `4bfaa5e`, `D11: review minors (serving)`), and the records are the commits `D11: runbook, spec amendments and state and decision records` and `D11: record the re-review`). None
-of the six is merged into `main` and none is pushed; merging D11 means merging D6, D7, D8, D9 and D10 first. At the D5 merge `main` was 81 commits ahead of `origin/main`
-(`9e7b0ec`); it is unpushed, and no CI run covers D3, D4, D5, D6, D7, D8, D9, D10 or D11. The full local gate was last run
-on the D11 branch: 11778 passed, 1 skipped, 10 deselected (D6 to D11 included), on `039d1d7` (11768 on `D11: review minors (serving)`, `4bfaa5e`; 11562 on `D11: the serving gate`, `b6d57a4`; 10258 after Task 1);
+commit is `039d1d7` (the final wave `330250a`, `55629cd`, `039d1d7` follows `4bfaa5e`, `D11: review minors (serving)`), and the records are the commits `D11: runbook, spec amendments and state and decision records` and `D11: record the re-review`); D12 lives
+on `d12-robustness`, stacked on D11 (cut from `d11-export-serving` at `23dc962`; its last code commit is `ae4e816`, `D12: review minors`, and the records are the commit `D12: runbook, spec amendments and state and decision records`). None
+of the seven is merged into `main` and none is pushed; merging D12 means merging D6, D7, D8, D9, D10 and D11 first. At the D5 merge `main` was 81 commits ahead of `origin/main`
+(`9e7b0ec`); it is unpushed, and no CI run covers D3, D4, D5, D6, D7, D8, D9, D10, D11 or D12. The full local gate was last run
+on the D12 branch: 13543 passed, 1 skipped, 10 deselected (D6 to D12 included), on `ae4e816` (in five parallel parts; 13491 on `D12: the robustness gate`, `b2466ef`; 11983 after Task 1); on the D11 branch it gave
+11778 passed, 1 skipped, 10 deselected (D6 to D11 included), on `039d1d7` (11768 on `D11: review minors (serving)`, `4bfaa5e`; 11562 on `D11: the serving gate`, `b6d57a4`; 10258 after Task 1);
 on the D10 branch it gave 9750 passed, 1 skipped, 10 deselected, on `D10: re-review minors` (`233ba33`; 9706 on `D10: fix the vocabulary
 padding that a teacher hypothesis could hold`, `cc917e2`; 9439 on `D10: the tiny student gate`, `e67b05e`; 8517 after Task 1); on the D9
 branch it gave 8252 passed, 1 skipped, 10 deselected on `D9: re-review minors` (`135e9f9`;
@@ -995,14 +1054,14 @@ commit (`D6: re-review minors`) it gave 4331 passed; on the merged D5 tree `main
 whole-branch review of D8 ran (above); its fix wave's scoped re-review approved it with minors and the minor
 that needed code is fixed (`D8: re-review minors`).
 
-Next step: D12 (Robustness): `eval/robustness.py` suites (numbers: dates, decimals, currency; entities; markup placeholders; terminology; script purity; `mn_Mong` source input) with
-their metrics, tests first (each metric on synthetic hypotheses with known answers); STOP: a robustness block populated in a tiny report. Nothing in D11 blocks it. Its inputs from D11:
-`rinchen.infer.engine.Engine` (`translate(rows, options)` with a status per row, `translate_documents`, the 16 counters) and `rinchen.Translator`, `script_purity` and
-`forbidden_scripts` (`infer/script_mask.py`; the policy by registry and the purity floor 0.98 are priors to calibrate on real text), `reserved_pieces(allow=...)` (the numbered placeholders are
-already allowed through, so D12's engine can write them; the request side refuses every other reserved symbol with a `RequestTextError` that names the row and the symbol), the request schema
-(which refuses an unknown key until D12 adds `terminology`), `rinchen translate --format jsonl` (one object per line with `status` and `script_purity`), the export record `rinchen.json` (languages,
-targets, tags, document level) as the description of a model under test, and the service's `/metrics` engine events. What D11 does not give D12: any real model, a measured script-mask effect on
-real text, any evidence on a GPU or in `float16`, and the container; the open gates above and the D3 to D10 gates stay open.
+Next step: D13 (Final eval and release tooling): `eval/suites.py` (FLORES+ `khk_Cyrl` devtest for 16 directions, NTREX where available, the Mongolia-sourced human sets of D2), `eval/runner.py` (systems: Rinchen
+students and teacher, NLLB and MADLAD through CTranslate2, Hy-MT2 through vLLM), `eval/significance.py` (a paired bootstrap of 1,000 resamples with a fixed seed), `eval/report.py` (Markdown and JSON), `export/model_card.py`
+and `export/hub.py` (a dry-run upload with a mock); STOP: a tiny `report.md` and model card generated, a dry-run hub upload. Nothing in D12 blocks it. Its inputs from D12: `rinchen eval robustness` and the six-key block
+`rinchen.eval.robustness.robustness_block` (D13's `result.json` embeds it as it is, with the `coverage` of `robustness_coverage` and the section `details` of `robustness.json` on demand), the hypotheses JSONL file as the
+boundary between systems (a baseline's output enters through it: NLLB, MADLAD and Hy-MT2 are scored without any model of ours), the per-row outcomes of `robustness.json` (`ok`, `value`, `value_cyrl`: what the paired
+bootstrap resamples), the narrow `report.json` (`rinchen.report.robustness/1`, which D13's report writer replaces or keeps per suite), the sacrebleu signature that the result records, and the golden files as a model of a
+pinned result. What D12 does not give D13: any real suite, model, glossary or reference, a builder of suites from real parallel text, a mechanism for placeholders or terminology, any evidence on a GPU or in `float16`;
+the open gates above and the D3 to D11 gates stay open.
 
 D0 (environment, skeleton, doctor): `pyproject.toml` restructured to the
 master plan's toolchain (see `docs/STACK.md` for resolved versions),

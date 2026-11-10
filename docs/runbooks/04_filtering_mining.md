@@ -606,6 +606,13 @@ Stages
   case" (U+4E07 U+4E00) as 10001, and either gives a Chinese row digits its
   digit-free English side lacks, so it is rejected as `numbers`. A lone one
   (U+4E00) is ignored.
+  [D12: the numeral folding behind `digit_multiset` (every Unicode decimal digit to its ASCII digit, every run of CJK numerals to the
+  digits of its value, a lone CJK digit character to nothing) now lives in `rinchen.text.numerals.fold_numerals`, so that D12's number
+  metric (`rinchen.eval.robust_numbers`) folds the same way without importing `rinchen.filter` (polars). D4 behaves exactly as before:
+  `tests/unit/test_filter_numbers.py` is unchanged, and `tests/unit/test_filter_numbers_fold.py` compares `digit_multiset` with a frozen
+  copy of the old formula over random text. `scores.num_ok` keeps this meaning, the digit multiset; D12's `numbers_acc`
+  (`docs/runbooks/12_robustness.md`) is a different metric, a comparison of values, and replaces nothing here: it rejects the 15 of a toy
+  model's 67 wrong number rows that the digit multiset accepted (digit transpositions, a lost decimal point; measured in the D12 spike, beam 1).]
 - **Script score of a lone Common letter.** A text whose only letters are of
   Common or Inherited script (for example a lone katakana long-vowel mark)
   scores 0.0, not the vacuous 1.0.

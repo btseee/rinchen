@@ -30,6 +30,7 @@ NEVER:
 - `uv run ruff format --check .`
 - `uv run mypy src`
 - `uv run rinchen doctor` (or `just doctor`)
+- `uv run rinchen eval robustness --suite FILE (--model DIR | --hypotheses FILE) --out-dir DIR` (D12: measures numbers, placeholders, names, glossary terms, script purity and a traditional-script source; no threshold, exit 0 whenever it measured; `docs/runbooks/12_robustness.md`)
 
 ## Repo layout
 
@@ -51,13 +52,13 @@ docs/runbooks/02_human_testsets.md docs/runbooks/03_tokenizer.md
 docs/runbooks/04_filtering_mining.md docs/runbooks/05_script_converter.md
 docs/runbooks/06_synthetic.md docs/runbooks/07_ablations.md docs/runbooks/08_teacher.md
 docs/runbooks/09_document_level.md docs/runbooks/10_distillation.md
-docs/runbooks/11_serving.md
+docs/runbooks/11_serving.md docs/runbooks/12_robustness.md
 docs/research/  docs/superpowers/{specs,plans}/
 src/rinchen/{config,manifest,utils,cli,text,lang,split,spm,corpus,filter,mine,script_conv,synth,metrics,eval,serve,export}/
 src/rinchen/acquire/{http,opus,hf,warc,commoncrawl,registry}.py
 src/rinchen/annotate/{db,export,agreement,app,routes,models}.py
 src/rinchen/spm/{symbols,corpus,train,check}.py src/rinchen/split/rules.py
-src/rinchen/text/normalize.py src/rinchen/lang/scripts.py
+src/rinchen/text/{normalize,numerals}.py src/rinchen/lang/scripts.py
 src/rinchen/corpus/{schema,readers,writers}.py src/rinchen/config/filters.py
 src/rinchen/filter/{reasons,script_ratio,numbers,length,lid,minhash,labse,qe,qe_eole,pipeline}.py
 src/rinchen/mine/{embed,align,docalign,pairs}.py src/rinchen/cli/{filter,mine,errors}.py
@@ -74,16 +75,19 @@ src/rinchen/train/{docify,doc_source,doc_pack,doc_corpus,continuation,vocabulary
 src/rinchen/export/{eole_ct2,record,verified,quantize,ct2}.py
 src/rinchen/infer/{doc_chunker,source_tokens,script_mask,engine_types,engine,translator}.py
 src/rinchen/serve/{schemas,metrics,batcher,engine,_http,_translate,app}.py src/rinchen/config/serve.py
+src/rinchen/eval/{robust_numbers,robust_placeholders,robust_spans,robust_script,robust_mong,robust_suite,robust_suite_rules}.py
+src/rinchen/eval/{robust_hypotheses,robust_outcomes,robust_sections,robustness,robust_report}.py
 src/rinchen/train/{distill_export,distill_saved_config,distill_teacher,distill_sources}.py src/rinchen/train/export_parity.py
 src/rinchen/train/{distill_shards,distill_generate,distill_corpus,distill_mix,distill_prepare}.py
 src/rinchen/config/ablation.py src/rinchen/cli/{train,train_runs,train_common,train_docify}.py
 src/rinchen/cli/{distill,distill_export,distill_generate,distill_generate_plan,distill_generate_records}.py
 src/rinchen/cli/{distill_prepare,distill_evaluate}.py src/rinchen/cli/{export,export_parity,translate,translate_io,serve}.py
+src/rinchen/cli/{eval,eval_robustness,eval_robustness_plan,eval_robustness_output}.py
 src/rinchen/utils/{logged_process,integers}.py
 src/rinchen/errors.py src/rinchen/__init__.py
 tests/ scripts/ plans/ reports/ manifests/
 manifests/ucd_standardized_variants.json
-tests/{unit,property,golden,integration}/ tests/fixtures/{annot,golden,raw,spm,script_conv}/
+tests/{unit,property,golden,integration}/ tests/fixtures/{annot,golden,raw,spm,script_conv,robustness}/
 tests/support/ (planted corpus and alignments, fake embedders, tiny LID model,
   tiny_converter, stub_runtime, fake_process, script_reference, planted_synth,
   synth_cli, fake_llm_server, shard_files, corpus_rows, eole_train_config, tiny_parallel,
@@ -91,7 +95,8 @@ tests/support/ (planted corpus and alignments, fake embedders, tiny LID model,
   signal_handlers, doc_cli, doc_rows, distill_cli, distill_exports, distill_gate, distill_gate_refusals,
   distill_gate_stages, distill_teachers, fake_ct2, planted_kd, planted_student, model_exports, engines,
   error_messages, translate_cli, parity_cli, fake_parity_eole, serve_app, serve_batcher, fake_serve_process,
-  docker_files, d11_gate, d11_gate_doc, serving_gate, serving_gate_fixtures)
+  docker_files, d11_gate, d11_gate_doc, serving_gate, serving_gate_fixtures, robust_toy, robust_toy_text,
+  robust_suites, robust_gate, robust_golden, robust_cli, robust_suite_documents)
 scripts/build_spm_fixture.py (regenerates tests/fixtures/spm/tiny_corpus)
 scripts/build_script_conv_fixtures.py (reference TSV -> lexicon, golden words, tiny fixture)
 data/{raw,clean,mined,synth,test}/ (gitignored content, tracked dirs)
@@ -222,8 +227,26 @@ model still held `<sep>` in the script modes `always` and `retry`'s second pass,
 against 88.2 unmasked on the gate's plain rows; 88.5 after the fix); a final wave of three commits (gate 11778 passed, 1 skipped, 10 deselected) fixed it and five of the minors
 and documented three (Kubernetes service links under the refused `RINCHEN_SERVE_` prefix, half of the stop budget for requests in flight,
 a 40-character echo of an unknown key).
-Next up: D12 (Robustness). See `STATE.md`, `docs/runbooks/09_document_level.md`, `docs/runbooks/10_distillation.md` and
-`docs/runbooks/11_serving.md`.
+D12 (Robustness) is done locally on branch `d12-robustness`, stacked on `d11-export-serving` (cut from it at `23dc962`; code tip
+`ae4e816`), not merged and not pushed, and no CI run covers it: its STOP gate ("robustness block populated in tiny report") is met on the
+toy. Through the real `rinchen eval robustness` binary and the real Eole, CTranslate2 and SentencePiece on the CPU a tiny model trained for
+the purpose (6,000 steps, 187 s, byte-identical across trainings on this machine) is scored over a generated suite and `report.json` holds all
+six values at or above the floors (numbers 892 of 960 = 0.9292 against 0.90, placeholders 599 of 600, entities 447 of 480, terms 1044 of 1044,
+script purity 1.0, `mn_Mong` source retention 0.9976 against 0.95), while the controls collapse (hypotheses moved by 7 rows: numbers 3 of 960;
+the D11 teacher: 0 of 960 numbers and 0 of 600 placeholders; a glossary the model never writes: 0 of 1,044; placeholder indices 10 and up: 0 of
+28; script mask `off`: 101 of 900 rows under the purity floor); no floor was lowered. It is an instrument, not a mechanism: D12 builds no
+placeholder masking, no terminology engine and no `terminology` request field (this amends D11's T22; nobody owns them or the training data
+that would make a model use them), and the toy ranks nothing; no GPU was used (the one on this machine was not authorised; `auto` is refused,
+`--device cuda` is never run), no real corpus, glossary or model exists, and the conventions table, the 4-letter case suffix, the currency symbols
+and the 0.98 floor are priors. D12 found that a model trained on a digit-free corpus cannot read or write a digit while the engine says `ok`, that
+a model copies a placeholder only for the indices it was trained on (0 to 9 copied, 10 and up 0 of 28), that the engine refuses the inline
+terminology markers, and that the numbers metric needs a unit-aware matching and every value its coverage. A combined review by one reviewer ran:
+ready with fixes, no Critical finding and four Important ones (identical text failed the numbers metric when one value appeared twice with
+different units; the denominators of the values were invisible; `term_acc` is agreement with a glossary, not adherence; the per-row outcomes
+could not reproduce the retention); its fix wave (five commits, gate 13543 passed, 1 skipped, 10 deselected, in five parallel parts) fixed three,
+repaired a load race in one D8 test and left open on purpose the limits that `docs/runbooks/12_robustness.md` lists under "Known limits". The
+scoped re-review of the fix wave was RUNNING when these records were written and its verdict is NOT recorded here; a follow-up edit adds it.
+Next up: D13 (Final eval and release tooling). See `STATE.md`, `docs/runbooks/11_serving.md` and `docs/runbooks/12_robustness.md`.
 
 ## Evidence and full plan
 
