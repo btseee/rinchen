@@ -48,6 +48,20 @@ GOLDEN_METRICS = {
     "rows.terms": 3.0,
     "rows.script": 6.0,
     "rows.mong": 3.0,
+    # What each value is a share of, in the unit of its section: rows, or mentions for the
+    # entities and the terms (hand-counted from the golden suite).
+    "scored.numbers": 6.0,
+    "scored.placeholders": 5.0,
+    "scored.entities": 7.0,
+    "scored.terms": 4.0,
+    "scored.script": 5.0,
+    "scored.mong": 3.0,
+    "excluded.numbers": 2.0,
+    "excluded.placeholders": 1.0,
+    "excluded.entities": 0.0,
+    "excluded.terms": 1.0,
+    "excluded.script": 1.0,
+    "excluded.mong": 0.0,
 }
 
 
@@ -139,7 +153,11 @@ def test_a_value_that_is_null_is_not_a_metric_and_an_absent_section_has_no_rows(
     )
 
     assert result.exit_code == 0, result.output
-    assert manifest_of(workspace).metrics == {"rows.numbers": 1.0}
+    assert manifest_of(workspace).metrics == {
+        "rows.numbers": 1.0,
+        "scored.numbers": 0.0,
+        "excluded.numbers": 1.0,
+    }
 
 
 def test_the_config_digest_is_that_of_the_canonical_json_of_the_options(

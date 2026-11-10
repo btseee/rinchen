@@ -17,6 +17,8 @@ from pathlib import Path
 import pytest
 from click.testing import Result
 
+from rinchen.cli.eval_robustness_output import result_lines
+from rinchen.eval.robustness import RobustnessSystem, compute_robustness
 from rinchen.infer.engine_types import DecodeOptions, LoadOptions, Row
 from tests.support.engines import FakeConverter
 from tests.support.robust_cli import (
@@ -29,7 +31,13 @@ from tests.support.robust_cli import (
     make_workspace,
     sha256_of,
 )
-from tests.support.robust_golden import GOLDEN, golden_requests, golden_suite
+from tests.support.robust_golden import (
+    GOLDEN,
+    GOLDEN_COVERAGE,
+    golden_requests,
+    golden_suite,
+    suite_of,
+)
 from tests.support.robust_suite_documents import document, encode
 
 # The cyrillic and traditional sources of the three `mong` rows of the golden suite.
@@ -44,8 +52,8 @@ GOLDEN_LINES = [
     "placeholders: 0.4000 (2/5), excluded 1",
     "entities: 0.5714 (4/7 mentions)",
     "terms: 0.7500 (3/4 mentions), excluded 1",
-    "script: 0.7500 (mean of 5 rows), below floor 2",
-    "mong: 0.5018 (retention over 3 rows)",
+    "script: 0.7500 (mean of 5 rows), below floor 2, excluded 1",
+    "mong: 0.5018 (retention over 3 rows, chrF 50.18 over 100.00 Cyrillic)",
 ]
 
 
@@ -105,7 +113,7 @@ def test_the_result_is_the_golden_result_byte_for_byte(
     )
 
 
-def test_the_report_holds_the_six_golden_values_and_the_digest_of_the_result(
+def test_the_report_holds_the_golden_values_their_counts_and_the_digest_of_the_result(
     workspace: RobustWorkspace,
 ) -> None:
     invoke(workspace.hypotheses_args("--system", "golden"))
@@ -127,6 +135,7 @@ def test_the_report_holds_the_six_golden_values_and_the_digest_of_the_result(
             "entity_acc": 0.5714285714285714,
             "mong_source_retention": 0.5017570743156547,
         },
+        "coverage": GOLDEN_COVERAGE,
         "robustness_file": "robustness.json",
         "robustness_sha256": sha256_of(workspace.result),
     }
@@ -215,7 +224,7 @@ def test_a_section_without_a_scored_row_prints_n_a_and_the_exclusions_it_keeps(
         "suite: tiny",
         "system: nothing",
         "numbers: n/a (no scored row), excluded 1",
-        "script: n/a (no scored row), below floor 0",
+        "script: n/a (no scored row), below floor 0, excluded 1",
     ]
     report = json.loads(workspace.report.read_text(encoding="utf-8"))
     assert report["robustness"]["numbers_acc"] is None
@@ -241,7 +250,9 @@ def test_a_suite_with_one_section_prints_that_section_only(
     )
 
     assert result.exit_code == 0, result.output
-    assert lines_of(result)[2:-3] == ["mong: 1.0000 (retention over 1 rows)"]
+    assert lines_of(result)[2:-3] == [
+        "mong: 1.0000 (retention over 1 rows, chrF 100.00 over 100.00 Cyrillic)"
+    ]
     report = json.loads(workspace.report.read_text(encoding="utf-8"))
     assert report["robustness"] == {
         "numbers_acc": None,
@@ -250,6 +261,48 @@ def test_a_suite_with_one_section_prints_that_section_only(
         "script_purity": None,
         "entity_acc": None,
         "mong_source_retention": 1.0,
+    }
+
+
+def test_a_mong_section_without_rows_prints_n_a_and_no_chrf() -> None:
+    # The suite reader refuses an empty section: only a suite built in memory has one.
+    result = compute_robustness(
+        suite_of(mong=()), {}, suite_sha256="0" * 64, system=RobustnessSystem(name="s")
+    )
+
+    assert result_lines(result)[2:] == ["mong: n/a (no scored row)"]
+
+
+def test_a_control_that_scores_zero_leaves_no_retention_and_shows_both_chrfs(
+    workspace: RobustWorkspace, tmp_path: Path
+) -> None:
+    doc = document()
+    doc["sections"] = {"mong": doc["sections"]["mong"]}
+    suite = tmp_path / "mong_suite.json"
+    suite.write_bytes(encode(doc))
+    hypotheses = tmp_path / "mong_hypotheses.jsonl"
+    hypotheses.write_text(
+        '{"arm": "cyrl", "id": "m1", "section": "mong", "text": "Zq"}\n'
+        '{"arm": "mong", "id": "m1", "section": "mong", "text": "This is a book."}\n',
+        encoding="utf-8",
+    )
+
+    result = invoke(
+        workspace.hypotheses_args("--system", "one", suite=suite, hypotheses=hypotheses)
+    )
+
+    assert result.exit_code == 0, result.output
+    assert lines_of(result)[2:-3] == [
+        "mong: n/a (retention over 1 rows, chrF 100.00 over 0.00 Cyrillic)"
+    ]
+    report = json.loads(workspace.report.read_text(encoding="utf-8"))
+    assert report["robustness"]["mong_source_retention"] is None
+    assert report["coverage"]["mong_source_retention"] == {
+        "scored": 1,
+        "excluded": 0,
+        "total": 1,
+        "chrf_cyrl": 0.0,
+        "chrf_mong": 100.0,
     }
 
 

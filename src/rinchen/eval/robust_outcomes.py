@@ -94,6 +94,16 @@ class SectionResult:
             object.__setattr__(self, name, MappingProxyType(frozen))
         object.__setattr__(self, "outcomes", tuple(self.outcomes))
 
+    @property
+    def excluded_total(self) -> int:
+        """The units left out of the value, under every reason."""
+        return sum(self.excluded.values())
+
+    @property
+    def total(self) -> int:
+        """The units the section holds, in its unit: those scored and those left out."""
+        return self.scored + self.excluded_total
+
     def to_dict(self) -> dict[str, Any]:
         """The section as the document writes it (the outcomes go under `rows`)."""
         return {

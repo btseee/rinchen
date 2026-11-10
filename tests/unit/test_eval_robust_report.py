@@ -1,7 +1,7 @@
 """The narrow report of D12 (spec T15): `report.json`, schema `rinchen.report.robustness/1`,
 the file the STOP gate reads ("robustness block populated in tiny report"). It names the system
-and the suite, holds the six values and points at `robustness.json` by its digest. D13 owns the
-full report and embeds the same block."""
+and the suite, holds the six values with the counts each rests on (`coverage`) and points at
+`robustness.json` by its digest. D13 owns the full report and embeds the same block."""
 
 from __future__ import annotations
 
@@ -24,6 +24,7 @@ from rinchen.eval.robustness import (
     robustness_block,
 )
 from tests.support.robust_golden import (
+    GOLDEN_COVERAGE,
     GOLDEN_SUITE_SHA256,
     golden_hypotheses,
     golden_result,
@@ -50,10 +51,11 @@ def test_the_constants_are_the_ones_of_the_spec() -> None:
     assert ROBUSTNESS_FILE == "robustness.json"
 
 
-def test_the_report_has_exactly_the_six_keys_of_the_spec() -> None:
+def test_the_report_has_exactly_the_seven_keys_of_the_spec() -> None:
     report = robustness_report(golden_result(), DIGEST)
 
     assert sorted(report) == [
+        "coverage",
         "robustness",
         "robustness_file",
         "robustness_sha256",
@@ -145,7 +147,7 @@ def test_the_bytes_are_sorted_keys_two_space_indent_and_one_line_feed() -> None:
         text == json.dumps(report, sort_keys=True, indent=2, ensure_ascii=False) + "\n"
     )
     assert text.startswith(
-        '{\n  "robustness": {\n    "entity_acc": 0.5714285714285714,'
+        '{\n  "coverage": {\n    "entity_acc": {\n      "excluded": 0,'
     )
 
 
@@ -170,3 +172,66 @@ def test_a_value_that_is_not_a_number_cannot_be_written() -> None:
 
     with pytest.raises(ValueError, match="JSON"):
         report_bytes(report)
+
+
+def test_the_report_says_how_many_units_each_value_rests_on() -> None:
+    report = robustness_report(golden_result(), DIGEST)
+
+    assert report["coverage"] == GOLDEN_COVERAGE
+    assert list(report["coverage"]) == list(SIX_VALUES)
+
+
+def test_a_value_over_a_few_scored_rows_shows_the_rows_it_left_out() -> None:
+    rows = (
+        row("a1"),
+        *(
+            row(f"x{i}", source="It costs a lot.", reference="Үнэ их.")
+            for i in range(9)
+        ),
+    )
+    result = compute_robustness(
+        suite_of(numbers=rows),
+        {
+            key("numbers", "a1"): Hypothesis("Үнэ 15.", "ok"),
+            **{key("numbers", f"x{i}"): Hypothesis("Үнэ.", "ok") for i in range(9)},
+        },
+        suite_sha256="0" * 64,
+        system=RobustnessSystem(name="s"),
+    )
+
+    report = robustness_report(result, DIGEST)
+
+    assert report["robustness"]["numbers_acc"] == 1.0
+    assert report["coverage"]["numbers_acc"] == {
+        "scored": 1,
+        "excluded": 9,
+        "total": 10,
+    }
+
+
+def test_a_section_the_suite_does_not_have_rests_on_nothing() -> None:
+    result = compute_robustness(
+        suite_of(numbers=(row("a1"),)),
+        {key("numbers", "a1"): Hypothesis("Үнэ 15.", "ok")},
+        suite_sha256="0" * 64,
+        system=RobustnessSystem(name="s"),
+    )
+
+    coverage = robustness_report(result, DIGEST)["coverage"]
+
+    assert coverage["numbers_acc"] == {"scored": 1, "excluded": 0, "total": 1}
+    nothing = {"scored": 0, "excluded": 0, "total": 0}
+    for name in ("placeholder_acc", "term_acc", "script_purity", "entity_acc"):
+        assert coverage[name] == nothing
+    assert coverage["mong_source_retention"] == {
+        **nothing,
+        "chrf_cyrl": None,
+        "chrf_mong": None,
+    }
+
+
+def test_the_counts_of_every_section_add_up_to_its_total() -> None:
+    coverage = robustness_report(golden_result(), DIGEST)["coverage"]
+
+    for counts in coverage.values():
+        assert counts["scored"] + counts["excluded"] == counts["total"]

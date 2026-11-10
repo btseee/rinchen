@@ -13,8 +13,13 @@ text of the suite or of a hypothesis, so the same inputs give the same bytes. La
 
 `robustness_block` is the six values the reports embed: `numbers_acc`, `placeholder_acc`,
 `term_acc`, `script_purity`, `entity_acc` and `mong_source_retention`, each a float or None (the
-section is absent, or nothing in it was scored: never 0 or 1). Nothing here measures a model;
-the floors of the gate are the gate's, not the result's."""
+section is absent, or nothing in it was scored: never 0 or 1). `robustness_coverage` is what each
+rests on: how many units were scored and how many were left out (rows; mentions for the entities
+and the terms), because a value over ten scored rows of a thousand looks like one over all of
+them. `mong_source_retention` is a ratio of two corpus chrF scores: it can exceed 1 (the direct
+arm beat the control) and it says nothing when the Cyrillic chrF is near zero (two poor scores
+give a ratio near 1), so its coverage entry carries both chrF scores. Nothing here measures a
+model; the floors of the gate are the gate's, not the result's."""
 
 from __future__ import annotations
 
@@ -38,6 +43,7 @@ __all__ = [
     "RobustnessSystem",
     "compute_robustness",
     "robustness_block",
+    "robustness_coverage",
 ]
 
 RESULT_SCHEMA: Final = "rinchen.robustness/1"
@@ -152,6 +158,30 @@ def robustness_block(result: RobustnessResult) -> dict[str, float | None]:
         key: result.sections[section].value if section in result.sections else None
         for key, section in _BLOCK
     }
+
+
+def robustness_coverage(
+    result: RobustnessResult,
+) -> dict[str, dict[str, float | int | None]]:
+    """What each of the six values rests on, in the order of the block: the units `scored`,
+    those `excluded` (under any reason) and their `total`, in the unit of the section (rows;
+    mentions for the entities and the terms). All three are 0 for a section the suite does not
+    have. The entry of `mong_source_retention` also holds the corpus chrF of both arms the
+    ratio is made of (`chrf_cyrl`, `chrf_mong`; None without rows)."""
+    coverage: dict[str, dict[str, float | int | None]] = {}
+    for key, name in _BLOCK:
+        section = result.sections.get(name)
+        coverage[key] = {
+            "scored": 0 if section is None else section.scored,
+            "excluded": 0 if section is None else section.excluded_total,
+            "total": 0 if section is None else section.total,
+        }
+    mong = result.sections.get("mong")
+    coverage["mong_source_retention"] |= {
+        "chrf_cyrl": None if mong is None else mong.details["chrf_cyrl"],
+        "chrf_mong": None if mong is None else mong.details["chrf_mong"],
+    }
+    return coverage
 
 
 def compute_robustness(

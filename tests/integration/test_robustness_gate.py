@@ -417,6 +417,12 @@ def test_the_report_and_the_result_agree_on_the_six_values(main_run: Run) -> Non
     assert block == main_run.result["robustness"]
     for section, key in KEYS.items():
         assert block[key] == main_run.sections[section]["value"]
+    for section, key in KEYS.items():
+        counts = main_run.report["coverage"][key]
+        scored = main_run.sections[section]["scored"]
+        excluded = sum(main_run.sections[section]["excluded"].values())
+        assert (counts["scored"], counts["excluded"]) == (scored, excluded), key
+        assert counts["total"] == scored + excluded, key
     assert main_run.report["schema"] == "rinchen.report.robustness/1"
     assert main_run.report["robustness_sha256"] == sha256_of(
         main_run.out_dir / RESULT_FILE
@@ -494,6 +500,12 @@ def test_the_manifest_vouches_for_the_suite_the_export_and_the_files_written(
     }
     for key in SIX_KEYS:
         assert manifest.metrics[key] == main_run.block[key], key
+    for name in SUITE_ROWS:
+        section = main_run.sections[name]
+        assert manifest.metrics[f"scored.{name}"] == float(section["scored"]), name
+        assert manifest.metrics[f"excluded.{name}"] == float(
+            sum(section["excluded"].values())
+        ), name
     assert {"ctranslate2", "sentencepiece", "sacrebleu", "regex"} <= set(
         manifest.tool_versions
     )

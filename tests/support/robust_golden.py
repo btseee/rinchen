@@ -35,6 +35,23 @@ GOLDEN_SUITE_SHA256: Final = (
 GOLDEN_HYPOTHESES_SHA256: Final = (
     "78bb56fc23e7cc07ea27df868ead4f35d52208779f2e7c67d05efcbb755e07a8"
 )
+# The units each of the six values is a share of, in the unit of its section (rows; mentions
+# for the entities and the terms), counted by hand from the golden suite
+# (`spike/logs/make_golden.txt`): the `coverage` of the report.
+GOLDEN_COVERAGE: Final[dict[str, dict[str, float | int]]] = {
+    "numbers_acc": {"scored": 6, "excluded": 2, "total": 8},
+    "placeholder_acc": {"scored": 5, "excluded": 1, "total": 6},
+    "term_acc": {"scored": 4, "excluded": 1, "total": 5},
+    "script_purity": {"scored": 5, "excluded": 1, "total": 6},
+    "entity_acc": {"scored": 7, "excluded": 0, "total": 7},
+    "mong_source_retention": {
+        "scored": 3,
+        "excluded": 0,
+        "total": 3,
+        "chrf_cyrl": 100.0,
+        "chrf_mong": 50.17570743156548,
+    },
+}
 
 
 def golden_suite() -> Suite:

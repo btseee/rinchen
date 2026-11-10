@@ -1,6 +1,11 @@
 """The narrow report of D12 (spec T15): `report.json`, schema `rinchen.report.robustness/1`, the
 file the STOP gate reads. It names the system and the suite, holds the six values of
-`robustness_block` and points at `robustness.json` by the SHA-256 of its bytes. No timestamp.
+`robustness_block`, the counts each value rests on (`coverage`, from `robustness_coverage`) and
+points at `robustness.json` by the SHA-256 of its bytes. No timestamp.
+
+A value is a share of the units that were scored: read it with its `coverage`, which says how
+many were left out. The retention is a ratio of two chrF scores, can exceed 1 and means nothing
+when the Cyrillic chrF beside it is near zero.
 
 D13 owns the full report: its writer embeds `robustness_block` as it is. When it exists this
 module and the command's `report.json` line are removed or kept as a per-suite artefact; the
@@ -13,7 +18,11 @@ import re
 from collections.abc import Mapping
 from typing import Any, Final
 
-from rinchen.eval.robustness import RobustnessResult, robustness_block
+from rinchen.eval.robustness import (
+    RobustnessResult,
+    robustness_block,
+    robustness_coverage,
+)
 
 __all__ = ["REPORT_SCHEMA", "ROBUSTNESS_FILE", "report_bytes", "robustness_report"]
 
@@ -43,6 +52,7 @@ def robustness_report(
         },
         "suite": {"name": result.suite_name, "sha256": result.suite_sha256},
         "robustness": robustness_block(result),
+        "coverage": robustness_coverage(result),
         "robustness_file": ROBUSTNESS_FILE,
         "robustness_sha256": robustness_sha256,
     }

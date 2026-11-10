@@ -100,12 +100,19 @@ def result_lines(result: RobustnessResult) -> list[str]:
 
 
 def metrics_of(result: RobustnessResult) -> dict[str, float]:
-    """The metrics of the manifest: the values of the six keys that are not null and the
-    number of rows of each section of the suite (`rows.<section>`)."""
+    """The metrics of the manifest: the values of the six keys that are not null, the number
+    of rows of each section of the suite (`rows.<section>`) and the units of each that were
+    scored and left out (`scored.<section>`, `excluded.<section>`: rows, or mentions for the
+    entities and the terms)."""
     block = robustness_block(result)
     return {
         **{key: value for key, value in block.items() if value is not None},
         **{f"rows.{name}": float(count) for name, count in result.suite_rows.items()},
+        **{f"scored.{name}": float(s.scored) for name, s in result.sections.items()},
+        **{
+            f"excluded.{name}": float(s.excluded_total)
+            for name, s in result.sections.items()
+        },
     }
 
 
@@ -151,7 +158,7 @@ def _headline(section: SectionResult, detail: str) -> str:
 
 
 def _excluded(section: SectionResult) -> str:
-    return f", excluded {sum(section.excluded.values())}"
+    return f", excluded {section.excluded_total}"
 
 
 def _mentions(section: SectionResult) -> str:
@@ -175,12 +182,21 @@ def _terms_line(name: str, section: SectionResult) -> str:
 def _script_line(name: str, section: SectionResult) -> str:
     detail = f"mean of {section.scored} rows"
     below_floor = int(section.details["below_floor"] or 0)
-    return f"{name}: {_headline(section, detail)}, below floor {below_floor}"
+    return (
+        f"{name}: {_headline(section, detail)}, below floor {below_floor}"
+        f"{_excluded(section)}"
+    )
 
 
 def _mong_line(name: str, section: SectionResult) -> str:
-    detail = f"retention over {section.rows} rows"
-    return f"{name}: {_headline(section, detail)}"
+    """The retention beside the two chrF scores it is the ratio of: a retention over a
+    Cyrillic chrF near zero says nothing, and `n/a` says the control scored 0."""
+    chrf_cyrl = section.details["chrf_cyrl"]
+    if chrf_cyrl is None:
+        return f"{name}: {_NOTHING_SCORED}"
+    figure = "n/a" if section.value is None else f"{section.value:.4f}"
+    chrfs = f"chrF {section.details['chrf_mong']:.2f} over {chrf_cyrl:.2f} Cyrillic"
+    return f"{name}: {figure} (retention over {section.rows} rows, {chrfs})"
 
 
 _LINES: Final[dict[str, Callable[[str, SectionResult], str]]] = {
