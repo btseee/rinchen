@@ -295,7 +295,7 @@ def test_the_manifest_records_the_installed_tools(
 
     assert manifest_of(workspace).tool_versions == {
         package: importlib.metadata.version(package)
-        for package in ("ctranslate2", "eole")
+        for package in ("ctranslate2", "eole", "torch")
     }
 
 

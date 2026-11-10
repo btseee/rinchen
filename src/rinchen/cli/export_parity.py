@@ -79,7 +79,8 @@ from rinchen.utils.part_file import replace_file
 
 _STAGE: Final = "export_parity"
 PARITY_FILE: Final = "parity.json"
-_TOOL_PACKAGES: Final = ("eole", "ctranslate2", "sentencepiece", "polars")
+# `eole predict` runs on torch.
+_TOOL_PACKAGES: Final = ("eole", "torch", "ctranslate2", "sentencepiece", "polars")
 _OUTPUTS: Final = "parity result"
 _CORPUS: Final = "corpus file"
 _MODEL_FILE: Final = EXPORT_FILES[0]

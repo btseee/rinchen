@@ -17,13 +17,13 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from rinchen.export.ct2 import ConvertResult, ExportFacts, convert
-from rinchen.export.record import EXPORT_FILES, ModelRecord
-from rinchen.export.verified import verify_export
 
 from rinchen.errors import ConfigError, DataError
 from rinchen.export import ct2
+from rinchen.export.ct2 import ConvertResult, ExportFacts, convert
 from rinchen.export.eole_ct2 import export_log_path
+from rinchen.export.record import EXPORT_FILES, ModelRecord
+from rinchen.export.verified import verify_export
 from rinchen.manifest import store
 from rinchen.manifest.model import Manifest
 from tests.support.distill_exports import (
@@ -385,7 +385,9 @@ def test_the_manifest_says_what_the_stage_did(
         "vocabulary_entries": float(len(SOURCE_VOCABULARY)),
         "model_bytes": float(len(MODEL_BYTES)),
     }
-    assert set(manifest.tool_versions) == {"ctranslate2", "eole"}
+    assert set(manifest.tool_versions) == {"ctranslate2", "eole", "torch"}
+    # The conversion subprocess loads torch through Eole: its version is recorded.
+    assert manifest.tool_versions["torch"] == importlib.metadata.version("torch")
     created = datetime.datetime.fromisoformat(manifest.created)
     assert created.tzinfo is not None
 

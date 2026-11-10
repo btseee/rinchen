@@ -11,6 +11,7 @@ sources of a run say which rows were read.
 from __future__ import annotations
 
 import hashlib
+import importlib.metadata
 import json
 from pathlib import Path
 
@@ -240,10 +241,13 @@ def test_the_manifest_vouches_for_the_inputs_and_the_result(
     }
     assert set(manifest.tool_versions) == {
         "eole",
+        "torch",
         "ctranslate2",
         "sentencepiece",
         "polars",
     }
+    # `eole predict` runs on torch: its version is recorded.
+    assert manifest.tool_versions["torch"] == importlib.metadata.version("torch")
 
 
 def test_the_manifest_names_the_options_that_decide_the_numbers(

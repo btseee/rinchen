@@ -67,7 +67,8 @@ from rinchen.manifest.model import Manifest, ManifestFile
 from rinchen.manifest.stage import code_version, sha256_of, tool_versions
 from rinchen.utils.part_file import replace_file
 
-_TOOL_PACKAGES: Final = ("ctranslate2", "eole")
+# The converter subprocess loads torch through Eole: its version is part of the provenance.
+_TOOL_PACKAGES: Final = ("ctranslate2", "eole", "torch")
 # The child of the private directory that the converter makes.
 _BUILT: Final = "export"
 _MODEL_FILE: Final = CT2_FILES[0]
