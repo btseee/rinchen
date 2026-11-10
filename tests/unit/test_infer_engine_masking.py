@@ -417,6 +417,78 @@ def test_a_decode_that_never_asks_for_a_script_list_does_not_build_one(
     assert built == [False]
 
 
+# -- a document model's lone sentence
+
+# A document model writes `<sep>` after a sentence decoded alone and the engine cuts the
+# hypothesis there, so the list of such a sentence lets `<sep>` through, as a window's does:
+# with `<sep>` suppressed the model runs on and invents the sentences that follow.
+
+SEP = "<sep>"
+CYRILLIC = SP + "Энэ"
+
+
+def runs_on_unless_the_separator_is_let_through(
+    line: tuple[str, ...], suppressed: frozenset[str]
+) -> Sequence[Hypothesis]:
+    """Latin until the call lists the script, then one sentence and `<sep>`, but runaway
+    text where the call suppresses `<sep>`."""
+    if LATIN not in suppressed:
+        return [hyp(LATIN, END)]
+    if SEP in suppressed:
+        return [hyp(CYRILLIC, SP + "ном", SP + "ус", END)]
+    return [hyp(CYRILLIC, SEP, END)]
+
+
+@pytest.mark.parametrize("name", ["always", "retry"])
+def test_the_list_of_a_sentence_of_a_document_model_lets_the_separator_through(
+    tmp_path: Path, name: str
+) -> None:
+    fixture = scripted_engine(
+        tmp_path,
+        document_level=True,
+        answer=runs_on_unless_the_separator_is_let_through,
+    )
+
+    (result,) = fixture.engine.translate(khk("x"), mode(name))
+
+    assert (result.status, result.text) == ("ok", "Энэ")
+    assert [SEP] not in fixture.ct2.calls[-1].suppress_sequences  # type: ignore[operator]
+    assert [LATIN] in fixture.ct2.calls[-1].suppress_sequences  # type: ignore[operator]
+
+
+@pytest.mark.parametrize("name", ["always", "retry"])
+def test_the_list_of_a_sentence_of_a_sentence_model_still_suppresses_the_separator(
+    tmp_path: Path, name: str
+) -> None:
+    fixture = scripted_engine(
+        tmp_path, answer=runs_on_unless_the_separator_is_let_through
+    )
+
+    (result,) = fixture.engine.translate(khk("x"), mode(name))
+
+    assert (result.status, result.text) == ("ok", "Энэ ном ус")
+    assert [SEP] in fixture.ct2.calls[-1].suppress_sequences  # type: ignore[operator]
+    counted_reserved = fixture.engine.counters()["reserved_symbol"]
+    assert counted_reserved == 0
+
+
+def test_the_lists_of_a_document_model_are_all_built_by_the_warmup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    built = counting_lists(monkeypatch)
+    fixture = scripted_engine(tmp_path, document_level=True, answer=leaky)
+
+    fixture.engine.warmup()
+    after_the_warmup = list(built)
+    for name in ("off", "retry", "always"):
+        fixture.engine.translate(khk("x"), mode(name))
+        fixture.engine.translate_documents(
+            ["Hello world. Hello book."], ENG, KHK, mode(name)
+        )
+
+    assert built == after_the_warmup
+
+
 # -- the warm-up builds the lists
 
 

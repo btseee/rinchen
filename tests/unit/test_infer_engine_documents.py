@@ -645,15 +645,19 @@ def test_an_impure_window_is_decoded_again_with_the_list_that_lets_the_separator
 
 def test_the_list_of_a_window_is_a_list_of_its_own(tmp_path: Path) -> None:
     fixture = documents(tmp_path, answer=pure_window, script=None)
+    # A sentence model never writes `<sep>`: its list suppresses it. (The lone sentence of a
+    # document model has the list of a window: see the masking tests.)
+    sentence_model = scripted_engine(tmp_path / "sentences", document_level=False)
 
     fixture.engine.translate_documents(
         ["Hello world. Hello book."], ENG, KHK, DecodeOptions(script_mask="always")
     )
-    fixture.engine.translate(
+    sentence_model.engine.translate(
         [Row("hello", None, KHK)], DecodeOptions(script_mask="always")
     )
 
-    window, sentence = fixture.ct2.calls
+    (window,) = fixture.ct2.calls
+    (sentence,) = sentence_model.ct2.calls
     assert [SEP] not in window.suppress_sequences  # type: ignore[operator]
     assert [SEP] in sentence.suppress_sequences  # type: ignore[operator]
 

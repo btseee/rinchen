@@ -19,7 +19,9 @@ What CTranslate2 does silently, the engine does not (measured in the D10 and D11
 - a document model (the record's `document_level`) writes `<sep>` after a sentence decoded
   alone, because it was continued on windows of 2 to 4 sentences only: its hypothesis is cut at
   the first `<sep>` and the head is the translation, finished (the separator is the model
-  saying so); one that starts with `<sep>` is dropped. A window lets `<sep>` through instead.
+  saying so); one that starts with `<sep>` is dropped. The suppression list of a document
+  model lets `<sep>` through in every call (a window writes it between sentences), or the
+  model would run on past the sentence and invent the ones that follow.
 
 A request is all-or-nothing in its errors (an unknown target, a `script` for a target that is not
 Mongolian, the same source and target, a lone surrogate or a reserved symbol in a text raise
@@ -516,9 +518,7 @@ class Engine:
         parsed: dict[int, Parsed] = {}
         for key, positions in groups.items():
             batch = [jobs[position] for position in positions]
-            suppressed = self._suppression(
-                key, batch[0].route.decode_tgt, batch[0].allow_separator
-            )
+            suppressed = self._suppression(key, batch[0].route.decode_tgt)
             results = self._translate_batch(batch, suppressed, options)
             for position, job, result in zip(positions, batch, results, strict=True):
                 parsed[position] = self._parse(job, result, tally)
@@ -526,11 +526,9 @@ class Engine:
 
     def _list_key(self, job: Job, scripts: bool) -> ListKey:
         forbidden = forbidden_scripts(job.route.decode_tgt) if scripts else None
-        return (forbidden, job.allow_separator, scripts)
+        return (forbidden, job.lets_separator_through, scripts)
 
-    def _suppression(
-        self, key: ListKey, decode_tgt: str, allow_separator: bool
-    ) -> list[list[str]]:
+    def _suppression(self, key: ListKey, decode_tgt: str) -> list[list[str]]:
         """The suppression list of `key` (for a decode into `decode_tgt`), built once however
         many threads ask for it."""
         with self._lists_lock:
@@ -541,23 +539,21 @@ class Engine:
                     self._processor,
                     decode_tgt,
                     end_token=self._end,
-                    allow=(SEGMENT_SEPARATOR,) if allow_separator else (),
+                    allow=(SEGMENT_SEPARATOR,) if key[1] else (),
                     scripts=key[2],
                 )
                 self._lists[key] = listed
             return listed
 
     def _build_every_list(self) -> None:
-        """The list of every kind of call into every target of the model (a document model
-        also decodes windows, which let `<sep>` through)."""
+        """The list of every kind of call into every target of the model (every call of a
+        document model lets `<sep>` through: a window and a lone sentence both write it)."""
         separators = (False, True) if self._record.document_level else (False,)
         for target in self._record.targets:
             for allow_separator in separators:
                 for scripts in (False, True):
                     forbidden = forbidden_scripts(target) if scripts else None
-                    self._suppression(
-                        (forbidden, allow_separator, scripts), target, allow_separator
-                    )
+                    self._suppression((forbidden, allow_separator, scripts), target)
 
     def _translate_batch(
         self,

@@ -337,7 +337,9 @@ class Job:
 
     A window lets `<sep>` through (`allow_separator`). A sentence decoded by a document model
     (`cut_at_separator`) is cut at its first `<sep>`: the model was continued on windows of 2
-    to 4 sentences only, so it writes the separator after a lone sentence.
+    to 4 sentences only, so it writes the separator after a lone sentence. Its suppression
+    list leaves `<sep>` alone too (`lets_separator_through`): with the separator suppressed
+    the model runs on and invents the sentences that follow.
     """
 
     label: str
@@ -346,6 +348,11 @@ class Job:
     route: Route
     allow_separator: bool = False
     cut_at_separator: bool = False
+
+    @property
+    def lets_separator_through(self) -> bool:
+        """Whether the suppression list of this job leaves `<sep>` out."""
+        return self.allow_separator or self.cut_at_separator
 
 
 @dataclass(frozen=True, slots=True)
