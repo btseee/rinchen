@@ -198,6 +198,29 @@ SIGNS_UNITS_AND_FOREIGN_DIGITS = [
     case(MONGOLIAN[1:3], None, "12"),
     case(f"2{THREE_IN_CJK}", None, "2"),
     case(f"x {chr(0x4E8C)}{chr(0x3007)}{chr(0x4E8C)}{chr(0x56DB)} y", None, "2024"),
+    # A symbol between two numbers is the unit of the one before it, never of both.
+    case(
+        f"859 571{TUGRIK} 3 ширхэг",
+        "khk_Cyrl",
+        f"859571 /{TUGRIK}",
+        "3",
+    ),
+    case(
+        f"3 ширхэг 859 571{TUGRIK}",
+        "khk_Cyrl",
+        "3",
+        f"859571 /{TUGRIK}",
+    ),
+    case(f"5 {TUGRIK} 3", None, f"5 /{TUGRIK}", "3"),
+    case(f"5{TUGRIK}3", None, f"5 /{TUGRIK}", "3"),
+    case(f"5 {TUGRIK} $3", None, f"5 /{TUGRIK}", "3 /$"),
+    case(f"5{TUGRIK}$3", None, f"5 /{TUGRIK}", "3 /$"),
+    case("5 and $3", None, "5", "3 /$"),
+    case("$5 x $3", None, "5 /$", "3 /$"),
+    case(f"{TUGRIK}5 3", None, f"5 /{TUGRIK}", "3"),
+    case(f"price {TUGRIK} 3", None, f"3 /{TUGRIK}"),
+    case("5 $7", None, "5 /$", "7"),
+    case(f"12:30{TUGRIK} 5", None, "12", "30", f"5 /{TUGRIK}"),
 ]
 
 
@@ -347,6 +370,32 @@ def scored(
     )
 
 
+T = TUGRIK
+
+
+def unit_score(
+    reference: str,
+    hypothesis: str,
+    *,
+    counts: tuple[int, int, int],
+    exact: bool,
+    units: bool = True,
+    same: bool = True,
+    lang: str = "eng_Latn",
+) -> object:
+    """A row of English text unless `lang` says otherwise: `same` says whether the
+    surfaces (the written numbers without units) agree, `units` whether the units do."""
+    return scored(
+        reference,
+        hypothesis,
+        lang,
+        counts=counts,
+        exact=exact,
+        units_ok=units,
+        surface=same,
+    )
+
+
 SCORES = [
     scored(
         "Ном 1 250,50 байна.",
@@ -417,6 +466,45 @@ SCORES = [
     scored("5-6", "6, 5", None, counts=(2, 2, 0), exact=True, surface=True),
     scored("5", "-5", None, counts=(1, 0, 1), exact=False),
     scored("12", "012", None, counts=(1, 1, 0), exact=True),
+    # One value written twice, once with a unit: a text is its own best translation.
+    unit_score(f"5 and 5 {T}", f"5 and 5 {T}", counts=(2, 2, 0), exact=True),
+    unit_score(f"5 {T} and 5", f"5 {T} and 5", counts=(2, 2, 0), exact=True),
+    unit_score(f"{T}5 and 5", f"{T}5 and 5", counts=(2, 2, 0), exact=True),
+    unit_score(f"100 {T} and 100", f"100 {T} and 100", counts=(2, 2, 0), exact=True),
+    unit_score(f"5 and 5 {T}", f"5 {T} and 5", counts=(2, 2, 0), exact=True),
+    unit_score("5 and 5", f"5 {T} and 5", counts=(2, 2, 0), exact=True),
+    unit_score(f"5 {T} and 5 $", f"5 $ and 5 {T}", counts=(2, 2, 0), exact=True),
+    # A unit the reference states and no hypothesis number carries fails the row.
+    unit_score(f"5 and 5 {T}", "5 and 5", counts=(2, 2, 0), exact=False, units=False),
+    unit_score(
+        f"5 {T} and 5 {T}", f"5 {T} and 5", counts=(2, 2, 0), exact=False, units=False
+    ),
+    unit_score(
+        f"5 {T} and 5 $", f"5 {T} and 5 {T}", counts=(2, 2, 0), exact=False, units=False
+    ),
+    unit_score(f"5 {T} and 5", "5 and 5 $", counts=(2, 2, 0), exact=False, units=False),
+    unit_score(
+        f"5 {T}", "5 and 5 $", counts=(1, 1, 1), exact=False, units=False, same=False
+    ),
+    # A spare number takes the unit it needs, and a missing number is not a unit failure.
+    unit_score(f"5 {T}", f"5 and 5 {T}", counts=(1, 1, 1), exact=False, same=False),
+    unit_score(f"5 {T} and 5", "5 and 7", counts=(2, 1, 1), exact=False, same=False),
+    unit_score(f"5 {T} and 5", f"5 {T}", counts=(2, 1, 0), exact=False, same=False),
+    # A symbol between two numbers is the first one's: the reordering keeps every unit.
+    unit_score(
+        f"859 571{T} 3 ширхэг",
+        f"3 ширхэг 859 571{T}",
+        counts=(2, 2, 0),
+        exact=True,
+        lang="khk_Cyrl",
+    ),
+    unit_score(
+        f"3 ширхэг 859 571{T}",
+        f"859 571{T} 3 ширхэг",
+        counts=(2, 2, 0),
+        exact=True,
+        lang="khk_Cyrl",
+    ),
 ]
 
 

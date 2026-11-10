@@ -15,7 +15,7 @@ Limits, on purpose: number and magnitude words (`three`, `million`) are not read
 from __future__ import annotations
 
 import re
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, replace
 from decimal import Decimal
 from functools import cache
@@ -90,8 +90,9 @@ class NumberOutcome:
 
 def numbers_in(text: str, lang: str | None = None) -> tuple[NumberToken, ...]:
     """The numbers of `text` in written order, read under the conventions of `lang`
-    (`None` when unknown). Numbered placeholders are not numbers. At most
-    `MAX_NUMBER_TOKENS + 1` tokens are produced, and the scan stops there."""
+    (`None` when unknown). Numbered placeholders are not numbers. A currency symbol is the
+    unit of one number: a symbol after a number is that number's, so `5 $7` is `5 $` and
+    `7`. At most `MAX_NUMBER_TOKENS + 1` tokens are produced, and the scan stops there."""
     bare = _placeholder_pattern().sub(" ", fold_numerals(text))
     return tuple(islice(_scan(bare, lang), MAX_NUMBER_TOKENS + 1))
 
@@ -101,14 +102,17 @@ def score_numbers(
 ) -> NumberOutcome:
     """Match the numbers of `hypothesis` to those of `reference` one to one by value (a
     maximum matching, so that no assignment is missed), both read as `tgt_lang`. Order
-    never matters; a missing, extra or changed number fails the row (`exact`); a unit the
-    reference states must be the hypothesis's (a reference without a unit accepts any)."""
+    never matters; a missing, extra or changed number fails the row (`exact`). A unit the
+    reference states must be the hypothesis's (a reference without a unit accepts any):
+    `units_ok` holds when some maximum matching gives every reference number a hypothesis
+    number of its own unit, so a value written twice with different units is never failed
+    by the pairing."""
     wanted = numbers_in(reference, tgt_lang)[:MAX_NUMBER_TOKENS]
     seen = numbers_in(hypothesis, tgt_lang)
-    pairs = _maximum_matching(wanted, seen[:MAX_NUMBER_TOKENS])
-    units_ok = all(
-        wanted[w].unit is None or seen[s].unit == wanted[w].unit for w, s in pairs
-    )
+    kept = seen[:MAX_NUMBER_TOKENS]
+    pairs = _maximum_matching(wanted, kept)
+    with_units = _maximum_matching(wanted, kept, _same_unit)
+    units_ok = len(with_units) == len(pairs)
     return NumberOutcome(
         expected=len(wanted),
         found=len(pairs),
@@ -116,9 +120,7 @@ def score_numbers(
         units_ok=units_ok,
         exact=len(pairs) == len(wanted) == len(seen) and units_ok,
         surface_exact=_surfaces(wanted) == _surfaces(seen),
-        ambiguous=any(
-            token.ambiguous for token in (*wanted, *seen[:MAX_NUMBER_TOKENS])
-        ),
+        ambiguous=any(token.ambiguous for token in (*wanted, *kept)),
         capped=len(seen) > MAX_NUMBER_TOKENS,
     )
 
@@ -144,11 +146,15 @@ def _placeholder_pattern() -> re.Pattern[str]:
 
 
 def _scan(text: str, lang: str | None) -> Iterator[NumberToken]:
+    claimed_up_to = 0
     for run in _RUN.finditer(text):
         numbers = _run_numbers(run.group(), lang)
         first_two = list(islice(numbers, 2))
         if len(first_two) == 1:
-            yield _with_sign_and_unit(first_two[0], text, run.start(), run.end())
+            token, claimed_up_to = _with_sign_and_unit(
+                first_two[0], text, run.start(), run.end(), claimed_up_to
+            )
+            yield token
         else:
             yield from first_two
             yield from numbers
@@ -239,20 +245,17 @@ def _token(value: Decimal, surface: str) -> NumberToken:
 
 
 def _with_sign_and_unit(
-    token: NumberToken, text: str, start: int, end: int
-) -> NumberToken:
-    """The sign written before a lone number and the currency symbol beside it."""
+    token: NumberToken, text: str, start: int, end: int, claimed_up_to: int
+) -> tuple[NumberToken, int]:
+    """The sign written before a lone number and the currency symbol beside it, and the
+    end of the symbol this number took after itself (the next number may not claim it)."""
     surface = token.surface
     readings = token.readings
     if _is_negated(text, start):
         readings = frozenset(reading.copy_negate() for reading in readings)
         surface = "-" + surface
-    return replace(
-        token,
-        readings=readings,
-        surface=surface,
-        unit=_currency_beside(text, start, end),
-    )
+    unit, claimed_up_to = _currency_beside(text, start, end, claimed_up_to)
+    return replace(token, readings=readings, surface=surface, unit=unit), claimed_up_to
 
 
 def _is_negated(text: str, start: int) -> bool:
@@ -262,28 +265,47 @@ def _is_negated(text: str, start: int) -> bool:
     return start == 1 or text[start - 2].isspace() or text[start - 2] == "("
 
 
-def _currency_beside(text: str, start: int, end: int) -> str | None:
+def _currency_beside(
+    text: str, start: int, end: int, claimed_up_to: int
+) -> tuple[str | None, int]:
     """The currency symbol after the number, else the one before it, with at most one
-    group space between."""
+    group space between. A symbol belongs to one number: a number before this one that
+    took it after itself keeps it (`claimed_up_to` is the end of that symbol). Returns the
+    unit and the end of the symbol this number took after itself (0 when it took none)."""
     after = _UNIT_AFTER.match(text, end)
     if after:
-        return after.group(1)
-    before = _UNIT_BEFORE.search(text[max(start - 2, 0) : start])
-    return before.group(1) if before else None
+        return after.group(1), after.end()
+    window = max(start - 2, 0)
+    before = _UNIT_BEFORE.search(text[window:start])
+    if before and window + before.start(1) >= claimed_up_to:
+        return before.group(1), 0
+    return None, 0
 
 
 def _surfaces(tokens: Sequence[NumberToken]) -> list[str]:
     return sorted(token.surface for token in tokens)
 
 
+def _same_unit(want: NumberToken, token: NumberToken) -> bool:
+    """A reference number that states a unit needs that unit; one without accepts any."""
+    return want.unit is None or token.unit == want.unit
+
+
 def _maximum_matching(
-    wanted: Sequence[NumberToken], seen: Sequence[NumberToken]
+    wanted: Sequence[NumberToken],
+    seen: Sequence[NumberToken],
+    compatible: Callable[[NumberToken, NumberToken], bool] | None = None,
 ) -> list[tuple[int, int]]:
-    """Kuhn's algorithm on tokens that share a reading: wanted tokens are tried in order,
-    each with its candidates in order, so the pairs are the same on every run. Returns
-    `(wanted index, seen index)` pairs."""
+    """Kuhn's algorithm on tokens that share a reading (and, when `compatible` is given,
+    satisfy it): wanted tokens are tried in order, each with its candidates in order, so
+    the pairs are the same on every run. Returns `(wanted index, seen index)` pairs."""
     candidates = [
-        [index for index, token in enumerate(seen) if token.readings & want.readings]
+        [
+            index
+            for index, token in enumerate(seen)
+            if token.readings & want.readings
+            and (compatible is None or compatible(want, token))
+        ]
         for want in wanted
     ]
     owner = [-1] * len(seen)

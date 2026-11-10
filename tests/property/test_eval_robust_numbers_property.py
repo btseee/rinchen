@@ -1,11 +1,16 @@
 """Property tests for the numbers metric of D12: whatever text a model writes, extracting its
 numbers never raises, is deterministic and yields at most 65 tokens; a text without a digit
 character has no number; a text of at most 64 numbers scored against itself is exact, in any
-order of its numbers; a score never claims more matches than either side holds."""
+order of its numbers, whatever units its repeated values carry; a score never claims more
+matches than either side holds; and the matching and the units agree with a brute-force search
+over every assignment."""
 
 from __future__ import annotations
 
-from hypothesis import given
+from collections.abc import Callable, Sequence
+from functools import cache
+
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from rinchen.eval.robust_numbers import (
@@ -66,8 +71,55 @@ NUMBER_ITEMS = [
 ]
 
 
+# Few characters, so that one value is often written twice and a currency symbol often
+# sits between two numbers.
+UNIT_PIECES = ["5", "5", "7", " ", " ", NBSP, "x", TUGRIK, "$"]
+UNIT_TEXT = st.lists(st.sampled_from(UNIT_PIECES), max_size=24).map("".join)
+SMALL_UNIT_TEXT = st.lists(st.sampled_from(UNIT_PIECES), max_size=14).map("".join)
+UNIT_ITEMS = ["5", "5 " + TUGRIK, TUGRIK + "5", "7", "7 $", "5 $", "$7"]
+# A symbol written BEFORE a number that follows another number with one space (`5 $7`) is
+# read as the unit of the first (a symbol after a number wins), so such items are only
+# reordered behind a letter; items with the symbol after the number go behind any separator.
+POSTFIX_ITEMS = ["5", "5 " + TUGRIK, "7", "7 $", "5 $", "7" + TUGRIK]
+ITEMS_AND_SEPARATORS = st.one_of(
+    st.tuples(st.lists(st.sampled_from(UNIT_ITEMS), max_size=8), st.just(" x ")),
+    st.tuples(
+        st.lists(st.sampled_from(POSTFIX_ITEMS), max_size=8),
+        st.sampled_from([" ", " x ", "x"]),
+    ),
+)
+
+
 def parse(text: str, lang: str | None) -> tuple[NumberToken, ...]:
     return numbers_in(text, lang)
+
+
+def best_assignment(
+    wanted: Sequence[NumberToken],
+    seen: Sequence[NumberToken],
+    allowed: Callable[[NumberToken, NumberToken], bool],
+) -> int:
+    """The most reference tokens that can be given a hypothesis token of their own (a shared
+    reading, `allowed`), found by trying every assignment."""
+
+    @cache
+    def best(index: int, used: frozenset[int]) -> int:
+        if index == len(wanted):
+            return 0
+        top = best(index + 1, used)
+        for position, token in enumerate(seen):
+            fits = wanted[index].readings & token.readings and allowed(
+                wanted[index], token
+            )
+            if position not in used and fits:
+                top = max(top, 1 + best(index + 1, used | {position}))
+        return top
+
+    return best(0, frozenset())
+
+
+def same_unit(want: NumberToken, token: NumberToken) -> bool:
+    return want.unit is None or token.unit == want.unit
 
 
 @given(ANY_TEXT, LANGUAGES)
@@ -139,3 +191,52 @@ def test_a_score_never_raises_and_counts_within_both_sides(
     assert outcome.exact == (
         outcome.found == outcome.expected == seen and outcome.units_ok
     )
+
+
+@given(UNIT_TEXT, LANGUAGES)
+def test_a_text_is_exact_against_itself_whatever_its_repeated_values_and_units(
+    text: str, lang: str | None
+) -> None:
+    outcome = score_numbers(text, text, tgt_lang=lang)
+
+    assert outcome.units_ok
+    assert outcome.exact
+
+
+@given(ITEMS_AND_SEPARATORS, LANGUAGES, st.data())
+def test_a_reordering_of_numbers_with_units_never_changes_a_unit(
+    items_and_separator: tuple[list[str], str], lang: str | None, data: st.DataObject
+) -> None:
+    items, separator = items_and_separator
+    shuffled = data.draw(st.permutations(items))
+
+    outcome = score_numbers(
+        separator.join(items), separator.join(shuffled), tgt_lang=lang
+    )
+
+    assert outcome.units_ok
+    assert outcome.exact
+
+
+@settings(max_examples=1000)
+@given(
+    SMALL_UNIT_TEXT,
+    st.one_of(
+        SMALL_UNIT_TEXT,
+        st.lists(st.sampled_from(UNIT_ITEMS), max_size=6).map(" x ".join),
+    ),
+    LANGUAGES,
+)
+def test_the_matching_and_the_units_agree_with_a_brute_force_search(
+    reference: str, hypothesis: str, lang: str | None
+) -> None:
+    wanted = parse(reference, lang)
+    seen = parse(hypothesis, lang)
+    blind = best_assignment(wanted, seen, lambda _want, _seen: True)
+    aware = best_assignment(wanted, seen, same_unit)
+
+    outcome = score_numbers(reference, hypothesis, tgt_lang=lang)
+
+    assert outcome.found == blind
+    assert outcome.units_ok is (aware == blind)
+    assert outcome.exact is (blind == len(wanted) == len(seen) and aware == blind)
