@@ -190,6 +190,8 @@ def test_the_scan_covers_the_package_and_the_robustness_tests() -> None:
         "robust_spans",
         "robust_script",
         "robust_mong",
+        "robust_suite",
+        "robust_suite_rules",
     ):
         assert PACKAGE / f"{module}.py" in MODULES
     for unit_test in (
@@ -198,13 +200,18 @@ def test_the_scan_covers_the_package_and_the_robustness_tests() -> None:
         "test_eval_robust_spans",
         "test_eval_robust_script",
         "test_eval_robust_mong",
+        "test_eval_robust_suite",
+        "test_eval_robust_suite_refusals",
+        "test_eval_robust_suite_field_refusals",
     ):
         assert TESTS / "unit" / f"{unit_test}.py" in ROBUSTNESS_TESTS
     for property_test in (
         "test_eval_robust_numbers_property",
         "test_eval_robust_spans_property",
+        "test_eval_robust_suite_property",
     ):
         assert TESTS / "property" / f"{property_test}.py" in ROBUSTNESS_TESTS
+    assert TESTS / "support" / "robust_suite_documents.py" in ROBUSTNESS_TESTS
 
 
 @pytest.mark.parametrize("path", MODULES, ids=lambda path: path.name)

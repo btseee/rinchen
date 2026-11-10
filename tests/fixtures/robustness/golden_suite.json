@@ -1,0 +1,327 @@
+{
+  "entities": {
+    "bat": {
+      "eng_Latn": [
+        "Bat"
+      ],
+      "khk_Cyrl": [
+        "Бат"
+      ]
+    },
+    "ulaanbaatar": {
+      "eng_Latn": [
+        "Ulaanbaatar",
+        "Ulan Bator"
+      ],
+      "khk_Cyrl": [
+        "Улаанбаатар"
+      ]
+    }
+  },
+  "name": "golden",
+  "schema": "rinchen.robustness.suite/1",
+  "sections": {
+    "entities": [
+      {
+        "category": "person_city",
+        "entities": [
+          "bat",
+          "ulaanbaatar"
+        ],
+        "id": "e1",
+        "reference": "Бат Улаанбаатарт амьдардаг.",
+        "source": "Bat lives in Ulaanbaatar.",
+        "src_lang": "eng_Latn",
+        "tgt_lang": "khk_Cyrl"
+      },
+      {
+        "category": "person_city",
+        "entities": [
+          "bat",
+          "ulaanbaatar"
+        ],
+        "id": "e2",
+        "reference": "Бат Улаанбаатарт амьдардаг.",
+        "source": "Bat lives in Ulaanbaatar.",
+        "src_lang": "eng_Latn",
+        "tgt_lang": "khk_Cyrl"
+      },
+      {
+        "category": "person_city",
+        "entities": [
+          "bat",
+          "ulaanbaatar"
+        ],
+        "id": "e3",
+        "reference": "Bat is in Ulan Bator.",
+        "source": "Бат Улаанбаатарт байна.",
+        "src_lang": "khk_Cyrl",
+        "tgt_lang": "eng_Latn"
+      },
+      {
+        "category": "city",
+        "entities": [
+          "ulaanbaatar"
+        ],
+        "id": "e4",
+        "reference": "Улаанбаатар хүртэлх зам.",
+        "source": "The road to Ulaanbaatar.",
+        "src_lang": "eng_Latn",
+        "tgt_lang": "khk_Cyrl"
+      }
+    ],
+    "mong": [
+      {
+        "category": "base",
+        "id": "m1",
+        "reference": "This is a book.",
+        "source": "Энэ бол ном.",
+        "source_mong": "ᠡᠨᠡ ᠪᠣᠯ ᠨᠣᠮ᠃",
+        "src_lang": "khk_Cyrl",
+        "tgt_lang": "eng_Latn"
+      },
+      {
+        "category": "base",
+        "id": "m2",
+        "reference": "The water is here.",
+        "source": "Ус энд байна.",
+        "source_mong": "ᠤᠰ ᠡᠨᠳ᠋ᠡ ᠪᠠᠢᠨᠠ᠃",
+        "src_lang": "khk_Cyrl",
+        "tgt_lang": "eng_Latn"
+      },
+      {
+        "category": "base",
+        "id": "m3",
+        "reference": "Where is the tree?",
+        "source": "Мод хаана байна вэ?",
+        "source_mong": "ᠮᠣᠳ ᠬᠠᠮᠢᠭ᠎ᠠ ᠪᠠᠢᠨᠠ ᠪᠤᠢ?",
+        "src_lang": "khk_Cyrl",
+        "tgt_lang": "eng_Latn"
+      }
+    ],
+    "numbers": [
+      {
+        "category": "grouped",
+        "id": "n1",
+        "reference": "Үнэ 1 250,50 доллар.",
+        "source": "The price is 1,250.50 dollars.",
+        "src_lang": "eng_Latn",
+        "tgt_lang": "khk_Cyrl"
+      },
+      {
+        "category": "date",
+        "id": "n2",
+        "reference": "Встреча 12.03.2024 в 10:30.",
+        "source": "Meeting on 03/12/2024 at 10:30.",
+        "src_lang": "eng_Latn",
+        "tgt_lang": "rus_Cyrl"
+      },
+      {
+        "category": "currency",
+        "id": "n3",
+        "reference": "Үнэ 1 500₮.",
+        "source": "It costs 1,500₮.",
+        "src_lang": "eng_Latn",
+        "tgt_lang": "khk_Cyrl"
+      },
+      {
+        "category": "int",
+        "id": "n4",
+        "reference": "Хуудас 7529.",
+        "source": "Page 7529.",
+        "src_lang": "eng_Latn",
+        "tgt_lang": "khk_Cyrl"
+      },
+      {
+        "category": "none",
+        "id": "n5",
+        "reference": "Энд тоо алга.",
+        "source": "No numbers here.",
+        "src_lang": "eng_Latn",
+        "tgt_lang": "khk_Cyrl"
+      },
+      {
+        "category": "words",
+        "id": "n6",
+        "reference": "Ойролцоогоор 3 000 000.",
+        "source": "About 3 million.",
+        "src_lang": "eng_Latn",
+        "tgt_lang": "khk_Cyrl"
+      },
+      {
+        "category": "int",
+        "id": "n7",
+        "reference": "Тэр 5, тэр 7.",
+        "source": "He is 5 and she is 7.",
+        "src_lang": "eng_Latn",
+        "tgt_lang": "khk_Cyrl"
+      },
+      {
+        "category": "percent",
+        "id": "n8",
+        "reference": "Энэ 15%.",
+        "source": "It is 15%.",
+        "src_lang": "eng_Latn",
+        "tgt_lang": "khk_Cyrl"
+      }
+    ],
+    "placeholders": [
+      {
+        "category": "noun",
+        "id": "p1",
+        "reference": "⟦3⟧ хаана байна вэ?",
+        "source": "Where is ⟦3⟧?",
+        "src_lang": "eng_Latn",
+        "tgt_lang": "khk_Cyrl"
+      },
+      {
+        "category": "reorder",
+        "id": "p2",
+        "reference": "⟦1⟧ийн ⟦0⟧.",
+        "source": "The ⟦0⟧ of the ⟦1⟧.",
+        "src_lang": "eng_Latn",
+        "tgt_lang": "khk_Cyrl"
+      },
+      {
+        "category": "noun",
+        "id": "p3",
+        "reference": "Энэ бол ⟦4⟧.",
+        "source": "This is ⟦4⟧.",
+        "src_lang": "eng_Latn",
+        "tgt_lang": "khk_Cyrl"
+      },
+      {
+        "category": "noun",
+        "id": "p4",
+        "reference": "Энэ бол ⟦5⟧.",
+        "source": "This is ⟦5⟧.",
+        "src_lang": "eng_Latn",
+        "tgt_lang": "khk_Cyrl"
+      },
+      {
+        "category": "noun",
+        "id": "p5",
+        "reference": "Энэ бол ⟦6⟧.",
+        "source": "This is ⟦6⟧.",
+        "src_lang": "eng_Latn",
+        "tgt_lang": "khk_Cyrl"
+      },
+      {
+        "category": "none",
+        "id": "p6",
+        "reference": "Тэмдэг алга.",
+        "source": "No placeholder.",
+        "src_lang": "eng_Latn",
+        "tgt_lang": "khk_Cyrl"
+      }
+    ],
+    "script": [
+      {
+        "category": "trained",
+        "id": "s1",
+        "reference": null,
+        "script": null,
+        "source": "This is a book.",
+        "src_lang": "eng_Latn",
+        "tgt_lang": "khk_Cyrl"
+      },
+      {
+        "category": "trained",
+        "id": "s2",
+        "reference": null,
+        "script": null,
+        "source": "This is a star.",
+        "src_lang": "eng_Latn",
+        "tgt_lang": "khk_Cyrl"
+      },
+      {
+        "category": "untrained",
+        "id": "s3",
+        "reference": null,
+        "script": null,
+        "source": "Water.",
+        "src_lang": null,
+        "tgt_lang": "khk_Cyrl"
+      },
+      {
+        "category": "mong_output",
+        "id": "s4",
+        "reference": null,
+        "script": "Mong",
+        "source": "This is a book.",
+        "src_lang": "eng_Latn",
+        "tgt_lang": "khk_Cyrl"
+      },
+      {
+        "category": "mong_output",
+        "id": "s5",
+        "reference": null,
+        "script": "Mong",
+        "source": "This is a star.",
+        "src_lang": "eng_Latn",
+        "tgt_lang": "khk_Cyrl"
+      },
+      {
+        "category": "untrained",
+        "id": "s6",
+        "reference": null,
+        "script": null,
+        "source": "It is fine.",
+        "src_lang": "eng_Latn",
+        "tgt_lang": "eng_Latn"
+      }
+    ],
+    "terms": [
+      {
+        "category": "glossary",
+        "id": "t1",
+        "reference": "Ширээ хаана байна вэ?",
+        "source": "Where is the table?",
+        "src_lang": "eng_Latn",
+        "terms": [
+          {
+            "src": "table",
+            "tgt": "ширээ"
+          }
+        ],
+        "tgt_lang": "khk_Cyrl"
+      },
+      {
+        "category": "glossary",
+        "id": "t2",
+        "reference": "Ширээ ба цонх.",
+        "source": "The table and the window.",
+        "src_lang": "eng_Latn",
+        "terms": [
+          {
+            "src": "table",
+            "tgt": "ширээ"
+          },
+          {
+            "src": "window",
+            "tgt": "цонх"
+          }
+        ],
+        "tgt_lang": "khk_Cyrl"
+      },
+      {
+        "category": "glossary",
+        "id": "t3",
+        "reference": "Сандал энд байна.",
+        "source": "The chair is here.",
+        "src_lang": "eng_Latn",
+        "terms": [
+          {
+            "src": "chair",
+            "tgt": "сандал"
+          },
+          {
+            "src": "lamp",
+            "tgt": "чийдэн"
+          }
+        ],
+        "tgt_lang": "khk_Cyrl"
+      }
+    ]
+  }
+}
