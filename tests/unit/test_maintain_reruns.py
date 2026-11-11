@@ -29,6 +29,7 @@ from rinchen.maintain.reruns import (
     run_pytest_rerun,
 )
 from rinchen.maintain.states import (
+    FAIL_BAD_JUNIT,
     FAIL_NO_JUNIT,
     fail_floor,
     fail_pytest_exit,
@@ -441,7 +442,7 @@ ROWS = [
         5,
         0,
         "fail",
-        FAIL_NO_JUNIT,
+        FAIL_BAD_JUNIT,
         None,
     ),
     (
@@ -451,7 +452,7 @@ ROWS = [
         1,
         0,
         "fail",
-        FAIL_NO_JUNIT,
+        FAIL_BAD_JUNIT,
         None,
     ),
 ]
@@ -621,8 +622,10 @@ def model(
         return "fail", fail_timeout(60)
     if exit_code is None:
         return "fail", fail_pytest_exit(-1)
-    if counts is None or counts[0] - counts[1] - counts[2] - counts[3] < 0:
-        return "fail", FAIL_NO_JUNIT  # no report, or one that counts more than it ran
+    if counts is None:
+        return "fail", FAIL_NO_JUNIT
+    if counts[0] - counts[1] - counts[2] - counts[3] < 0:
+        return "fail", FAIL_BAD_JUNIT  # a report that counts more than it ran
     tests, failures, errors, skipped = counts
     passed = tests - failures - errors - skipped
     conditions = [

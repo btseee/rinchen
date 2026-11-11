@@ -53,6 +53,7 @@ _TESTS: Final = "<f> failed and <e> errors"
 _FLOOR: Final = "<p> passed, fewer than the floor <m>"
 _SKIPPED: Final = "<k> skipped, more than the allowed <m>"
 FAIL_NO_JUNIT: Final = "no JUnit report was written"
+FAIL_BAD_JUNIT: Final = "the JUnit report could not be read"
 FAIL_TARGET: Final = "a target does not exist"
 _COMMAND_EXIT: Final = "the command exited with code <n>"
 FAIL_NO_FIGURES: Final = "the command wrote no readable parity.json"
@@ -77,6 +78,7 @@ ALL_REASONS: Final = (
     _FLOOR,
     _SKIPPED,
     FAIL_NO_JUNIT,
+    FAIL_BAD_JUNIT,
     FAIL_TARGET,
     _COMMAND_EXIT,
     FAIL_NO_FIGURES,

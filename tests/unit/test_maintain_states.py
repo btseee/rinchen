@@ -18,6 +18,7 @@ import pytest
 from rinchen.maintain import states
 from rinchen.maintain.states import (
     ALL_REASONS,
+    FAIL_BAD_JUNIT,
     FAIL_CONTRADICTION,
     FAIL_DOCTOR,
     FAIL_NO_FIGURES,
@@ -76,6 +77,7 @@ EXPECTED_REASONS = (
     "<p> passed, fewer than the floor <m>",
     "<k> skipped, more than the allowed <m>",
     "no JUnit report was written",
+    "the JUnit report could not be read",
     "a target does not exist",
     "the command exited with code <n>",
     "the command wrote no readable parity.json",
@@ -119,6 +121,7 @@ def test_the_constants_hold_the_strings_of_the_interface() -> None:
     assert FAIL_CONTRADICTION == "uv printed a no-change line next to change lines"
     assert FAIL_DOCTOR == "the check failed"
     assert FAIL_NO_JUNIT == "no JUnit report was written"
+    assert FAIL_BAD_JUNIT == "the JUnit report could not be read"
     assert FAIL_TARGET == "a target does not exist"
     assert FAIL_NO_FIGURES == "the command wrote no readable parity.json"
 
@@ -260,6 +263,6 @@ def test_every_constant_of_the_module_is_in_the_closed_list() -> None:
         for name, value in vars(states).items()
         if name.startswith(("SKIP_", "FAIL_")) and isinstance(value, str)
     }
-    assert len(constants) == 7 + 7
+    assert len(constants) == 7 + 8
     for name, value in constants.items():
         assert value in ALL_REASONS, name

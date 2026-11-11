@@ -32,6 +32,7 @@ from rinchen.config.maintain import RerunConfig
 from rinchen.errors import ConfigError, DataError
 from rinchen.maintain.commands import CommandRunner, child_environment
 from rinchen.maintain.states import (
+    FAIL_BAD_JUNIT,
     FAIL_NO_FIGURES,
     FAIL_NO_JUNIT,
     FAIL_TARGET,
@@ -230,8 +231,8 @@ def run_pytest_rerun(
     parent_env: Mapping[str, str],
 ) -> RerunResult:
     """Run a rerun of kind `pytest` in `project_dir` and decide, in this order and stopping at
-    the first that holds: a timeout; a process that did not start; no readable JUnit report;
-    failures or errors; fewer passed tests than the floor; more skipped tests than allowed; a
+    the first that holds: a timeout; a process that did not start; no JUnit report, or one that
+    cannot be read (two reasons); failures or errors; fewer passed tests than the floor; more skipped tests than allowed; a
     non-zero exit code; else `ok`.
 
     A target that does not exist under `project_dir` is a failure before anything runs. The
@@ -261,8 +262,8 @@ def run_pytest_rerun(
     if outcome.exit_code is None:
         return _result(rerun, "fail", fail_pytest_exit(-1))
     counts = _read_counts(junit)
-    if counts is None:
-        return _result(rerun, "fail", FAIL_NO_JUNIT)
+    if isinstance(counts, str):
+        return _result(rerun, "fail", counts)
     reason = _pytest_failure(counts, outcome.exit_code, floor, rerun.max_skipped)
     return _result(rerun, "ok" if reason is None else "fail", reason, tests=counts)
 
@@ -340,12 +341,20 @@ def _absolute(inputs: ExportInputs) -> ExportInputs:
     )
 
 
-def _read_counts(junit: Path) -> TestCounts | None:
-    """The counters of the report at `junit`, or `None` when it is missing or unreadable."""
+def _read_counts(junit: Path) -> TestCounts | str:
+    """The counters of the report at `junit`, or the reason there are none: `FAIL_NO_JUNIT` when no
+    report was written, `FAIL_BAD_JUNIT` when there is one that cannot be read as a JUnit report
+    (not well-formed XML, an unknown encoding, no counters, a file that is no file)."""
     try:
-        return read_junit(junit.read_bytes())
-    except OSError, DataError:
-        return None
+        data = junit.read_bytes()
+    except FileNotFoundError:
+        return FAIL_NO_JUNIT
+    except OSError:
+        return FAIL_BAD_JUNIT
+    try:
+        return read_junit(data)
+    except DataError:
+        return FAIL_BAD_JUNIT
 
 
 def _pytest_failure(
