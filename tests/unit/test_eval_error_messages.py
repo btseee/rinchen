@@ -1403,6 +1403,268 @@ REVIEWED: Final[tuple[tuple[str, str, str, str], ...]] = (
         "output_place(*missing[0])",
         "the first segment of the run that the file lacks: well-formed parts only (`output_place`)",
     ),
+    # ---- the report (Task 8) ----
+    (
+        "eval/targets.py",
+        "TargetOutcome.__post_init__",
+        "', '.join(TARGET_STATUSES)",
+        CONSTANT,
+    ),
+    (
+        "eval/report_format.py",
+        "_path_problem",
+        "field",
+        (
+            "a section of the format and the index of an entry (`coverage.3`), chosen by the "
+            "reader and never a string of the file"
+        ),
+    ),
+    (
+        "eval/report.py",
+        "build_report",
+        "error",
+        "the message of `require_no_absolute_path`: a section and an index, never the string",
+    ),
+    (
+        "eval/report.py",
+        "_require_a_system_of_the_runs",
+        "name",
+        (
+            "the baseline the operator asked for, after `is_id` accepted it on the line above: "
+            "an id that matched its pattern"
+        ),
+    ),
+    (
+        "eval/report.py",
+        "_robustness",
+        "one.system",
+        "a system name: `hold_runs` refused every name that is not an id",
+    ),
+    (
+        "eval/report_runs.py",
+        "_held",
+        "name",
+        "the name of the suite of a run: `RunRecord` checks it against the id pattern",
+    ),
+    (
+        "eval/report_runs.py",
+        "_held",
+        "where",
+        (
+            "`the run of the system <id> over the suite <id>`: `is_id` accepted the system a few "
+            "lines above and `RunRecord` checked the suite name"
+        ),
+    ),
+    (
+        "eval/report_runs.py",
+        "_require_one_run_for_each",
+        "one.system",
+        "a system name `_held` accepted with `is_id`",
+    ),
+    (
+        "eval/report_runs.py",
+        "_require_one_run_for_each",
+        "one.suite_name",
+        "a suite name `RunRecord` checked against the id pattern",
+    ),
+    (
+        "eval/report_runs.py",
+        "_require_one_suite_for_each_name",
+        "one.suite_name",
+        "a suite name `RunRecord` checked against the id pattern",
+    ),
+    (
+        "eval/report_runs.py",
+        "_require_one_record_for_each_system",
+        "one.system",
+        "a system name `_held` accepted with `is_id`",
+    ),
+    (
+        "eval/report_runs.py",
+        "_require_every_suite_used",
+        "suite.name",
+        (
+            "the name of a suite that `Suite.from_bytes` parsed: `checked_name` holds it to the id "
+            "pattern"
+        ),
+    ),
+    (
+        "eval/report_runs.py",
+        "_results_of",
+        "where",
+        "`the run of the system <id> over the suite <id>` (see `_held`)",
+    ),
+    (
+        "eval/report_runs.py",
+        "_results_of",
+        "result.direction",
+        "a direction of a `DirectionResult`: `require_direction` holds it to two registry codes",
+    ),
+    (
+        "eval/report_runs.py",
+        "_results_of",
+        "direction",
+        "a direction of the run record: `require_direction` holds it to two registry codes",
+    ),
+    (
+        "eval/report_runs.py",
+        "_require_the_result_of_this_run",
+        "place",
+        (
+            "`the run of the system <id> over the suite <id>, direction <registry codes>` (see "
+            "`_held` and `_results_of`)"
+        ),
+    ),
+    (
+        "eval/report_runs.py",
+        "_require_one_robustness_block",
+        "where",
+        "`the run of the system <id> over the suite <id>` (see `_held`)",
+    ),
+    (
+        "eval/report_runs.py",
+        "verified_rows",
+        "where",
+        "`the run of the system <id> over the suite <id>` (see `_held`)",
+    ),
+    (
+        "eval/report_runs.py",
+        "verified_rows",
+        "len(missing)",
+        COUNT,
+    ),
+    (
+        "eval/report_runs.py",
+        "verified_rows",
+        "direction",
+        "a direction of a `DirectionResult`: two registry codes",
+    ),
+    (
+        "eval/report_runs.py",
+        "verified_rows",
+        "place",
+        "`the run of the system <id> over the suite <id>, direction <registry codes>`",
+    ),
+    ("eval/report_runs.py", "verified_rows", "result.n_segments", COUNT),
+    ("eval/report_runs.py", "verified_rows", "len(view.ids)", COUNT),
+    (
+        "eval/report_runs.py",
+        "verified_rows",
+        "result.bootstrap.unit",
+        "the unit of a `BootstrapRecord`: `document` or `segment`, a choice of the format",
+    ),
+    ("eval/report_runs.py", "verified_rows", "result.bootstrap.units", COUNT),
+    (
+        "eval/report_runs.py",
+        "verified_rows",
+        "computed.unit",
+        "`document` or `segment`, chosen by `direction_rows`",
+    ),
+    ("eval/report_runs.py", "verified_rows", "len(computed.labels)", COUNT),
+    (
+        "eval/report_runs.py",
+        "verified_rows",
+        "name",
+        "the name of a count metric: `bleu`, `chrf` or `chrf_pp`",
+    ),
+    (
+        "eval/report_read.py",
+        "report_from_bytes",
+        "error",
+        (
+            "the message of a reader helper of `rinchen.eval.field_rules`: a field of the format, "
+            "never a value or a key of the file"
+        ),
+    ),
+    (
+        "eval/report_read_rules.py",
+        "Names.system",
+        "field",
+        "a dotted field path built by the reader (`runs.0.system`): section names and indexes",
+    ),
+    (
+        "eval/report_read_rules.py",
+        "Names.suite",
+        "field",
+        "a dotted field path built by the reader (`runs.0.suite`): section names and indexes",
+    ),
+    (
+        "eval/report_read_rules.py",
+        "Names.declared",
+        "field",
+        "a dotted field path built by the reader: section names and indexes",
+    ),
+    (
+        "eval/report_read_rules.py",
+        "items",
+        "field",
+        "a section name or a dotted path of the reader",
+    ),
+    (
+        "eval/report_read_sections.py",
+        "suites",
+        "where",
+        "`suites.<index>`, built by the reader",
+    ),
+    (
+        "eval/report_read_sections.py",
+        "_suite_directions",
+        "field",
+        "a dotted path of the reader: `suites.<index>.directions`",
+    ),
+    (
+        "eval/report_read_rules.py",
+        "language",
+        "field",
+        "a dotted path of the reader: `suites.<index>.source.missing_languages`",
+    ),
+    (
+        "eval/report_read_sections.py",
+        "coverage",
+        "where",
+        "`coverage.<index>`, built by the reader",
+    ),
+    (
+        "eval/report_read.py",
+        "_results",
+        "where",
+        "`results.<index>`, built by the reader",
+    ),
+    (
+        "eval/report_read.py",
+        "_results",
+        "error",
+        (
+            "the message of `result_from_bytes` (a field of the result format, never a value) or "
+            "of `document_bytes` for a number that is not finite"
+        ),
+    ),
+    ("eval/report_read.py", "_bootstrap", "INTERVAL_KIND", CONSTANT),
+    ("eval/report_read.py", "_bootstrap", "RNG_NAME", CONSTANT),
+    (
+        "eval/report_read.py",
+        "_comparisons",
+        "where",
+        "`comparisons.<index>`, built by the reader",
+    ),
+    (
+        "eval/report_read.py",
+        "_comparisons",
+        "name",
+        "one of `ci95`, `p_value` and `better_fraction`: constants of the loop",
+    ),
+    (
+        "eval/report_read.py",
+        "_interval",
+        "field",
+        "a dotted path of the reader: `comparisons.<index>.ci95`",
+    ),
+    (
+        "eval/report_read.py",
+        "_share",
+        "field",
+        "a dotted path of the reader: `comparisons.<index>.p_value`",
+    ),
 )
 
 
@@ -1519,6 +1781,20 @@ def test_the_scan_covers_the_scoring_the_result_documents_and_the_robustness_inp
         "eval/result.py",
         "eval/run_record.py",
         "eval/robustness_input.py",
+    } <= covered
+
+
+def test_the_scan_covers_the_modules_of_the_report() -> None:
+    covered = {f.path for f in scanned()}
+
+    assert {
+        "eval/targets.py",
+        "eval/report_format.py",
+        "eval/report_runs.py",
+        "eval/report.py",
+        "eval/report_read.py",
+        "eval/report_read_rules.py",
+        "eval/report_read_sections.py",
     } <= covered
 
 

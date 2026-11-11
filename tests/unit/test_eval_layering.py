@@ -433,6 +433,27 @@ def test_the_run_commands_import_no_dataset_hub_or_http_library() -> None:
             )
 
 
+REPORT_MODULES = (
+    "targets",
+    "report_format",
+    "report_runs",
+    "report",
+    "report_markdown",
+    "report_markdown_cells",
+    "report_markdown_notes",
+    "report_markdown_scores",
+    "report_read",
+    "report_read_rules",
+    "report_read_sections",
+    "report_view",
+)
+
+
+def test_the_scan_covers_the_report_modules() -> None:
+    for module in REPORT_MODULES:
+        assert PACKAGE / f"{module}.py" in MODULES
+
+
 @pytest.mark.parametrize(
     "path",
     [*MODULES, *COMMAND_MODULES, *SYNTH_COMMAND_MODULES, *ROBUSTNESS_TESTS],

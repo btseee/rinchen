@@ -1,0 +1,533 @@
+{
+  "bootstrap": {
+    "alpha": 0.05,
+    "interval": "percentile",
+    "resamples": 1000,
+    "rng": "splitmix64-counter/1",
+    "seed": 20261110
+  },
+  "comparisons": [
+    {
+      "baseline": "alpha",
+      "better_fraction": 1.0,
+      "ci95": [
+        13.91888026941568,
+        33.41274507632882
+      ],
+      "delta": 20.79023520781935,
+      "direction": "khk_Cyrl-eng_Latn",
+      "higher_is_better": true,
+      "metric": "chrf_pp",
+      "p_value": 0.001998001998001998,
+      "significant": true,
+      "suite": "golden",
+      "system": "beta",
+      "unit": "document",
+      "units": 5
+    },
+    {
+      "baseline": "alpha",
+      "better_fraction": 1.0,
+      "ci95": [
+        22.909663629023655,
+        54.784823724544815
+      ],
+      "delta": 35.0143964409301,
+      "direction": "khk_Cyrl-eng_Latn",
+      "higher_is_better": true,
+      "metric": "bleu",
+      "p_value": 0.001998001998001998,
+      "significant": true,
+      "suite": "golden",
+      "system": "beta",
+      "unit": "document",
+      "units": 5
+    },
+    {
+      "baseline": "alpha",
+      "better_fraction": 1.0,
+      "ci95": [
+        12.652693037229753,
+        36.215446705381645
+      ],
+      "delta": 23.27473898275622,
+      "direction": "eng_Latn-khk_Cyrl",
+      "higher_is_better": true,
+      "metric": "chrf_pp",
+      "p_value": 0.001998001998001998,
+      "significant": true,
+      "suite": "golden",
+      "system": "beta",
+      "unit": "document",
+      "units": 5
+    },
+    {
+      "baseline": "alpha",
+      "better_fraction": 1.0,
+      "ci95": [
+        29.19958222390276,
+        57.54538352286106
+      ],
+      "delta": 40.19887253369139,
+      "direction": "eng_Latn-khk_Cyrl",
+      "higher_is_better": true,
+      "metric": "bleu",
+      "p_value": 0.001998001998001998,
+      "significant": true,
+      "suite": "golden",
+      "system": "beta",
+      "unit": "document",
+      "units": 5
+    }
+  ],
+  "coverage": [
+    {
+      "direction": "khk_Cyrl-eng_Latn",
+      "reason": null,
+      "state": "run",
+      "suite": "golden",
+      "system": "alpha"
+    },
+    {
+      "direction": "eng_Latn-khk_Cyrl",
+      "reason": null,
+      "state": "run",
+      "suite": "golden",
+      "system": "alpha"
+    },
+    {
+      "direction": "khk_Cyrl-eng_Latn",
+      "reason": null,
+      "state": "run",
+      "suite": "golden",
+      "system": "beta"
+    },
+    {
+      "direction": "eng_Latn-khk_Cyrl",
+      "reason": null,
+      "state": "run",
+      "suite": "golden",
+      "system": "beta"
+    }
+  ],
+  "evidence": {
+    "fixture_only": true,
+    "kinds": [
+      "fixture"
+    ]
+  },
+  "note_multiple_comparisons": "16 intervals and 4 paired comparisons are reported with no correction for multiple comparisons",
+  "results": [
+    {
+      "bleu_signature": "nrefs:1|case:mixed|eff:no|tok:13a|smooth:exp|version:2.6.0",
+      "bootstrap": {
+        "alpha": 0.05,
+        "interval": "percentile",
+        "resamples": 1000,
+        "rng": "splitmix64-counter/1",
+        "seed": 20261110,
+        "unit": "document",
+        "units": 5
+      },
+      "chrf_pp_signature": "nrefs:1|case:mixed|eff:yes|nc:6|nw:2|space:no|version:2.6.0",
+      "chrf_signature": "nrefs:1|case:mixed|eff:yes|nc:6|nw:0|space:no|version:2.6.0",
+      "ci95": {
+        "bleu": [
+          36.33559622758536,
+          72.13730354815289
+        ],
+        "chrf": [
+          53.758259687838795,
+          85.62747863272854
+        ],
+        "chrf_pp": [
+          54.90789038028186,
+          85.48385757545739
+        ],
+        "comet22": null,
+        "metricx24": null,
+        "metricx24_qe": null
+      },
+      "direction": "khk_Cyrl-eng_Latn",
+      "manifest_sha": null,
+      "metrics": {
+        "bleu": 59.40481339822236,
+        "chrf": 72.43951493593927,
+        "chrf_pp": 73.08276683393322,
+        "comet22": null,
+        "metricx24": null,
+        "metricx24_qe": null
+      },
+      "n_segments": 10,
+      "provenance": {
+        "outputs_sha256": "0708a74060c85c5d579d55d907a36ff7bb0ce419c4ab558d1cb16314c5aca2da",
+        "suite_sha256": "b707518d39133bd206092e6df28bf0bcf1e42c776ad5c16900995bf783ebc761",
+        "system": {
+          "kind": "hypotheses",
+          "manifest_sha256": null,
+          "model_sha256": null,
+          "name": "alpha",
+          "options": {},
+          "outputs_sha256": "0708a74060c85c5d579d55d907a36ff7bb0ce419c4ab558d1cb16314c5aca2da"
+        }
+      },
+      "schema": "rinchen.eval/1",
+      "statuses": {
+        "ok": 10
+      },
+      "suite": "golden",
+      "system": "alpha",
+      "trained": true,
+      "unmeasured": {
+        "comet22": "no segment scores were given: no scorer is built (B1 and B2 are open)",
+        "metricx24": "no segment scores were given: no scorer is built (B1 and B2 are open)",
+        "metricx24_qe": "no segment scores were given: no scorer is built (B1 and B2 are open)"
+      }
+    },
+    {
+      "bleu_signature": "nrefs:1|case:mixed|eff:no|tok:13a|smooth:exp|version:2.6.0",
+      "bootstrap": {
+        "alpha": 0.05,
+        "interval": "percentile",
+        "resamples": 1000,
+        "rng": "splitmix64-counter/1",
+        "seed": 20261110,
+        "unit": "document",
+        "units": 5
+      },
+      "chrf_pp_signature": "nrefs:1|case:mixed|eff:yes|nc:6|nw:2|space:no|version:2.6.0",
+      "chrf_signature": "nrefs:1|case:mixed|eff:yes|nc:6|nw:0|space:no|version:2.6.0",
+      "ci95": {
+        "bleu": [
+          25.5366832841316,
+          67.87818182443375
+        ],
+        "chrf": [
+          49.837684278291874,
+          80.58562671841165
+        ],
+        "chrf_pp": [
+          50.67413054994893,
+          80.98143244841619
+        ],
+        "comet22": null,
+        "metricx24": null,
+        "metricx24_qe": null
+      },
+      "direction": "eng_Latn-khk_Cyrl",
+      "manifest_sha": null,
+      "metrics": {
+        "bleu": 50.86894326533609,
+        "chrf": 67.41404584044409,
+        "chrf_pp": 68.06307127183763,
+        "comet22": null,
+        "metricx24": null,
+        "metricx24_qe": null
+      },
+      "n_segments": 10,
+      "provenance": {
+        "outputs_sha256": "0708a74060c85c5d579d55d907a36ff7bb0ce419c4ab558d1cb16314c5aca2da",
+        "suite_sha256": "b707518d39133bd206092e6df28bf0bcf1e42c776ad5c16900995bf783ebc761",
+        "system": {
+          "kind": "hypotheses",
+          "manifest_sha256": null,
+          "model_sha256": null,
+          "name": "alpha",
+          "options": {},
+          "outputs_sha256": "0708a74060c85c5d579d55d907a36ff7bb0ce419c4ab558d1cb16314c5aca2da"
+        }
+      },
+      "schema": "rinchen.eval/1",
+      "statuses": {
+        "ok": 10
+      },
+      "suite": "golden",
+      "system": "alpha",
+      "trained": true,
+      "unmeasured": {
+        "comet22": "no segment scores were given: no scorer is built (B1 and B2 are open)",
+        "metricx24": "no segment scores were given: no scorer is built (B1 and B2 are open)",
+        "metricx24_qe": "no segment scores were given: no scorer is built (B1 and B2 are open)"
+      }
+    },
+    {
+      "bleu_signature": "nrefs:1|case:mixed|eff:no|tok:13a|smooth:exp|version:2.6.0",
+      "bootstrap": {
+        "alpha": 0.05,
+        "interval": "percentile",
+        "resamples": 1000,
+        "rng": "splitmix64-counter/1",
+        "seed": 20261110,
+        "unit": "document",
+        "units": 5
+      },
+      "chrf_pp_signature": "nrefs:1|case:mixed|eff:yes|nc:6|nw:2|space:no|version:2.6.0",
+      "chrf_signature": "nrefs:1|case:mixed|eff:yes|nc:6|nw:0|space:no|version:2.6.0",
+      "ci95": {
+        "bleu": [
+          85.51323882363222,
+          100.0
+        ],
+        "chrf": [
+          84.43197075527794,
+          100.0
+        ],
+        "chrf_pp": [
+          85.23908863844622,
+          100.0
+        ],
+        "comet22": null,
+        "metricx24": null,
+        "metricx24_qe": null
+      },
+      "direction": "khk_Cyrl-eng_Latn",
+      "manifest_sha": null,
+      "metrics": {
+        "bleu": 94.41920983915246,
+        "chrf": 93.46167452409257,
+        "chrf_pp": 93.87300204175257,
+        "comet22": null,
+        "metricx24": null,
+        "metricx24_qe": null
+      },
+      "n_segments": 10,
+      "provenance": {
+        "outputs_sha256": "fcf6f29435de72e35b151e6bb22f854455c1604bc237130551cf26fcdd46ceef",
+        "suite_sha256": "b707518d39133bd206092e6df28bf0bcf1e42c776ad5c16900995bf783ebc761",
+        "system": {
+          "kind": "hypotheses",
+          "manifest_sha256": null,
+          "model_sha256": null,
+          "name": "beta",
+          "options": {},
+          "outputs_sha256": "fcf6f29435de72e35b151e6bb22f854455c1604bc237130551cf26fcdd46ceef"
+        }
+      },
+      "schema": "rinchen.eval/1",
+      "statuses": {
+        "ok": 10
+      },
+      "suite": "golden",
+      "system": "beta",
+      "trained": true,
+      "unmeasured": {
+        "comet22": "no segment scores were given: no scorer is built (B1 and B2 are open)",
+        "metricx24": "no segment scores were given: no scorer is built (B1 and B2 are open)",
+        "metricx24_qe": "no segment scores were given: no scorer is built (B1 and B2 are open)"
+      }
+    },
+    {
+      "bleu_signature": "nrefs:1|case:mixed|eff:no|tok:13a|smooth:exp|version:2.6.0",
+      "bootstrap": {
+        "alpha": 0.05,
+        "interval": "percentile",
+        "resamples": 1000,
+        "rng": "splitmix64-counter/1",
+        "seed": 20261110,
+        "unit": "document",
+        "units": 5
+      },
+      "chrf_pp_signature": "nrefs:1|case:mixed|eff:yes|nc:6|nw:2|space:no|version:2.6.0",
+      "chrf_signature": "nrefs:1|case:mixed|eff:yes|nc:6|nw:0|space:no|version:2.6.0",
+      "ci95": {
+        "bleu": [
+          83.56447475603727,
+          97.8022872484601
+        ],
+        "chrf": [
+          84.67226850152994,
+          97.8429577643661
+        ],
+        "chrf_pp": [
+          85.0715197211207,
+          97.8580969310857
+        ],
+        "comet22": null,
+        "metricx24": null,
+        "metricx24_qe": null
+      },
+      "direction": "eng_Latn-khk_Cyrl",
+      "manifest_sha": null,
+      "metrics": {
+        "bleu": 91.06781579902749,
+        "chrf": 91.06726556207575,
+        "chrf_pp": 91.33781025459385,
+        "comet22": null,
+        "metricx24": null,
+        "metricx24_qe": null
+      },
+      "n_segments": 10,
+      "provenance": {
+        "outputs_sha256": "fcf6f29435de72e35b151e6bb22f854455c1604bc237130551cf26fcdd46ceef",
+        "suite_sha256": "b707518d39133bd206092e6df28bf0bcf1e42c776ad5c16900995bf783ebc761",
+        "system": {
+          "kind": "hypotheses",
+          "manifest_sha256": null,
+          "model_sha256": null,
+          "name": "beta",
+          "options": {},
+          "outputs_sha256": "fcf6f29435de72e35b151e6bb22f854455c1604bc237130551cf26fcdd46ceef"
+        }
+      },
+      "schema": "rinchen.eval/1",
+      "statuses": {
+        "ok": 10
+      },
+      "suite": "golden",
+      "system": "beta",
+      "trained": true,
+      "unmeasured": {
+        "comet22": "no segment scores were given: no scorer is built (B1 and B2 are open)",
+        "metricx24": "no segment scores were given: no scorer is built (B1 and B2 are open)",
+        "metricx24_qe": "no segment scores were given: no scorer is built (B1 and B2 are open)"
+      }
+    }
+  ],
+  "robustness": {},
+  "runs": [
+    {
+      "run_sha256": "b46ccb72f2f4c55daf8d471db294ff2ada598e45a999107167429aafebfc5789",
+      "suite": "golden",
+      "system": "alpha"
+    },
+    {
+      "run_sha256": "2babc57034c694bb5f9042966db044f8799eaafdacaa2abaed80c9694c2336e8",
+      "suite": "golden",
+      "system": "beta"
+    }
+  ],
+  "schema": "rinchen.report/1",
+  "suites": [
+    {
+      "benchmark": "golden",
+      "directions": [
+        {
+          "direction": "khk_Cyrl-deu_Latn",
+          "rows": null
+        },
+        {
+          "direction": "deu_Latn-khk_Cyrl",
+          "rows": null
+        },
+        {
+          "direction": "khk_Cyrl-eng_Latn",
+          "rows": 10
+        },
+        {
+          "direction": "eng_Latn-khk_Cyrl",
+          "rows": 10
+        },
+        {
+          "direction": "khk_Cyrl-jpn_Jpan",
+          "rows": null
+        },
+        {
+          "direction": "jpn_Jpan-khk_Cyrl",
+          "rows": null
+        },
+        {
+          "direction": "khk_Cyrl-kaz_Cyrl",
+          "rows": null
+        },
+        {
+          "direction": "kaz_Cyrl-khk_Cyrl",
+          "rows": null
+        },
+        {
+          "direction": "khk_Cyrl-kor_Hang",
+          "rows": null
+        },
+        {
+          "direction": "kor_Hang-khk_Cyrl",
+          "rows": null
+        },
+        {
+          "direction": "khk_Cyrl-rus_Cyrl",
+          "rows": null
+        },
+        {
+          "direction": "rus_Cyrl-khk_Cyrl",
+          "rows": null
+        },
+        {
+          "direction": "khk_Cyrl-tur_Latn",
+          "rows": null
+        },
+        {
+          "direction": "tur_Latn-khk_Cyrl",
+          "rows": null
+        },
+        {
+          "direction": "khk_Cyrl-zho_Hans",
+          "rows": null
+        },
+        {
+          "direction": "zho_Hans-khk_Cyrl",
+          "rows": null
+        }
+      ],
+      "kind": "fixture",
+      "name": "golden",
+      "purpose": "report",
+      "rows": 10,
+      "sha256": "b707518d39133bd206092e6df28bf0bcf1e42c776ad5c16900995bf783ebc761",
+      "source": {
+        "dataset": null,
+        "missing_languages": [],
+        "pinned": false,
+        "revision": null
+      },
+      "split": "devtest"
+    }
+  ],
+  "systems": [
+    {
+      "kind": "hypotheses",
+      "manifest_sha256": null,
+      "model_sha256": null,
+      "name": "alpha",
+      "options": {}
+    },
+    {
+      "kind": "hypotheses",
+      "manifest_sha256": null,
+      "model_sha256": null,
+      "name": "beta",
+      "options": {}
+    }
+  ],
+  "targets": [
+    {
+      "basis": "0 of 16 directions measured",
+      "description": "chrF++ above the baseline system, by the paired bootstrap, in at least 12 of 16 FLORES+ devtest directions",
+      "id": "beats_baseline",
+      "status": "unmeasured",
+      "threshold": 12,
+      "value": null
+    },
+    {
+      "basis": "no language identification is run",
+      "description": "at most 1 % of outputs in the wrong language (no language identification is run, so never measured)",
+      "id": "off_target",
+      "status": "unmeasured",
+      "threshold": 0.01,
+      "value": null
+    },
+    {
+      "basis": "no robustness run of a rinchen system was given",
+      "description": "the number accuracy of the robustness suites is at least 0.99",
+      "id": "numbers",
+      "status": "unmeasured",
+      "threshold": 0.99,
+      "value": null
+    },
+    {
+      "basis": "no robustness run of a rinchen system was given",
+      "description": "the placeholder accuracy of the robustness suites is 1.0",
+      "id": "placeholders",
+      "status": "unmeasured",
+      "threshold": 1.0,
+      "value": null
+    }
+  ]
+}
