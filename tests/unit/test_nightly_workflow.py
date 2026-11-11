@@ -240,9 +240,15 @@ def test_the_check_runs_with_an_output_directory_and_the_cadence_variable(
 ) -> None:
     run = maintain_step_run(load(nightly_text))
     tokens = shlex.split(run)
-    options = [token for token in tokens if token.startswith("--")]
+    uv_options = [
+        token for token in tokens[: tokens.index("rinchen")] if token.startswith("--")
+    ]
+    options = [
+        token for token in tokens[tokens.index("check") :] if token.startswith("--")
+    ]
 
     assert run == MAINTAIN_RUN
+    assert uv_options == ["--frozen", "--no-sync"], "uv neither locks nor syncs"
     assert options == ["--out-dir", "--cadence"]
     assert set(options) <= check_options()
     assert tokens[tokens.index("--out-dir") + 1] == "maintain-out"
@@ -399,6 +405,16 @@ BREAKS: Final[dict[str, tuple[str, str, str]]] = {
         f"run: {SYNC_RUN}",
         "run: uv sync --group dev",
         f"a uv sync is not {SYNC_RUN}",
+    ),
+    "a check through a uv run that locks the project": (
+        f"run: {MAINTAIN_RUN}",
+        f"run: {MAINTAIN_RUN.replace(' --frozen --no-sync', '')}",
+        "the steps are not the ones of the nightly workflow, in order",
+    ),
+    "a check through a uv run that syncs the environment": (
+        f"run: {MAINTAIN_RUN}",
+        f"run: {MAINTAIN_RUN.replace(' --no-sync', '')}",
+        "the steps are not the ones of the nightly workflow, in order",
     ),
     "write permission": (
         "permissions:\n  contents: read",

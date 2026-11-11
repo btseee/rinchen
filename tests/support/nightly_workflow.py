@@ -34,11 +34,13 @@ CADENCE_CHOICE: Final = {
     "options": ["nightly", "weekly"],
     "default": "nightly",
 }
-CHECK_PREFIX: Final = "uv run rinchen maintain check"
+# `uv run` alone locks the project first: a `pyproject.toml` that moved without the lock would be
+# repaired before the check could see it. `--frozen` keeps the lock as it is and `--no-sync` leaves
+# the environment the previous step made, so the check reads the stack as it is.
+UV_RUN: Final = "uv run --frozen --no-sync"
+CHECK_PREFIX: Final = f"{UV_RUN} rinchen maintain check"
 SYNC_RUN: Final = "uv sync --frozen --group dev"
-MAINTAIN_RUN: Final = (
-    'uv run rinchen maintain check --out-dir maintain-out --cadence "$CADENCE"'
-)
+MAINTAIN_RUN: Final = f'{CHECK_PREFIX} --out-dir maintain-out --cadence "$CADENCE"'
 SUMMARY_RUN: Final = 'cat maintain-out/maintain_report.md >> "$GITHUB_STEP_SUMMARY"'
 SUMMARY_IF: Final = (
     "${{ always() && hashFiles('maintain-out/maintain_report.md') != '' }}"
@@ -284,9 +286,12 @@ def check_problems(run: str) -> list[str]:
         tokens = shlex.split(run)
     except ValueError:
         return [*problems, "the check is not a well-formed shell line"]
+    command_tokens = (
+        tokens[tokens.index("check") + 1 :] if "check" in tokens else tokens
+    )
     problems += [
         f"the check is given an option the command lacks: {token}"
-        for token in tokens
+        for token in command_tokens
         if token.startswith("--") and token not in check_options()
     ]
     return problems
