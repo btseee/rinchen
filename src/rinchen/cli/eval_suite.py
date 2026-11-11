@@ -110,6 +110,8 @@ _CONFIG: Final = "eval suites config"
 suite_app = typer.Typer(no_args_is_help=True)
 
 
+_NO_FETCH = "no fetch manifest found, dataset and revision are not recorded"
+
 # ---- fetch --------------------------------------------------------------------------------
 
 
@@ -286,6 +288,8 @@ def build_command(
         typer.echo(f"suite: {suite_path}")
         typer.echo(f"sha256: {digest}")
         typer.echo(f"manifest: {manifest_path}")
+        if built.provenance is not None:
+            typer.echo(f"provenance: {built.provenance}")
 
 
 def _build_human(origin: Path, plan: BuildPlan, target: Path) -> Built:
@@ -318,8 +322,7 @@ def _build_multiway(
     bench = benchmark_of(_configuration(config_entry), plan.benchmark, plan.split)
     if not origin.is_dir():
         raise DataError(f"the source {origin} is not a directory")
-    fetch_entry, record = _vouching_fetch(origin, bench, plan)
-    root = origin if record is None else origin / plan.split
+    fetch_entry, record, root = _vouching_fetch(origin, bench, plan)
     files = language_inputs(
         root, reader=bench.reader, configured=bench.languages, benchmark=plan.benchmark
     )
@@ -355,17 +358,48 @@ def _build_multiway(
         source=source,
     )
     options = {**plan._asdict(), "config": config_entry.sha256}
-    return Built(suite, entries, status_of(plan, source), options_digest(options))
+    # Shards that no fetch vouches for have no dataset and no revision to record: say so.
+    unvouched = bench.reader == "parquet_shards" and record is None
+    status = status_of(plan, source)
+    if unvouched:
+        status["provenance"] = _NO_FETCH
+    return Built(
+        suite,
+        entries,
+        status,
+        options_digest(options),
+        provenance=_NO_FETCH if unvouched else None,
+    )
 
 
 def _vouching_fetch(
     origin: Path, bench: BenchmarkConfig, plan: BuildPlan
-) -> tuple[ManifestFile | None, FetchRecord | None]:
-    """The manifest of a fetch that `origin` holds (hashed) and what it vouches for; neither for
-    a source that holds none, which is a directory of loose shards or of text files."""
-    manifest_file = origin / "manifest.json"
-    if bench.reader != "parquet_shards" or not manifest_file.is_file():
-        return None, None
+) -> tuple[ManifestFile | None, FetchRecord | None, Path]:
+    """The manifest of a fetch that vouches for the shards of `origin` (hashed), what it vouches
+    for, and the directory the shards are under.
+
+    `origin` is the fetch directory (its own `manifest.json`, the shards under `<split>/`) or the
+    split directory of a fetch (the manifest is the one above it, found only when `origin` is named
+    for the split and the manifest is a fetch of this benchmark and split); a directory of loose
+    shards, of text files or a source of another reader has none, and neither does a split
+    directory that nothing above vouches for."""
+    if bench.reader != "parquet_shards":
+        return None, None, origin
+    own = origin / "manifest.json"
+    if own.is_file():
+        return (*_read_fetch(own, plan), origin / plan.split)
+    above = origin.parent / "manifest.json"
+    if origin.name == plan.split and above.is_file():
+        try:
+            return (*_read_fetch(above, plan), origin)
+        except DataError:
+            return None, None, origin
+    return None, None, origin
+
+
+def _read_fetch(
+    manifest_file: Path, plan: BuildPlan
+) -> tuple[ManifestFile, FetchRecord]:
     entry = hash_input(manifest_file, what="fetch manifest", missing=DataError)
     record = read_fetch_manifest(
         verified_content(manifest_file, entry.sha256),

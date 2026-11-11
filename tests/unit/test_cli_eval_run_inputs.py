@@ -137,14 +137,75 @@ def test_the_robustness_of_another_model_is_refused_and_nothing_is_written(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     engine = workspace.engine()
-    install(monkeypatch, engine)
+    seams = install(monkeypatch, engine)
 
     result = invoke(workspace.model_args("--robustness", str(robust.other_model)))
 
     assert_one_error(result, 2, "the robustness run is of another model")
     assert result.stdout == ""
-    assert engine.closed == 1
+    assert seams.opens == [] and engine.closed == 0
     assert not workspace.out_dir.exists()
+
+
+def test_the_robustness_of_another_model_is_refused_before_the_engine_is_opened(
+    workspace: EvalWorkspace,
+    robust: RobustnessDirectories,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = workspace.engine()
+    seams = install(monkeypatch, engine)
+
+    result = invoke(workspace.model_args("--robustness", str(robust.other_model)))
+
+    assert result.exit_code == 2
+    assert seams.opens == [] and seams.events == []
+    assert engine.calls == [] and engine.closed == 0
+
+
+def test_a_model_without_a_robustness_model_is_refused_before_the_engine_is_opened(
+    workspace: EvalWorkspace,
+    robust: RobustnessDirectories,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = workspace.engine()
+    seams = install(monkeypatch, engine)
+
+    result = invoke(
+        workspace.model_args(
+            "--system", "alpha", "--robustness", str(robust.named_alpha)
+        )
+    )
+
+    assert_one_error(result, 2, "the robustness run was made without a model")
+    assert seams.opens == [] and engine.calls == []
+
+
+def test_a_baseline_of_another_name_is_refused_before_its_translator_is_built(
+    workspace: EvalWorkspace,
+    robust: RobustnessDirectories,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seams = install(monkeypatch, None, FakeCandidateTranslator())
+
+    result = invoke(
+        workspace.generator_args("nllb_toy", "--robustness", str(robust.named_alpha))
+    )
+
+    assert_one_error(result, 2, "the robustness run is of another system")
+    assert seams.builds == []
+
+
+def test_the_model_that_is_bound_still_opens_the_engine_once(
+    workspace: EvalWorkspace,
+    robust: RobustnessDirectories,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seams = install(monkeypatch, workspace.engine())
+
+    result = invoke(workspace.model_args("--robustness", str(robust.model)))
+
+    assert result.exit_code == 0, result.output
+    assert len(seams.opens) == 1
 
 
 def test_a_hypotheses_system_of_another_name_than_the_robustness_run_is_refused(

@@ -409,6 +409,9 @@ REVIEWED: Final[tuple[tuple[str, str, str, str], ...]] = (
     ("cli/release_hub_output.py", "commit", "target", OPERATOR_PATH),
     ("cli/release_hub_output.py", "commit", "exc", OS_ERROR),
     ("cli/release_hub_output.py", "commit", "_OUTPUTS", CONSTANT),
+    ("cli/release_hub_output.py", "require_writable", "target", OPERATOR_PATH),
+    ("cli/release_hub_output.py", "require_writable", "exc", OS_ERROR),
+    ("cli/release_hub_output.py", "require_writable", "_OUTPUTS", CONSTANT),
     ("cli/release_hub_output.py", "refuse_to_erase_an_upload", "target", OPERATOR_PATH),
     ("export/hub_files.py", "read_stage", "stage", OPERATOR_PATH),
     (

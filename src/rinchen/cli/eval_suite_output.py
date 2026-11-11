@@ -40,12 +40,14 @@ SUITE_PATH_PARTS: Final = 1
 
 class Built(NamedTuple):
     """What a build came to and `commit_build` writes: the suite, the inputs in order with their
-    digests, the manifest's status and the digest of the options it stands on."""
+    digests, the manifest's status and the digest of the options it stands on, and `provenance`,
+    the sentence the command prints (and the status records) when no fetch vouches for the shards."""
 
     suite: Suite
     inputs: list[ManifestFile]
     status: dict[str, str]
     options: str
+    provenance: str | None = None
 
 
 def status_of(plan: BuildPlan, source: SuiteSource | None) -> dict[str, str]:

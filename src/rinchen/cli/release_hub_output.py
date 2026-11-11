@@ -14,6 +14,8 @@ commit. Nothing here holds the token: it is not a parameter of any function of t
 from __future__ import annotations
 
 import hashlib
+import os
+import tempfile
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Final, Literal, NamedTuple
@@ -36,6 +38,7 @@ __all__ = [
     "commit",
     "plan_lines",
     "refuse_to_erase_an_upload",
+    "require_writable",
     "result_lines",
 ]
 
@@ -95,6 +98,43 @@ def refuse_to_erase_an_upload(target: Path, mode: Mode) -> None:
             f"{target} holds the record of an upload and a dry run would erase it; "
             "use another --out-dir"
         )
+
+
+def require_writable(target: Path) -> None:
+    """Find out BEFORE an upload that the record of it can be written under `target`: make the
+    directory (and the parents it has to), create a probe file in it and remove the probe and the
+    directories it made, so that a refusal later leaves nothing behind. The probe has a name of its
+    own (`tempfile`'s), which no record can have. An upload cannot be undone and its record can
+    only be written after it. Exits with code 1, as a write that fails at the end does, when the
+    directory cannot be made or written."""
+    made = _missing_directories(target)
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+        descriptor, probe = tempfile.mkstemp(dir=target, prefix=".probe-")
+        os.close(descriptor)
+        os.unlink(probe)
+    except OSError as exc:
+        _remove_made(made)
+        exit_cannot_write(target, exc, what=_OUTPUTS)
+    _remove_made(made)
+
+
+def _missing_directories(target: Path) -> list[Path]:
+    """The directories of `target` that do not exist yet, the deepest first."""
+    missing: list[Path] = []
+    for directory in (target, *target.parents):
+        if directory.exists():
+            break
+        missing.append(directory)
+    return missing
+
+
+def _remove_made(directories: list[Path]) -> None:
+    for directory in directories:
+        try:
+            directory.rmdir()
+        except OSError:
+            return
 
 
 def commit(

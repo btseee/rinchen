@@ -60,6 +60,7 @@ from rinchen.cli.eval_run_inputs import (
     GeneratorSource,
     Hashed,
     ModelSource,
+    Source,
     entries,
     hash_inputs,
     read_robustness_input,
@@ -76,13 +77,16 @@ from rinchen.cli.eval_run_output import (
     prepared,
 )
 from rinchen.cli.eval_run_plan import DEFAULT_METRICS_PATH, RunPlan, plan_of
+from rinchen.cli.eval_suite_plan import DIRECTORY_NAMES
 from rinchen.cli.train_common import require_out_apart_from_inputs
 from rinchen.config.eval_metrics import load_eval_metrics_config
 from rinchen.errors import ConfigError, DataError
 from rinchen.eval.bootstrap import BootstrapSettings
 from rinchen.eval.outputs import direction_place, outputs_to_bytes
+from rinchen.eval.robustness_input import RobustnessInput, bind
 from rinchen.eval.runner import SuiteRun, run_suite
 from rinchen.eval.suites import Suite
+from rinchen.eval.systems import SystemRecord
 from rinchen.export.verified import VerifiedExport, verified_content
 from rinchen.infer.engine_types import ModelInfo, ScriptMode
 from rinchen.manifest.model import ManifestFile
@@ -286,6 +290,7 @@ def _measure(plan: RunPlan, suite_path: Path, target: Path) -> Prepared:
     _require_run_dir_apart(run_dir, sources)
     refuse_foreign_manifest(run_dir, STAGE)
     robustness = read_robustness_input(hashed.robustness)
+    _require_the_binding(robustness, hashed.source, name)
     ran = _run(hashed, name, suite, plan)
     outputs = outputs_to_bytes(ran.run.outputs)
     scores = read_segment_scores(
@@ -325,12 +330,40 @@ def _measure(plan: RunPlan, suite_path: Path, target: Path) -> Prepared:
     )
 
 
+def _require_the_binding(
+    robustness: RobustnessInput | None, source: Source, name: str
+) -> None:
+    """D12's block must describe the system of this run, which is known before anything runs: a
+    model by the digests `verify_export` took, any other system by its name. Refused here, the
+    whole suite is not translated (and an engine is not opened, a baseline not built) only to find
+    out at the end that the block is of another system. `documents_of` binds again, to the record
+    the run produced.
+
+    Raises:
+        ConfigError: the robustness run is of another model or another system.
+    """
+    if robustness is None:
+        return
+    if isinstance(source, ModelSource):
+        record = SystemRecord(
+            kind="rinchen",
+            name=name,
+            model_sha256=source.verified.sha256["model.bin"],
+            manifest_sha256=source.verified.manifest_sha256,
+        )
+    elif isinstance(source, GeneratorSource):
+        record = SystemRecord(kind="baseline", name=name)
+    else:
+        record = SystemRecord(kind="hypotheses", name=name)
+    bind(robustness, record)
+
+
 def _require_names_that_make_a_directory(name: str, suite: Suite) -> None:
     """The run goes into `<out>/<suite>/<system>`: a name that is `.` or `..` matches the id
     pattern and would write beside or above the directory of the run."""
-    if name in (".", ".."):
+    if name in DIRECTORY_NAMES:
         raise ConfigError("the system name cannot be '.' or '..': it names a directory")
-    if suite.name in (".", ".."):
+    if suite.name in DIRECTORY_NAMES:
         raise DataError("the suite name cannot be '.' or '..': it names a directory")
 
 

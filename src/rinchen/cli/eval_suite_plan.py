@@ -26,6 +26,9 @@ from rinchen.eval.robust_suite_rules import is_id
 _REVISION: Final = re.compile(r"[0-9a-f]{40}")
 _REVISION_RULE: Final = "40 lowercase hexadecimal characters (a commit hash)"
 _NAME_RULE: Final = "1 to 64 characters: letters, digits, '.', '_' and '-'"
+# `eval run` writes `<out>/<suite name>/<system name>`: these two match the id pattern and name a
+# directory beside or above the run's, so neither is a name of a suite (or of a system).
+DIRECTORY_NAMES: Final = (".", "..")
 
 
 class SuiteKind(StrEnum):
@@ -96,6 +99,8 @@ def plan_of(
     """
     if name is not None and not is_id(name):
         raise ConfigError(f"--name must be {_NAME_RULE}")
+    if name in DIRECTORY_NAMES:
+        raise ConfigError("--name cannot be '.' or '..': it names a directory")
     if benchmark == HUMAN_BENCHMARK:
         if split not in (None, "test"):
             raise ConfigError("--split must be test for a human set (or left out)")

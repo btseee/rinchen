@@ -5,12 +5,15 @@ files are scanned before the upload is planned. `kinds_in` returns the kinds of 
 and never the text that matched: a message about a file names the file and the kind.
 
 - A token: `hf_` followed by 20 or more letters or digits, `Bearer` and 16 or more token characters,
-  or the assignment `HF_TOKEN=` (with blanks around the sign allowed).
+  or the assignment of `HF_TOKEN`: the name, an optional quote (a backslash before it allowed, as in a
+  JSON string inside a JSON string), optional blanks and `=` or `:` (`HF_TOKEN=x`, `"HF_TOKEN": "x"`).
 - An absolute local path: a POSIX path of at least two components whose first slash starts a word
-  (after a blank, a quote, a bracket, `=`, `,`, `;`, `:` or `|`), under any root (`/home`, `/tmp`,
-  `/var`, `/root`, `/Users`, `/mnt`, `/opt`, `/usr`, `/srv`, ...), or a drive path (`X:` and a backslash).
-  The export's own `manifest.json` holds such paths, which is why it is never uploaded. A slash inside
-  a word (`and/or`, `org/name`, `path/to/x`) or in an address (`https://host/x`) is not a local path.
+  (after a blank, a quote of any kind, a bracket, `=`, `,`, `;`, `:` or `|`, or straight after the
+  `://` of an address: `file:///home/x/y`), under any root (`/home`, `/tmp`, `/var`, `/root`,
+  `/Users`, `/mnt`, `/opt`, `/usr`, `/srv`, ...), or a drive path (`X:` and a backslash). The export's
+  own `manifest.json` holds such paths, which is why it is never uploaded. A slash inside a word
+  (`and/or`, `org/name`, `path/to/x`) or in the path of an address with a host (`https://host/x`) is
+  not a local path.
 """
 
 from __future__ import annotations
@@ -26,10 +29,15 @@ KIND_PATH: Final = "holds an absolute local path"
 _TOKEN_PATTERNS: Final = (
     re.compile(r"hf_[A-Za-z0-9]{20,}"),
     re.compile(r"(?i:bearer)\s+[A-Za-z0-9._~+/=-]{16,}"),
-    re.compile(r"HF_TOKEN\s*="),
+    re.compile(r"HF_TOKEN\\?[\"']?\s*[:=]"),
 )
+# The characters after which a slash starts a path: blanks, quotes (straight and typographic),
+# brackets and separators; `://` (an address with no host) is the other way in.
 _PATH_PATTERNS: Final = (
-    re.compile(r"(?:^|[\s\"'`(\[{<=,;:|])/[A-Za-z0-9._~-]+/[A-Za-z0-9._~-]"),
+    re.compile(
+        r"(?:^|(?<=://)|[\s\"'`\u2018\u2019\u201c\u201d\u00ab\u00bb(\[{<=,;:|])"
+        r"/[A-Za-z0-9._~-]+/[A-Za-z0-9._~-]"
+    ),
     re.compile(r"(?<![A-Za-z0-9])[A-Za-z]:\\"),
 )
 

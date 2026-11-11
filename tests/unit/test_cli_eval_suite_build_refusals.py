@@ -99,6 +99,57 @@ def test_a_name_that_is_not_an_id_is_refused(
     assert_refused(workspace, invoke(workspace.build_args("--name", name)), 2, "--name")
 
 
+@pytest.mark.parametrize("name", [".", ".."])
+def test_a_name_that_names_a_directory_is_refused_with_2_and_nothing_is_written(
+    workspace: SuiteWorkspace, name: str
+) -> None:
+    # `eval run` writes `<out>/<suite name>/<system>`: a suite called `.` or `..` could never run.
+    result = invoke(workspace.build_args("--name", name))
+
+    assert_refused(
+        workspace, result, 2, "--name cannot be '.' or '..': it names a directory"
+    )
+
+
+@pytest.mark.parametrize("name", [".", ".."])
+def test_the_same_name_is_refused_for_a_fixture_and_for_a_human_set(
+    workspace: SuiteWorkspace, tmp_path: Path, name: str
+) -> None:
+    fixture = invoke(workspace.build_args("--name", name, "--kind", "fixture"))
+    human = invoke(
+        [
+            "eval",
+            "suite",
+            "build",
+            "--benchmark",
+            "human",
+            "--from",
+            str(tmp_path / "export.jsonl"),
+            "--out-dir",
+            str(workspace.out_dir),
+            "--name",
+            name,
+        ]
+    )
+
+    assert_refused(
+        workspace, fixture, 2, "--name cannot be '.' or '..': it names a directory"
+    )
+    assert human.exit_code == 2
+    assert "--name cannot be '.' or '..'" in human.stderr
+    assert not workspace.out_dir.exists()
+
+
+@pytest.mark.parametrize("name", ["a.b", "...", ".a", "a.", "g..h"])
+def test_a_name_with_dots_in_it_is_still_a_name(
+    workspace: SuiteWorkspace, name: str
+) -> None:
+    result = invoke(workspace.build_args("--name", name))
+
+    assert result.exit_code == 0, result.output
+    assert (workspace.out_dir / f"{name}.json").is_file()
+
+
 def test_a_configuration_that_is_missing_is_refused(
     workspace: SuiteWorkspace, tmp_path: Path
 ) -> None:

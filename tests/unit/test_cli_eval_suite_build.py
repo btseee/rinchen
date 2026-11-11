@@ -205,6 +205,7 @@ def test_the_command_prints_the_suite_its_digest_and_the_manifest(
         f"suite: {workspace.suite}",
         f"sha256: {sha256_of(workspace.suite)}",
         f"manifest: {workspace.manifest}",
+        "provenance: no fetch manifest found, dataset and revision are not recorded",
     ]
     assert result.stderr == ""
 
@@ -256,6 +257,7 @@ def test_the_manifest_records_what_the_suite_is(workspace: SuiteWorkspace) -> No
         "kind": "benchmark",
         "revision": "null",
         "pinned": "false",
+        "provenance": "no fetch manifest found, dataset and revision are not recorded",
     }
     assert manifest["tool_versions"] == {"polars": importlib.metadata.version("polars")}
     assert len(manifest["config_sha256"]) == 64

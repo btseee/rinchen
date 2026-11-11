@@ -49,6 +49,7 @@ from rinchen.cli.release_hub_output import (
     commit,
     plan_lines,
     refuse_to_erase_an_upload,
+    require_writable,
     result_lines,
 )
 from rinchen.cli.release_stage_output import STAGE as RELEASE_STAGE
@@ -166,7 +167,8 @@ def _prepare(
     stage: Path, repo_id: str, target: Path, mode: Mode, public: bool
 ) -> Prepared:
     """Everything up to the output: hash and read the manifest of the stage, plan the upload, bind
-    the plan to the manifest and check the output directory. Nothing is written."""
+    the plan to the manifest and check the output directory (for an upload also that it can be
+    written, which is found out before the commit and not after it). Nothing is left written."""
     entry = hash_input(stage / _MANIFEST_FILE, what="stage manifest", missing=DataError)
     manifest = _stage_manifest(verified_content(Path(entry.path), entry.sha256), stage)
     _require_the_nine_listed(manifest, stage)
@@ -178,6 +180,8 @@ def _prepare(
     )
     refuse_foreign_manifest(target, STAGE)
     refuse_to_erase_an_upload(target, mode)
+    if mode == "upload":
+        require_writable(target)
     return Prepared(plan=plan, inputs=inputs, mode=mode, public=public)
 
 

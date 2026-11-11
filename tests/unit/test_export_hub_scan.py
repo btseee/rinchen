@@ -224,3 +224,109 @@ def test_a_vocabulary_of_pieces_holds_nothing_the_scan_finds() -> None:
     ]
 
     assert kinds(json.dumps(pieces)) == []
+
+
+# ---- the bypasses of the review: an address with a local path in it, and the variable in JSON ----------------------
+
+LEFT_DOUBLE: Final = chr(0x201C)
+RIGHT_DOUBLE: Final = chr(0x201D)
+LEFT_SINGLE: Final = chr(0x2018)
+RIGHT_SINGLE: Final = chr(0x2019)
+SCHEME_SEPARATOR: Final = ":" + SLASH + SLASH
+DOUBLE_QUOTE: Final = chr(0x22)
+SINGLE_QUOTE: Final = chr(0x27)
+
+
+def local_address(scheme: str, *parts: str) -> str:
+    """`scheme:///<parts>`: an address whose path starts straight after the separator."""
+    return scheme + SCHEME_SEPARATOR + posix(*parts)
+
+
+def assignment(name: str, quote: str, gap: str, sign: str, value: str = "x") -> str:
+    return f"{quote}{name}{quote}{gap}{sign}{gap}{quote}{value}{quote}"
+
+
+# Twenty-seven texts, each put together from pieces so that no literal token or local path is in
+# this file, with the kinds the scan must say. The first block is what the review found missing.
+REVIEW_TABLE: Final = (
+    # an address whose path comes right after `://`
+    (local_address("file", "home", "x", "y"), [KIND_PATH]),
+    (local_address("FILE", "home", "x", "y"), [KIND_PATH]),
+    ("see " + local_address("file", "var", "lib", "x"), [KIND_PATH]),
+    (DOUBLE_QUOTE + local_address("file", "tmp", "a", "b") + DOUBLE_QUOTE, [KIND_PATH]),
+    ("[x](" + local_address("file", "home", "a", "b") + ")", [KIND_PATH]),
+    (local_address("ssh", "srv", "data", "x"), [KIND_PATH]),
+    # a path after a typographic quotation mark
+    (LEFT_DOUBLE + posix("home", "x", "y") + RIGHT_DOUBLE, [KIND_PATH]),
+    (LEFT_SINGLE + posix("home", "x", "y") + RIGHT_SINGLE, [KIND_PATH]),
+    # the token variable assigned in JSON, in a mapping, with blanks, with a colon
+    (assignment(VARIABLE, DOUBLE_QUOTE, "", ":"), [KIND_TOKEN]),
+    (assignment(VARIABLE, DOUBLE_QUOTE, " ", ":"), [KIND_TOKEN]),
+    (assignment(VARIABLE, SINGLE_QUOTE, " ", ":"), [KIND_TOKEN]),
+    (assignment(VARIABLE, DOUBLE_QUOTE, "", "="), [KIND_TOKEN]),
+    ("{" + assignment(VARIABLE, DOUBLE_QUOTE, "", ":", "abc") + "}", [KIND_TOKEN]),
+    (VARIABLE + ": " + "x", [KIND_TOKEN]),
+    (VARIABLE + " :x", [KIND_TOKEN]),
+    (
+        BACKSLASH + DOUBLE_QUOTE + VARIABLE + BACKSLASH + DOUBLE_QUOTE + ": 1",
+        [KIND_TOKEN],
+    ),
+    # both at once
+    (
+        local_address("file", "home", "x") + " " + VARIABLE + '": "y"',
+        [KIND_TOKEN, KIND_PATH],
+    ),
+    # what stays allowed
+    ("https" + SCHEME_SEPARATOR + "host" + posix("a", "b"), []),
+    ("file" + SCHEME_SEPARATOR + "host" + posix("a", "b"), []),
+    ("https" + SCHEME_SEPARATOR + "huggingface.co" + posix("org", "name"), []),
+    ("a scheme alone: file" + SCHEME_SEPARATOR, []),
+    (
+        "the variable "
+        + DOUBLE_QUOTE
+        + VARIABLE
+        + DOUBLE_QUOTE
+        + " is read from the environment",
+        [],
+    ),
+    (assignment("OTHER_TOKEN", DOUBLE_QUOTE, "", ":"), []),
+    ("set " + VARIABLE + " and then " + VARIABLE.lower() + ": no", []),
+    (LEFT_DOUBLE + "org" + SLASH + "name" + RIGHT_DOUBLE, []),
+    (LEFT_DOUBLE + SLASH + "usr" + RIGHT_DOUBLE, []),
+    (json.dumps({"a": "x" + SLASH + "y", "b": "12" + SLASH + "16"}), []),
+)
+
+
+@pytest.mark.parametrize(
+    "quote",
+    [LEFT_DOUBLE, RIGHT_DOUBLE, LEFT_SINGLE, RIGHT_SINGLE, chr(0xAB), chr(0xBB)],
+    ids=[
+        "left-double",
+        "right-double",
+        "left-single",
+        "right-single",
+        "left-guillemet",
+        "right-guillemet",
+    ],
+)
+def test_a_path_is_found_after_each_typographic_quotation_mark(quote: str) -> None:
+    assert kinds(quote + posix("home", "x", "y")) == [KIND_PATH]
+    assert kinds("see " + quote + posix("srv", "a") + quote) == [KIND_PATH]
+
+
+def test_the_review_table_has_twenty_seven_texts() -> None:
+    assert len(REVIEW_TABLE) == 27
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"), REVIEW_TABLE, ids=[str(i) for i in range(len(REVIEW_TABLE))]
+)
+def test_the_review_table(text: str, expected: list[str]) -> None:
+    assert kinds(text) == expected
+
+
+def test_the_code_that_builds_the_review_table_holds_no_literal_token_or_path() -> None:
+    source = Path(__file__).read_text(encoding="utf-8")
+    marker = "# ---- the bypasses of the review"
+
+    assert kinds_in(source[source.index(marker) :].encode("utf-8")) == []
