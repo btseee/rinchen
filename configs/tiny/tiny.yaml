@@ -1,0 +1,108 @@
+# Pipeline configuration of `rinchen tiny run --profile tiny` (D15, spec P5 to P14): the fixtures
+# and their pins, the configurations of the stages, the schedule of the model, the thresholds, the
+# wall-time budget and the timeout of every stage. EVERY NUMBER BELOW IS A PRIOR from one
+# machine's measurements (a 20-core CPU shared with other work, CPU only, no network): the
+# whole run took 120 to 158 s there, and nothing was measured on a 4-core runner or on GitHub
+# Actions. Each timeout is at least three times the time its stage took and at least 30 s.
+# The fixtures are templated sentences: what the run proves is the machinery, and the model
+# ranks nothing.
+#
+# The document is closed (an unknown key is an error and no key names a device), every key is
+# required unless `thresholds` names a default, and relative paths mean the same thing from any
+# working directory. A threshold is never lowered: a miss is answered with more `train.steps`.
+# There is no `full` profile: a table of unmeasured priors that a command would run is how a
+# long job starts by mistake, and the full configuration of each stage is run by that stage's
+# own command.
+fixtures:
+  directory: tests/fixtures/parallel
+  # SHA-256 of each file; a changed byte is refused before the file is read.
+  sha256:
+    eng_Latn-khk_Cyrl.tsv: 7d1d15d7b7fc8e6ed5bc617990505519f37909ea0107f221728fdb38a962d229
+    rus_Cyrl-khk_Cyrl.tsv: dce119b354e907812361dce126b3d1266bebe874fc594c89a6247d3a0a8f6bbe
+    mn_Mong.tsv: 16000ecdd3c099179c5e243cfa2a9c6d89bba565091cf680e7ac3231f0ad0f34
+    mono_khk_Cyrl.tsv: 79f488e2ffe757dd34194b0ef056e41f29eb038c8b2d84dde57e23e7fa418952
+    noise.tsv: fa16dba1968d182ff50fc7f61c62b86b16fd7112481196c17ae70dfacafe3248
+    nouns.tsv: 62fe9458a7d8592cb61ecedcaf2b1023b4a130fb357cb28b4e373d54fa2387be
+    entities.tsv: 6cb6bb4ec68a042ff3a721d20798853d633fc4d36d1d2ed5e36e772f755cef63
+registry: configs/data/sources.tiny_parallel.yaml
+# SentencePiece: 640 pieces. The 1,000 of the master plan is not reachable on this text (the
+# ceiling was 786 to 850 and moves with the text), and 640 sits between the floor and it.
+spm:
+  vocab_size: 640
+  input_sentence_size: 100000
+  character_coverage: 0.9999
+  temperature: 0.3
+# The filter, run once per pair and then expanded to both directions. The length bounds are
+# wider than the defaults (0.5 to 2.0), which flag 26 authentic rows of the fixtures.
+filter:
+  char_ratio_min: 0.4
+  char_ratio_max: 2.5
+  minhash_threshold: 0.8
+  labse_min_cosine: 0.7
+  qe_max_metricx: 8.0
+  # The planted stand-ins may flag at most this share of the authentic rows (4 of 760 measured).
+  max_authentic_flagged_share: 0.01
+converter:
+  pairs: tests/fixtures/script_conv/tiny_words.tsv
+  char_vocab_size: 200
+synth:
+  job: bt_eng_khk
+  shard_size: 32
+  n: 1
+# 1,500 steps, not the master plan's 400 (27.4 to 48.6 chrF, under its own bound of 50): the
+# first count above 50 in every direction is 500, and the robustness figures are exact at beam 1
+# from 1,000. The two last checkpoints are averaged. `train.base` states the same count.
+train:
+  base: configs/eole/tiny.yaml
+  steps: 1500
+  average_last: 2
+  temperature: 1.0
+  bt_ratio: 0.2
+  tag_placement: src
+  dev_max_lines: 100
+# float32 gates the parity and is the reference of the int8 chrF drop; int8 is the product.
+export:
+  quantizations: [float32, int8]
+parity:
+  max_lines: 50
+# Every thresholded decode is greedy: at beam 4 a placeholder is lost in one export of nine.
+decode:
+  beam_size: 1
+serve:
+  config: configs/serve/tiny.yaml
+# The memorised suites are split `test` and the held-out ones `devtest`: fixture suites need one
+# of the three splits of the suites, and the names of the suites say which is which.
+evaluation:
+  memorised_split: test
+  heldout_split: devtest
+  resamples: 1000
+thresholds:
+  train_chrf_min: 50.0
+  parity_exact_min: 0.95
+  parity_delta_max: 0.001
+  int8_chrf_drop_max: 1.0
+  script_purity_min: 1.0
+  placeholder_acc_min: 1.0
+# The master plan's 20 minutes; the run took 120 to 158 s here.
+budget_seconds: 1200
+timeouts:
+  environment: 30
+  fetch: 30
+  corpus: 60
+  filter: 120
+  spm: 120
+  converter: 300
+  synth: 120
+  prepare: 120
+  train: 600
+  average: 60
+  export: 120
+  parity: 180
+  serve: 60
+  robustness: 120
+  evaluate: 300
+threads: 2
+# The planted stand-ins for LaBSE and the QE scorer, which need models that were not downloaded.
+qe_fake: true
+# Stamped on every row of the corpus, so that two runs write equal files.
+created: "2026-11-11T00:00:00Z"

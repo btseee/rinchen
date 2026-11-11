@@ -1,0 +1,70 @@
+# Base Eole config of the tiny pipeline (D15, spec P7): the model of teacher_tiny.yaml (a
+# 64-wide transformer with 2+2 layers, trained from random init) with the schedule of
+# `rinchen tiny run`: 1,500 steps, a report every 10 steps, one validation at the end, a save
+# every 100 steps and the last four saves kept (the averaging takes the last two). The master
+# plan's 400 steps measured chrF 27.4 to 48.6 on the fixtures of the pipeline, under its own
+# bound of 50; its rule is to raise the steps and never to lower the bound, and from 500 steps
+# on every direction is above 50 (the least 56.2), so 1,500 is three times the first count that
+# passes. Every number is a prior from one machine's measurements. The fixtures are templated
+# sentences: a model that learns them proves the machinery and ranks nothing.
+#
+# This file holds no per-run value. `rinchen train ablate --prepare-only` merges these in, and
+# the merged config is validated before Eole sees it:
+#   src_vocab, training.model_path         the run directory
+#   transforms_configs.sentencepiece       the SentencePiece model, both sides
+#   data                                   the corpora, their weights and tag prefixes
+#   seed                                   the variant's seed (1234 here is the default)
+#   training.train_steps, valid_steps      the profile's steps, when it states them
+#
+# Resuming the run is not configured here: the launcher renders a separate resume file
+# for that, and the model stays one trained from random init.
+seed: 1234
+share_vocab: true
+overwrite: true
+# One report every 10 steps.
+report_every: 10
+data: {}
+transforms_configs:
+  filtertoolong:
+    src_seq_length: 64
+    tgt_seq_length: 64
+model:
+  architecture: transformer
+  hidden_size: 64
+  encoder:
+    layers: 2
+  decoder:
+    layers: 2
+  heads: 4
+  transformer_ff: 128
+  embeddings:
+    # Equal to hidden_size: Eole's default of 512 breaks a smaller model.
+    word_vec_size: 64
+    position_encoding_type: SinusoidalInterleaved
+  share_embeddings: true
+  share_decoder_embeddings: true
+training:
+  batch_type: tokens
+  batch_size: 2048
+  accum_count: [1]
+  # Dropout 0: the fixtures are small and the run is short.
+  dropout: [0.0]
+  attention_dropout: [0.0]
+  optim: adamw
+  decay_method: noam
+  label_smoothing: 0.1
+  world_size: 1
+  train_steps: 1500
+  # One validation, at the end; a save every 100 steps: Eole keeps the last
+  # keep_checkpoint checkpoints, so the averaging has four to take.
+  valid_steps: 1500
+  save_checkpoint_steps: 100
+  keep_checkpoint: 4
+  learning_rate: 0.5
+  warmup_steps: 100
+  compute_dtype: fp32
+  gpu_ranks: []
+  # Eole's defaults (262144 and 200) made 100 steps take twice as long on the CPU.
+  bucket_size: 1024
+  prefetch_factor: 8
+  num_workers: 1
