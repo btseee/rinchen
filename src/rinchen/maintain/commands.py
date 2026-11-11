@@ -16,9 +16,13 @@ maintenance check needs: the exit code is handed back and not turned into an err
 rerun reads 1 for a failure and 5 for nothing collected). POSIX only: the check runs in CI on
 Linux.
 
-The environment of a child is the parent's with the GPU hidden and the Hugging Face libraries
-offline (`child_environment`), and for `uv` also without colour or progress bar and without
-interpreter downloads. Nothing of the environment is written anywhere.
+The environment of a child is the parent's without its secrets, with the GPU hidden and the
+Hugging Face libraries offline (`child_environment`), and for `uv` also without colour or progress
+bar and without interpreter downloads. A secret is a variable whose name ends in `_TOKEN`,
+`_SECRET`, `_PASSWORD` or `_API_KEY` (`HF_TOKEN` and `HUGGING_FACE_HUB_TOKEN` among them), matched
+in upper case only: a pytest rerun runs the project's tests, and a changed dependency should not
+see what the check was given. Nothing else of the parent's is removed, and nothing of the
+environment is written anywhere.
 """
 
 from __future__ import annotations
@@ -46,6 +50,8 @@ HIDDEN_ENVIRONMENT: Final[Mapping[str, str]] = MappingProxyType(
     }
 )
 LOG_LIMIT: Final = 64 * 1024
+# The variables a child never inherits: the ones whose upper-case name ends in one of these.
+SECRET_SUFFIXES: Final = ("_TOKEN", "_SECRET", "_PASSWORD", "_API_KEY")
 
 # With polars imported (every `rinchen` command has it) SIGINT is handled by a handler that
 # restarts a blocking call: a wait without a timeout is not woken, while a wait with a timeout
@@ -81,10 +87,16 @@ class CommandRunner(Protocol):
 
 
 def child_environment(parent: Mapping[str, str], *, uv: bool = False) -> dict[str, str]:
-    """A copy of `parent` with the device hidden and the Hugging Face libraries offline, and,
-    for `uv`, without colour or progress bar and without interpreter downloads. The switches
-    win over the parent's values; `parent` is never modified."""
-    return {**parent, **HIDDEN_ENVIRONMENT, **(UV_ENVIRONMENT if uv else {})}
+    """A copy of `parent` without its secrets (`SECRET_SUFFIXES`), with the device hidden and the
+    Hugging Face libraries offline, and, for `uv`, without colour or progress bar and without
+    interpreter downloads. The switches win over the parent's values; `parent` is never
+    modified."""
+    kept = {
+        name: value
+        for name, value in parent.items()
+        if not name.endswith(SECRET_SUFFIXES)
+    }
+    return {**kept, **HIDDEN_ENVIRONMENT, **(UV_ENVIRONMENT if uv else {})}
 
 
 class SubprocessRunner:

@@ -81,6 +81,9 @@ RERUN_IDS = (
     "serving_tiny",
 )
 PARITY_JSON = {"exact": 200, "sentences": 200, "mean_abs_delta": 7.19e-07}
+# What a child inherits of SECRET_ENVIRONMENT: its two secrets (a name that ends in `_SECRET` and
+# one that ends in `_TOKEN`) are left out of every child's environment.
+INHERITED_ENVIRONMENT = {"HOME": SECRET_ENVIRONMENT["HOME"]}
 LOCK_CHECK = (UV, "lock", "--check")
 DRY_RUN = (UV, "lock", "--upgrade", "--dry-run")
 
@@ -392,12 +395,12 @@ def test_each_command_runs_in_the_project_with_its_bound_and_its_environment(
     assert (lock_check.timeout, dry_run.timeout) == (120, 300)
     assert (numerics.timeout, parity.timeout) == (300, 600)
     assert lock_check.env == {
-        **SECRET_ENVIRONMENT,
+        **INHERITED_ENVIRONMENT,
         **HIDDEN_ENVIRONMENT,
         **UV_ENVIRONMENT,
     }
     assert dry_run.env == lock_check.env
-    assert numerics.env == {**SECRET_ENVIRONMENT, **HIDDEN_ENVIRONMENT}
+    assert numerics.env == {**INHERITED_ENVIRONMENT, **HIDDEN_ENVIRONMENT}
     assert lock_check.log == run.out / "logs" / "lock_consistent.log"
     assert dry_run.log == run.out / "logs" / "drift.log"
     assert numerics.log == run.out / "logs" / "numerics.log"
@@ -549,7 +552,7 @@ def test_the_export_rerun_runs_the_parity_command_over_the_given_export(
     call = runner.calls[2]
     assert call.cwd == run.project
     assert call.timeout == 600
-    assert call.env == {**SECRET_ENVIRONMENT, **HIDDEN_ENVIRONMENT}
+    assert call.env == {**INHERITED_ENVIRONMENT, **HIDDEN_ENVIRONMENT}
     assert call.log == out / "logs" / "parity_export.log"
     item = items_of(run)["parity_export"]
     assert (item["state"], item["reason"]) == ("ok", None)
