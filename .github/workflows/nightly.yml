@@ -1,0 +1,52 @@
+name: Nightly
+
+# A schedule starts the maintenance check (docs/runbooks/14_maintenance.md). The drift step of the
+# check is a dry run that never writes the lock file, and an upgrade is an operator's procedure on
+# a branch. The job fails when a check fails; it needs no secret.
+on:
+  schedule:
+    - cron: "17 3 * * *"
+    - cron: "47 4 * * 0"
+  workflow_dispatch:
+    inputs:
+      cadence:
+        description: "nightly or weekly"
+        type: choice
+        options: [nightly, weekly]
+        default: nightly
+
+permissions:
+  contents: read
+
+jobs:
+  maintain:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    env:
+      CADENCE: ${{ github.event.inputs.cadence || (github.event.schedule == '47 4 * * 0' && 'weekly' || 'nightly') }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.3.3
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
+      - name: Install just
+        uses: extractions/setup-just@v4
+
+      - name: Sync dependencies
+        run: uv sync --frozen --group dev
+
+      - name: Maintenance check (doctor, lock, dependency drift, parity reruns)
+        run: uv run rinchen maintain check --out-dir maintain-out --cadence "$CADENCE"
+
+      - name: Tiny pipeline (stub until D15)
+        run: just tiny
+
+      - name: Show the report on the run page
+        if: ${{ always() && hashFiles('maintain-out/maintain_report.md') != '' }}
+        run: cat maintain-out/maintain_report.md >> "$GITHUB_STEP_SUMMARY"
