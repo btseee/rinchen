@@ -320,6 +320,69 @@ REVIEWED: Final[tuple[tuple[str, str, str, str], ...]] = (
     ("cli/eval_report_output.py", "commit", "target", OPERATOR_PATH),
     ("cli/eval_report_output.py", "commit", "exc", OS_ERROR),
     ("cli/eval_report_output.py", "commit", "_OUTPUTS", CONSTANT),
+    # ---- cli/release*.py and export/release.py (Task 9) ----
+    ("cli/release_stage_inputs.py", "_manifest_of", "directory", OPERATOR_PATH),
+    (
+        "cli/release_stage_inputs.py",
+        "_require_a_finished_report",
+        "directory",
+        OPERATOR_PATH,
+    ),
+    (
+        "cli/release_stage_inputs.py",
+        "_require_a_finished_report",
+        "REPORT_STAGE",
+        CONSTANT,
+    ),
+    (
+        "cli/release_stage_inputs.py",
+        "_require_a_finished_report",
+        "_STATUS_KEY",
+        CONSTANT,
+    ),
+    ("cli/release_stage_inputs.py", "read_report_dir", "directory", OPERATOR_PATH),
+    (
+        "cli/release_stage_inputs.py",
+        "read_report_dir",
+        "name",
+        "`report.json` or `report.md`, the file names of the two entries of the loop above",
+    ),
+    ("cli/release_stage_output.py", "commit", "target", OPERATOR_PATH),
+    ("cli/release_stage_output.py", "commit", "exc", OS_ERROR),
+    ("cli/release_stage_output.py", "commit", "_OUTPUTS", CONSTANT),
+    (
+        "export/release.py",
+        "require_report_for_export",
+        "system",
+        (
+            "the system named by the operator's `--system`, which `check_system_name` has "
+            "checked against the id pattern: it names no text of a report"
+        ),
+    ),
+    (
+        "export/release.py",
+        "require_report_for_export",
+        "entry.kind",
+        "the kind of a system, one of three constants: the strict reader of the report checked it",
+    ),
+    (
+        "export/release.py",
+        "require_report_for_export",
+        "what",
+        "`model` or `manifest`, the two words of the loop above",
+    ),
+    (
+        "export/release.py",
+        "require_report_for_export",
+        "short(found)",
+        "the first twelve hexadecimal digits of a digest the strict reader of the report checked",
+    ),
+    (
+        "export/release.py",
+        "require_report_for_export",
+        "short(expected)",
+        "the first twelve hexadecimal digits of the digest of the export's file",
+    ),
 )
 
 
@@ -328,6 +391,10 @@ def scanned_paths() -> list[Path]:
         *sorted(CLI.glob("eval_suite*.py")),
         SOURCE_ROOT / "config" / "eval_suites.py",
         *sorted(CLI.glob("eval_report*.py")),
+        CLI / "release.py",
+        *sorted(CLI.glob("release_stage*.py")),
+        SOURCE_ROOT / "export" / "release.py",
+        *sorted((SOURCE_ROOT / "export").glob("model_card*.py")),
     ]
 
 

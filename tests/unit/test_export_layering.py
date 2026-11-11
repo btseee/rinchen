@@ -98,8 +98,12 @@ def test_the_scan_covers_every_module_of_the_package() -> None:
         "__init__.py",
         "ct2.py",
         "eole_ct2.py",
+        "model_card.py",
+        "model_card_evaluation.py",
+        "model_card_notes.py",
         "quantize.py",
         "record.py",
+        "release.py",
         "verified.py",
     ]
 

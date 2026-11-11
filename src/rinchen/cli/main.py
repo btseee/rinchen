@@ -12,6 +12,7 @@ from rinchen.cli import (
     doctor,
     export,
     mine,
+    release,
     spm,
     synth,
     tiny,
@@ -38,6 +39,7 @@ app.add_typer(train.app, name="train")
 app.add_typer(distill.app, name="distill")
 app.add_typer(export.app, name="export")
 app.add_typer(eval_cli.app, name="eval")
+app.add_typer(release.app, name="release")
 app.add_typer(annotate.app, name="annotate")
 app.add_typer(doctor.app, name="doctor")
 app.add_typer(tiny.app, name="tiny")

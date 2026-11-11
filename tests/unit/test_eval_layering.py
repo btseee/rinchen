@@ -59,6 +59,10 @@ COMMAND_MODULES = [
     CLI / "eval_report.py",
     CLI / "eval_report_inputs.py",
     CLI / "eval_report_output.py",
+    CLI / "release.py",
+    CLI / "release_stage.py",
+    CLI / "release_stage_inputs.py",
+    CLI / "release_stage_output.py",
 ]
 COMMAND_FORBIDDEN_LAYERS = (
     "rinchen.train",
@@ -456,6 +460,16 @@ def test_the_scan_covers_the_report_modules_and_the_report_command() -> None:
     for module in REPORT_MODULES:
         assert PACKAGE / f"{module}.py" in MODULES
     for name in ("eval_report", "eval_report_inputs", "eval_report_output"):
+        assert CLI / f"{name}.py" in COMMAND_MODULES
+
+
+def test_the_scan_covers_the_release_commands() -> None:
+    for name in (
+        "release",
+        "release_stage",
+        "release_stage_inputs",
+        "release_stage_output",
+    ):
         assert CLI / f"{name}.py" in COMMAND_MODULES
 
 

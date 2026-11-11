@@ -17,6 +17,7 @@ SUBCOMMANDS = [
     "train",
     "export",
     "eval",
+    "release",
     "serve",
     "annotate",
     "doctor",
