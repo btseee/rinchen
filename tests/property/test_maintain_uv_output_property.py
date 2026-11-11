@@ -122,6 +122,36 @@ def _plain(token: str) -> bool:
     return token != "" and "\t" not in token
 
 
+def reference_is_elapsed(parts: list[str]) -> bool:
+    """uv's three spellings of an elapsed time, checked without a regular expression: `<n>ms`,
+    `<n>.<dd>s`, and `<n>m` and `<dd>s` as two words."""
+    digits = string.digits
+    if len(parts) == 1:
+        word = parts[0]
+        if word.endswith("ms"):
+            return word[:-2] != "" and all(char in digits for char in word[:-2])
+        whole, dot, cents = word[:-1].partition(".")
+        return (
+            word.endswith("s")
+            and dot == "."
+            and whole != ""
+            and all(char in digits for char in whole)
+            and len(cents) == 2
+            and all(char in digits for char in cents)
+        )
+    if len(parts) == 2:
+        minutes, seconds = parts
+        return (
+            minutes.endswith("m")
+            and minutes[:-1] != ""
+            and all(char in digits for char in minutes[:-1])
+            and len(seconds) == 3
+            and seconds.endswith("s")
+            and all(char in digits for char in seconds[:2])
+        )
+    return False
+
+
 def reference_is_boilerplate(tokens: list[str]) -> bool:
     if tokens[0] == "Using":
         return (
@@ -134,12 +164,12 @@ def reference_is_boilerplate(tokens: list[str]) -> bool:
         )
     if tokens[0] == "Resolved":
         return (
-            len(tokens) == 5
+            len(tokens) in (5, 6)
             and tokens[1] != ""
             and all(char in string.digits for char in tokens[1])
             and tokens[2] in ("package", "packages")
             and tokens[3] == "in"
-            and _plain(tokens[4])
+            and reference_is_elapsed(tokens[4:])
         )
     return False
 
@@ -210,7 +240,7 @@ def boilerplate_lines(draw: st.DrawFn) -> tuple[str, int]:
         line, warnings = f"Using CPython {version} interpreter at: {path}", 0
     elif kind == "resolved":
         count = draw(st.integers(min_value=0, max_value=9999))
-        took = draw(st.sampled_from(["1ms", "2.31s", "0.00s", "3m"]))
+        took = draw(st.sampled_from(["1ms", "2.31s", "0.00s", "1m 02s"]))
         line, warnings = (
             f"Resolved {count} package{'s' if count != 1 else ''} in {took}",
             0,

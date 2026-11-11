@@ -8,7 +8,10 @@ and one trailing carriage return are removed and the spaces and tabs at both end
 every non-blank line of the text, which is the text between newline characters, is exactly one of:
 
 - boilerplate: `Using CPython <token> interpreter at: <rest>` or `Resolved <n> package(s) in
-  <token>`, skipped and not counted;
+  <elapsed>`, skipped and not counted. The elapsed time is one of the three spellings of uv's own
+  formatter, read from its source in memory and never measured past `1ms`: `<n>ms`, `<n>.<dd>s` (two
+  decimals) and `<n>m <dd>s` (minutes, then two-digit seconds, one space between). Nothing else is
+  an elapsed time (`1m02s`, `0.5 s`, `-1s` and a word are unrecognised);
 - a warning: `warning:` alone or followed by a space and anything, counted;
 - the positive line `No lockfile changes detected`, which sets `no_changes`;
 - a change line: the verb `Update` or `Updated` (an update: `<name> <old> -> <new>`) or `Add`,
@@ -36,7 +39,8 @@ ChangeKind = Literal["update", "add", "remove"]
 
 _ESCAPE: Final = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 _USING: Final = re.compile(r"Using CPython [^ \t]+ interpreter at: .+")
-_RESOLVED: Final = re.compile(r"Resolved [0-9]+ packages? in [^ \t]+")
+_ELAPSED: Final = r"(?:[0-9]+ms|[0-9]+\.[0-9]{2}s|[0-9]+m [0-9]{2}s)"
+_RESOLVED: Final = re.compile(rf"Resolved [0-9]+ packages? in {_ELAPSED}")
 _WARNING: Final = re.compile(r"warning:(?: .*)?")
 _POSITIVE: Final = "No lockfile changes detected"
 _NAME: Final = r"[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?"

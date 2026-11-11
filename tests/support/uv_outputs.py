@@ -59,6 +59,26 @@ CHANGES_HAND_WRITTEN = (
     "Remove sortedcontainers v2.4.0\n"
 )
 
+# The elapsed time of the `Resolved <n> packages in <elapsed>` line, each spelling with where it comes
+# from. The three shapes are the ones uv's own formatter has (minutes and two-digit seconds from a
+# minute on, seconds with two decimals from a second on, milliseconds below): read from uv's source
+# IN MEMORY, never measured. MEASURED means it is in an output that a real run of uv 0.13.7 gave,
+# HAND-WRITTEN that an agent wrote it, SECOND-HAND that a report of a real online dry run gave it and
+# that report could not be reproduced.
+ELAPSED_SPELLINGS = (
+    ("1ms", "MEASURED (NO_CHANGE_MEASURED)"),
+    ("2.31s", "HAND-WRITTEN (CHANGES_HAND_WRITTEN)"),
+    ("1.11s", "SECOND-HAND: the one number a report of an online dry run gave"),
+    ("3.21s", "HAND-WRITTEN, UNMEASURED (uv's source, in memory)"),
+    ("1m 02s", "HAND-WRITTEN, UNMEASURED (uv's source, in memory)"),
+)
+
+
+def resolved_line(elapsed: str, count: int = 187) -> str:
+    """The `Resolved` line of a dry run that took `elapsed`."""
+    return f"Resolved {count} packages in {elapsed}"
+
+
 # The versions of the lock the samples above speak about: `tomli-w` is not in it (it is an add).
 SAMPLE_LOCKED = {
     "numpy": ("2.5.4",),

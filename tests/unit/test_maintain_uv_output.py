@@ -348,7 +348,7 @@ def test_a_line_that_is_not_exactly_a_warning_is_unrecognised(line: str) -> None
         "Resolved 187 packages in 1ms",
         "Resolved 1 package in 2.31s",
         "Resolved 0 packages in 0.00s",
-        "Resolved 12 packages in 3m",
+        "Resolved 12 packages in 1m 02s",
     ],
 )
 def test_the_boilerplate_lines_are_skipped_and_not_counted(line: str) -> None:
