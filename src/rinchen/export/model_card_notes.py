@@ -50,9 +50,30 @@ def limits_section(
         ),
         f"- {report.note_multiple_comparisons}. Read a difference with its p-value.",
         *([_ROBUSTNESS_KIND] if system in report.robustness else []),
+        _gpu_limit(report),
         f"- Not measured: {_not_measured(results)}.",
         "",
     ]
+
+
+def _gpu_limit(report: ReportView) -> str:
+    """What the report records of the device of its runs (the `device` of each system's options):
+    a run on another device than `cpu` has figures that come from a GPU and are not reproduced
+    here; when every device recorded is `cpu`, or none is, no GPU run is recorded."""
+    devices = sorted(
+        {
+            str(entry.options["device"])
+            for entry in report.systems
+            if "device" in entry.options
+        }
+        - {"cpu"}
+    )
+    if not devices:
+        return "- No run on a GPU is recorded in this report."
+    return (
+        f"- A run of this report used the device {', '.join(devices)}: its figures come "
+        "from that run on a GPU and are not reproduced here."
+    )
 
 
 def _not_measured(results: Sequence[DirectionResult]) -> str:
@@ -60,7 +81,6 @@ def _not_measured(results: Sequence[DirectionResult]) -> str:
     parts = [
         *([f"{_names(unscored)} (no scorer is built)"] if unscored else []),
         "the share of outputs in the wrong language (no language identification is run)",
-        "any run on a GPU (none was made)",
         "real-world input beyond the suites above",
     ]
     return f"{', '.join(parts[:-1])} and {parts[-1]}"

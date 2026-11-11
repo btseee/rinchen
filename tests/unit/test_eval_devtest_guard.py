@@ -5,6 +5,14 @@ synthetic-data, distillation, filtering, mining and serving code cannot read a b
 included. The structural guard has two more parts that are not scans: `Suite.selection_view`
 accepts only a `dev` suite and `rinchen eval report` refuses a `dev` run.
 
+Two scans make the first part. The readers' own (`violations`) covers every file outside the exempt
+ones. It cannot see a one-hop re-export (`rinchen.eval.runner.Suite` IS `rinchen.eval.suites.Suite`),
+so the second scan is the inverse (`eval_violations`): NO module outside the exempt ones imports
+anything of `rinchen.eval` at all unless it is in `ALLOWED_EVAL_IMPORTERS`, each with its reason; a
+new importer is a decision somebody takes in this file, with the reason written down. The modules
+of the allowlist are still held by the first scan. A transitive import (an allowed module that
+imports a module of the package that imports a suite reader) is not seen by either scan.
+
 What the scan reads: `import` and `from ... import` statements (relative ones are resolved
 against the package of the file, and `from rinchen.eval import suites` names the submodule it
 takes), calls of `importlib.import_module` and `__import__` (a literal name, or a relative one
@@ -37,18 +45,31 @@ GUARDED: Final = (
     "rinchen.eval.suite_rules",
     "rinchen.eval.suite_sources",
 )
+EVAL_PACKAGE: Final = ("rinchen.eval",)
 UNREADABLE: Final = "<an import the scan cannot read>"
 DYNAMIC_IMPORTS: Final = ("import_module", "__import__")
+# The modules outside `rinchen/eval/` and `rinchen/cli/eval*.py` that import `rinchen.eval`, each with
+# the reason. They read a PARSED report (`report_read`, `report_view`, `report_format`, the cells of
+# the Markdown) or the result types the report holds, never a suite file: the first scan still
+# holds them to that.
+ALLOWED_EVAL_IMPORTERS: Final = {
+    "export/model_card.py": "renders the model card from the parsed report (report_read, report_view)",
+    "export/model_card_evaluation.py": "the evaluation, robustness and target sections of the card, whose figures are the parsed report's",
+    "export/model_card_notes.py": "the limits and provenance sections of the card, from the parsed report",
+    "export/release.py": "the release record and the report-to-export binding, through the parsed report and the evidence label",
+    "cli/release_stage.py": "`rinchen release stage` builds the card and the release record from the parsed report",
+    "cli/release_stage_inputs.py": "`rinchen release stage` hashes and parses the report directory the card is bound to",
+}
 
 
 def inside(name: str, package: str) -> bool:
     return name == package or name.startswith(f"{package}.")
 
 
-def guarded_of(name: str | None) -> str | None:
+def guarded_of(name: str | None, guarded: Iterable[str] = GUARDED) -> str | None:
     if name is None:
         return None
-    return next((module for module in GUARDED if inside(name, module)), None)
+    return next((module for module in guarded if inside(name, module)), None)
 
 
 def absolute_base(node: ast.ImportFrom, package: str) -> str | None:
@@ -119,9 +140,15 @@ def aliases_of(tree: ast.AST, package: str) -> dict[str, str]:
     return bound
 
 
-def reached(source: str, module: str, *, is_package: bool = False) -> list[str]:
-    """The guarded modules `source`, the code of `module`, reaches, sorted; `UNREADABLE` stands
-    for a dynamic import the scan cannot read."""
+def reached(
+    source: str,
+    module: str,
+    *,
+    is_package: bool = False,
+    guarded: Iterable[str] = GUARDED,
+) -> list[str]:
+    """The `guarded` modules (the suite readers by default) `source`, the code of `module`,
+    reaches, sorted; `UNREADABLE` stands for a dynamic import the scan cannot read."""
     package = module if is_package else module.rpartition(".")[0]
     tree = ast.parse(source)
     aliases = aliases_of(tree, package)
@@ -142,7 +169,7 @@ def reached(source: str, module: str, *, is_package: bool = False) -> list[str]:
         for name in names:
             if name == UNREADABLE:
                 found.add(UNREADABLE)
-            elif (hit := guarded_of(name)) is not None:
+            elif (hit := guarded_of(name, guarded)) is not None:
                 found.add(hit)
     return sorted(found)
 
@@ -190,11 +217,72 @@ def violations(package_root: Path) -> dict[str, list[str]]:
     return found
 
 
+def eval_violations(
+    package_root: Path, allowed: Iterable[str] = ALLOWED_EVAL_IMPORTERS
+) -> dict[str, list[str]]:
+    """The files outside the exempt ones and outside `allowed` that import anything of
+    `rinchen.eval` (or a dynamic import the scan cannot read), with what they reach."""
+    root = package_root.parent
+    permitted = set(allowed)
+    found: dict[str, list[str]] = {}
+    for path in scanned_files(package_root):
+        relative = path.relative_to(package_root).as_posix()
+        if relative in permitted:
+            continue
+        module, is_package = module_of(path, root)
+        hits = reached(
+            path.read_text(encoding="utf-8"),
+            module,
+            is_package=is_package,
+            guarded=EVAL_PACKAGE,
+        )
+        if hits:
+            found[relative] = hits
+    return found
+
+
 # ---- the real tree ------------------------------------------------------------------------
 
 
 def test_no_module_outside_eval_and_the_eval_commands_reaches_a_suite_reader() -> None:
     assert violations(PACKAGE_ROOT) == {}
+
+
+def test_no_module_outside_eval_and_the_eval_commands_imports_rinchen_eval_but_the_allowed_ones() -> (
+    None
+):
+    assert eval_violations(PACKAGE_ROOT) == {}
+
+
+def test_every_allowed_importer_exists_has_a_reason_and_still_imports_rinchen_eval() -> (
+    None
+):
+    for relative, reason in ALLOWED_EVAL_IMPORTERS.items():
+        path = PACKAGE_ROOT / relative
+        assert path.is_file(), relative
+        assert not is_exempt(path, PACKAGE_ROOT), relative
+        assert len(reason) > 20, relative
+        module, is_package = module_of(path, PACKAGE_ROOT.parent)
+        assert reached(
+            path.read_text(encoding="utf-8"),
+            module,
+            is_package=is_package,
+            guarded=EVAL_PACKAGE,
+        ), f"{relative} no longer imports rinchen.eval: take it off the allowlist"
+
+
+def test_the_allowed_importers_are_still_held_to_the_suite_readers_scan() -> None:
+    scanned = {
+        path.relative_to(PACKAGE_ROOT).as_posix()
+        for path in scanned_files(PACKAGE_ROOT)
+    }
+
+    assert set(ALLOWED_EVAL_IMPORTERS) <= scanned
+    assert not {
+        name: hits
+        for name, hits in violations(PACKAGE_ROOT).items()
+        if name in ALLOWED_EVAL_IMPORTERS
+    }
 
 
 def test_the_scan_of_the_real_tree_reads_the_modules_that_must_not_read_a_suite() -> (
@@ -418,6 +506,98 @@ def test_what_is_not_an_import_of_a_suite_reader_is_not_flagged(source: str) -> 
     assert reached(source, "rinchen.export.x") == []
 
 
+# ---- the inverse scan: any import of rinchen.eval ----------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("source", "module", "is_package"),
+    [
+        # the one-hop re-export of the review: the class IS the one of rinchen.eval.suites
+        ("from rinchen.eval.runner import Suite\n", "rinchen.train.x", False),
+        ("from rinchen.eval.runner import Suite as S\n", "rinchen.synth.x", False),
+        ("import rinchen.eval.runner\n", "rinchen.export.x", False),
+        ("import rinchen.eval.runner as runner\n", "rinchen.serve.x", False),
+        ("from rinchen.eval import runner\n", "rinchen.filter.x", False),
+        ("from rinchen.eval import runner as r, bootstrap\n", "rinchen.mine.x", False),
+        ("import rinchen.eval\n", "rinchen.cli.train", False),
+        ("import rinchen.eval as ev\n", "rinchen.cli.synth", False),
+        ("from rinchen import eval\n", "rinchen.export.x", False),
+        ("from rinchen import eval as ev\n", "rinchen.export.x", False),
+        ("from rinchen import config, eval\n", "rinchen.train.x", False),
+        ("from rinchen.eval import *\n", "rinchen.train.x", False),
+        (
+            "def late():\n    from rinchen.eval.runner import Suite\n",
+            "rinchen.cli.main",
+            False,
+        ),
+        ("from ..eval.runner import Suite\n", "rinchen.train.x", False),
+        ("from ..eval import runner\n", "rinchen.train.x", False),
+        ("from .. import eval\n", "rinchen.train.x", False),
+        ("from ...eval import runner\n", "rinchen.train.sub.x", False),
+        ("from .. import eval\n", "rinchen.synth", True),
+        ("import rinchen\nrinchen.eval.runner.Suite\n", "rinchen.export.x", False),
+        (
+            'import importlib\nimportlib.import_module("rinchen.eval.runner")\n',
+            "rinchen.train.x",
+            False,
+        ),
+        ('__import__("rinchen.eval")\n', "rinchen.train.x", False),
+        (
+            'import importlib\nimportlib.import_module(".runner", "rinchen.eval")\n',
+            "rinchen.train.x",
+            False,
+        ),
+    ],
+)
+def test_any_import_of_rinchen_eval_is_found_by_the_inverse_scan_the_one_hop_ones_too(
+    source: str, module: str, is_package: bool
+) -> None:
+    assert reached(source, module, is_package=is_package, guarded=EVAL_PACKAGE) == [
+        "rinchen.eval"
+    ]
+
+
+def test_the_suite_readers_scan_does_not_see_the_one_hop_re_export_and_the_inverse_one_does() -> (
+    None
+):
+    source = "from rinchen.eval.runner import Suite\n"
+
+    assert reached(source, "rinchen.train.x") == []
+    assert reached(source, "rinchen.train.x", guarded=EVAL_PACKAGE) == ["rinchen.eval"]
+
+
+def test_an_import_the_inverse_scan_cannot_read_is_a_violation_too() -> None:
+    assert reached(
+        "import importlib\nimportlib.import_module(name)\n",
+        "rinchen.train.x",
+        guarded=EVAL_PACKAGE,
+    ) == [UNREADABLE]
+
+
+@pytest.mark.parametrize(
+    ("source", "module"),
+    [
+        ("from rinchen.cli import eval as eval_cli\n", "rinchen.cli.main"),
+        ("from rinchen.cli import (\n    eval,\n    train,\n)\n", "rinchen.cli.main"),
+        ("import rinchen.cli.eval\n", "rinchen.cli.main"),
+        ("from . import eval\n", "rinchen.cli.main"),
+        ("import rinchen.evaluation\n", "rinchen.train.x"),
+        ("from rinchen.evaluator import x\n", "rinchen.train.x"),
+        ("from rinchen.export.record import ModelRecord\n", "rinchen.train.x"),
+        ("from rinchen.metrics import bleu_chrf\n", "rinchen.train.x"),
+        ("import evaluate\n", "rinchen.train.x"),
+        ('"""Reads rinchen.eval.runner."""\n# rinchen.eval\n', "rinchen.train.x"),
+        ('MESSAGE = "see rinchen.eval"\nprint(MESSAGE)\n', "rinchen.train.x"),
+        ("def eval(x):\n    return x\n", "rinchen.train.x"),
+        ("import importlib\nimportlib.import_module('eole')\n", "rinchen.train.x"),
+    ],
+)
+def test_what_is_not_an_import_of_rinchen_eval_is_not_flagged_by_the_inverse_scan(
+    source: str, module: str
+) -> None:
+    assert reached(source, module, guarded=EVAL_PACKAGE) == []
+
+
 # ---- which files are looked at and which are exempt --------------------------------------
 
 
@@ -495,3 +675,52 @@ def test_a_file_that_is_not_python_source_is_not_read(tmp_path: Path) -> None:
     )
 
     assert violations(package_root) == {}
+
+
+def test_the_inverse_scan_finds_the_one_hop_leak_in_any_package_but_the_exempt_and_allowed(
+    tmp_path: Path,
+) -> None:
+    one_hop = "from rinchen.eval.runner import Suite\n"
+    package_root = build_tree(
+        tmp_path,
+        {
+            "__init__.py": "",
+            "train/mixture.py": one_hop,
+            "train/ok.py": "from rinchen.export.record import ModelRecord\n",
+            "synth/deep/leak.py": "import rinchen.eval\n",
+            "serve/__init__.py": "from .. import eval\n",
+            "cli/main.py": "from rinchen.cli import eval as eval_cli\n",
+            "cli/release_stage.py": "from rinchen.eval.report_read import ReportView\n",
+            "cli/robust_eval.py": one_hop,
+            "export/model_card.py": "from rinchen.eval.report_read import ReportView\n",
+            "export/model_card_extra.py": one_hop,
+            "eval/report.py": one_hop,
+            "cli/eval_run.py": one_hop,
+        },
+    )
+    allowed = ["cli/release_stage.py", "export/model_card.py"]
+
+    assert eval_violations(package_root, allowed) == {
+        "train/mixture.py": ["rinchen.eval"],
+        "synth/deep/leak.py": ["rinchen.eval"],
+        "serve/__init__.py": ["rinchen.eval"],
+        "cli/robust_eval.py": ["rinchen.eval"],
+        "export/model_card_extra.py": ["rinchen.eval"],
+    }
+
+
+def test_an_allowed_file_is_exempt_by_its_exact_path_only(tmp_path: Path) -> None:
+    package_root = build_tree(
+        tmp_path,
+        {
+            "__init__.py": "",
+            "export/release.py": "from rinchen.eval.report_read import ReportView\n",
+            "export/release_extra.py": "from rinchen.eval.report_read import ReportView\n",
+            "synth/release.py": "from rinchen.eval.report_read import ReportView\n",
+        },
+    )
+
+    assert eval_violations(package_root, ["export/release.py"]) == {
+        "export/release_extra.py": ["rinchen.eval"],
+        "synth/release.py": ["rinchen.eval"],
+    }

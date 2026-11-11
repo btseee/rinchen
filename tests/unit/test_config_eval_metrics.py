@@ -265,12 +265,27 @@ def test_every_violation_is_a_config_error_that_names_the_field(
         ("targets.1.threshold", 0),
         ("targets.1.threshold", 1),
         ("targets.2.threshold", 0.0),
-        ("comparison_metrics", ["chrf"]),
+        ("comparison_metrics", ["chrf", "chrf_pp"]),
         ("comparison_metrics", ["bleu", "chrf", "chrf_pp"]),
+        ("comparison_metrics", ["chrf_pp"]),
     ],
 )
 def test_the_value_at_the_edge_of_a_bound_is_accepted(path: str, value: object) -> None:
     load(with_change(path, value))
+
+
+@pytest.mark.parametrize(
+    "metrics", [["bleu"], ["chrf"], ["bleu", "chrf"], ["chrf", "bleu"]]
+)
+def test_comparison_metrics_without_the_primary_metric_are_refused_naming_both_keys(
+    metrics: list[str],
+) -> None:
+    # `beats_baseline` is judged on the primary metric: without it among the comparisons every
+    # direction would be `unmeasured` and the target would read "0 of 16 directions measured".
+    message = refused(with_change("comparison_metrics", metrics))
+
+    assert "comparison_metrics" in message
+    assert "primary_metric" in message
 
 
 def test_a_duplicate_target_id_is_refused_by_name() -> None:

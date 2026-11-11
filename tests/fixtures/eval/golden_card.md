@@ -110,7 +110,8 @@ A target is a measurement: no command fails because one is not met.
 - A dev split is used for model selection only: the report refuses a dev run, so every figure here is from a devtest or test split.
 - Each interval resamples the unit its table names: a document when every row of a direction has a document id, a segment otherwise.
 - 16 intervals and 4 paired comparisons are reported with no correction for multiple comparisons. Read a difference with its p-value.
-- Not measured: COMET-22, MetricX-24 and MetricX-24-QE (no scorer is built), the share of outputs in the wrong language (no language identification is run), any run on a GPU (none was made) and real-world input beyond the suites above.
+- No run on a GPU is recorded in this report.
+- Not measured: COMET-22, MetricX-24 and MetricX-24-QE (no scorer is built), the share of outputs in the wrong language (no language identification is run) and real-world input beyond the suites above.
 
 ## Provenance
 

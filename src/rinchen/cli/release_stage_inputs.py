@@ -6,11 +6,14 @@ The manifest must be that of a finished `eval_report` stage and must list `repor
 `report.md`, each once, with the digests they have now: a report that changed after the command that
 wrote it, or that nothing vouches for, is refused. `report.json` is then parsed from the bytes that
 were hashed by the strict reader (`report_from_bytes`), so the card describes what the manifest vouches
-for. `report.md` is not parsed: it is copied as it was hashed. No text of a file is in a message.
+for. `report.md` is not parsed: it is copied as it was hashed, after it is found to be the rendering of
+that `report.json` (`render_markdown`, a pure function: an edited or stale Markdown whose digest was
+updated in the manifest is refused). No text of a file is in a message.
 """
 
 from __future__ import annotations
 
+import json
 from collections import Counter
 from pathlib import Path
 from typing import Final, NamedTuple
@@ -19,6 +22,7 @@ from rinchen.cli.eval_report_output import MARKDOWN_FILE, REPORT_FILE
 from rinchen.cli.eval_report_output import STAGE as REPORT_STAGE
 from rinchen.cli.train_common import hash_input
 from rinchen.errors import DataError
+from rinchen.eval.report_markdown import render_markdown
 from rinchen.eval.report_read import ReportView, report_from_bytes
 from rinchen.export.verified import verified_content
 from rinchen.manifest import store
@@ -70,7 +74,8 @@ def read_report_dir(hashed: HashedReport) -> LoadedReport:
 
     Raises:
         DataError: the manifest is not that of a finished `eval_report` stage, does not list a
-            file once with the digest it has now, or `report.json` is not a report.
+            file once with the digest it has now, `report.json` is not a report, or `report.md`
+            is not its rendering.
         ConfigError: a file changed after it was hashed.
     """
     directory = hashed.directory
@@ -88,11 +93,16 @@ def read_report_dir(hashed: HashedReport) -> LoadedReport:
                 "wrote it"
             )
     report_bytes = verified_content(Path(hashed.report.path), hashed.report.sha256)
-    return LoadedReport(
-        report_from_bytes(report_bytes),
-        report_bytes,
-        verified_content(Path(hashed.markdown.path), hashed.markdown.sha256),
+    view = report_from_bytes(report_bytes)
+    markdown_bytes = verified_content(
+        Path(hashed.markdown.path), hashed.markdown.sha256
     )
+    if render_markdown(json.loads(report_bytes)).encode("utf-8") != markdown_bytes:
+        raise DataError(
+            f"report.md of the report directory {directory} is not the rendering of its "
+            "report.json"
+        )
+    return LoadedReport(view, report_bytes, markdown_bytes)
 
 
 def _manifest_of(data: bytes, directory: Path) -> Manifest:

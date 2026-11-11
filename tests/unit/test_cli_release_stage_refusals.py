@@ -26,7 +26,13 @@ from rinchen.export.verified import verify_export
 from rinchen.manifest import store
 from rinchen.manifest.model import Manifest
 from tests.support.no_network import no_network  # noqa: F401 - the fixture of the mark
-from tests.support.release_documents import SYSTEM, bound_document, without_results_of
+from tests.support.release_documents import (
+    OTHER,
+    SYSTEM,
+    bound_document,
+    markdown_bytes,
+    without_results_of,
+)
 from tests.support.release_fixture import (
     Release,
     another_report_dir,
@@ -538,3 +544,64 @@ def test_a_report_file_that_changes_after_it_was_hashed_is_refused_with_2(
     made = refused(release, 2)
 
     assert "changed" in made.stderr
+
+
+# ---- report.md is the rendering of report.json (3) ------------------------------------------------------
+
+
+def report_dir_with_markdown(release: Release, name: str, markdown: bytes) -> Path:
+    """A report directory holding the release's `report.json` and this `report.md`, whose manifest
+    vouches for both exactly as they are (every digest holds)."""
+    return write_report_dir(release.root / name, release.report_bytes, markdown)
+
+
+def test_a_report_md_that_is_not_the_rendering_of_report_json_is_refused_with_3_naming_the_file(
+    release: Release,
+) -> None:
+    stale = report_dir_with_markdown(
+        release, "stale", release.markdown_bytes + b"\nAn edited line.\n"
+    )
+
+    result = refused(release, 3, report_dir=stale)
+
+    assert (
+        f"error: report.md of the report directory {stale} is not the rendering of its "
+        "report.json"
+    ) in result.stderr
+    assert "An edited line" not in result.output
+
+
+def test_a_report_md_with_one_changed_digit_is_refused(release: Release) -> None:
+    markdown = release.markdown_bytes
+    index = markdown.index(b"73.08")
+    edited = markdown[:index] + b"83.08" + markdown[index + 5 :]
+    assert edited != markdown
+
+    refused(release, 3, report_dir=report_dir_with_markdown(release, "digit", edited))
+
+
+def test_the_report_md_of_another_report_is_refused(release: Release) -> None:
+    other = without_results_of(
+        bound_document(release.model_sha256, release.manifest_sha256, system=SYSTEM),
+        OTHER,
+    )
+
+    refused(
+        release,
+        3,
+        report_dir=report_dir_with_markdown(release, "other", markdown_bytes(other)),
+    )
+
+
+def test_an_empty_report_md_is_refused(release: Release) -> None:
+    refused(release, 3, report_dir=report_dir_with_markdown(release, "empty", b""))
+
+
+def test_the_rendering_of_the_report_is_accepted_whatever_the_manifest_lists_last(
+    release: Release,
+) -> None:
+    again = report_dir_with_markdown(release, "same", release.markdown_bytes)
+
+    made = invoke_stage(release, report_dir=again)
+
+    assert made.exit_code == 0, made.output

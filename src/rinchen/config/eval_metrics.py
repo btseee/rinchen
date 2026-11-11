@@ -120,6 +120,15 @@ class EvalMetricsConfig(BaseModel):
     targets: list[TargetConfig]
 
     @model_validator(mode="after")
+    def _the_primary_metric_is_compared(self) -> EvalMetricsConfig:
+        if self.primary_metric not in self.comparison_metrics:
+            raise ValueError(
+                "comparison_metrics must include primary_metric "
+                f"({self.primary_metric}): the release targets are judged on it"
+            )
+        return self
+
+    @model_validator(mode="after")
     def _target_ids_are_distinct(self) -> EvalMetricsConfig:
         ids = [target.id for target in self.targets]
         if repeated := sorted({name for name in ids if ids.count(name) > 1}):

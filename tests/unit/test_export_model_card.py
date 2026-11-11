@@ -474,9 +474,10 @@ def test_the_limits_are_a_list_of_facts(record: ModelRecord) -> None:
         "direction has a document id, a segment otherwise.\n"
         "- 16 intervals and 4 paired comparisons are reported with no correction for "
         "multiple comparisons. Read a difference with its p-value.\n"
+        "- No run on a GPU is recorded in this report.\n"
         "- Not measured: COMET-22, MetricX-24 and MetricX-24-QE (no scorer is built), the "
-        "share of outputs in the wrong language (no language identification is run), any "
-        "run on a GPU (none was made) and real-world input beyond the suites above.\n"
+        "share of outputs in the wrong language (no language identification is run) and "
+        "real-world input beyond the suites above.\n"
     ) in card
 
 
