@@ -32,6 +32,14 @@ START = (
 )
 
 
+PLANTED_FIELD = (
+    "comet22 of the result has a value and the run lists no segment scores for it"
+)
+REASON_FIELD = (
+    "unmeasured reason of the comet22 of the result is not the one the runner writes"
+)
+
+
 @pytest.fixture
 def workspace(tmp_path: Path) -> ReportWorkspace:
     return make_report_workspace(tmp_path)
@@ -55,6 +63,16 @@ def forged_trained(document: dict[str, Any]) -> None:
     document["trained"] = False
 
 
+def planted_neural_value(document: dict[str, Any]) -> None:
+    document["metrics"]["comet22"] = 0.77
+    document["ci95"]["comet22"] = [0.7, 0.8]
+    del document["unmeasured"]["comet22"]
+
+
+def another_reason(document: dict[str, Any]) -> None:
+    document["unmeasured"]["comet22"] = "the scorer crashed"
+
+
 @pytest.mark.parametrize(
     ("edit", "field"),
     [
@@ -62,6 +80,8 @@ def forged_trained(document: dict[str, Any]) -> None:
         (forged_statuses, "statuses of the result"),
         (forged_signature, "chrf_pp_signature of the result"),
         (forged_trained, "trained flag of the result"),
+        (planted_neural_value, PLANTED_FIELD),
+        (another_reason, REASON_FIELD),
     ],
 )
 def test_a_consistently_re_digested_forgery_is_a_data_error_naming_the_field(

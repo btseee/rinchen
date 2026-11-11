@@ -23,8 +23,12 @@ statuses, sacrebleu signatures or `trained` flag is not what its outputs score (
 catches a flipped byte, not a result that was edited and re-digested): a result file is never
 believed to hold more than it says, and the comparisons are made from these rows and from nothing a
 result file holds. The neural metrics are the exception that cannot be recomputed here (a report holds
-no segment scores): their value and interval are what the result says. A message names suites,
-systems (ids), directions and fields and never a text or a value.
+no segment scores): their value and interval are what the result says. What is checked is their
+presence: a result holds a value for a neural metric exactly when `run.json` lists the scores of that
+metric, and holds the runner's reason otherwise. What is not checked is a value or an interval that
+the scores would give, a free-text reason of a metric that is unmeasured for another cause, and the
+robustness block's values (its file is not in the run directory). A message names suites, systems
+(ids), directions and fields and never a text or a value.
 """
 
 from __future__ import annotations
@@ -44,7 +48,12 @@ from rinchen.eval.run_record import RunRecord
 from rinchen.eval.scoring import DirectionRows, MetricRows, direction_rows
 from rinchen.eval.significance import estimate
 from rinchen.eval.suites import Suite
-from rinchen.metrics.registry import COUNT_METRICS, CountMetricName
+from rinchen.metrics.registry import (
+    COUNT_METRICS,
+    NO_SCORER_REASON,
+    SEGMENT_SCORE_METRICS,
+    CountMetricName,
+)
 from rinchen.metrics.segment_stats import score_from_statistics
 
 __all__ = ["HeldRun", "RunInput", "hold_runs", "robustness_of", "verified_rows"]
@@ -344,6 +353,7 @@ def verified_rows(
             )
         _require_the_points(result, computed, place)
         _require_the_scoring_record(result, outputs, computed, settings, place)
+        _require_the_neural_presence(result, held.input.record, place)
         rows[direction] = computed
     return rows
 
@@ -400,6 +410,31 @@ def _require_the_scoring_record(
             f"{place}: the trained flag of the result does not match its run: a "
             "direction that ran is a trained one"
         )
+
+
+def _require_the_neural_presence(
+    result: DirectionResult, record: RunRecord, place: str
+) -> None:
+    """A neural metric has a value in the result exactly when the run lists its scores, and has the
+    runner's reason when it has none (the values themselves cannot be recomputed here)."""
+    for name in SEGMENT_SCORE_METRICS:
+        listed = name in record.segment_scores
+        has_value = result.metrics[name] is not None
+        if has_value and not listed:
+            raise DataError(
+                f"{place}: the {name} of the result has a value and the run lists no "
+                "segment scores for it"
+            )
+        if listed and not has_value:
+            raise DataError(
+                f"{place}: the {name} of the result has no value and the run lists "
+                "segment scores for it"
+            )
+        if not listed and result.unmeasured[name] != NO_SCORER_REASON:
+            raise DataError(
+                f"{place}: the unmeasured reason of the {name} of the result is not the "
+                "one the runner writes"
+            )
 
 
 def _interval_of(
