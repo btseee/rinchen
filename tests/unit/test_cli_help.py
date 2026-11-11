@@ -18,6 +18,7 @@ SUBCOMMANDS = [
     "export",
     "eval",
     "release",
+    "maintain",
     "serve",
     "annotate",
     "doctor",
