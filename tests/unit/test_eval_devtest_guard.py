@@ -8,17 +8,19 @@ accepts only a `dev` suite and `rinchen eval report` refuses a `dev` run.
 Two scans make the first part. The readers' own (`violations`) covers every file outside the exempt
 ones. It cannot see a one-hop re-export (`rinchen.eval.runner.Suite` IS `rinchen.eval.suites.Suite`),
 so the second scan is the inverse (`eval_violations`): NO module outside the exempt ones imports
-anything of `rinchen.eval` at all unless it is in `ALLOWED_EVAL_IMPORTERS`, each with its reason; a
-new importer is a decision somebody takes in this file, with the reason written down. The modules
-of the allowlist are still held by the first scan. A transitive import (an allowed module that
-imports a module of the package that imports a suite reader) is not seen by either scan.
+anything of `rinchen.eval`, or any of the eval commands `rinchen.cli.eval*` (which import the suite
+readers themselves), at all unless it is in `ALLOWED_EVAL_IMPORTERS`, each with its reason; a new
+importer is a decision somebody takes in this file, with the reason written down. The modules of
+the allowlist are still held by the first scan. A transitive import (an allowed module that imports
+a module of the package that imports a suite reader) is not seen by either scan.
 
 What the scan reads: `import` and `from ... import` statements (relative ones are resolved
 against the package of the file, and `from rinchen.eval import suites` names the submodule it
-takes), calls of `importlib.import_module` and `__import__` (a literal name, or a relative one
-with its literal package; a name the scan cannot read is itself a violation), and attribute
-chains such as `rinchen.eval.suites.read_suite`, also through an alias (`import rinchen.eval as
-ev` then `ev.suites`). It cannot see a computed `getattr`, `exec` or a plugin loader, which
+takes), calls of `importlib.import_module` and `__import__`, also under another name (`from importlib
+import import_module as im`; a literal name, or a relative one with its literal package; a name the
+scan cannot read is itself a violation), and attribute chains such as
+`rinchen.eval.suites.read_suite`, also through an alias (`import rinchen.eval as ev` then
+`ev.suites`). It cannot see a computed `getattr`, `exec` or a plugin loader, which
 nothing in the project uses. A mention in a docstring, a comment or a string is not an import.
 
 Every function of the scan is tested on sources that violate it and on sources that do not, and
@@ -45,24 +47,32 @@ GUARDED: Final = (
     "rinchen.eval.suite_rules",
     "rinchen.eval.suite_sources",
 )
-EVAL_PACKAGE: Final = ("rinchen.eval",)
+# The commands `rinchen/cli/eval*.py` (a trailing `*` is a prefix) read suites too: from outside the
+# exempt files, reaching one of them is reaching a suite reader through it.
+EVAL_COMMANDS: Final = "rinchen.cli.eval*"
+EVAL_PACKAGE: Final = ("rinchen.eval", EVAL_COMMANDS)
 UNREADABLE: Final = "<an import the scan cannot read>"
 DYNAMIC_IMPORTS: Final = ("import_module", "__import__")
-# The modules outside `rinchen/eval/` and `rinchen/cli/eval*.py` that import `rinchen.eval`, each with
-# the reason. They read a PARSED report (`report_read`, `report_view`, `report_format`, the cells of
-# the Markdown) or the result types the report holds, never a suite file: the first scan still
-# holds them to that.
+# The modules outside `rinchen/eval/` and `rinchen/cli/eval*.py` that import `rinchen.eval` or one of
+# the eval commands, each with the reason. They read a PARSED report (`report_read`, `report_view`,
+# `report_format`, the cells of the Markdown) or the result types the report holds, or take a helper
+# of the commands that reads no suite, never a suite file: the first scan still holds them to that.
 ALLOWED_EVAL_IMPORTERS: Final = {
     "export/model_card.py": "renders the model card from the parsed report (report_read, report_view)",
     "export/model_card_evaluation.py": "the evaluation, robustness and target sections of the card, whose figures are the parsed report's",
     "export/model_card_notes.py": "the limits and provenance sections of the card, from the parsed report",
     "export/release.py": "the release record and the report-to-export binding, through the parsed report and the evidence label",
     "cli/release_stage.py": "`rinchen release stage` builds the card and the release record from the parsed report",
-    "cli/release_stage_inputs.py": "`rinchen release stage` hashes and parses the report directory the card is bound to",
+    "cli/release_stage_inputs.py": "`rinchen release stage` hashes and parses the report directory the card is bound to, and names its files and stage through cli.eval_report_output",
+    "cli/release_stage_output.py": "writes the stage outputs with the manifest-led helpers begin_outputs and options_digest of cli.eval_suite_output, which read no suite",
+    "cli/release_hub_output.py": "writes the plan outputs with the manifest-led helpers begin_outputs and options_digest of cli.eval_suite_output, which read no suite",
+    "cli/main.py": "registers the `eval` command group (`from rinchen.cli import eval`) and takes nothing of a suite",
 }
 
 
 def inside(name: str, package: str) -> bool:
+    if package.endswith("*"):
+        return name.startswith(package.removesuffix("*"))
     return name == package or name.startswith(f"{package}.")
 
 
@@ -95,12 +105,13 @@ def dotted(node: ast.expr, aliases: dict[str, str]) -> str | None:
     return ".".join(reversed(parts))
 
 
-def dynamic_target(node: ast.Call) -> list[str]:
-    """What an `import_module` or `__import__` call imports, as names; `UNREADABLE` when the
-    scan cannot tell."""
+def dynamic_target(node: ast.Call, aliases: dict[str, str]) -> list[str]:
+    """What an `import_module` or `__import__` call imports, as names (the function may be
+    called by the name an `import ... as` or `from ... import ... as` gave it); `UNREADABLE` when
+    the scan cannot tell."""
     function = node.func
     name = (
-        function.id
+        aliases.get(function.id, function.id).rpartition(".")[2]
         if isinstance(function, ast.Name)
         else function.attr
         if isinstance(function, ast.Attribute)
@@ -161,7 +172,7 @@ def reached(
             base = absolute_base(node, package)
             names = [base, *(f"{base}.{alias.name}" for alias in node.names)]
         elif isinstance(node, ast.Call):
-            names = dynamic_target(node)
+            names = dynamic_target(node, aliases)
         elif isinstance(node, ast.Attribute):
             names = [dotted(node, aliases)]
         else:
@@ -437,6 +448,13 @@ def test_a_relative_import_is_resolved_against_the_package_of_the_file(
         'import importlib\nimportlib.import_module(".suites", "rinchen.eval")\n',
         'import importlib\nimportlib.import_module(".suites", package="rinchen.eval")\n',
         'import importlib\nimportlib.import_module("rinchen.eval.suites.Suite")\n',
+        # an alias of the function or of the module does not hide it
+        'from importlib import import_module as im\nim("rinchen.eval.suites")\n',
+        'import importlib as il\nil.import_module("rinchen.eval.suite_rules")\n',
+        'from builtins import __import__ as imp\nimp("rinchen.eval.suite_sources")\n',
+        'from importlib import import_module as im\nim(".suites", "rinchen.eval")\n',
+        'from importlib import import_module as im\nim(".suites", package="rinchen.eval")\n',
+        'def late():\n    from importlib import import_module as im\n    return im("rinchen.eval.suites")\n',
     ],
 )
 def test_a_dynamic_import_of_a_suite_reader_is_found(source: str) -> None:
@@ -454,6 +472,8 @@ def test_a_dynamic_import_of_a_suite_reader_is_found(source: str) -> None:
         'import importlib\nimportlib.import_module(".suites", package)\n',
         "__import__(name)\n",
         "import importlib\nimportlib.import_module()\n",
+        "from importlib import import_module as im\nim(name)\n",
+        "from builtins import __import__ as imp\nimp(name)\n",
     ],
 )
 def test_a_dynamic_import_the_scan_cannot_read_is_a_violation_too(source: str) -> None:
@@ -492,6 +512,9 @@ def test_a_use_of_a_suite_reader_through_an_attribute_chain_is_found(
         "from rinchen import eval\n",
         "import rinchen.eval\n",
         'import importlib\nimportlib.import_module("eole")\n',
+        'from importlib import import_module as im\nim("eole")\n',
+        # an alias of something else than an import function is not a dynamic import
+        'from json import loads as im\nim("rinchen.eval.suites")\n',
         "import rinchen.metrics.segment_stats as stats\nstats.statistics_metric\n",
         "from . import suites\n",
         "from .suites import Suite\n",
@@ -577,11 +600,81 @@ def test_an_import_the_inverse_scan_cannot_read_is_a_violation_too() -> None:
 @pytest.mark.parametrize(
     ("source", "module"),
     [
+        # the review's probe: the exempt eval commands import the suite readers themselves
+        ("from rinchen.cli.eval_report import Suite\n", "rinchen.train.x"),
+        ("from rinchen.cli.eval_suite_output import begin_outputs\n", "rinchen.cli.x"),
+        ("from rinchen.cli import eval_report\n", "rinchen.synth.x"),
+        ("from rinchen.cli import eval_run as run\n", "rinchen.serve.x"),
+        ("import rinchen.cli.eval_suite\n", "rinchen.filter.x"),
+        # a submodule of a command that is a package
+        ("import rinchen.cli.eval_report.sub\n", "rinchen.filter.x"),
+        ("import rinchen.cli.eval.groups as groups\n", "rinchen.filter.x"),
+        ("import rinchen.cli.eval_suite as suite_command\n", "rinchen.mine.x"),
         ("from rinchen.cli import eval as eval_cli\n", "rinchen.cli.main"),
         ("from rinchen.cli import (\n    eval,\n    train,\n)\n", "rinchen.cli.main"),
         ("import rinchen.cli.eval\n", "rinchen.cli.main"),
+        ("from rinchen.cli.eval import app\n", "rinchen.cli.main"),
+        ("from rinchen.cli.eval_report_output import STAGE\n", "rinchen.export.x"),
         ("from . import eval\n", "rinchen.cli.main"),
+        ("from .eval_report import Suite\n", "rinchen.cli.x"),
+        ("from . import eval_run\n", "rinchen.cli.x"),
+        ("from .. import cli\ncli.eval_report.Suite\n", "rinchen.train.x"),
+        ("from ..cli import eval_report\n", "rinchen.train.x"),
+        ("from ..cli.eval_report import Suite\n", "rinchen.train.x"),
+        ("import rinchen\nrinchen.cli.eval_suite.build\n", "rinchen.export.x"),
+        ("import rinchen.cli as c\nc.eval_report.report_runs\n", "rinchen.train.x"),
+        (
+            "def late():\n    from rinchen.cli.eval_report import Suite\n",
+            "rinchen.train.x",
+        ),
+        (
+            'import importlib\nimportlib.import_module("rinchen.cli.eval_report")\n',
+            "rinchen.train.x",
+        ),
+        (
+            'from importlib import import_module as im\nim("rinchen.cli.eval_suite")\n',
+            "rinchen.train.x",
+        ),
+    ],
+)
+def test_an_import_of_an_eval_command_is_found_by_the_inverse_scan(
+    source: str, module: str
+) -> None:
+    # The commands `rinchen/cli/eval*.py` are exempt because they read suites, so reaching one
+    # from outside is reaching a suite reader through it.
+    assert reached(source, module, guarded=EVAL_PACKAGE) == ["rinchen.cli.eval*"]
+
+
+def test_the_suite_readers_scan_does_not_see_an_eval_command_and_the_inverse_one_does() -> (
+    None
+):
+    source = "from rinchen.cli.eval_report import Suite\n"
+
+    assert reached(source, "rinchen.train.x") == []
+    assert reached(source, "rinchen.train.x", guarded=EVAL_PACKAGE) == [
+        "rinchen.cli.eval*"
+    ]
+
+
+def test_an_eval_package_import_and_an_eval_command_import_are_told_apart() -> None:
+    source = "from rinchen.eval.runner import Suite\nfrom rinchen.cli import eval_run\n"
+
+    assert reached(source, "rinchen.train.x", guarded=EVAL_PACKAGE) == [
+        "rinchen.cli.eval*",
+        "rinchen.eval",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("source", "module"),
+    [
         ("import rinchen.evaluation\n", "rinchen.train.x"),
+        # a command that is not one of the eval commands
+        ("from rinchen.cli import train, synth\n", "rinchen.cli.main"),
+        ("from rinchen.cli.train_common import write_manifest\n", "rinchen.cli.x"),
+        ("from . import train\n", "rinchen.cli.main"),
+        ("import rinchen.cli.translate\n", "rinchen.train.x"),
+        ("from rinchen.cli import e\n", "rinchen.train.x"),
         ("from rinchen.evaluator import x\n", "rinchen.train.x"),
         ("from rinchen.export.record import ModelRecord\n", "rinchen.train.x"),
         ("from rinchen.metrics import bleu_chrf\n", "rinchen.train.x"),
@@ -689,7 +782,9 @@ def test_the_inverse_scan_finds_the_one_hop_leak_in_any_package_but_the_exempt_a
             "train/ok.py": "from rinchen.export.record import ModelRecord\n",
             "synth/deep/leak.py": "import rinchen.eval\n",
             "serve/__init__.py": "from .. import eval\n",
+            "train/zz_probe.py": "from rinchen.cli.eval_report import Suite\n",
             "cli/main.py": "from rinchen.cli import eval as eval_cli\n",
+            "cli/release_hub_output.py": "from rinchen.cli.eval_suite_output import x\n",
             "cli/release_stage.py": "from rinchen.eval.report_read import ReportView\n",
             "cli/robust_eval.py": one_hop,
             "export/model_card.py": "from rinchen.eval.report_read import ReportView\n",
@@ -704,6 +799,9 @@ def test_the_inverse_scan_finds_the_one_hop_leak_in_any_package_but_the_exempt_a
         "train/mixture.py": ["rinchen.eval"],
         "synth/deep/leak.py": ["rinchen.eval"],
         "serve/__init__.py": ["rinchen.eval"],
+        "train/zz_probe.py": ["rinchen.cli.eval*"],
+        "cli/main.py": ["rinchen.cli.eval*"],
+        "cli/release_hub_output.py": ["rinchen.cli.eval*"],
         "cli/robust_eval.py": ["rinchen.eval"],
         "export/model_card_extra.py": ["rinchen.eval"],
     }
