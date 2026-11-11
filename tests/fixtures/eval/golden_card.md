@@ -41,7 +41,7 @@ Trained for 6 directions: eng_Latn-khk_Cyrl, khk_Cyrl-eng_Latn, khk_Cyrl-rus_Cyr
 | spm.model | 128 | 26d706159878af9911c037ebf1fa8ee71a186d498a36583e4184910f3e8707e3 |
 | rinchen.json | 1089 | 590688d0a34415f238ae0ad5ed45d88f68158515b77323eb7a851f3a5e4ad38c |
 | report.json | 14894 | 9dbd9380216097555c9deac98aaf3b54257134bb78ccbae4d771b3935525d9ef |
-| report.md | 6610 | a22350b28862150572f20bd8fc9de640d6fb5d9a0435c61423ad6d6ab8f96369 |
+| report.md | 7644 | a22350b28862150572f20bd8fc9de640d6fb5d9a0435c61423ad6d6ab8f96369 |
 
 `README.md` is this card and `release.json` lists the digest of every other file, this card included.
 
@@ -68,14 +68,16 @@ The figures are those of the system `alpha` in `report.json`: every number below
 - kind: fixture
 - split: devtest
 - rows: 10
+- dataset: n/a (no source record)
+- revision: n/a (no source record)
 - BLEU signature: `nrefs:1|case:mixed|eff:no|tok:13a|smooth:exp|version:2.6.0`
 - chrF signature: `nrefs:1|case:mixed|eff:yes|nc:6|nw:0|space:no|version:2.6.0`
 - chrF++ signature: `nrefs:1|case:mixed|eff:yes|nc:6|nw:2|space:no|version:2.6.0`
 
-| direction | segments | resampling units | chrF++ | chrF | BLEU |
-| --- | --- | --- | --- | --- | --- |
-| khk_Cyrl-eng_Latn | 10 | 5 document units | 73.08 [54.91, 85.48] | 72.44 [53.76, 85.63] | 59.40 [36.34, 72.14] |
-| eng_Latn-khk_Cyrl | 10 | 5 document units | 68.06 [50.67, 80.98] | 67.41 [49.84, 80.59] | 50.87 [25.54, 67.88] |
+| direction | segments | outputs ok | resampling units | chrF++ | chrF | BLEU |
+| --- | --- | --- | --- | --- | --- | --- |
+| khk_Cyrl-eng_Latn | 10 | 10 of 10 | 5 document units | 73.08 [54.91, 85.48] | 72.44 [53.76, 85.63] | 59.40 [36.34, 72.14] |
+| eng_Latn-khk_Cyrl | 10 | 10 of 10 | 5 document units | 68.06 [50.67, 80.98] | 67.41 [49.84, 80.59] | 50.87 [25.54, 67.88] |
 
 n/a (not in the suite): khk_Cyrl-rus_Cyrl, rus_Cyrl-khk_Cyrl, mn_Mong-eng_Latn, mn_Mong-rus_Cyrl.
 

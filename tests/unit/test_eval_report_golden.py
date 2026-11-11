@@ -35,7 +35,7 @@ pytestmark = pytest.mark.usefixtures("no_network")
 
 # `sha256sum` of the two files, taken from the files and not from the code.
 GOLDEN_JSON_SHA256 = "c8d2095fb0109e7682a3558261778031ca3d34fdce65f96f43f766755874ce30"
-GOLDEN_MD_SHA256 = "ae879f69ccd6f2aac97a01ebd4342dfd1829b5677616ebba677f1fc8ed383f72"
+GOLDEN_MD_SHA256 = "a6b30c0dcceec9e08bc9f2b0a7ed22d38c722d645e00a9648087efde1d6f8a3f"
 
 
 def golden_report() -> dict[str, object]:

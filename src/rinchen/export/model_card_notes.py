@@ -20,9 +20,17 @@ from rinchen.export.record import ModelRecord
 
 __all__ = ["limits_section", "provenance_section"]
 
+# D12's block records the suite it was measured on by name and digest and not by kind.
+_ROBUSTNESS_KIND = (
+    "- The kind of the robustness suite is not recorded in D12's block, so the evidence above "
+    "counts only the suites of the evaluation tables."
+)
 
-def limits_section(report: ReportView, results: Sequence[DirectionResult]) -> list[str]:
-    """The limits of the figures of the card."""
+
+def limits_section(
+    report: ReportView, system: str, results: Sequence[DirectionResult]
+) -> list[str]:
+    """The limits of the figures of the card of `system`, whose `results` they are."""
     return [
         "## Limits",
         "",
@@ -41,6 +49,7 @@ def limits_section(report: ReportView, results: Sequence[DirectionResult]) -> li
             "a direction has a document id, a segment otherwise."
         ),
         f"- {report.note_multiple_comparisons}. Read a difference with its p-value.",
+        *([_ROBUSTNESS_KIND] if system in report.robustness else []),
         f"- Not measured: {_not_measured(results)}.",
         "",
     ]

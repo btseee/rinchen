@@ -833,4 +833,4 @@ def test_a_report_of_one_unit_is_read_back_and_rendered_with_n_a() -> None:
 
     assert all(c.p_value is None and c.ci95 is None for c in view.comparisons)
     assert "| khk_Cyrl-eng_Latn | beta | chrF++ | +" in markdown
-    assert " | n/a | n/a |  |" in markdown
+    assert " | n/a | n/a | n/a (fewer than two units) |" in markdown

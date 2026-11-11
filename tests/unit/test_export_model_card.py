@@ -382,11 +382,11 @@ def test_the_table_has_a_row_for_each_direction_that_was_measured_and_nothing_el
     card = card_of(record)
 
     assert (
-        "| direction | segments | resampling units | chrF++ | chrF | BLEU |\n"
-        "| --- | --- | --- | --- | --- | --- |\n"
-        "| khk_Cyrl-eng_Latn | 10 | 5 document units | 73.08 [54.91, 85.48] | "
+        "| direction | segments | outputs ok | resampling units | chrF++ | chrF | BLEU |\n"
+        "| --- | --- | --- | --- | --- | --- | --- |\n"
+        "| khk_Cyrl-eng_Latn | 10 | 10 of 10 | 5 document units | 73.08 [54.91, 85.48] | "
         "72.44 [53.76, 85.63] | 59.40 [36.34, 72.14] |\n"
-        "| eng_Latn-khk_Cyrl | 10 | 5 document units | 68.06 [50.67, 80.98] | "
+        "| eng_Latn-khk_Cyrl | 10 | 10 of 10 | 5 document units | 68.06 [50.67, 80.98] | "
         "67.41 [49.84, 80.59] | 50.87 [25.54, 67.88] |\n"
     ) in card
 

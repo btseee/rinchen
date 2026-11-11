@@ -64,7 +64,7 @@ GOLDEN_FILE_SIZES: Final[Mapping[str, int]] = {
     "spm.model": 128,
     "rinchen.json": 1089,
     "report.json": 14894,
-    "report.md": 6610,
+    "report.md": 7644,
 }
 
 
@@ -193,6 +193,41 @@ def with_a_run_in_another_suite(
     return with_the_note_of(document)
 
 
+def with_statuses(
+    document: dict[str, Any],
+    system: str,
+    direction: str,
+    statuses: Mapping[str, int],
+) -> dict[str, Any]:
+    """`document` in which the outputs of `system` in `direction` carry these `statuses` (their
+    counts must add up to the segments of the direction: the strict reader checks that)."""
+    for result in document["results"]:
+        if result["system"] == system and result["direction"] == direction:
+            result["statuses"] = dict(sorted(statuses.items()))
+    return document
+
+
+def with_source(document: dict[str, Any], **source: Any) -> dict[str, Any]:
+    """`document` whose suite has this source record (`dataset`, `revision`, `pinned`)."""
+    document["suites"][0]["source"].update(source)
+    return document
+
+
+def with_a_comparison_of(
+    document: dict[str, Any], index: int, *, delta: float, p_value: float | None
+) -> dict[str, Any]:
+    """The comparison `index` with this `delta` and `p_value`, its verdict kept consistent with
+    them (`significant` is the first system being better with a p-value below alpha; the interval
+    is moved with the delta and is no part of the verdict)."""
+    comparison = document["comparisons"][index]
+    alpha = document["bootstrap"]["alpha"]
+    comparison["delta"] = delta
+    comparison["ci95"] = [delta - 1.0, delta + 1.0]
+    comparison["p_value"] = p_value
+    comparison["significant"] = p_value is not None and p_value < alpha and delta > 0
+    return document
+
+
 def with_a_direction_that_did_not_run(
     document: dict[str, Any], direction: str, state: str, reason: str
 ) -> dict[str, Any]:
@@ -315,12 +350,15 @@ __all__ = [
     "markdown_bytes",
     "report_bytes",
     "view_of",
+    "with_a_comparison_of",
     "with_a_direction_that_did_not_run",
     "with_a_human_suite",
     "with_a_run_in_another_suite",
     "with_comet_scores",
     "with_one_unit",
     "with_robustness",
+    "with_source",
+    "with_statuses",
     "with_the_note_of",
     "without_results_of",
 ]

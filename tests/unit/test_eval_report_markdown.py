@@ -3,7 +3,7 @@ report, so the same document gives the same bytes in every process, locale and t
 
 The sections come in a fixed order; a score is `value [low, high]` with two decimals, a p-value has
 three, a delta a sign; whatever was not measured is `n/a (<state or reason>)` and never a number;
-a star marks a significant comparison; the evidence banner is a function of the kinds of suites.
+a comparison has a verdict in words; the evidence banner is a function of the kinds of suites.
 The whole golden report is pinned byte for byte in `test_eval_report_golden.py`; here the lines
 the brief names are pinned one by one, and the rest of the behaviour with small reports.
 """
@@ -189,13 +189,15 @@ def test_a_report_without_a_fixture_says_what_a_measurement_is() -> None:
 def test_the_chrf_pp_table_has_the_system_columns_and_the_document_unit_cells() -> None:
     table = block_after(golden_markdown(), "### golden", "#### chrF++")
 
-    assert table[1] == "| direction | alpha | beta |"
-    assert table[2] == "| --- | --- | --- |"
+    assert table[1] == "| direction | alpha | alpha ok | beta | beta ok |"
+    assert table[2] == "| --- | --- | --- | --- | --- |"
     assert (
-        "| khk_Cyrl-eng_Latn | 73.08 [54.91, 85.48] | 93.87 [85.24, 100.00] |" in table
+        "| khk_Cyrl-eng_Latn | 73.08 [54.91, 85.48] | 10 of 10 | "
+        "93.87 [85.24, 100.00] | 10 of 10 |" in table
     )
     assert (
-        "| eng_Latn-khk_Cyrl | 68.06 [50.67, 80.98] | 91.34 [85.07, 97.86] |" in table
+        "| eng_Latn-khk_Cyrl | 68.06 [50.67, 80.98] | 10 of 10 | "
+        "91.34 [85.07, 97.86] | 10 of 10 |" in table
     )
 
 
@@ -236,8 +238,8 @@ def test_a_direction_the_suite_does_not_declare_is_n_a_not_in_the_suite() -> Non
     table = block_after(golden_markdown(), "### golden", "#### chrF++")
 
     assert (
-        "| khk_Cyrl-deu_Latn | n/a (not in the suite) | n/a (not in the suite) |"
-        in table
+        "| khk_Cyrl-deu_Latn | n/a (not in the suite) | n/a | "
+        "n/a (not in the suite) | n/a |" in table
     )
 
 
@@ -247,7 +249,7 @@ def test_a_direction_a_system_did_not_run_is_n_a_with_its_state() -> None:
     )
 
     row = next(line for line in table if line.startswith(f"| {THIRD} |"))
-    assert row == f"| {THIRD} | n/a (not_in_file) | n/a (not_trained) |"
+    assert row == f"| {THIRD} | n/a (not_in_file) | n/a | n/a (not_trained) | n/a |"
 
 
 def test_a_not_run_cell_is_never_a_number() -> None:
@@ -295,7 +297,10 @@ def test_an_interval_that_is_not_there_is_n_a_and_never_zero() -> None:
 
     table = block_after(render_markdown(report), "### golden", "#### chrF++")
 
-    assert "| khk_Cyrl-eng_Latn | 73.08 [n/a] | 93.87 [n/a] |" in table
+    assert (
+        "| khk_Cyrl-eng_Latn | 73.08 [n/a] | 10 of 10 | 93.87 [n/a] | 10 of 10 |"
+        in table
+    )
 
 
 def test_a_score_has_two_decimals_and_a_p_value_three() -> None:
@@ -307,7 +312,7 @@ def test_a_score_has_two_decimals_and_a_p_value_three() -> None:
     markdown = render_markdown(report)
 
     assert "| khk_Cyrl-eng_Latn | 5.00 [4.90, 5.10] |" in markdown
-    assert "| 0.000 | * |" in markdown
+    assert "| 0.000 | better |" in markdown
 
 
 def test_a_neural_metric_with_values_gets_its_table_and_one_without_is_listed_as_unmeasured() -> (
@@ -338,15 +343,17 @@ def test_a_neural_metric_with_values_gets_its_table_and_one_without_is_listed_as
 # ---- the comparisons ---------------------------------------------------------------------------
 
 
-def test_a_comparison_row_has_the_delta_the_interval_the_p_value_and_a_star() -> None:
+def test_a_comparison_row_has_the_delta_the_interval_the_p_value_and_the_verdict() -> (
+    None
+):
     markdown = golden_markdown()
 
     assert (
-        "| khk_Cyrl-eng_Latn | beta | chrF++ | +20.79 | [+13.92, +33.41] | 0.002 | * |"
+        "| khk_Cyrl-eng_Latn | beta | chrF++ | +20.79 | [+13.92, +33.41] | 0.002 | better |"
         in lines_of(markdown)
     )
     assert (
-        "| khk_Cyrl-eng_Latn | beta | BLEU | +35.01 | [+22.91, +54.78] | 0.002 | * |"
+        "| khk_Cyrl-eng_Latn | beta | BLEU | +35.01 | [+22.91, +54.78] | 0.002 | better |"
         in lines_of(markdown)
     )
 
@@ -355,12 +362,10 @@ def test_the_comparison_table_names_the_baseline_and_has_its_header() -> None:
     lines = lines_of(golden_markdown())
 
     assert any(line.startswith("Baseline: alpha. ") for line in lines)
-    assert (
-        "| direction | system | metric | delta | interval | p | significant |" in lines
-    )
+    assert "| direction | system | metric | delta | interval | p | verdict |" in lines
 
 
-def test_a_comparison_that_is_not_significant_has_an_empty_mark() -> None:
+def test_a_comparison_that_is_not_significant_says_so_in_words() -> None:
     plain = without_documents(golden_suite())
     report = build_report(
         [
@@ -375,8 +380,8 @@ def test_a_comparison_that_is_not_significant_has_an_empty_mark() -> None:
     lines = lines_of(render_markdown(report))
 
     assert (
-        "| khk_Cyrl-eng_Latn | gamma | chrF++ | +8.22 | [+1.95, +16.52] | 0.052 |  |"
-        in lines
+        "| khk_Cyrl-eng_Latn | gamma | chrF++ | +8.22 | [+1.95, +16.52] | 0.052 | "
+        "no significant difference |" in lines
     )
 
 
@@ -388,7 +393,7 @@ def test_a_negative_delta_has_its_sign() -> None:
     lines = lines_of(render_markdown(report))
 
     assert (
-        "| khk_Cyrl-eng_Latn | alpha | chrF++ | -20.79 | [-33.41, -13.92] | 0.002 |  |"
+        "| khk_Cyrl-eng_Latn | alpha | chrF++ | -20.79 | [-33.41, -13.92] | 0.002 | worse |"
         in lines
     )
 
@@ -400,7 +405,10 @@ def test_a_comparison_without_an_interval_or_a_p_value_says_n_a() -> None:
 
     lines = lines_of(render_markdown(report))
 
-    assert "| khk_Cyrl-eng_Latn | beta | chrF++ | +20.79 | n/a | n/a |  |" in lines
+    assert (
+        "| khk_Cyrl-eng_Latn | beta | chrF++ | +20.79 | n/a | n/a | "
+        "n/a (fewer than two units) |" in lines
+    )
 
 
 def test_the_note_about_multiple_comparisons_opens_the_section() -> None:
@@ -474,10 +482,13 @@ def test_the_suites_table_has_the_counts_and_the_digest_prefix() -> None:
     block = block_after(golden_markdown(), "## Suites")
 
     assert block[1] == (
-        "| suite | kind | benchmark | split | purpose | rows | directions | sha256 |"
+        "| suite | kind | benchmark | split | purpose | rows | directions | dataset | "
+        "revision | sha256 |"
     )
     assert block[3] == (
-        f"| golden | fixture | golden | devtest | report | 10 | 2 | {suite_digest(golden_suite())[:12]} |"
+        "| golden | fixture | golden | devtest | report | 10 | 2 | "
+        "n/a (no source record) | n/a (no source record) | "
+        f"{suite_digest(golden_suite())[:12]} |"
     )
 
 
@@ -512,8 +523,8 @@ def test_the_robustness_section_has_the_six_values_with_their_counts() -> None:
     assert "| placeholder_acc | 0.9983 | 599 | 1 | 600 |" in block
     assert "| mong_source_retention | 0.9976 | 900 | 0 | 900 |" in block
     assert (
-        "Measured on the suite robust (e5e5e5e5e5e5), bound to the system by name."
-        in block
+        "Measured on the suite robust (e5e5e5e5e5e5, suite kind not recorded), bound to "
+        "the system by name." in block
     )
 
 
@@ -699,7 +710,9 @@ def test_the_unmeasured_count_is_the_results_that_lack_the_metric_of_all_the_res
     assert f"- comet22: {reason} (2 of 4 results)" in block
     assert f"- metricx24: {reason} (4 of 4 results)" in block
     table = block_after(render_markdown(report), "### golden", "#### COMET-22")
-    assert "| khk_Cyrl-eng_Latn | 0.80 [0.80, 0.80] | n/a (" in "\n".join(table)
+    assert "| khk_Cyrl-eng_Latn | 0.80 [0.80, 0.80] | 10 of 10 | n/a (" in "\n".join(
+        table
+    )
 
 
 def test_a_baseline_that_has_no_run_in_a_suite_is_not_a_direction_that_did_not_run() -> (

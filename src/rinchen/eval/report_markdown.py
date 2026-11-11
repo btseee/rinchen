@@ -2,14 +2,15 @@
 so one document gives the same bytes in every process, locale and time zone (it reads nothing of
 the environment, iterates only lists and sorted keys, and formats numbers with fixed formats).
 
-The sections come in a fixed order: the title with the evidence banner, the systems, the suites, the
-scores (a table for each suite and metric, a row for every direction the report expects and a
-column for every system), the paired comparisons, the robustness block with its counts, what was
-not measured, the release targets and the provenance. A score is `value [low, high]` with two
-decimals, a p-value has three and a delta a sign; whatever was not measured is `n/a (<state or
-reason>)` and never a number; a star marks a comparison whose verdict is significant. The banner is
-a function of the kinds of suites the figures come from: a fixture is generated and says nothing
-about translation quality. No line holds a timestamp or a path.
+The sections come in a fixed order: the title with the evidence banner, the systems, the suites (with
+the dataset and the revision of each), the scores (a table for each suite and metric, a row for every
+direction the report expects and, for every system, a column of scores and a column of the outputs
+that were `ok`), the paired comparisons, the robustness block with its counts, what was not measured,
+the release targets and the provenance. A score is `value [low, high]` with two decimals, a p-value
+has three and a delta a sign; whatever was not measured is `n/a (<state or reason>)` and never a
+number; a comparison has a verdict in words (`better`, `worse` or `no significant difference`). The
+banner is a function of the kinds of suites the figures come from: a fixture is generated and says
+nothing about translation quality. No line holds a timestamp or a path.
 
 The score and comparison sections are in `report_markdown_scores`, the robustness and not-measured
 sections in `report_markdown_notes` and the cells they share in `report_markdown_cells`.
@@ -21,7 +22,14 @@ import json
 from collections.abc import Mapping
 from typing import Any, Final
 
-from rinchen.eval.report_markdown_cells import inline, label, number, short, table
+from rinchen.eval.report_markdown_cells import (
+    inline,
+    label,
+    number,
+    short,
+    source_cells,
+    table,
+)
 from rinchen.eval.report_markdown_notes import not_measured_section, robustness_section
 from rinchen.eval.report_markdown_scores import comparisons_section, scores_section
 
@@ -113,6 +121,11 @@ def _suites(report: Mapping[str, Any]) -> list[str]:
             suite["purpose"],
             str(suite["rows"]),
             str(_declared(suite)),
+            *source_cells(
+                suite["source"]["dataset"],
+                suite["source"]["revision"],
+                suite["source"]["pinned"],
+            ),
             short(suite["sha256"]),
         ]
         for suite in report["suites"]
@@ -125,6 +138,8 @@ def _suites(report: Mapping[str, Any]) -> list[str]:
         "purpose",
         "rows",
         "directions",
+        "dataset",
+        "revision",
         "sha256",
     ]
     lines = ["## Suites", "", *table(header, rows)]

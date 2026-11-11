@@ -24,7 +24,9 @@ def robustness_section(report: Mapping[str, Any]) -> list[str]:
     lines += [
         (
             "A value is a share of the units that were scored: read it with its counts. The "
-            "retention is a ratio of two chrF scores (see report.json)."
+            "retention is a ratio of two chrF scores (see report.json). The kind of the "
+            "robustness suite is not recorded in D12's block, so the evidence banner above "
+            "does not count it."
         ),
         "",
     ]
@@ -46,8 +48,8 @@ def robustness_section(report: Mapping[str, Any]) -> list[str]:
             "",
             *table(["value", "result", "scored", "excluded", "total"], rows),
             (
-                f"Measured on the suite {source['suite']} ({short(source['suite_sha256'])}), "
-                f"bound to the system by {binding}."
+                f"Measured on the suite {source['suite']} ({short(source['suite_sha256'])}, "
+                f"suite kind not recorded), bound to the system by {binding}."
             ),
             "",
         ]

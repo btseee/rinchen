@@ -16,6 +16,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 
 from rinchen.eval.report_markdown_cells import (
+    FEWER_THAN_TWO_UNITS,
     LABELS,
     TABLE_ORDER,
     inline,
@@ -23,7 +24,10 @@ from rinchen.eval.report_markdown_cells import (
     number,
     plural,
     short,
+    source_cells,
+    status_cell,
     table,
+    verdict,
 )
 from rinchen.eval.report_read import ReportView
 from rinchen.eval.report_view import ComparisonView, RobustnessView, SuiteView
@@ -43,7 +47,7 @@ __all__ = [
 _NOT_IN_THE_SUITE = "not in the suite"
 _NOT_TRAINED = "not trained"
 _NO_RUN = "no run"
-_FEWER_THAN_TWO_UNITS = "n/a (fewer than two units)"
+_FEWER_THAN_TWO_UNITS = FEWER_THAN_TWO_UNITS
 # The count metrics in the order of the report's tables: the headline first.
 _COUNT_COLUMNS = tuple(metric for metric in TABLE_ORDER if metric in COUNT_METRICS)
 # The reasons a direction is listed under, in the order the card lists them; any other (a state of
@@ -130,12 +134,17 @@ def _suite_block(
     results: Sequence[DirectionResult],
 ) -> list[str]:
     by_direction = {result.direction: result for result in results}
+    dataset, revision = source_cells(
+        suite.source.dataset, suite.source.revision, suite.source.pinned
+    )
     lines = [
         f"### Suite {suite.name}",
         "",
         f"- kind: {suite.kind}",
         f"- split: {suite.split}",
         f"- rows: {suite.rows}",
+        f"- dataset: {dataset}",
+        f"- revision: {revision}",
         *_signature_lines(results),
         "",
     ]
@@ -145,6 +154,7 @@ def _suite_block(
             [
                 suite_direction.direction,
                 str(by_direction[suite_direction.direction].n_segments),
+                _outputs_ok(by_direction[suite_direction.direction]),
                 _units(by_direction[suite_direction.direction]),
                 *(
                     _cell(by_direction[suite_direction.direction], metric)
@@ -157,6 +167,7 @@ def _suite_block(
         header = [
             "direction",
             "segments",
+            "outputs ok",
             "resampling units",
             *(label(m) for m in columns),
         ]
@@ -186,6 +197,10 @@ def _signature_lines(results: Sequence[DirectionResult]) -> list[str]:
             shown = ", ".join(f"`{signature}`" for signature in signatures)
             lines.append(f"- {label(metric)} signature: {shown}")
     return lines
+
+
+def _outputs_ok(result: DirectionResult) -> str:
+    return status_cell(result.statuses, result.n_segments)
 
 
 def _units(result: DirectionResult) -> str:
@@ -276,21 +291,29 @@ def comparisons_section(report: ReportView, system: str) -> list[str]:
         "delta",
         "interval",
         "p",
-        "significant",
+        "verdict",
     ]
     return [
         *lines,
         (
-            f"{report.note_multiple_comparisons}. A comparison is significant when its p-value "
-            f"is below {alpha} and the difference is in favour of this system: the verdict is "
-            "the p-value's, not the interval's."
+            f"{report.note_multiple_comparisons}. The verdict compares this system with the "
+            "baseline and is the p-value's, not the interval's: `better` is a p-value below "
+            f"{alpha} with the difference in this system's favour, `worse` is a p-value below "
+            f"{alpha} with the difference against it, and `no significant difference` is "
+            "anything else."
         ),
         "",
-        *table(header, [_comparison_row(comparison) for comparison in mine]),
+        *table(
+            header,
+            [
+                _comparison_row(comparison, report.bootstrap.alpha)
+                for comparison in mine
+            ],
+        ),
     ]
 
 
-def _comparison_row(comparison: ComparisonView) -> list[str]:
+def _comparison_row(comparison: ComparisonView, alpha: float) -> list[str]:
     interval = comparison.ci95
     return [
         comparison.suite,
@@ -304,7 +327,12 @@ def _comparison_row(comparison: ComparisonView) -> list[str]:
         _FEWER_THAN_TWO_UNITS
         if comparison.p_value is None
         else f"{comparison.p_value:.3f}",
-        "yes" if comparison.significant else "no",
+        verdict(
+            comparison.p_value,
+            comparison.delta,
+            comparison.higher_is_better,
+            alpha,
+        ),
     ]
 
 
@@ -334,7 +362,8 @@ def robustness_section(report: ReportView, system: str) -> list[str]:
         *lines,
         (
             f"Measured on the robustness suite `{source['suite']}` (sha256 "
-            f"{short(source['suite_sha256'])}), not on the suites above; bound to the system "
+            f"{short(source['suite_sha256'])}, suite kind not recorded), not on the suites "
+            "above; bound to the system "
             f"by {binding}. A value is a share of the units that were scored: read it with "
             "its counts."
         ),

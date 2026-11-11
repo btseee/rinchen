@@ -116,7 +116,7 @@ def render_card(
         evaluation_section(record, report, system, results),
         robustness_section(report, system),
         targets_section(report),
-        limits_section(report, results),
+        limits_section(report, system, results),
         provenance_section(
             record,
             report_sha256=report_sha256,

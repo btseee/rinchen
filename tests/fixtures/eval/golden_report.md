@@ -11,13 +11,13 @@ These figures come from generated fixture suites. They test the tooling and say 
 
 ## Suites
 
-| suite | kind | benchmark | split | purpose | rows | directions | sha256 |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| golden | fixture | golden | devtest | report | 10 | 2 | b707518d3913 |
+| suite | kind | benchmark | split | purpose | rows | directions | dataset | revision | sha256 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| golden | fixture | golden | devtest | report | 10 | 2 | n/a (no source record) | n/a (no source record) | b707518d3913 |
 
 ## Scores
 
-A cell is the corpus score with its interval, `value [low, high]`. A system that did not run a direction has `n/a` and the state; a direction the suite does not declare is `n/a (not in the suite)`.
+A cell is the corpus score with its interval, `value [low, high]`; the column beside it counts the outputs that were `ok` and names the others. A system that did not run a direction has `n/a` and the state; a direction the suite does not declare is `n/a (not in the suite)`.
 
 ### golden
 
@@ -25,66 +25,66 @@ Resampling unit: document (5 units in each direction).
 
 #### chrF++
 
-| direction | alpha | beta |
-| --- | --- | --- |
-| khk_Cyrl-deu_Latn | n/a (not in the suite) | n/a (not in the suite) |
-| deu_Latn-khk_Cyrl | n/a (not in the suite) | n/a (not in the suite) |
-| khk_Cyrl-eng_Latn | 73.08 [54.91, 85.48] | 93.87 [85.24, 100.00] |
-| eng_Latn-khk_Cyrl | 68.06 [50.67, 80.98] | 91.34 [85.07, 97.86] |
-| khk_Cyrl-jpn_Jpan | n/a (not in the suite) | n/a (not in the suite) |
-| jpn_Jpan-khk_Cyrl | n/a (not in the suite) | n/a (not in the suite) |
-| khk_Cyrl-kaz_Cyrl | n/a (not in the suite) | n/a (not in the suite) |
-| kaz_Cyrl-khk_Cyrl | n/a (not in the suite) | n/a (not in the suite) |
-| khk_Cyrl-kor_Hang | n/a (not in the suite) | n/a (not in the suite) |
-| kor_Hang-khk_Cyrl | n/a (not in the suite) | n/a (not in the suite) |
-| khk_Cyrl-rus_Cyrl | n/a (not in the suite) | n/a (not in the suite) |
-| rus_Cyrl-khk_Cyrl | n/a (not in the suite) | n/a (not in the suite) |
-| khk_Cyrl-tur_Latn | n/a (not in the suite) | n/a (not in the suite) |
-| tur_Latn-khk_Cyrl | n/a (not in the suite) | n/a (not in the suite) |
-| khk_Cyrl-zho_Hans | n/a (not in the suite) | n/a (not in the suite) |
-| zho_Hans-khk_Cyrl | n/a (not in the suite) | n/a (not in the suite) |
+| direction | alpha | alpha ok | beta | beta ok |
+| --- | --- | --- | --- | --- |
+| khk_Cyrl-deu_Latn | n/a (not in the suite) | n/a | n/a (not in the suite) | n/a |
+| deu_Latn-khk_Cyrl | n/a (not in the suite) | n/a | n/a (not in the suite) | n/a |
+| khk_Cyrl-eng_Latn | 73.08 [54.91, 85.48] | 10 of 10 | 93.87 [85.24, 100.00] | 10 of 10 |
+| eng_Latn-khk_Cyrl | 68.06 [50.67, 80.98] | 10 of 10 | 91.34 [85.07, 97.86] | 10 of 10 |
+| khk_Cyrl-jpn_Jpan | n/a (not in the suite) | n/a | n/a (not in the suite) | n/a |
+| jpn_Jpan-khk_Cyrl | n/a (not in the suite) | n/a | n/a (not in the suite) | n/a |
+| khk_Cyrl-kaz_Cyrl | n/a (not in the suite) | n/a | n/a (not in the suite) | n/a |
+| kaz_Cyrl-khk_Cyrl | n/a (not in the suite) | n/a | n/a (not in the suite) | n/a |
+| khk_Cyrl-kor_Hang | n/a (not in the suite) | n/a | n/a (not in the suite) | n/a |
+| kor_Hang-khk_Cyrl | n/a (not in the suite) | n/a | n/a (not in the suite) | n/a |
+| khk_Cyrl-rus_Cyrl | n/a (not in the suite) | n/a | n/a (not in the suite) | n/a |
+| rus_Cyrl-khk_Cyrl | n/a (not in the suite) | n/a | n/a (not in the suite) | n/a |
+| khk_Cyrl-tur_Latn | n/a (not in the suite) | n/a | n/a (not in the suite) | n/a |
+| tur_Latn-khk_Cyrl | n/a (not in the suite) | n/a | n/a (not in the suite) | n/a |
+| khk_Cyrl-zho_Hans | n/a (not in the suite) | n/a | n/a (not in the suite) | n/a |
+| zho_Hans-khk_Cyrl | n/a (not in the suite) | n/a | n/a (not in the suite) | n/a |
 
 #### chrF
 
-| direction | alpha | beta |
-| --- | --- | --- |
-| khk_Cyrl-deu_Latn | n/a (not in the suite) | n/a (not in the suite) |
-| deu_Latn-khk_Cyrl | n/a (not in the suite) | n/a (not in the suite) |
-| khk_Cyrl-eng_Latn | 72.44 [53.76, 85.63] | 93.46 [84.43, 100.00] |
-| eng_Latn-khk_Cyrl | 67.41 [49.84, 80.59] | 91.07 [84.67, 97.84] |
-| khk_Cyrl-jpn_Jpan | n/a (not in the suite) | n/a (not in the suite) |
-| jpn_Jpan-khk_Cyrl | n/a (not in the suite) | n/a (not in the suite) |
-| khk_Cyrl-kaz_Cyrl | n/a (not in the suite) | n/a (not in the suite) |
-| kaz_Cyrl-khk_Cyrl | n/a (not in the suite) | n/a (not in the suite) |
-| khk_Cyrl-kor_Hang | n/a (not in the suite) | n/a (not in the suite) |
-| kor_Hang-khk_Cyrl | n/a (not in the suite) | n/a (not in the suite) |
-| khk_Cyrl-rus_Cyrl | n/a (not in the suite) | n/a (not in the suite) |
-| rus_Cyrl-khk_Cyrl | n/a (not in the suite) | n/a (not in the suite) |
-| khk_Cyrl-tur_Latn | n/a (not in the suite) | n/a (not in the suite) |
-| tur_Latn-khk_Cyrl | n/a (not in the suite) | n/a (not in the suite) |
-| khk_Cyrl-zho_Hans | n/a (not in the suite) | n/a (not in the suite) |
-| zho_Hans-khk_Cyrl | n/a (not in the suite) | n/a (not in the suite) |
+| direction | alpha | alpha ok | beta | beta ok |
+| --- | --- | --- | --- | --- |
+| khk_Cyrl-deu_Latn | n/a (not in the suite) | n/a | n/a (not in the suite) | n/a |
+| deu_Latn-khk_Cyrl | n/a (not in the suite) | n/a | n/a (not in the suite) | n/a |
+| khk_Cyrl-eng_Latn | 72.44 [53.76, 85.63] | 10 of 10 | 93.46 [84.43, 100.00] | 10 of 10 |
+| eng_Latn-khk_Cyrl | 67.41 [49.84, 80.59] | 10 of 10 | 91.07 [84.67, 97.84] | 10 of 10 |
+| khk_Cyrl-jpn_Jpan | n/a (not in the suite) | n/a | n/a (not in the suite) | n/a |
+| jpn_Jpan-khk_Cyrl | n/a (not in the suite) | n/a | n/a (not in the suite) | n/a |
+| khk_Cyrl-kaz_Cyrl | n/a (not in the suite) | n/a | n/a (not in the suite) | n/a |
+| kaz_Cyrl-khk_Cyrl | n/a (not in the suite) | n/a | n/a (not in the suite) | n/a |
+| khk_Cyrl-kor_Hang | n/a (not in the suite) | n/a | n/a (not in the suite) | n/a |
+| kor_Hang-khk_Cyrl | n/a (not in the suite) | n/a | n/a (not in the suite) | n/a |
+| khk_Cyrl-rus_Cyrl | n/a (not in the suite) | n/a | n/a (not in the suite) | n/a |
+| rus_Cyrl-khk_Cyrl | n/a (not in the suite) | n/a | n/a (not in the suite) | n/a |
+| khk_Cyrl-tur_Latn | n/a (not in the suite) | n/a | n/a (not in the suite) | n/a |
+| tur_Latn-khk_Cyrl | n/a (not in the suite) | n/a | n/a (not in the suite) | n/a |
+| khk_Cyrl-zho_Hans | n/a (not in the suite) | n/a | n/a (not in the suite) | n/a |
+| zho_Hans-khk_Cyrl | n/a (not in the suite) | n/a | n/a (not in the suite) | n/a |
 
 #### BLEU
 
-| direction | alpha | beta |
-| --- | --- | --- |
-| khk_Cyrl-deu_Latn | n/a (not in the suite) | n/a (not in the suite) |
-| deu_Latn-khk_Cyrl | n/a (not in the suite) | n/a (not in the suite) |
-| khk_Cyrl-eng_Latn | 59.40 [36.34, 72.14] | 94.42 [85.51, 100.00] |
-| eng_Latn-khk_Cyrl | 50.87 [25.54, 67.88] | 91.07 [83.56, 97.80] |
-| khk_Cyrl-jpn_Jpan | n/a (not in the suite) | n/a (not in the suite) |
-| jpn_Jpan-khk_Cyrl | n/a (not in the suite) | n/a (not in the suite) |
-| khk_Cyrl-kaz_Cyrl | n/a (not in the suite) | n/a (not in the suite) |
-| kaz_Cyrl-khk_Cyrl | n/a (not in the suite) | n/a (not in the suite) |
-| khk_Cyrl-kor_Hang | n/a (not in the suite) | n/a (not in the suite) |
-| kor_Hang-khk_Cyrl | n/a (not in the suite) | n/a (not in the suite) |
-| khk_Cyrl-rus_Cyrl | n/a (not in the suite) | n/a (not in the suite) |
-| rus_Cyrl-khk_Cyrl | n/a (not in the suite) | n/a (not in the suite) |
-| khk_Cyrl-tur_Latn | n/a (not in the suite) | n/a (not in the suite) |
-| tur_Latn-khk_Cyrl | n/a (not in the suite) | n/a (not in the suite) |
-| khk_Cyrl-zho_Hans | n/a (not in the suite) | n/a (not in the suite) |
-| zho_Hans-khk_Cyrl | n/a (not in the suite) | n/a (not in the suite) |
+| direction | alpha | alpha ok | beta | beta ok |
+| --- | --- | --- | --- | --- |
+| khk_Cyrl-deu_Latn | n/a (not in the suite) | n/a | n/a (not in the suite) | n/a |
+| deu_Latn-khk_Cyrl | n/a (not in the suite) | n/a | n/a (not in the suite) | n/a |
+| khk_Cyrl-eng_Latn | 59.40 [36.34, 72.14] | 10 of 10 | 94.42 [85.51, 100.00] | 10 of 10 |
+| eng_Latn-khk_Cyrl | 50.87 [25.54, 67.88] | 10 of 10 | 91.07 [83.56, 97.80] | 10 of 10 |
+| khk_Cyrl-jpn_Jpan | n/a (not in the suite) | n/a | n/a (not in the suite) | n/a |
+| jpn_Jpan-khk_Cyrl | n/a (not in the suite) | n/a | n/a (not in the suite) | n/a |
+| khk_Cyrl-kaz_Cyrl | n/a (not in the suite) | n/a | n/a (not in the suite) | n/a |
+| kaz_Cyrl-khk_Cyrl | n/a (not in the suite) | n/a | n/a (not in the suite) | n/a |
+| khk_Cyrl-kor_Hang | n/a (not in the suite) | n/a | n/a (not in the suite) | n/a |
+| kor_Hang-khk_Cyrl | n/a (not in the suite) | n/a | n/a (not in the suite) | n/a |
+| khk_Cyrl-rus_Cyrl | n/a (not in the suite) | n/a | n/a (not in the suite) | n/a |
+| rus_Cyrl-khk_Cyrl | n/a (not in the suite) | n/a | n/a (not in the suite) | n/a |
+| khk_Cyrl-tur_Latn | n/a (not in the suite) | n/a | n/a (not in the suite) | n/a |
+| tur_Latn-khk_Cyrl | n/a (not in the suite) | n/a | n/a (not in the suite) | n/a |
+| khk_Cyrl-zho_Hans | n/a (not in the suite) | n/a | n/a (not in the suite) | n/a |
+| zho_Hans-khk_Cyrl | n/a (not in the suite) | n/a | n/a (not in the suite) | n/a |
 
 ## Paired comparisons
 
@@ -92,14 +92,14 @@ Resampling unit: document (5 units in each direction).
 
 ### golden
 
-Baseline: alpha. A star marks a system significantly better than the baseline: a p-value below 0.05 with the difference in its favour.
+Baseline: alpha. The verdict is the p-value's, not the interval's: `better` is a p-value below 0.05 with the difference in the system's favour, `worse` is a p-value below 0.05 with the difference against it, and `no significant difference` is anything else.
 
-| direction | system | metric | delta | interval | p | significant |
+| direction | system | metric | delta | interval | p | verdict |
 | --- | --- | --- | --- | --- | --- | --- |
-| khk_Cyrl-eng_Latn | beta | chrF++ | +20.79 | [+13.92, +33.41] | 0.002 | * |
-| khk_Cyrl-eng_Latn | beta | BLEU | +35.01 | [+22.91, +54.78] | 0.002 | * |
-| eng_Latn-khk_Cyrl | beta | chrF++ | +23.27 | [+12.65, +36.22] | 0.002 | * |
-| eng_Latn-khk_Cyrl | beta | BLEU | +40.20 | [+29.20, +57.55] | 0.002 | * |
+| khk_Cyrl-eng_Latn | beta | chrF++ | +20.79 | [+13.92, +33.41] | 0.002 | better |
+| khk_Cyrl-eng_Latn | beta | BLEU | +35.01 | [+22.91, +54.78] | 0.002 | better |
+| eng_Latn-khk_Cyrl | beta | chrF++ | +23.27 | [+12.65, +36.22] | 0.002 | better |
+| eng_Latn-khk_Cyrl | beta | BLEU | +40.20 | [+29.20, +57.55] | 0.002 | better |
 
 ## Robustness
 

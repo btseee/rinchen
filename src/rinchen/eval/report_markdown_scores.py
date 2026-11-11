@@ -1,8 +1,10 @@
 """The score tables and the paired comparisons of the Markdown report of D13 (spec T14), sections of
 `rinchen.eval.report_markdown`: for each suite and metric a table with a row for every direction the
-report expects and a column for every system, each cell `value [low, high]` or `n/a (<state or
-reason>)`; and for each suite with a baseline its comparisons with the delta, the interval, the
-p-value and a star where the verdict is significant."""
+report expects and, for every system, a column of scores, each cell `value [low, high]` or `n/a
+(<state or reason>)`, and a column `<system> ok` with the outputs that were `ok` (`10 of 10`, or `6
+of 10 (1 empty, 3 truncated)`): a failure the system flagged stays beside the metric. And for each
+suite with a baseline its comparisons with the delta, the interval, the p-value and the verdict in
+words (`better`, `worse` or `no significant difference`)."""
 
 from __future__ import annotations
 
@@ -14,7 +16,9 @@ from rinchen.eval.report_markdown_cells import (
     TABLE_ORDER,
     inline,
     label,
+    status_cell,
     table,
+    verdict,
 )
 from rinchen.metrics.registry import COUNT_METRICS, HIGHER_IS_BETTER
 
@@ -28,9 +32,10 @@ def scores_section(report: Mapping[str, Any]) -> list[str]:
         "## Scores",
         "",
         (
-            "A cell is the corpus score with its interval, `value [low, high]`. A system that did "
-            "not run a direction has `n/a` and the state; a direction the suite does not declare "
-            "is `n/a (not in the suite)`."
+            "A cell is the corpus score with its interval, `value [low, high]`; the column beside "
+            "it counts the outputs that were `ok` and names the others. A system that did not run "
+            "a direction has `n/a` and the state; a direction the suite does not declare is `n/a "
+            "(not in the suite)`."
         ),
         "",
     ]
@@ -70,19 +75,24 @@ def _scores_of(report: Mapping[str, Any], suite: Mapping[str, Any]) -> list[str]
             [
                 entry["direction"],
                 *(
-                    _score_cell(
-                        metric,
-                        results.get((system, entry["direction"])),
-                        states.get((system, entry["direction"])),
-                        entry["rows"] is None,
-                    )
+                    cell
                     for system in systems
+                    for cell in (
+                        _score_cell(
+                            metric,
+                            results.get((system, entry["direction"])),
+                            states.get((system, entry["direction"])),
+                            entry["rows"] is None,
+                        ),
+                        _status_cell(results.get((system, entry["direction"]))),
+                    )
                 ),
             ]
             for entry in suite["directions"]
         ]
+        header = ["direction", *(c for s in systems for c in (s, f"{s} ok"))]
         lines += [f"#### {label(metric)}{suffix}", ""]
-        lines += table(["direction", *systems], rows)
+        lines += table(header, rows)
     return lines
 
 
@@ -114,11 +124,17 @@ def _score_cell(
     return f"{value:.2f} {spread}"
 
 
+def _status_cell(result: Mapping[str, Any] | None) -> str:
+    if result is None:
+        return "n/a"
+    return status_cell(result["statuses"], result["n_segments"])
+
+
 def comparisons_section(report: Mapping[str, Any]) -> list[str]:
     note = report["note_multiple_comparisons"]
     lines = ["## Paired comparisons", "", f"{note}.", ""]
     sections: list[str] = []
-    alpha = format(report["bootstrap"]["alpha"], "g")
+    alpha = report["bootstrap"]["alpha"]
     for suite in report["suites"]:
         name = suite["name"]
         held = [c for c in report["comparisons"] if c["suite"] == name]
@@ -151,7 +167,7 @@ def comparisons_section(report: Mapping[str, Any]) -> list[str]:
 
 
 def _comparison_table(
-    suite: str, comparisons: Sequence[Mapping[str, Any]], alpha: str
+    suite: str, comparisons: Sequence[Mapping[str, Any]], alpha: float
 ) -> list[str]:
     rows = [
         [
@@ -161,18 +177,20 @@ def _comparison_table(
             f"{c['delta']:+.2f}",
             _interval(c["ci95"]),
             "n/a" if c["p_value"] is None else f"{c['p_value']:.3f}",
-            "*" if c["significant"] else "",
+            verdict(c["p_value"], c["delta"], c["higher_is_better"], alpha),
         ]
         for c in comparisons
     ]
-    header = ["direction", "system", "metric", "delta", "interval", "p", "significant"]
+    header = ["direction", "system", "metric", "delta", "interval", "p", "verdict"]
+    shown = format(alpha, "g")
     return [
         "### " + suite,
         "",
         (
-            f"Baseline: {comparisons[0]['baseline']}. A star marks a system significantly "
-            f"better than the baseline: a p-value below {alpha} with the difference in its "
-            "favour."
+            f"Baseline: {comparisons[0]['baseline']}. The verdict is the p-value's, not the "
+            f"interval's: `better` is a p-value below {shown} with the difference in the "
+            f"system's favour, `worse` is a p-value below {shown} with the difference against "
+            "it, and `no significant difference` is anything else."
         ),
         "",
         *table(header, rows),

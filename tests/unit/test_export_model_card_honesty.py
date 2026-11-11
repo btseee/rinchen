@@ -151,10 +151,11 @@ def test_a_score_that_was_given_is_a_column_and_the_others_stay_n_a(
     card = card_of(record, with_comet_scores(bound()))
 
     assert (
-        "| direction | segments | resampling units | chrF++ | chrF | BLEU | COMET-22 |\n"
+        "| direction | segments | outputs ok | resampling units | chrF++ | chrF | BLEU | "
+        "COMET-22 |\n"
     ) in card
     assert (
-        "| khk_Cyrl-eng_Latn | 10 | 5 document units | 73.08 [54.91, 85.48] | "
+        "| khk_Cyrl-eng_Latn | 10 | 10 of 10 | 5 document units | 73.08 [54.91, 85.48] | "
         "72.44 [53.76, 85.63] | 59.40 [36.34, 72.14] | 0.85 [0.79, 0.91] |\n"
     ) in card
     assert f"\nMetricX-24, MetricX-24-QE: n/a ({NO_SCORER}).\n" in card
@@ -170,11 +171,11 @@ def test_a_score_given_for_one_direction_only_leaves_the_other_cell_n_a_with_its
     card = card_of(record, document)
 
     assert (
-        "| khk_Cyrl-eng_Latn | 10 | 5 document units | 73.08 [54.91, 85.48] | "
+        "| khk_Cyrl-eng_Latn | 10 | 10 of 10 | 5 document units | 73.08 [54.91, 85.48] | "
         "72.44 [53.76, 85.63] | 59.40 [36.34, 72.14] | 0.85 [0.79, 0.91] |\n"
     ) in card
     assert (
-        "| eng_Latn-khk_Cyrl | 10 | 5 document units | 68.06 [50.67, 80.98] | "
+        "| eng_Latn-khk_Cyrl | 10 | 10 of 10 | 5 document units | 68.06 [50.67, 80.98] | "
         f"67.41 [49.84, 80.59] | 50.87 [25.54, 67.88] | n/a ({NO_SCORER}) |\n"
     ) in card
 
@@ -210,23 +211,25 @@ def test_a_candidate_has_a_row_for_each_comparison_with_its_p_value_and_verdict(
     assert (
         "### Paired comparisons\n\n"
         "16 intervals and 4 paired comparisons are reported with no correction for "
-        "multiple comparisons. A comparison is significant when its p-value is below "
-        "0.05 and the difference is in favour of this system: the verdict is the "
-        "p-value's, not the interval's.\n\n"
-        "| suite | direction | metric | baseline | delta | interval | p | significant |\n"
+        "multiple comparisons. The verdict compares this system with the baseline and "
+        "is the p-value's, not the interval's: `better` is a p-value below 0.05 with "
+        "the difference in this system's favour, `worse` is a p-value below 0.05 with "
+        "the difference against it, and `no significant difference` is anything "
+        "else.\n\n"
+        "| suite | direction | metric | baseline | delta | interval | p | verdict |\n"
         "| --- | --- | --- | --- | --- | --- | --- | --- |\n"
         "| golden | khk_Cyrl-eng_Latn | chrF++ | alpha | +20.79 | [+13.92, +33.41] | "
-        "0.002 | yes |\n"
+        "0.002 | better |\n"
         "| golden | khk_Cyrl-eng_Latn | BLEU | alpha | +35.01 | [+22.91, +54.78] | "
-        "0.002 | yes |\n"
+        "0.002 | better |\n"
         "| golden | eng_Latn-khk_Cyrl | chrF++ | alpha | +23.27 | [+12.65, +36.22] | "
-        "0.002 | yes |\n"
+        "0.002 | better |\n"
         "| golden | eng_Latn-khk_Cyrl | BLEU | alpha | +40.20 | [+29.20, +57.55] | "
-        "0.002 | yes |\n"
+        "0.002 | better |\n"
     ) in card
 
 
-def test_a_difference_against_the_system_is_not_significant_whatever_the_p_value(
+def test_a_difference_against_the_system_reads_worse_whatever_the_p_value_says_of_the_interval(
     record: ModelRecord,
 ) -> None:
     document = a_candidate_in_two_comparisons(bound())
@@ -235,19 +238,20 @@ def test_a_difference_against_the_system_is_not_significant_whatever_the_p_value
 
     assert (
         "| golden | khk_Cyrl-eng_Latn | chrF++ | beta | -20.79 | [-33.41, -13.92] | "
-        "0.002 | no |\n"
+        "0.002 | worse |\n"
     ) in card
-    assert " | yes |" not in card
+    assert " | better |" not in card
 
 
-def test_a_comparison_over_one_unit_has_no_interval_and_no_p_value_and_is_not_significant(
+def test_a_comparison_over_one_unit_has_no_interval_no_p_value_and_no_verdict(
     record: ModelRecord,
 ) -> None:
     card = card_of(record, with_one_unit(bound(OTHER), 0), system=OTHER)
 
     assert (
         "| golden | khk_Cyrl-eng_Latn | chrF++ | alpha | +20.79 | "
-        "n/a (fewer than two units) | n/a (fewer than two units) | no |\n"
+        "n/a (fewer than two units) | n/a (fewer than two units) | "
+        "n/a (fewer than two units) |\n"
     ) in card
 
 
@@ -270,7 +274,12 @@ def test_every_row_of_the_comparison_table_has_a_p_value_or_its_reason(
             assert re.fullmatch(r"\d\.\d{3}|n/a \(fewer than two units\)", cells[6]), (
                 line
             )
-            assert cells[7] in ("yes", "no"), line
+            assert cells[7] in (
+                "better",
+                "worse",
+                "no significant difference",
+                "n/a (fewer than two units)",
+            ), line
 
 
 def test_the_card_claims_no_rank_in_words(record: ModelRecord) -> None:
@@ -380,9 +389,9 @@ def test_the_robustness_section_prints_the_six_values_with_scored_of_total(
 
     assert (
         "## Robustness\n\n"
-        "Measured on the robustness suite `robust-main` (sha256 555555555555), not on the "
-        "suites above; bound to the system by its model digest. A value is a share of the "
-        "units that were scored: read it with its counts.\n\n"
+        "Measured on the robustness suite `robust-main` (sha256 555555555555, suite kind not "
+        "recorded), not on the suites above; bound to the system by its model digest. A "
+        "value is a share of the units that were scored: read it with its counts.\n\n"
         "| value | result | scored of total |\n"
         "| --- | --- | --- |\n"
         "| numbers_acc | 0.9292 | 960 of 960 |\n"
