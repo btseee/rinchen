@@ -294,7 +294,7 @@ re-review of the fix wave (one independent reader) ran and approved it with mino
 heading; the devtest guard did not see the eval commands or an aliased dynamic import; two refusals did not say what to do; `--public` over a private repository said nothing; the card printed `n/a ()`; two sentences of the
 uploaded text named internal milestones); its final wave (seven commits, `2df73c1..413bc94`, 72 mutants, gate 17,852 passed, 1 skipped, 10 deselected) fixed all seven and left open that a re-digested
 result can still plant a free-text reason and D12's robustness block values, which the report cannot recompute; no reader has read the final wave.
-D14 (Maintenance loop) is done locally on branch `d14-maintenance`, stacked on `d13-release` (cut from it at `0f3f6ba`; code tip `51c4489`), not merged and not pushed, and no CI run
+D14 (Maintenance loop) is done locally on branch `d14-maintenance`, stacked on `d13-release` (cut from it at `0f3f6ba`; code tip `52b9b3b`), not merged and not pushed, and no CI run
 covers it: its STOP gate ("nightly workflow green on tiny") is met ONLY as "the workflow's own command, read from `nightly.yml`, runs green natively on the CPU through a uv shim that never forwards
 the upgrade dry run"; GitHub Actions is UNMEASURED. Through the real `rinchen` binary and the real Eole, CTranslate2 and pytest on the CPU with the GPU hidden, `uv run --frozen --no-sync rinchen maintain
 check --out-dir maintain-out --cadence "$CADENCE"` (`CADENCE=nightly`, through `sh` with a `uv` shim first on `PATH`) exits 0 in about 150 s (doctor 13.2 s, the two nightly reruns 136.2 s) and writes a
@@ -307,8 +307,13 @@ GPU check is never called) and no test or measurement reached a package index (t
 copy of the tree by a slip, disclosed). `configs/maintain/maintain.yaml` (10 pin rules, 6 reruns) is a table of unvalidated priors. D14 found that uv's offline dry run fails for any change here, so the lines
 for an update, an add and a remove were never measured (a second-hand report of one real run is recorded as such and is not a fixture), that the dry run is blind to the 12 of 38 direct dependencies pinned
 with `==` (Eole, CTranslate2, sacrebleu, SentencePiece, torch ...), that a plain `uv run` locks and syncs first (so the workflow uses `--frozen --no-sync`), that the nightly job keeps no log, and that the
-floors have margins of 10 (`numerics`) and 0 (the other four reruns). The combined review of the code has NOT run yet; a follow-up commit will record it (gate 19,818 passed, 1 skipped, 10 deselected
-before it, against 17,852 at the end of D13). The open gates: everything GPU, the real PyPI state and the lines of a real change, GitHub Actions and its minutes budget, every real export, and the D3 to D13 gates.
+floors have margins of 10 (`numerics`) and 0 (the other four reruns). A combined review by one independent reader ran: ready with fixes, no Critical and no Important finding and eleven Minor ones (the dry-run log
+judged from its first 64 KiB; a configured doctor skip that could silence a failure; a guard against self-selection by name only; a nightly manifest saying `<sha>-dirty`; an `--out-dir` that could be any
+project subdirectory; a false reason for the reruns `--rerun` leaves out; children inheriting tokens; the in-process doctor seeing the caller's device; and four more); its fix wave (14 commits,
+`83d09f5..ada92a1`, gate 20,443 passed, 1 skipped, 10 deselected against 19,818 before it and 17,852 at the end of D13, 119 mutants) fixed them and two minors deferred from Task 3 (uv's three elapsed
+spellings, UNMEASURED beyond `1ms`; `the JUnit report could not be read`), and left open on purpose the limits that `docs/runbooks/14_maintenance.md` lists under "Known limits". A scoped re-review of
+the fix wave (one independent reader) approved it with minors: no Critical, no Important, three Minor findings and three Nits; the controller fixed two of the minors in `52b9b3b` (the full gate was NOT run
+again after it and no reader has read it) and left open that the doctor's own `--help` children inherit the whole environment, the upper-case suffix rule for secrets and the guard by name. The open gates: everything GPU, the real PyPI state and the lines of a real change, GitHub Actions and its minutes budget, every real export, and the D3 to D13 gates.
 Next up: D15 (the tiny end-to-end pipeline; D15 decides whether `just tiny` calls `maintain check --no-drift --no-reruns`). See `STATE.md`, `docs/runbooks/14_maintenance.md` and `docs/runbooks/13_release.md`.
 
 ## Evidence and full plan
