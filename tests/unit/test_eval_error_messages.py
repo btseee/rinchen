@@ -1592,6 +1592,27 @@ REVIEWED: Final[tuple[tuple[str, str, str, str], ...]] = (
         "the name of a count metric: `bleu`, `chrf` or `chrf_pp`",
     ),
     (
+        "eval/report_runs.py",
+        "_require_the_scoring_record",
+        "_installed_sacrebleu()",
+        (
+            "the version of the installed sacrebleu package, read from its metadata (or `not "
+            "installed`): a version of a tool, no text of a suite or of a file"
+        ),
+    ),
+    (
+        "eval/report_runs.py",
+        "_require_the_neural_presence",
+        "place",
+        "`the run of the system <id> over the suite <id>, direction <registry codes>`",
+    ),
+    (
+        "eval/report_runs.py",
+        "_require_the_neural_presence",
+        "name",
+        "the name of a neural metric taken from `SEGMENT_SCORE_METRICS`: `comet22`, `metricx24` or `metricx24_qe`",
+    ),
+    (
         "eval/report_read.py",
         "report_from_bytes",
         "error",
@@ -1641,6 +1662,18 @@ REVIEWED: Final[tuple[tuple[str, str, str, str], ...]] = (
         "language",
         "field",
         "a dotted path of the reader: `suites.<index>.source.missing_languages`",
+    ),
+    (
+        "eval/report_read_rules.py",
+        "dataset_or_null",
+        "field",
+        "a dotted path of the reader: `suites.<index>.source.dataset`",
+    ),
+    (
+        "eval/report_read_rules.py",
+        "revision_or_null",
+        "field",
+        "a dotted path of the reader: `suites.<index>.source.revision`",
     ),
     (
         "eval/report_read_sections.py",
