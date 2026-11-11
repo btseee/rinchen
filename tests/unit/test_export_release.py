@@ -38,7 +38,7 @@ from tests.support.release_documents import (
     as_benchmark,
     bound_document,
     view_of,
-    with_a_human_suite,
+    with_a_run_in_another_suite,
     with_the_note_of,
     without_results_of,
 )
@@ -404,8 +404,11 @@ def test_the_evidence_of_a_report_that_is_not_all_fixture_is_measured_or_mixed(
     mixed = release_record(
         release.export.record,
         view_of(
-            with_a_human_suite(
-                bound_document(release.model_sha256, release.manifest_sha256)
+            with_a_run_in_another_suite(
+                bound_document(release.model_sha256, release.manifest_sha256),
+                SYSTEM,
+                name="golden-human",
+                kind="human",
             )
         ),
         SYSTEM,

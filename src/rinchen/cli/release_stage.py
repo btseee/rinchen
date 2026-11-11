@@ -52,7 +52,7 @@ from rinchen.cli.release_stage_output import (
 )
 from rinchen.cli.train_common import require_out_apart_from_inputs
 from rinchen.eval.report_format import evidence_label
-from rinchen.export.model_card import FileFacts, render_card
+from rinchen.export.model_card import FileFacts, render_card, system_evidence
 from rinchen.export.record import EXPORT_FILES
 from rinchen.export.release import (
     check_repo_id,
@@ -142,7 +142,7 @@ def _build(
         inputs=inputs,
         repo_id=repo_id,
         system=system,
-        evidence=evidence_label(loaded.view.evidence.kinds),
+        evidence=evidence_label(system_evidence(loaded.view, system).kinds),
     )
 
 

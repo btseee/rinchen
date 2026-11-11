@@ -33,11 +33,12 @@ from tests.support.release_documents import (
     GOLDEN_MODEL_SHA256,
     GOLDEN_REPORT_SHA256,
     REPO_ID,
+    SYSTEM,
     as_benchmark,
     bound_document,
     report_bytes,
     view_of,
-    with_a_human_suite,
+    with_a_run_in_another_suite,
 )
 from tests.support.release_fixture import (
     NO_SCORER,
@@ -246,8 +247,11 @@ def test_the_banner_of_a_mixed_report_says_that_the_fixture_suites_are_generated
 ) -> None:
     card = card_of(
         record,
-        with_a_human_suite(
-            bound_document(GOLDEN_MODEL_SHA256, GOLDEN_EXPORT_MANIFEST_SHA256)
+        with_a_run_in_another_suite(
+            bound_document(GOLDEN_MODEL_SHA256, GOLDEN_EXPORT_MANIFEST_SHA256),
+            SYSTEM,
+            name="golden-human",
+            kind="human",
         ),
     )
 

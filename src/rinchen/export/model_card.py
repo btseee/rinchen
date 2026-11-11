@@ -12,7 +12,8 @@ results are in the body, labelled, and the model is trained from random initiali
 says. Whether the Hub accepts these values is UNVERIFIED (nothing was run against it).
 
 The honesty rules are those of the sections that carry figures (`rinchen.export.model_card_evaluation`):
-the banner is a function of the evidence, every missing value is `n/a (<reason>)`, no ranking is
+the banner is a function of the evidence of the system the card describes (the kinds of the suites in
+which that system has a result), every missing value is `n/a (<reason>)`, no ranking is
 claimed without its p-value, and the card describes the one system it was asked for. The limits and
 the provenance are `rinchen.export.model_card_notes`'.
 """
@@ -28,6 +29,7 @@ from rinchen.config.languages import known_language_codes
 from rinchen.eval.report_markdown import FIXTURE_BANNER
 from rinchen.eval.report_markdown_cells import plural, table
 from rinchen.eval.report_read import ReportView
+from rinchen.eval.report_view import EvidenceView
 from rinchen.eval.result import DirectionResult
 from rinchen.export.model_card_evaluation import (
     evaluation_section,
@@ -37,7 +39,7 @@ from rinchen.export.model_card_evaluation import (
 from rinchen.export.model_card_notes import limits_section, provenance_section
 from rinchen.export.record import ModelRecord
 
-__all__ = ["HUB_LANGUAGE_CODES", "FileFacts", "render_card"]
+__all__ = ["HUB_LANGUAGE_CODES", "FileFacts", "render_card", "system_evidence"]
 
 _TRADITIONAL_SCRIPT = "mn_Mong"
 # The ISO 639-3 code of each registry language but the traditional script of Mongolian: the registry
@@ -103,9 +105,10 @@ def render_card(
     results = [result for result in report.results if result.system == system]
     if not results:
         raise ValueError(f"the report holds no result of the system {system!r}")
+    evidence = system_evidence(report, system)
     sections = [
-        _front_matter(record, report),
-        [f"# {record.name}", "", f"> {_banner(report, results)}", ""],
+        _front_matter(record, evidence),
+        [f"# {record.name}", "", f"> {_banner(evidence, results)}", ""],
         _what_it_is(record, repo_id),
         _directions(record),
         _files(files),
@@ -123,7 +126,20 @@ def render_card(
     return "\n".join(line for section in sections for line in section) + "\n"
 
 
-def _front_matter(record: ModelRecord, report: ReportView) -> list[str]:
+def system_evidence(report: ReportView, system: str) -> EvidenceView:
+    """The evidence of `system`: the kinds of the suites in which it has a result (a direction
+    that ran), sorted, and whether every one of them is a fixture. The report's own evidence also
+    counts the suites of the other systems, and a card must not borrow from them: a system whose
+    every table is from a fixture suite stays a fixture card when another system of the report
+    was measured on a benchmark."""
+    ran_in = {result.suite for result in report.results if result.system == system}
+    kinds = tuple(
+        sorted({suite.kind for suite in report.suites if suite.name in ran_in})
+    )
+    return EvidenceView(kinds, kinds == ("fixture",))
+
+
+def _front_matter(record: ModelRecord, evidence: EvidenceView) -> list[str]:
     languages = sorted(
         {
             HUB_LANGUAGE_CODES[code]
@@ -131,7 +147,7 @@ def _front_matter(record: ModelRecord, report: ReportView) -> list[str]:
             if code in HUB_LANGUAGE_CODES
         }
     )
-    tags = [*_TAGS, *(["toy"] if report.evidence.fixture_only else [])]
+    tags = [*_TAGS, *(["toy"] if evidence.fixture_only else [])]
     return [
         "---",
         "language:",
@@ -145,8 +161,7 @@ def _front_matter(record: ModelRecord, report: ReportView) -> list[str]:
     ]
 
 
-def _banner(report: ReportView, results: Sequence[DirectionResult]) -> str:
-    evidence = report.evidence
+def _banner(evidence: EvidenceView, results: Sequence[DirectionResult]) -> str:
     if evidence.fixture_only:
         return FIXTURE_BANNER
     kinds = evidence.kinds

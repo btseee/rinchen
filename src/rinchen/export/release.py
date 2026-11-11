@@ -8,7 +8,7 @@ holds the paths of the machine that made it).
 `release.json` (schema `rinchen.release/1`) says what the release is and vouches for the files: the
 repository, the model's name, version, quantization, tag placement and directions, the digests of the
 export (its `model.bin`, its manifest, its SentencePiece model and the checkpoint it came from), the
-digest of the report and the system of it the card describes, the evidence the figures rest on and the
+digest of the report and the system of it the card describes, the evidence that system's figures rest on and the
 size and SHA-256 of every uploaded file but itself. It is sorted JSON with two-space indent and one
 final LF, and holds no timestamp (only manifests have one) and no path: it is uploaded.
 
@@ -30,7 +30,7 @@ from rinchen.eval.report_format import evidence_label
 from rinchen.eval.report_markdown_cells import short
 from rinchen.eval.report_read import ReportView
 from rinchen.eval.robust_suite_rules import is_id
-from rinchen.export.model_card import FileFacts
+from rinchen.export.model_card import FileFacts, system_evidence
 from rinchen.export.record import ModelRecord
 from rinchen.export.verified import VerifiedExport
 
@@ -171,7 +171,7 @@ def release_record(
             "checkpoint": asdict(record.checkpoint),
         },
         "report": {"sha256": report_sha256, "system": system},
-        "evidence": evidence_label(report.evidence.kinds),
+        "evidence": evidence_label(system_evidence(report, system).kinds),
         "files": {
             fact.name: {"bytes": fact.bytes, "sha256": fact.sha256} for fact in files
         },

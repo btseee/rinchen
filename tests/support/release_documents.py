@@ -168,6 +168,31 @@ def with_a_human_suite(document: dict[str, Any]) -> dict[str, Any]:
     return document
 
 
+def with_a_run_in_another_suite(
+    document: dict[str, Any],
+    system: str,
+    *,
+    name: str = "golden-bench",
+    kind: str = "benchmark",
+) -> dict[str, Any]:
+    """A second suite of `kind` in which ONLY `system` has a run, with the results of its first
+    suite (as a copy): the report's evidence now includes `kind`, and so does the evidence of
+    `system` and of no other system."""
+    other = copy.deepcopy(document["suites"][0])
+    other.update(name=name, kind=kind, sha256="8" * 64)
+    other["benchmark"] = "flores_plus" if kind == "benchmark" else name
+    document["suites"].append(other)
+    for result in [r for r in document["results"] if r["system"] == system]:
+        copied = copy.deepcopy(result)
+        copied["suite"] = name
+        copied["provenance"]["suite_sha256"] = "8" * 64
+        document["results"].append(copied)
+    document["runs"].append({"suite": name, "system": system, "run_sha256": "9" * 64})
+    kinds = sorted({suite["kind"] for suite in document["suites"]})
+    document["evidence"] = {"kinds": kinds, "fixture_only": kinds == ["fixture"]}
+    return with_the_note_of(document)
+
+
 def with_a_direction_that_did_not_run(
     document: dict[str, Any], direction: str, state: str, reason: str
 ) -> dict[str, Any]:
@@ -292,6 +317,7 @@ __all__ = [
     "view_of",
     "with_a_direction_that_did_not_run",
     "with_a_human_suite",
+    "with_a_run_in_another_suite",
     "with_comet_scores",
     "with_one_unit",
     "with_robustness",
