@@ -31,6 +31,9 @@ NEVER:
 - `uv run mypy src`
 - `uv run rinchen doctor` (or `just doctor`)
 - `uv run rinchen eval robustness --suite FILE (--model DIR | --hypotheses FILE) --out-dir DIR` (D12: measures numbers, placeholders, names, glossary terms, script purity and a traditional-script source; no threshold, exit 0 whenever it measured; `docs/runbooks/12_robustness.md`)
+- `uv run rinchen eval suite fetch|build|inspect` (D13: `fetch --benchmark B --split S --out-dir DIR (--revision HEX | --unpinned)` is the ONLY network step and was never run; `build --benchmark B|human --from PATH --out-dir DIR` turns local files into a suite file and refuses `khk_Mong` by name; `inspect --suite FILE`)
+- `uv run rinchen eval run --suite FILE --out-dir DIR (--model DIR | --generator NAME | --hypotheses FILE)` and `uv run rinchen eval report --run DIR ... --suite FILE ... --out-dir DIR [--baseline SYSTEM]` (D13: BLEU, chrF and chrF++ with 95 % bootstrap intervals, paired comparisons, `report.json` and `report.md`; they measure and exit 0 whenever they measured; `docs/runbooks/13_release.md`)
+- `uv run rinchen release stage --export DIR --report-dir DIR --system NAME --repo-id ORG/NAME --out-dir DIR` and `uv run rinchen release hub --stage DIR --repo-id ORG/NAME --out-dir DIR [--upload] [--public]` (D13: the staging directory with the model card; `hub` is a DRY RUN unless `--upload`, which needs `HF_TOKEN` in the environment, creates the repository private and was never run)
 
 ## Repo layout
 
@@ -45,6 +48,7 @@ configs/eole/converter{,_tiny}.yaml configs/spm/converter_char.yaml
 configs/eole/{multilingual_tiny,ablation_tiny,multilingual_proxy,ablation_priors}.yaml
 configs/eole/{teacher,teacher_tiny}.yaml configs/eole/{teacher_doc,teacher_doc_tiny}.yaml
 configs/eole/student_{server,edge,tiny}.yaml configs/serve/{tiny,server,edge}.yaml
+configs/eval/{metrics,suites}.yaml
 docker/{Dockerfile.cpu,compose.serve.yaml} .dockerignore
 docs/STACK.md docs/VERIFY.md
 docs/runbooks/00_environment.md docs/runbooks/01_acquisition.md
@@ -52,7 +56,7 @@ docs/runbooks/02_human_testsets.md docs/runbooks/03_tokenizer.md
 docs/runbooks/04_filtering_mining.md docs/runbooks/05_script_converter.md
 docs/runbooks/06_synthetic.md docs/runbooks/07_ablations.md docs/runbooks/08_teacher.md
 docs/runbooks/09_document_level.md docs/runbooks/10_distillation.md
-docs/runbooks/11_serving.md docs/runbooks/12_robustness.md
+docs/runbooks/11_serving.md docs/runbooks/12_robustness.md docs/runbooks/13_release.md
 docs/research/  docs/superpowers/{specs,plans}/
 src/rinchen/{config,manifest,utils,cli,text,lang,split,spm,corpus,filter,mine,script_conv,synth,metrics,eval,serve,export}/
 src/rinchen/acquire/{http,opus,hf,warc,commoncrawl,registry}.py
@@ -77,17 +81,28 @@ src/rinchen/infer/{doc_chunker,source_tokens,script_mask,engine_types,engine,tra
 src/rinchen/serve/{schemas,metrics,batcher,engine,_http,_translate,app}.py src/rinchen/config/serve.py
 src/rinchen/eval/{robust_numbers,robust_placeholders,robust_spans,robust_script,robust_mong,robust_suite,robust_suite_rules}.py
 src/rinchen/eval/{robust_hypotheses,robust_outcomes,robust_sections,robustness,robust_report}.py
+src/rinchen/metrics/{registry,segment_stats}.py src/rinchen/config/eval_{metrics,suites}.py
+src/rinchen/eval/{bootstrap,significance,suite_rules,suites,suite_sources,outputs,systems,runner}.py
+src/rinchen/eval/{segment_scores,scoring,result,run_record,field_rules,robustness_input,targets}.py
+src/rinchen/eval/{report,report_runs,report_view,report_format,report_markdown,report_markdown_cells}.py
+src/rinchen/eval/{report_markdown_scores,report_markdown_notes,report_read,report_read_rules,report_read_sections}.py
+src/rinchen/export/{model_card,model_card_evaluation,model_card_notes,release}.py
+src/rinchen/export/{hub,hub_files,hub_record,hub_scan}.py
 src/rinchen/train/{distill_export,distill_saved_config,distill_teacher,distill_sources}.py src/rinchen/train/export_parity.py
 src/rinchen/train/{distill_shards,distill_generate,distill_corpus,distill_mix,distill_prepare}.py
 src/rinchen/config/ablation.py src/rinchen/cli/{train,train_runs,train_common,train_docify}.py
 src/rinchen/cli/{distill,distill_export,distill_generate,distill_generate_plan,distill_generate_records}.py
 src/rinchen/cli/{distill_prepare,distill_evaluate}.py src/rinchen/cli/{export,export_parity,translate,translate_io,serve}.py
 src/rinchen/cli/{eval,eval_robustness,eval_robustness_plan,eval_robustness_output}.py
+src/rinchen/cli/{eval_suite,eval_suite_files,eval_suite_plan,eval_suite_output}.py
+src/rinchen/cli/{eval_run,eval_run_plan,eval_run_inputs,eval_run_output,eval_systems}.py
+src/rinchen/cli/{eval_report,eval_report_inputs,eval_report_output}.py
+src/rinchen/cli/{release,release_stage,release_stage_inputs,release_stage_output,release_hub,release_hub_output}.py
 src/rinchen/utils/{logged_process,integers}.py
 src/rinchen/errors.py src/rinchen/__init__.py
 tests/ scripts/ plans/ reports/ manifests/
 manifests/ucd_standardized_variants.json
-tests/{unit,property,golden,integration}/ tests/fixtures/{annot,golden,raw,spm,script_conv,robustness}/
+tests/{unit,property,golden,integration}/ tests/fixtures/{annot,golden,raw,spm,script_conv,robustness,eval}/
 tests/support/ (planted corpus and alignments, fake embedders, tiny LID model,
   tiny_converter, stub_runtime, fake_process, script_reference, planted_synth,
   synth_cli, fake_llm_server, shard_files, corpus_rows, eole_train_config, tiny_parallel,
@@ -96,13 +111,15 @@ tests/support/ (planted corpus and alignments, fake embedders, tiny LID model,
   distill_gate_stages, distill_teachers, fake_ct2, planted_kd, planted_student, model_exports, engines,
   error_messages, translate_cli, parity_cli, fake_parity_eole, serve_app, serve_batcher, fake_serve_process,
   docker_files, d11_gate, d11_gate_doc, serving_gate, serving_gate_fixtures, robust_toy, robust_toy_text,
-  robust_suites, robust_gate, robust_golden, robust_cli, robust_suite_documents)
+  robust_suites, robust_gate, robust_golden, robust_cli, robust_suite_documents, no_network, module_imports,
+  eval_golden, eval_fakes, eval_cli, eval_suite_cli, eval_suite_documents, eval_result_documents, eval_report,
+  eval_report_cli, eval_report_golden, eval_toy, eval_gate, release_documents, release_fixture, hub_fakes, hub_stage)
 scripts/build_spm_fixture.py (regenerates tests/fixtures/spm/tiny_corpus)
 scripts/build_script_conv_fixtures.py (reference TSV -> lexicon, golden words, tiny fixture)
 data/{raw,clean,mined,synth,test}/ (gitignored content, tracked dirs)
 vendor/wheels/ (committed binary wheels with no cp314 upstream release)
 vendor/fasttext-wheel-shim/ (pure-Python shim package, see DECISIONS.md)
-.github/workflows/ci.yml
+.github/workflows/{ci,release}.yml
 ```
 
 Note: `data/`, `align/`, and `convert/` under `src/rinchen/` from the old
@@ -249,7 +266,26 @@ scoped re-review of the fix wave approved it with minors (no Critical, no Import
 currency symbol to the number it touches (`$5 $7` against `$7 $5` is exact, `5 $7` against `7 $5` is not), made the surface-exact detail see the layout
 of a date (a copy-through echo is surface-exact on 568 of 960 again) and fixed five minors; the per-row `value_cyrl` supports a ratio-of-mean-sentence-chrF
 PROXY of the retention, not the corpus statistic, and D13's report must embed `robustness_coverage` beside the six-key block.
-Next up: D13 (Final eval and release tooling). See `STATE.md`, `docs/runbooks/11_serving.md` and `docs/runbooks/12_robustness.md`.
+D13 (Final eval and release tooling) is done locally on branch `d13-release`, stacked on `d12-robustness` (cut from it at `1a378d0`; code tip
+`2df73c1`), not merged and not pushed, and no CI run covers it: its STOP gate ("tiny report.md + model card generated; dry-run hub upload (mock)") is met on the
+toy. Through the real `rinchen` binary and the real Eole, CTranslate2, SentencePiece and sacrebleu on the CPU, with no network and no token, the toy export of D12
+(`model.bin` `e28d1566...a6`) and the D11 teacher translate a FLORES-like fixture suite built from the toy; `rinchen eval run`, `eval report`, `release stage` and
+`release hub` (the dry run) write the results, the report, the model card and the nine-file upload plan: chrF++ 97.03, 99.05, 98.97 and 98.38 for the export
+against 36.50, 46.09, 29.30 and 31.67 for the teacher (floors 95.0 and 60.0), the paired difference +60.528, +52.965, +69.668 and +66.707 with p 0.001998,
+identical systems delta 0 with p exactly 1.0, a 5 % perturbation -3.274 to -4.030 with p 0.001998, three reruns byte-equal across hash seeds and locale, and the
+stage and the plan refusing a stray file, a changed byte, a symlink, a token-like line and an absolute path; no floor was lowered. It is an instrument and a release
+tool, not a verdict on a model: D13 measures, builds no mechanism and no neural scorer (COMET and MetricX enter only through a seam of score files; B1 to B4 stay open),
+the toy ranks nothing, no GPU was used (the one on this machine was not authorised; `auto` is refused, `--device cuda` is never run) and no network was used (`rinchen
+eval suite fetch` and `rinchen release hub --upload` were never run; the Hub, FLORES+, NTREX, NLLB, MADLAD, Hy-MT2 and GitHub Actions are unmeasured). D13 found that
+sacrebleu's per-segment statistics are integers and a corpus score is the score of their sums, that four of its tokenizers download a model on first use (the design
+spike's first run did: a disclosed slip), that its paired bootstrap calls a system against itself significant (so D13 has its own exact one), that the engine answers an
+untrained pair with `ok` in the wrong language, that D6's `CT2Translator` is silent about a vocabulary without its family's language tokens, and that
+`create_repo(exist_ok=True)` ignores `private` for an existing repository. A combined review by one reviewer ran: ready with fixes, no Critical finding and five
+Important ones (the report believed a re-digested result file; the card's evidence came from the whole report; flagged output failures and the dataset and revision were
+invisible in `report.md`; private-by-default did not hold for an existing repository); its fix wave (six commits, gate 17,666 passed, 1 skipped, 10 deselected, against
+13,583 at the end of D12) fixed them and eleven Minor findings and left open on purpose the limits that `docs/runbooks/13_release.md` lists under "Known limits". A scoped
+re-review of the fix wave was running when the records were written and its verdict is not recorded.
+Next up: D14 (Maintenance loop). See `STATE.md`, `docs/runbooks/13_release.md` and `docs/runbooks/12_robustness.md`.
 
 ## Evidence and full plan
 

@@ -31,7 +31,7 @@ gate's.
 - **No fine-tuning.** The toy's model is trained from random initialisation, as every Rinchen model; an external model enters only through a hypotheses file, as a system under test.
 - **Departures from the master plan** (`eval/robustness.py`, a robustness block of four keys in `rinchen.eval/1`): the work is split over `rinchen.eval.robust_*` (see "Architecture"); the
   block has SIX keys (amendment C1: `entity_acc` and `mong_source_retention` are added to the master plan's four, because its own D12 item lists the two suites); no `result.json`, no
-  runner over many systems, no significance, no model card (D13); no generic suite builder from real parallel text.
+  runner over many systems, no significance, no model card (D13) [D13: built, `docs/runbooks/13_release.md`: the runner, `result.json`, the paired bootstrap, `report.json` and `report.md`, the card and the Hub upload plan]; no generic suite builder from real parallel text.
 
 Tags used below: **measured** (run for this runbook on 2026-11-10 with the code at `ae4e816`; the drivers are read-only scripts in `scratchpad/d12-t9/`: `train.py`, `measure.py`,
 `vectors.py`, `toy_digest.py`, `example/make.py`), **gate** (printed by `tests/integration/test_robustness_gate.py`, in the run of the fix wave or of Task 8), **spike** (run in the
@@ -364,7 +364,7 @@ rows. `mong_source_retention` 0.9976 (chrF 99.49 over 99.73; 467 of 480 texts eq
 4. **Keep the suite small if it is committed** (the repository's fixtures stay under 2 MB, a single fixture under 50 KB); generate large suites at test time.
 
 D12 builds no generic builder from real parallel text (extract the numbers a source and its reference share, mask them with placeholders, list the capitalised tokens both sides keep): on any set
-without an entity table or a glossary `entity_acc` and `term_acc` are `null` (spec section 6, item 4; D13 decides).
+without an entity table or a glossary `entity_acc` and `term_acc` are `null` (spec section 6, item 4; D13 decides) [D13: it did not build one; the benchmark suites of D13 are translation suites with references and carry no entity table or glossary, so the robustness block of a result always comes from a robustness suite of D12's kind].
 
 ## What to do when a floor is missed
 
@@ -437,14 +437,14 @@ control suites are built from the toy by `tests/support/robust_suites.py` (main 
 
 The metrics are cheaper than the engine (0.04 against 0.11 and 0.23 s per 1,000 rows, ARITHMETIC from the table) and both are negligible next to the toy's training; the spike's prototypes cost about 0.1 s per
 1,000 rows (**spike**), the finished code 0.04 s. UNMEASURED: memory (the command reads the whole suite and all hypotheses; the caps bound the parse, not memory), a suite of tens of
-thousands of rows (one `Engine.translate` call is one batch in memory: D13 chunks if it needs to), a real model, the GPU.
+thousands of rows (one `Engine.translate` call is one batch in memory: D13 chunks if it needs to) [D13: it does not chunk: `rinchen eval run` also makes ONE call per run, so the same limit holds for a suite of tens of thousands of rows], a real model, the GPU.
 
 ## What D13 takes over
 
 The FLORES+ and NTREX suites and the Mongolia-sourced human sets; the runner over systems (Rinchen students and teacher, NLLB, MADLAD, Hy-MT2: their outputs enter through the hypotheses file); `result.json` of
 `rinchen.eval/1` (it embeds `robustness_block` as it is, and `robustness_coverage` beside it: the coverage is not in the block); significance (it reads the per-row `ok`, `value` and `value_cyrl` of `robustness.json`); the Markdown and JSON report (`report.json` of D12 is the
 narrow one: D13 removes `eval/robust_report.py` and the command's `report.json` line or keeps them as a per-suite artefact; `robustness_block`, `robustness.json` and the command stay); the model card and the hub
-upload. D12 leaves room by keeping the metrics pure functions of rows, the runner over a protocol (`translate(rows, options)`), the hypotheses file as the system boundary and the result per row. Left out on
+upload [D13: all of it is built (`docs/runbooks/13_release.md`). `eval/robust_report.py` and the command's narrow `report.json` were KEPT as the per-system artefact and nothing of D12 was renamed or removed; `rinchen eval run --robustness DIR` reads `robustness.json` and the narrow `report.json` and embeds the block UNCHANGED with its `coverage` (`robustness_coverage`) and a record of its source in every result of the system, bound by the model digest or the weaker name; D13's `report.json` is the new `rinchen.report/1`. The per-row `ok`, `value` and `value_cyrl` are NOT used by D13's significance, which bootstraps the benchmark scores only; the proxy of the retention (limit 18) stays a proxy and no interval of the six robustness values is computed. The FLORES+ and NTREX suites, the human sets and a generic builder of robustness suites from real parallel text were not built with real data: UNMEASURED]. D12 leaves room by keeping the metrics pure functions of rows, the runner over a protocol (`translate(rows, options)`), the hypotheses file as the system boundary and the result per row. Left out on
 purpose: a generic builder of suites from real parallel text, a repair policy, a `--min-*` threshold, per-language conventions beyond the table, entity extraction without a table, number words, document-level
 suites, and a `terminology` request field.
 

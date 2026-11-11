@@ -45,7 +45,7 @@ real CTranslate2 on the CPU, on the templated toy sentences of `tests/support/ti
   `docs/runbooks/12_robustness.md`) and builds no mechanism, so the two modules and the field stay unbuilt, with no owner, and the request schema keeps
   refusing `terminology`; this amends the sentence above and the spec's T22]; no `preprocess`, `postprocess` or `batching` module (the steps are inline in the engine and the
   batcher is `serve/batcher.py`); no rate limiting by client, no authentication, no hot reload, no multi-model server (a gateway in
-  front is assumed); no `export/model_card.py` or `export/hub.py` (D13).
+  front is assumed); no `export/model_card.py` or `export/hub.py` (D13) [D13: built, `docs/runbooks/13_release.md`: `export/model_card.py`, `release.py` and `hub.py` render the card from a report and plan the upload (a dry run by default; a real upload was never run), and `rinchen release stage|hub` stage and plan it].
 
 Tags used below: **measured** (run for this runbook on 2026-11-10, code `4bfaa5e`, or by a gate; the numbers the final wave moved were measured again at `039d1d7`), **spike** (run in the design spike,
 on the CPU), **source-read** (read from the source of an installed package, never run), **ARITHMETIC** (a formula applied to values
@@ -1061,7 +1061,7 @@ explicit authorisation.
 3. **Quantise** and measure the cost: `--quantization int8` (CPU) or `int8_float16` (GPU, unmeasured), on the same checkpoint; translate the dev sources of the corpus with
    `rinchen translate --format jsonl` or `rinchen.Translator` and score them (`rinchen.metrics.bleu_chrf.corpus_scores`) against float32: the gate is a drop of at most 1.0 chrF; no
    command scores an export for that yet (D12 and D13 will) [D12: `rinchen eval robustness` scores an export for numbers, placeholders, names, glossary terms, script purity and a
-   traditional-script source; it does not score chrF or the int8 drop: D13]. UNMEASURED: the real int8 loss, the file's share of float32 (29 % on a 6/6 d512 random-init model, 73 % on the toy), the speed.
+   traditional-script source; it does not score chrF or the int8 drop: D13] [D13: `rinchen eval run --model DIR --suite FILE` scores an export with chrF++, chrF and BLEU and 95 % intervals, and `rinchen eval report --baseline` can compare two exports (the int8 export against the float32 one, as two systems with their own names) with a paired bootstrap whose verdict is the p-value; the design spike did it with its prototype on the toy and float32 against int8 gave p 0.1079 to 0.4476 with intervals touching zero, which ranks nothing; a real int8 loss is UNMEASURED]. UNMEASURED: the real int8 loss, the file's share of float32 (29 % on a 6/6 d512 random-init model, 73 % on the toy), the speed.
 4. **Choose the script mode**: keep `retry`; read the engine counters (`script_retries`, `script_retry_improved`, `script_impure` in the `counters:` line of `rinchen translate` and in
    `rinchen_engine_events_total`) over real requests, compare `always`, and calibrate the purity floor 0.98 and the policy for the eight other languages (the registry's) on
    real text. UNMEASURED: whether a hard mask helps or hurts, the loss of a legitimate Latin name in Cyrillic output under `always`, the cost of a 30,000-entry list per call.
