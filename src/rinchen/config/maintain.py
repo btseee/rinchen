@@ -86,7 +86,7 @@ def _checked_target(path: str) -> str:
     folded = unicodedata.normalize("NFKC", path).casefold()
     if any(_FORBIDDEN_IN_TARGET in part for part in folded.split("/")):
         raise ValueError("must not name a test of the maintenance check itself")
-    if path in DIRECTORIES_WITH_MAINTENANCE_TESTS:
+    if folded in DIRECTORIES_WITH_MAINTENANCE_TESTS:
         raise ValueError(
             f"must be a file or a narrower directory: {path} holds tests of the "
             "maintenance check itself"

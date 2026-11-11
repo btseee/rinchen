@@ -64,6 +64,11 @@ _DOCUMENTS: Final = (REPORT_FILE, SUMMARY_FILE)
 _SUBDIRECTORIES: Final = (LOGS_DIR, JUNIT_DIR, PARITY_DIR)
 # The top-level names of an output directory that this command writes.
 _OWN_ENTRIES: Final = (*_DOCUMENTS, store.manifest_path(Path()).name, *_SUBDIRECTORIES)
+# A run that is killed while it writes a file leaves `<name>.<hex>.part` beside it.
+_PART_HINT: Final = (
+    "; an entry ending in .part is left by a run that was killed while it wrote: "
+    "delete it"
+)
 _UV_VERSION: Final = re.compile(r"uv ([0-9][0-9A-Za-z.+-]{0,31})(?: .*)?")
 
 
@@ -91,13 +96,16 @@ def require_only_own_entries(out_dir: Path) -> None:
     """
     if not out_dir.is_dir():
         return
-    others = sum(1 for entry in out_dir.iterdir() if entry.name not in _OWN_ENTRIES)
+    others = [
+        entry.name for entry in out_dir.iterdir() if entry.name not in _OWN_ENTRIES
+    ]
     if others:
         raise ConfigError(
-            f"--out-dir {out_dir} holds {others} {'entry' if others == 1 else 'entries'} "
+            f"--out-dir {out_dir} holds {len(others)} "
+            f"{'entry' if len(others) == 1 else 'entries'} "
             f"that this command does not write (it writes only {', '.join(_OWN_ENTRIES)} "
             "there); pass an empty directory, one that does not exist yet or the one an "
-            "earlier run wrote"
+            f"earlier run wrote{_PART_HINT if any(name.endswith('.part') for name in others) else ''}"
         )
 
 

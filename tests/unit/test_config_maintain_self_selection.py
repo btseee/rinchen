@@ -140,6 +140,24 @@ def test_a_directory_that_holds_maintenance_tests_is_refused_and_the_message_say
 @pytest.mark.parametrize(
     "target",
     [
+        "tests/UNIT",
+        "tests/Unit",
+        "tests/Integration",
+        "tests/PROPERTY",
+        "tests/" + "".join(chr(0xFF00 + ord(letter) - 0x20) for letter in "UNIT"),
+    ],
+)
+def test_the_closed_list_of_directories_is_compared_on_the_folded_spelling(
+    target: str,
+) -> None:
+    """On a file system that ignores case, `tests/Unit` is `tests/unit`: the list is compared
+    like the name check beside it (NFKC, then casefold)."""
+    assert "holds tests of the maintenance check" in refusal_of(target)
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
         "tests/unit/sub",
         "tests/integration/sub",
         "tests/property/sub",

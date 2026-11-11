@@ -86,6 +86,37 @@ def test_a_directory_with_one_foreign_file_is_refused_and_the_message_counts_it(
     assert CANARY not in message
 
 
+def test_a_part_file_left_by_a_killed_run_is_refused_and_the_message_says_what_it_is(
+    ws: Workspace, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A run killed while it wrote leaves `<name>.<hex>.part`: the directory an earlier run wrote
+    is then refused, and the message must say why (it names no file)."""
+    out = tmp_path / "other"
+    out.mkdir()
+    (out / "logs").mkdir()
+    (out / f"manifest.json.{CANARY}.part").write_text("half")
+
+    message = refused(ws, monkeypatch, out)
+
+    assert "1 entry" in message
+    assert ".part" in message
+    assert "killed" in message
+    assert CANARY not in message
+
+
+def test_the_message_names_a_part_file_only_when_the_directory_holds_one(
+    ws: Workspace, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    out = tmp_path / "other"
+    out.mkdir()
+    (out / "a.txt").write_text("a")
+
+    message = refused(ws, monkeypatch, out)
+
+    assert ".part" not in message
+    assert "killed" not in message
+
+
 def test_a_foreign_directory_counts_as_an_entry_and_the_count_is_of_all_of_them(
     ws: Workspace, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
