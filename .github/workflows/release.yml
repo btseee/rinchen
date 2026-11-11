@@ -1,0 +1,52 @@
+name: Release
+
+# A tag starts the checks and the build of a release. Nothing here uploads: the upload to the Hub is
+# an operator's command from the machine that holds the model (docs/runbooks/13_release.md). This
+# workflow only proves, over a fabricated release, that the dry run lists the files it should.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  verify-and-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.3.3
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
+      - name: Install just
+        uses: extractions/setup-just@v4
+
+      - name: Sync dependencies
+        run: uv sync --frozen --group dev
+
+      - name: Gate (ruff format, ruff check, mypy, fast tests)
+        run: just gate
+
+      - name: Doctor (environment checks must all pass or skip, never fail)
+        run: just doctor
+
+      - name: Build the distributions
+        run: uv build
+
+      - name: Dry run of the Hub upload over a fabricated release
+        run: uv run pytest tests/integration/test_release_dry_run.py -q
+
+      - name: Keep the distributions
+        uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error

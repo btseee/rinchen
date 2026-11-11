@@ -383,6 +383,67 @@ REVIEWED: Final[tuple[tuple[str, str, str, str], ...]] = (
         "short(expected)",
         "the first twelve hexadecimal digits of the digest of the export's file",
     ),
+    # ---- cli/release_hub*.py and export/hub.py (Task 10) ----
+    (
+        "cli/release_hub.py",
+        "_stage_manifest",
+        "stage",
+        OPERATOR_PATH,
+    ),
+    ("cli/release_hub.py", "_stage_manifest", "RELEASE_STAGE", CONSTANT),
+    ("cli/release_hub.py", "_stage_manifest", "_STATUS_KEY", CONSTANT),
+    ("cli/release_hub.py", "_require_the_nine_listed", "stage", OPERATOR_PATH),
+    (
+        "cli/release_hub.py",
+        "_require_the_nine_listed",
+        "name",
+        "one of the nine names of `UPLOAD_NAMES`, a constant of `rinchen.export.release`",
+    ),
+    ("cli/release_hub.py", "_require_the_plan_vouched_for", "stage", OPERATOR_PATH),
+    (
+        "cli/release_hub.py",
+        "_require_the_plan_vouched_for",
+        "name",
+        "one of the nine names of the plan, which `plan_upload` built from `UPLOAD_NAMES`",
+    ),
+    ("cli/release_hub_output.py", "commit", "target", OPERATOR_PATH),
+    ("cli/release_hub_output.py", "commit", "exc", OS_ERROR),
+    ("cli/release_hub_output.py", "commit", "_OUTPUTS", CONSTANT),
+    ("cli/release_hub_output.py", "refuse_to_erase_an_upload", "target", OPERATOR_PATH),
+    ("export/hub_files.py", "read_stage", "stage", OPERATOR_PATH),
+    (
+        "export/hub.py",
+        "_refuse",
+        "'; '.join(shown_problems)",
+        (
+            "`name (kind)` for each file at fault: the name of a file of the upload as it is, any "
+            "other name escaped and cut to 80 characters (a name on the operator's disk, never a "
+            "text a file holds), and a kind that is a constant of the module"
+        ),
+    ),
+    (
+        "export/hub.py",
+        "_require_unchanged",
+        "file.name",
+        "one of the nine names of the plan, which `plan_upload` built from `UPLOAD_NAMES`",
+    ),
+    ("export/hub.py", "_name_of_the_model", "RELEASE_FILE", CONSTANT),
+    (
+        "export/hub.py",
+        "_name_of_the_model",
+        "error.detail",
+        (
+            "the place of a field of `release.json` that is not a record's: a fixed phrase or "
+            "`field 'x'`, where x is a key of the schema or a file name escaped and cut"
+        ),
+    ),
+    (
+        "export/hub.py",
+        "_through_the_client",
+        "failure",
+        "a literal sentence that the caller gave: the Hub refused the repository or the upload",
+    ),
+    ("export/hub.py", "_through_the_client", "refused", UPSTREAM_CLASS),
 )
 
 
@@ -405,9 +466,24 @@ def run_paths() -> list[Path]:
     return [*sorted(CLI.glob("eval_run*.py")), CLI / "eval_systems.py"]
 
 
+def hub_paths() -> list[Path]:
+    """The modules of the Hub upload: the plan and the scan of its text files (`export/hub*.py`)
+    and the command (`cli/release_hub*.py`). They are not in `scanned_paths`: the command reads
+    `HF_TOKEN` from the environment on the `--upload` path and the plan takes and passes a token, so
+    the environment scan below is narrower for them (`hub_command_paths`)."""
+    return [
+        *sorted((SOURCE_ROOT / "export").glob("hub*.py")),
+        *sorted(CLI.glob("release_hub*.py")),
+    ]
+
+
+def hub_command_paths() -> list[Path]:
+    return [path for path in hub_paths() if path.parent == CLI]
+
+
 def scanned() -> list[Finding]:
     found: list[Finding] = []
-    for path in [*scanned_paths(), *run_paths()]:
+    for path in [*scanned_paths(), *run_paths(), *hub_paths()]:
         relative = path.relative_to(SOURCE_ROOT).as_posix()
         found += interpolations(path.read_text(encoding="utf-8"), relative, names=NAMES)
     return found
@@ -544,6 +620,59 @@ def code_names(path: Path) -> set[str]:
         ):
             found.add(node.value)
     return found
+
+
+def test_the_scan_covers_the_modules_of_the_hub_upload() -> None:
+    covered = {path.relative_to(SOURCE_ROOT).as_posix() for path in hub_paths()}
+
+    assert {
+        "export/hub.py",
+        "export/hub_files.py",
+        "export/hub_record.py",
+        "export/hub_scan.py",
+        "cli/release_hub.py",
+        "cli/release_hub_output.py",
+    } <= covered
+
+
+@pytest.mark.parametrize("path", hub_command_paths(), ids=lambda path: path.name)
+def test_the_hub_command_never_logs_in_and_never_looks_for_a_token_file(
+    path: Path,
+) -> None:
+    # `release_hub.py` reads `HF_TOKEN` on the `--upload` path and so names the variable, the
+    # environment and a token: those are checked by `test_export_hub_layering.py` (the environment is
+    # read in one function). What it must never do is ask the library to log in or look for the
+    # library's home or its stored token. (The manifest of an upload names the package, to record
+    # its version; the layering test checks that nothing imports it here.)
+    forbidden = ("login", "hf_home", "get_token", "hffolder", "whoami")
+
+    names = {name.lower() for name in code_names(path)}
+
+    assert [
+        name for name in sorted(names) if any(word in name for word in forbidden)
+    ] == []
+
+
+@pytest.mark.parametrize("path", hub_command_paths(), ids=lambda path: path.name)
+def test_the_hub_command_modules_read_the_environment_only_where_the_token_is_asked_for(
+    path: Path,
+) -> None:
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    readers = sorted(
+        function.name
+        for function in ast.walk(tree)
+        if isinstance(function, ast.FunctionDef)
+        and any(
+            isinstance(node, ast.Attribute | ast.Name)
+            and (getattr(node, "attr", None) or getattr(node, "id", None))
+            in ("environ", "getenv", "environb")
+            for node in ast.walk(function)
+        )
+    )
+
+    assert readers == (
+        ["token_from_environment"] if path.name == "release_hub.py" else []
+    )
 
 
 @pytest.mark.parametrize("path", scanned_paths(), ids=lambda path: path.name)

@@ -77,13 +77,18 @@ def test_the_export_package_imports_nothing_of_the_layers_above_it() -> None:
 
 def test_the_export_package_holds_no_other_module() -> None:
     # D11 added the record, its reader, quantisation and `convert` beside the converter call; D13
-    # added the model card (and the modules that render its sections) and the release record.
+    # added the model card (and the modules that render its sections), the release record
+    # and the Hub upload plan (`hub.py`, the reading of the stage, of its record and the scan of its text files).
     package = Path(eole_ct2.__file__).parent
 
     assert sorted(path.name for path in package.glob("*.py")) == [
         "__init__.py",
         "ct2.py",
         "eole_ct2.py",
+        "hub.py",
+        "hub_files.py",
+        "hub_record.py",
+        "hub_scan.py",
         "model_card.py",
         "model_card_evaluation.py",
         "model_card_notes.py",

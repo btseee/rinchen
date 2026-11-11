@@ -63,6 +63,8 @@ COMMAND_MODULES = [
     CLI / "release_stage.py",
     CLI / "release_stage_inputs.py",
     CLI / "release_stage_output.py",
+    CLI / "release_hub.py",
+    CLI / "release_hub_output.py",
 ]
 COMMAND_FORBIDDEN_LAYERS = (
     "rinchen.train",
