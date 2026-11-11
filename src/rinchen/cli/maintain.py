@@ -160,7 +160,7 @@ def check_command(
         Path | None,
         typer.Option(
             "--uv",
-            help="The uv program. Default: the one on PATH (the variable UV is not read).",
+            help="The uv program, as a path: `--uv uv` means `<cwd>/uv`, not the one on PATH. Default: the one on PATH (the variable UV is not read).",
         ),
     ] = None,
     no_drift: Annotated[

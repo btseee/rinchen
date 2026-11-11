@@ -14,7 +14,7 @@ these runs rely on, is pinned in `tests/unit/test_fake_uv.py`):
     R7  the reruns through the real pytest: a failing test is `fail` (`1 failed and 0 errors`), an erroring
         one too, a selection with fewer passing tests than its floor is `fail`, a skipping test with no skips
         allowed is `fail`, an empty target (pytest exit 5) is `fail` and never `ok`, a rerun that runs past
-        its bound is `fail` (`timed out after 3 s`) within 10 s and the process it started is gone; a
+        its bound is `fail` (`timed out after 20 s`) within 10 s and the process it started is gone; a
         passing rerun sees the device hidden and the Hub offline; every other step is still reported and the
         exit is 4
     R8  the drift: random text, the measured offline failure, a sample whose old version disagrees with the
@@ -35,7 +35,7 @@ Measured on this machine (CPU, 2026-11-11):
     R7     seven reruns in one run (about 15 s with the doctor): `1 failed and 0 errors`, `0 failed and 1
            errors`, `2 passed, fewer than the floor 3`, `1 skipped, more than the allowed 0`, `0 passed,
            fewer than the floor 1` (pytest exit 5), the passing ones `ok` with 2 passed and with the device
-           hidden; the 3 s bound: `timed out after 3 s`, the reruns step ends within 10 s of it and both pids
+           hidden; the bound (3 s then): `timed out after 3 s`, the reruns step ends within 10 s of it and both pids
            of the sleeping test are gone
     R8     each drift run 13 s (the doctor): `lines this version does not recognise` for the random text,
            `uv exited with code 1`, `differs from uv.lock for 1 packages`; the no-change text `ok`
@@ -129,7 +129,8 @@ NO_SUCH_UV = "/nonexistent/uv"
 SHIM_TIMEOUT_SECONDS = 30
 RANDOM_TEXT = "zxqv plmk 3817\nwoeiru ytqp 20 jjj\n\nkk\n"
 DISAGREEING_SAMPLE = CHANGES_HAND_WRITTEN.replace("numpy v2.5.4", "numpy v2.5.3")
-SLEEP_BOUND_SECONDS = 3
+# Not 3 s: under load (average 18) a pytest start can outlast it and the sleeping test would die before its pids.
+SLEEP_BOUND_SECONDS = 20
 SLEEP_GRACE_SECONDS = 10
 INTERRUPT_WAIT_SECONDS = 150
 
@@ -263,6 +264,9 @@ def test_an_empty_target_is_a_failure_and_never_a_pass(outcomes: ScratchRun) -> 
 def test_a_passing_rerun_passes_and_sees_the_device_hidden_and_the_hub_offline(
     outcomes: ScratchRun,
 ) -> None:
+    """`hidden` cannot fail by itself: the gate's own environment already hides the device. The real
+    control is in the unit tests (`test_maintain_commands.py`, the hidden switches win over the
+    parent's; `test_maintain_junit.py`, a rerun started with the device visible hides it)."""
     passes = rerun_item(outcomes.report, "passes")
 
     assert _outcome(outcomes, "passes") == ("ok", None)
@@ -320,7 +324,7 @@ def test_a_rerun_that_runs_past_its_bound_fails_within_ten_seconds_of_it(
     seconds = read_manifest(sleeper.out_dir)["metrics"]["seconds.reruns"]
 
     assert sleeper.invocation.returncode == 4, sleeper.invocation.stderr
-    assert _outcome(sleeper, "sleeper") == ("fail", "timed out after 3 s")
+    assert _outcome(sleeper, "sleeper") == ("fail", "timed out after 20 s")
     assert SLEEP_BOUND_SECONDS <= seconds < SLEEP_BOUND_SECONDS + SLEEP_GRACE_SECONDS
 
 

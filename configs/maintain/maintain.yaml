@@ -14,7 +14,9 @@
 #   --check, repeats a flag, or lacks --dry-run (here) or --check (lock_check).
 # rules: the first rule that names a package (or a prefix with a final *) labels its row
 #   `blocked`; `requires` names the reruns (and `gate`, the full local gate) that must be green
-#   before the package is taken. `torch-*` covers torch-cuda and not torchvision.
+#   before the package is taken. `torch-*` covers torch-cuda and not torchvision. The rule is
+#   deliberately a prefix and over-labels (torch-optimi is `blocked` too): `blocked` only says
+#   which reruns to make before the package is taken, so over-labelling is the safe side.
 # reruns: `pytest` reruns the tests of `targets` and fails when fewer than `min_passed` pass or
 #   more than `max_skipped` are skipped; `export_parity` runs the parity command over an export
 #   the operator gives. A rerun never selects a test of the maintenance check itself.

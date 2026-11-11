@@ -95,6 +95,19 @@ def test_the_check_help_lists_every_option() -> None:
         assert option in result.output, option
 
 
+def test_the_uv_option_says_a_bare_name_means_the_current_directory() -> None:
+    result = CliRunner().invoke(
+        app, ["maintain", "check", "--help"], terminal_width=200
+    )
+
+    text = " ".join(
+        result.output.replace("\u2502", " ").split()
+    )  # the help is a boxed table
+    assert result.exit_code == 0
+    assert "`--uv uv` means `<cwd>/uv`, not the one on PATH" in text
+    assert "the variable UV is not read" in text
+
+
 def test_the_check_help_says_what_the_exit_codes_are() -> None:
     result = CliRunner().invoke(
         app, ["maintain", "check", "--help"], terminal_width=200
