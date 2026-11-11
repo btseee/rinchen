@@ -1,11 +1,13 @@
 """What the strict reader of the report of D13 shares between its parts (`rinchen.eval.report_read`):
-the names of the suite format it keeps its own copy of (a card never needs the module that reads a
-suite; a test pins them equal to `rinchen.eval.suite_rules`'), the systems and suites a report lists
-(which every entry elsewhere must name) and the small checks of a list, a text and a number. A refusal
-names a dotted field path the reader built (`runs.0.system`) and never quotes a value or a key."""
+the names and the dataset and revision patterns of the suite format it keeps its own copy of (a card
+never needs the module that reads a suite; a test pins them equal to `rinchen.eval.suite_rules`'),
+the systems and suites a report lists (which every entry elsewhere must name) and the small checks of
+a list, a dataset, a revision and a number. A refusal names a dotted field path the reader built
+(`runs.0.system`) and never quotes a value or a key."""
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from typing import Any, Final, get_args
 
@@ -14,7 +16,6 @@ from rinchen.eval.field_rules import (
     problem,
     require_direction,
     require_number,
-    require_text,
 )
 from rinchen.eval.report_format import ABSENT_STATE
 from rinchen.eval.report_view import SuiteView
@@ -22,15 +23,18 @@ from rinchen.eval.systems import DirectionState
 
 __all__ = [
     "COVERAGE_STATES",
+    "DATASET_PATTERN",
     "PURPOSES",
+    "REVISION_PATTERN",
     "SPLITS",
     "SUITE_KINDS",
     "SYSTEM_KINDS",
     "Names",
+    "dataset_or_null",
     "items",
     "language",
     "number_or_null",
-    "text_or_null",
+    "revision_or_null",
 ]
 
 # The names of the suite format, as `rinchen.eval.suite_rules` has them (a test pins them equal).
@@ -38,6 +42,10 @@ SUITE_KINDS: Final = ("benchmark", "human", "fixture")
 SPLITS: Final = ("dev", "devtest", "test")
 PURPOSES: Final = ("selection", "report")
 SYSTEM_KINDS: Final = ("rinchen", "baseline", "hypotheses")
+# The patterns of a suite's `dataset` and `revision`, as `rinchen.eval.suite_rules` has them (a test
+# pins them equal): a report can hold no other text there, so none reaches a table or a listing.
+DATASET_PATTERN: Final = re.compile(r"[A-Za-z0-9._/-]{1,200}")
+REVISION_PATTERN: Final = re.compile(r"[0-9a-f]{40}")
 COVERAGE_STATES: Final = (*get_args(DirectionState), ABSENT_STATE)
 
 
@@ -77,8 +85,26 @@ def items(raw: object, field: str) -> list[Any]:
     return raw
 
 
-def text_or_null(raw: object, field: str) -> str | None:
-    return None if raw is None else require_text(raw, field)
+def dataset_or_null(raw: object, field: str) -> str | None:
+    """A dataset id of the Hub, as a suite file holds one, or null."""
+    if raw is not None and not (
+        isinstance(raw, str) and DATASET_PATTERN.fullmatch(raw)
+    ):
+        raise problem(
+            field,
+            "must be a dataset id of the Hub (letters, digits, '.', '_', '-' and '/', "
+            "at most 200 characters) or null",
+        )
+    return raw
+
+
+def revision_or_null(raw: object, field: str) -> str | None:
+    """A revision of 40 lowercase hexadecimal characters, as a suite file holds one, or null."""
+    if raw is not None and not (
+        isinstance(raw, str) and REVISION_PATTERN.fullmatch(raw)
+    ):
+        raise problem(field, "must be 40 lowercase hexadecimal characters or null")
+    return raw
 
 
 def number_or_null(raw: object, field: str) -> float | int | None:

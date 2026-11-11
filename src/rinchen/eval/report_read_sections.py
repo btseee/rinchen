@@ -27,9 +27,10 @@ from rinchen.eval.report_read_rules import (
     SUITE_KINDS,
     SYSTEM_KINDS,
     Names,
+    dataset_or_null,
     items,
     language,
-    text_or_null,
+    revision_or_null,
 )
 from rinchen.eval.report_view import (
     CoverageView,
@@ -174,8 +175,8 @@ def _suite_source(raw: object, field: str) -> SuiteSourceView:
         for code in items(fields["missing_languages"], f"{field}.missing_languages")
     )
     return SuiteSourceView(
-        text_or_null(fields["dataset"], f"{field}.dataset"),
-        text_or_null(fields["revision"], f"{field}.revision"),
+        dataset_or_null(fields["dataset"], f"{field}.dataset"),
+        revision_or_null(fields["revision"], f"{field}.revision"),
         require_flag(fields["pinned"], f"{field}.pinned"),
         missing,
     )

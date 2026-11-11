@@ -112,9 +112,10 @@ def source_cells(
     a local directory)."""
     if dataset is None:
         return NO_SOURCE_RECORD, NO_SOURCE_RECORD
+    shown = inline(dataset)
     if revision is None:
-        return dataset, UNPINNED
-    return dataset, revision if pinned else f"{revision} ({UNPINNED})"
+        return shown, UNPINNED
+    return shown, inline(revision if pinned else f"{revision} ({UNPINNED})")
 
 
 def verdict(
