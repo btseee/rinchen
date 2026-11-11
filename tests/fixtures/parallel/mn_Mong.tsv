@@ -1,0 +1,71 @@
+id	split	kind	mn_Mong	khk_Cyrl	eng_Latn
+mm-0001	train	base	ᠭᠣᠣᠯ᠂ ᠴᠣᠩᠬᠤ ᠪᠠ ᠮᠣᠳ᠃	Гол, цонх ба мод.	The river, the window and the tree.
+mm-0002	train	base	ᠡᠭᠡᠵᠢ ᠪᠠ ᠴᠠᠰ᠃	Ээж ба цас.	The mother and the snow.
+mm-0003	train	base	ᠰᠦᠭᠦ᠂ ᠳᠡᠯᠭᠡᠭᠦᠷ ᠪᠠ ᠪᠣᠷᠤᠭᠤ᠃	Сүү, дэлгүүр ба бороо.	The milk, the shop and the rain.
+mm-0004	train	base	ᠠᠯᠢᠮ ᠪᠠ ᠱᠤᠪᠤᠭᠤ᠃	Алим ба шувуу.	The apple and the bird.
+mm-0005	train	base	ᠬᠠᠭᠠᠯᠭᠠ ᠬᠠᠮᠢᠭ᠎ᠠ ᠪᠠᠢᠨᠠ ᠪᠤᠢ?	Хаалга хаана байна вэ?	Where is the door?
+mm-0006	train	base	ᠡᠨᠡ ᠪᠣᠯ ᠰᠠᠷ᠃	Энэ бол сар.	This is the moon.
+mm-0007	train	base	ᠥᠳᠦᠷ᠂ ᠬᠣᠲᠠ ᠪᠠ ᠬᠦᠮᠦᠨ᠃	Өдөр, хот ба хүн.	The day, the city and the person.
+mm-0008	train	base	ᠲᠡᠨᠳ ᠴᠡᠴᠡᠭ ᠪᠠᠢᠨᠠ᠃	Тэнд цэцэг байна.	The flower is there.
+mm-0009	train	base	ᠨᠣᠬᠠᠢ ᠡᠨᠳ᠋ᠡ ᠪᠠᠢᠨᠠ᠃	Нохой энд байна.	The dog is here.
+mm-0010	train	base	ᠮᠣᠷᠢ ᠪᠠ ᠬᠣᠲᠠ᠃	Морь ба хот.	The horse and the city.
+mm-0011	train	base	ᠡᠨᠡ ᠪᠣᠯ ᠭᠡᠷ᠃	Энэ бол гэр.	This is the home.
+mm-0012	train	base	ᠴᠡᠴᠡᠭ ᠬᠠᠮᠢᠭ᠎ᠠ ᠪᠠᠢᠨᠠ ᠪᠤᠢ?	Цэцэг хаана байна вэ?	Where is the flower?
+mm-0013	train	base	ᠪᠣᠷᠤᠭᠤ ᠡᠨᠳ᠋ᠡ ᠪᠠᠢᠨᠠ᠃	Бороо энд байна.	The rain is here.
+mm-0014	train	base	ᠴᠣᠩᠬᠤ ᠬᠠᠮᠢᠭ᠎ᠠ ᠪᠠᠢᠨᠠ ᠪᠤᠢ?	Цонх хаана байна вэ?	Where is the window?
+mm-0015	train	base	ᠭᠠᠷ᠂ ᠰᠠᠨᠳᠠᠯ ᠪᠠ ᠱᠢᠷᠡᠭᠡ᠃	Гар, сандал ба ширээ.	The hand, the chair and the table.
+mm-0016	train	base	ᠰᠤᠷᠭᠤᠭᠤᠯᠢ᠂ ᠪᠣᠷᠤᠭᠤ ᠪᠠ ᠲᠠᠯᠬ᠎ᠠ᠃	Сургууль, бороо ба талх.	The school, the rain and the bread.
+mm-0017	train	base	ᠰᠠᠯᠬᠢ᠂ ᠨᠠᠷᠠ ᠪᠠ ᠴᠠᠢ᠃	Салхи, нар ба цай.	The wind, the sun and the tea.
+mm-0018	train	base	ᠮᠣᠳ᠂ ᠪᠠᠭᠱ ᠪᠠ ᠱᠢᠷᠡᠭᠡ᠃	Мод, багш ба ширээ.	The tree, the teacher and the table.
+mm-0019	train	base	ᠱᠤᠪᠤᠭᠤ᠂ ᠠᠪᠤ ᠪᠠ ᠳᠡᠯᠭᠡᠭᠦᠷ᠃	Шувуу, аав ба дэлгүүр.	The bird, the father and the shop.
+mm-0020	train	base	ᠡᠨᠡ ᠪᠣᠯ ᠰᠦᠭᠦ᠃	Энэ бол сүү.	This is the milk.
+mm-0021	train	base	ᠲᠡᠨᠳ ᠰᠠᠨᠳᠠᠯ ᠪᠠᠢᠨᠠ᠃	Тэнд сандал байна.	The chair is there.
+mm-0022	train	base	ᠴᠠᠢ ᠬᠠᠮᠢᠭ᠎ᠠ ᠪᠠᠢᠨᠠ ᠪᠤᠢ?	Цай хаана байна вэ?	Where is the tea?
+mm-0023	train	base	ᠵᠠᠮ ᠬᠠᠮᠢᠭ᠎ᠠ ᠪᠠᠢᠨᠠ ᠪᠤᠢ?	Зам хаана байна вэ?	Where is the road?
+mm-0024	train	base	ᠡᠨᠡ ᠪᠣᠯ ᠱᠢᠷᠡᠭᠡ᠃	Энэ бол ширээ.	This is the table.
+mm-0025	train	base	ᠲᠡᠨᠳ ᠵᠢᠭᠠᠰᠤ ᠪᠠᠢᠨᠠ᠃	Тэнд загас байна.	The fish is there.
+mm-0026	train	base	ᠴᠠᠰ ᠡᠨᠳ᠋ᠡ ᠪᠠᠢᠨᠠ᠃	Цас энд байна.	The snow is here.
+mm-0027	train	base	ᠭᠠᠷ ᠡᠨᠳ᠋ᠡ ᠪᠠᠢᠨᠠ᠃	Гар энд байна.	The hand is here.
+mm-0028	train	base	ᠮᠠᠱᠢᠨ᠂ ᠰᠠᠷ ᠪᠠ ᠬᠠᠭᠠᠯᠭᠠ᠃	Машин, сар ба хаалга.	The car, the moon and the door.
+mm-0029	train	base	ᠵᠠᠮ ᠡᠨᠳ᠋ᠡ ᠪᠠᠢᠨᠠ᠃	Зам энд байна.	The road is here.
+mm-0030	train	base	ᠲᠡᠨᠳ ᠤᠭᠤᠯ ᠪᠠᠢᠨᠠ᠃	Тэнд уул байна.	The mountain is there.
+mm-0031	train	base	ᠪᠠᠭᠱ ᠪᠠ ᠤᠰ᠃	Багш ба ус.	The teacher and the water.
+mm-0032	train	base	ᠲᠠᠯᠬ᠎ᠠ ᠬᠠᠮᠢᠭ᠎ᠠ ᠪᠠᠢᠨᠠ ᠪᠤᠢ?	Талх хаана байна вэ?	Where is the bread?
+mm-0033	train	base	ᠰᠠᠷ ᠬᠠᠮᠢᠭ᠎ᠠ ᠪᠠᠢᠨᠠ ᠪᠤᠢ?	Сар хаана байна вэ?	Where is the moon?
+mm-0034	train	base	ᠱᠤᠪᠤᠭᠤ ᠪᠠ ᠤᠭᠤᠯ᠃	Шувуу ба уул.	The bird and the mountain.
+mm-0035	train	base	ᠭᠣᠣᠯ ᠡᠨᠳ᠋ᠡ ᠪᠠᠢᠨᠠ᠃	Гол энд байна.	The river is here.
+mm-0036	train	base	ᠡᠨᠡ ᠪᠣᠯ ᠵᠢᠭᠠᠰᠤ᠃	Энэ бол загас.	This is the fish.
+mm-0037	train	base	ᠲᠡᠨᠳ ᠰᠠᠷ ᠪᠠᠢᠨᠠ᠃	Тэнд сар байна.	The moon is there.
+mm-0038	train	base	ᠬᠠᠭᠠᠯᠭᠠ ᠡᠨᠳ᠋ᠡ ᠪᠠᠢᠨᠠ᠃	Хаалга энд байна.	The door is here.
+mm-0039	train	base	ᠲᠡᠨᠳ ᠨᠣᠬᠠᠢ ᠪᠠᠢᠨᠠ᠃	Тэнд нохой байна.	The dog is there.
+mm-0040	train	base	ᠡᠭᠡᠵᠢ᠂ ᠪᠠᠭᠱ ᠪᠠ ᠰᠦᠭᠦ᠃	Ээж, багш ба сүү.	The mother, the teacher and the milk.
+mm-0041	train	base	ᠴᠠᠰ ᠪᠠ ᠨᠢᠳᠦ᠃	Цас ба нүд.	The snow and the eye.
+mm-0042	train	base	ᠲᠡᠨᠳ ᠥᠳᠦᠷ ᠪᠠᠢᠨᠠ᠃	Тэнд өдөр байна.	The day is there.
+mm-0043	train	base	ᠲᠠᠯᠬ᠎ᠠ ᠪᠠ ᠨᠣᠬᠠᠢ᠃	Талх ба нохой.	The bread and the dog.
+mm-0044	train	base	ᠰᠦᠭᠦ᠂ ᠤᠭᠤᠯ ᠪᠠ ᠭᠡᠷ᠃	Сүү, уул ба гэр.	The milk, the mountain and the home.
+mm-0045	train	base	ᠴᠠᠢ ᠪᠠ ᠳᠡᠯᠭᠡᠭᠦᠷ᠃	Цай ба дэлгүүр.	The tea and the shop.
+mm-0046	train	base	ᠤᠭᠤᠯ ᠪᠠ ᠮᠣᠳ᠃	Уул ба мод.	The mountain and the tree.
+mm-0047	train	base	ᠬᠦᠮᠦᠨ ᠬᠠᠮᠢᠭ᠎ᠠ ᠪᠠᠢᠨᠠ ᠪᠤᠢ?	Хүн хаана байна вэ?	Where is the person?
+mm-0048	train	base	ᠵᠢᠭᠠᠰᠤ ᠪᠠ ᠴᠣᠩᠬᠤ᠃	Загас ба цонх.	The fish and the window.
+mm-0049	train	base	ᠬᠦᠮᠦᠨ ᠪᠠ ᠱᠤᠪᠤᠭᠤ᠃	Хүн ба шувуу.	The person and the bird.
+mm-0050	train	base	ᠣᠳᠤ ᠪᠠ ᠬᠠᠭᠠᠯᠭᠠ᠃	Од ба хаалга.	The star and the door.
+mm-0051	dev	base	ᠨᠠᠷᠠ ᠪᠠ ᠡᠭᠡᠵᠢ᠃	Нар ба ээж.	The sun and the mother.
+mm-0052	dev	base	ᠪᠠᠭᠱ ᠪᠠ ᠣᠳᠤ᠃	Багш ба од.	The teacher and the star.
+mm-0053	dev	base	ᠴᠡᠴᠡᠭ ᠪᠠ ᠵᠠᠮ᠃	Цэцэг ба зам.	The flower and the road.
+mm-0054	dev	base	ᠡᠨᠡ ᠪᠣᠯ ᠴᠣᠩᠬᠤ᠃	Энэ бол цонх.	This is the window.
+mm-0055	dev	base	ᠪᠣᠷᠤᠭᠤ ᠬᠠᠮᠢᠭ᠎ᠠ ᠪᠠᠢᠨᠠ ᠪᠤᠢ?	Бороо хаана байна вэ?	Where is the rain?
+mm-0056	dev	base	ᠴᠠᠰ ᠪᠠ ᠠᠯᠢᠮ᠃	Цас ба алим.	The snow and the apple.
+mm-0057	dev	base	ᠨᠢᠳᠦ ᠪᠠ ᠭᠡᠷ᠃	Нүд ба гэр.	The eye and the home.
+mm-0058	dev	base	ᠮᠣᠳ ᠪᠠ ᠨᠢᠳᠦ᠃	Мод ба нүд.	The tree and the eye.
+mm-0059	dev	placeholder	ᠲᠡᠨᠳ ⟦5⟧ ᠪᠠᠢᠨᠠ᠃	Тэнд ⟦5⟧ байна.	The ⟦5⟧ is there.
+mm-0060	dev	placeholder	ᠲᠡᠨᠳ ⟦3⟧ ᠪᠠᠢᠨᠠ᠃	Тэнд ⟦3⟧ байна.	The ⟦3⟧ is there.
+mm-0061	test	base	ᠪᠠᠭᠱ ᠡᠨᠳ᠋ᠡ ᠪᠠᠢᠨᠠ᠃	Багш энд байна.	The teacher is here.
+mm-0062	test	base	ᠲᠡᠨᠳ ᠵᠠᠮ ᠪᠠᠢᠨᠠ᠃	Тэнд зам байна.	The road is there.
+mm-0063	test	base	ᠲᠡᠨᠳ ᠮᠣᠳ ᠪᠠᠢᠨᠠ᠃	Тэнд мод байна.	The tree is there.
+mm-0064	test	base	ᠠᠪᠤ ᠡᠨᠳ᠋ᠡ ᠪᠠᠢᠨᠠ᠃	Аав энд байна.	The father is here.
+mm-0065	test	base	ᠴᠡᠴᠡᠭ᠂ ᠵᠠᠮ ᠪᠠ ᠨᠢᠳᠦ᠃	Цэцэг, зам ба нүд.	The flower, the road and the eye.
+mm-0066	test	base	ᠡᠨᠡ ᠪᠣᠯ ᠴᠠᠰ᠃	Энэ бол цас.	This is the snow.
+mm-0067	test	base	ᠡᠭᠡᠵᠢ ᠪᠠ ᠨᠣᠬᠠᠢ᠃	Ээж ба нохой.	The mother and the dog.
+mm-0068	test	base	ᠤᠰ᠂ ᠱᠢᠷᠡᠭᠡ ᠪᠠ ᠴᠣᠩᠬᠤ᠃	Ус, ширээ ба цонх.	The water, the table and the window.
+mm-0069	test	base	ᠮᠣᠳ ᠪᠠ ᠮᠠᠱᠢᠨ᠃	Мод ба машин.	The tree and the car.
+mm-0070	test	base	ᠲᠡᠨᠳ ᠰᠦᠭᠦ ᠪᠠᠢᠨᠠ᠃	Тэнд сүү байна.	The milk is there.

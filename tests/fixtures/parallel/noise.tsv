@@ -1,0 +1,11 @@
+id	expect	src_lang	tgt_lang	src	tgt
+no-0001	script_tgt	eng_Latn	khk_Cyrl	This is the book.	This is the book.
+no-0002	script_tgt	eng_Latn	khk_Cyrl	Where is the dog?	Where is the dog?
+no-0003	len_ratio_char	eng_Latn	khk_Cyrl	The book is here.	Ном.
+no-0004	len_ratio_char	eng_Latn	khk_Cyrl	The book, the water and the home.	Ном.
+no-0005	numbers	eng_Latn	khk_Cyrl	The book is 12.	Ном 13 байна.
+no-0006	numbers	eng_Latn	khk_Cyrl	The dog is 7.	Нохой 8 байна.
+no-0007	duplicate	eng_Latn	khk_Cyrl	The river, the window and the tree.	Гол, цонх ба мод.
+no-0008	duplicate	eng_Latn	khk_Cyrl	The mother and the snow.	Ээж ба цас.
+no-0009	labse	eng_Latn	khk_Cyrl	The book is here.	Ус хаана байна вэ?
+no-0010	labse	eng_Latn	khk_Cyrl	Where is the dog?	Ном энд байна.

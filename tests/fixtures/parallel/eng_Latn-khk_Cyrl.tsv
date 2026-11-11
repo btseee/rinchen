@@ -1,0 +1,346 @@
+id	split	kind	eng_Latn	khk_Cyrl
+ek-0001	train	base	The river, the window and the tree.	Гол, цонх ба мод.
+ek-0002	train	base	The mother and the snow.	Ээж ба цас.
+ek-0003	train	base	The milk, the shop and the rain.	Сүү, дэлгүүр ба бороо.
+ek-0004	train	base	The apple and the bird.	Алим ба шувуу.
+ek-0005	train	base	Where is the door?	Хаалга хаана байна вэ?
+ek-0006	train	base	This is the moon.	Энэ бол сар.
+ek-0007	train	base	The day, the city and the person.	Өдөр, хот ба хүн.
+ek-0008	train	base	The flower is there.	Тэнд цэцэг байна.
+ek-0009	train	base	The dog is here.	Нохой энд байна.
+ek-0010	train	base	The horse and the city.	Морь ба хот.
+ek-0011	train	base	This is the home.	Энэ бол гэр.
+ek-0012	train	base	Where is the flower?	Цэцэг хаана байна вэ?
+ek-0013	train	base	The rain is here.	Бороо энд байна.
+ek-0014	train	base	Where is the window?	Цонх хаана байна вэ?
+ek-0015	train	base	The hand, the chair and the table.	Гар, сандал ба ширээ.
+ek-0016	train	base	The school, the rain and the bread.	Сургууль, бороо ба талх.
+ek-0017	train	base	The wind, the sun and the tea.	Салхи, нар ба цай.
+ek-0018	train	base	The tree, the teacher and the table.	Мод, багш ба ширээ.
+ek-0019	train	base	The bird, the father and the shop.	Шувуу, аав ба дэлгүүр.
+ek-0020	train	base	This is the milk.	Энэ бол сүү.
+ek-0021	train	base	The chair is there.	Тэнд сандал байна.
+ek-0022	train	base	Where is the tea?	Цай хаана байна вэ?
+ek-0023	train	base	Where is the road?	Зам хаана байна вэ?
+ek-0024	train	base	This is the table.	Энэ бол ширээ.
+ek-0025	train	base	The fish is there.	Тэнд загас байна.
+ek-0026	train	base	The snow is here.	Цас энд байна.
+ek-0027	train	base	The hand is here.	Гар энд байна.
+ek-0028	train	base	The car, the moon and the door.	Машин, сар ба хаалга.
+ek-0029	train	base	The road is here.	Зам энд байна.
+ek-0030	train	base	The mountain is there.	Тэнд уул байна.
+ek-0031	train	base	The teacher and the water.	Багш ба ус.
+ek-0032	train	base	Where is the bread?	Талх хаана байна вэ?
+ek-0033	train	base	Where is the moon?	Сар хаана байна вэ?
+ek-0034	train	base	The bird and the mountain.	Шувуу ба уул.
+ek-0035	train	base	The river is here.	Гол энд байна.
+ek-0036	train	base	This is the fish.	Энэ бол загас.
+ek-0037	train	base	The moon is there.	Тэнд сар байна.
+ek-0038	train	base	The door is here.	Хаалга энд байна.
+ek-0039	train	base	The dog is there.	Тэнд нохой байна.
+ek-0040	train	base	The mother, the teacher and the milk.	Ээж, багш ба сүү.
+ek-0041	train	base	The snow and the eye.	Цас ба нүд.
+ek-0042	train	base	The day is there.	Тэнд өдөр байна.
+ek-0043	train	base	The bread and the dog.	Талх ба нохой.
+ek-0044	train	base	The milk, the mountain and the home.	Сүү, уул ба гэр.
+ek-0045	train	base	The tea and the shop.	Цай ба дэлгүүр.
+ek-0046	train	base	The mountain and the tree.	Уул ба мод.
+ek-0047	train	base	Where is the person?	Хүн хаана байна вэ?
+ek-0048	train	base	The fish and the window.	Загас ба цонх.
+ek-0049	train	base	The person and the bird.	Хүн ба шувуу.
+ek-0050	train	base	The star and the door.	Од ба хаалга.
+ek-0051	train	base	The dog and the horse.	Нохой ба морь.
+ek-0052	train	base	The table is there.	Тэнд ширээ байна.
+ek-0053	train	base	Where is the wind?	Салхи хаана байна вэ?
+ek-0054	train	base	The moon is here.	Сар энд байна.
+ek-0055	train	base	The star and the apple.	Од ба алим.
+ek-0056	train	base	The river and the milk.	Гол ба сүү.
+ek-0057	train	base	The river and the hand.	Гол ба гар.
+ek-0058	train	base	The sun and the teacher.	Нар ба багш.
+ek-0059	train	base	Where is the car?	Машин хаана байна вэ?
+ek-0060	train	base	The star is here.	Од энд байна.
+ek-0061	train	base	Where is the milk?	Сүү хаана байна вэ?
+ek-0062	train	base	The water and the school.	Ус ба сургууль.
+ek-0063	train	base	The home, the table and the chair.	Гэр, ширээ ба сандал.
+ek-0064	train	base	The shop and the home.	Дэлгүүр ба гэр.
+ek-0065	train	base	Where is the teacher?	Багш хаана байна вэ?
+ek-0066	train	base	The apple and the sun.	Алим ба нар.
+ek-0067	train	base	Where is the dog?	Нохой хаана байна вэ?
+ek-0068	train	base	Where is the horse?	Морь хаана байна вэ?
+ek-0069	train	base	This is the day.	Энэ бол өдөр.
+ek-0070	train	base	The fish and the table.	Загас ба ширээ.
+ek-0071	train	base	Where is the eye?	Нүд хаана байна вэ?
+ek-0072	train	base	The home, the teacher and the tea.	Гэр, багш ба цай.
+ek-0073	train	base	The wind, the table and the city.	Салхи, ширээ ба хот.
+ek-0074	train	base	The table and the wind.	Ширээ ба салхи.
+ek-0075	train	base	Where is the school?	Сургууль хаана байна вэ?
+ek-0076	train	base	The home is there.	Тэнд гэр байна.
+ek-0077	train	base	The bread and the eye.	Талх ба нүд.
+ek-0078	train	base	The road and the wind.	Зам ба салхи.
+ek-0079	train	base	The rain and the city.	Бороо ба хот.
+ek-0080	train	base	The apple, the tea and the water.	Алим, цай ба ус.
+ek-0081	train	base	The bird, the wind and the flower.	Шувуу, салхи ба цэцэг.
+ek-0082	train	base	The bird, the school and the book.	Шувуу, сургууль ба ном.
+ek-0083	train	base	The mother and the tea.	Ээж ба цай.
+ek-0084	train	base	The day, the road and the fish.	Өдөр, зам ба загас.
+ek-0085	train	base	This is the tree.	Энэ бол мод.
+ek-0086	train	base	The tree is here.	Мод энд байна.
+ek-0087	train	base	The road and the mountain.	Зам ба уул.
+ek-0088	train	base	The shop and the tree.	Дэлгүүр ба мод.
+ek-0089	train	base	The hand and the mother.	Гар ба ээж.
+ek-0090	train	base	Where is the day?	Өдөр хаана байна вэ?
+ek-0091	train	base	The home and the table.	Гэр ба ширээ.
+ek-0092	train	base	Where is the tree?	Мод хаана байна вэ?
+ek-0093	train	base	The person is here.	Хүн энд байна.
+ek-0094	train	base	The teacher and the rain.	Багш ба бороо.
+ek-0095	train	base	Where is the mountain?	Уул хаана байна вэ?
+ek-0096	train	base	Where is the city?	Хот хаана байна вэ?
+ek-0097	train	base	The water and the moon.	Ус ба сар.
+ek-0098	train	base	The tea, the teacher and the school.	Цай, багш ба сургууль.
+ek-0099	train	base	The window is here.	Цонх энд байна.
+ek-0100	train	base	The book and the bread.	Ном ба талх.
+ek-0101	train	base	The person and the father.	Хүн ба аав.
+ek-0102	train	base	The dog and the tree.	Нохой ба мод.
+ek-0103	train	base	The apple is here.	Алим энд байна.
+ek-0104	train	base	This is the tea.	Энэ бол цай.
+ek-0105	train	base	The hand, the eye and the shop.	Гар, нүд ба дэлгүүр.
+ek-0106	train	base	This is the sun.	Энэ бол нар.
+ek-0107	train	base	The rain and the star.	Бороо ба од.
+ek-0108	train	base	Where is the chair?	Сандал хаана байна вэ?
+ek-0109	train	base	The moon and the tea.	Сар ба цай.
+ek-0110	train	base	The moon, the day and the person.	Сар, өдөр ба хүн.
+ek-0111	train	base	This is the rain.	Энэ бол бороо.
+ek-0112	train	base	The rain and the milk.	Бороо ба сүү.
+ek-0113	train	base	This is the school.	Энэ бол сургууль.
+ek-0114	train	base	The book and the milk.	Ном ба сүү.
+ek-0115	train	base	The book is here.	Ном энд байна.
+ek-0116	train	base	The dog and the apple.	Нохой ба алим.
+ek-0117	train	base	The hand, the horse and the day.	Гар, морь ба өдөр.
+ek-0118	train	base	The day, the wind and the hand.	Өдөр, салхи ба гар.
+ek-0119	train	base	The tree and the school.	Мод ба сургууль.
+ek-0120	train	base	The window and the school.	Цонх ба сургууль.
+ek-0121	train	base	The bread, the teacher and the father.	Талх, багш ба аав.
+ek-0122	train	base	The wind is here.	Салхи энд байна.
+ek-0123	train	base	The road, the dog and the fish.	Зам, нохой ба загас.
+ek-0124	train	base	This is the eye.	Энэ бол нүд.
+ek-0125	train	base	The tree and the shop.	Мод ба дэлгүүр.
+ek-0126	train	base	The mountain, the river and the bird.	Уул, гол ба шувуу.
+ek-0127	train	base	This is the bird.	Энэ бол шувуу.
+ek-0128	train	base	The rain and the chair.	Бороо ба сандал.
+ek-0129	train	base	The chair and the horse.	Сандал ба морь.
+ek-0130	train	base	The school and the eye.	Сургууль ба нүд.
+ek-0131	train	base	The rain is there.	Тэнд бороо байна.
+ek-0132	train	base	The book and the apple.	Ном ба алим.
+ek-0133	train	base	The shop is here.	Дэлгүүр энд байна.
+ek-0134	train	base	The car is there.	Тэнд машин байна.
+ek-0135	train	base	This is the dog.	Энэ бол нохой.
+ek-0136	train	base	The door, the father and the home.	Хаалга, аав ба гэр.
+ek-0137	train	base	The chair and the school.	Сандал ба сургууль.
+ek-0138	train	base	The wind and the road.	Салхи ба зам.
+ek-0139	train	base	The mother and the wind.	Ээж ба салхи.
+ek-0140	train	base	The apple and the moon.	Алим ба сар.
+ek-0141	train	base	This is the water.	Энэ бол ус.
+ek-0142	train	base	The person, the rain and the mountain.	Хүн, бороо ба уул.
+ek-0143	train	base	This is the mother.	Энэ бол ээж.
+ek-0144	train	base	The water, the road and the river.	Ус, зам ба гол.
+ek-0145	train	base	Where is the snow?	Цас хаана байна вэ?
+ek-0146	train	base	The bird and the chair.	Шувуу ба сандал.
+ek-0147	train	base	The bird and the teacher.	Шувуу ба багш.
+ek-0148	train	base	The school, the water and the snow.	Сургууль, ус ба цас.
+ek-0149	train	base	The rain and the eye.	Бороо ба нүд.
+ek-0150	train	base	The day is here.	Өдөр энд байна.
+ek-0151	train	int	The shop is 756.	Дэлгүүр 756 байна.
+ek-0152	train	int	The tree is 628.	Мод 628 байна.
+ek-0153	train	int	The chair is 359.	Сандал 359 байна.
+ek-0154	train	int	The bread is 177.	Талх 177 байна.
+ek-0155	train	int	The door is 700.	Хаалга 700 байна.
+ek-0156	train	int	The river is 646.	Гол 646 байна.
+ek-0157	train	int	The mountain is 59.	Уул 59 байна.
+ek-0158	train	int	The fish is 770.	Загас 770 байна.
+ek-0159	train	int	The teacher is 484.	Багш 484 байна.
+ek-0160	train	int	The car is 982.	Машин 982 байна.
+ek-0161	train	int	The person is 108.	Хүн 108 байна.
+ek-0162	train	int	The teacher is 264.	Багш 264 байна.
+ek-0163	train	int	The table is 40.	Ширээ 40 байна.
+ek-0164	train	int	The bird is 48.	Шувуу 48 байна.
+ek-0165	train	int	The snow is 440.	Цас 440 байна.
+ek-0166	train	int	The mountain is 369.	Уул 369 байна.
+ek-0167	train	int	The door is 263.	Хаалга 263 байна.
+ek-0168	train	int	The river is 345.	Гол 345 байна.
+ek-0169	train	int	The road is 846.	Зам 846 байна.
+ek-0170	train	int	The dog is 844.	Нохой 844 байна.
+ek-0171	train	int	The book is 450.	Ном 450 байна.
+ek-0172	train	int	The bread is 954.	Талх 954 байна.
+ek-0173	train	int	The horse is 540.	Морь 540 байна.
+ek-0174	train	int	The car is 740.	Машин 740 байна.
+ek-0175	train	int	The home is 981.	Гэр 981 байна.
+ek-0176	train	int	The fish is 848.	Загас 848 байна.
+ek-0177	train	int	The bread is 464.	Талх 464 байна.
+ek-0178	train	int	The bread is 564.	Талх 564 байна.
+ek-0179	train	int	The window is 265.	Цонх 265 байна.
+ek-0180	train	int	The shop is 406.	Дэлгүүр 406 байна.
+ek-0181	train	decimal	The city is 37.75.	Хот 37,75 байна.
+ek-0182	train	decimal	The snow is 4.75.	Цас 4,75 байна.
+ek-0183	train	decimal	The bread is 54.75.	Талх 54,75 байна.
+ek-0184	train	decimal	The teacher is 43.4.	Багш 43,4 байна.
+ek-0185	train	decimal	The river is 45.8.	Гол 45,8 байна.
+ek-0186	train	decimal	The door is 93.5.	Хаалга 93,5 байна.
+ek-0187	train	decimal	The city is 49.4.	Хот 49,4 байна.
+ek-0188	train	decimal	The road is 12.8.	Зам 12,8 байна.
+ek-0189	train	decimal	The tea is 6.75.	Цай 6,75 байна.
+ek-0190	train	decimal	The door is 65.4.	Хаалга 65,4 байна.
+ek-0191	train	decimal	The snow is 84.25.	Цас 84,25 байна.
+ek-0192	train	decimal	The horse is 21.25.	Морь 21,25 байна.
+ek-0193	train	decimal	The tree is 45.5.	Мод 45,5 байна.
+ek-0194	train	decimal	The city is 94.4.	Хот 94,4 байна.
+ek-0195	train	decimal	The day is 41.8.	Өдөр 41,8 байна.
+ek-0196	train	decimal	The door is 80.75.	Хаалга 80,75 байна.
+ek-0197	train	decimal	The chair is 29.25.	Сандал 29,25 байна.
+ek-0198	train	decimal	The book is 31.25.	Ном 31,25 байна.
+ek-0199	train	grouped	The day is 33,411.	Өдөр 33 411 байна.
+ek-0200	train	grouped	The chair is 7,533.	Сандал 7 533 байна.
+ek-0201	train	grouped	The horse is 23,249.	Морь 23 249 байна.
+ek-0202	train	grouped	The eye is 1,230.	Нүд 1 230 байна.
+ek-0203	train	grouped	The tree is 36,582.	Мод 36 582 байна.
+ek-0204	train	grouped	The dog is 98,114.	Нохой 98 114 байна.
+ek-0205	train	grouped	The bird is 1,558.	Шувуу 1 558 байна.
+ek-0206	train	grouped	The moon is 75,810.	Сар 75 810 байна.
+ek-0207	train	grouped	The city is 69,963.	Хот 69 963 байна.
+ek-0208	train	grouped	The dog is 93,519.	Нохой 93 519 байна.
+ek-0209	train	grouped	The home is 36,459.	Гэр 36 459 байна.
+ek-0210	train	grouped	The fish is 62,282.	Загас 62 282 байна.
+ek-0211	train	placeholder	This is the ⟦9⟧.	Энэ бол ⟦9⟧.
+ek-0212	train	placeholder	Where is the ⟦4⟧?	⟦4⟧ хаана байна вэ?
+ek-0213	train	placeholder	The ⟦3⟧ is here.	⟦3⟧ энд байна.
+ek-0214	train	placeholder	This is the ⟦2⟧.	Энэ бол ⟦2⟧.
+ek-0215	train	placeholder	Where is the ⟦1⟧?	⟦1⟧ хаана байна вэ?
+ek-0216	train	placeholder	The ⟦4⟧ is here.	⟦4⟧ энд байна.
+ek-0217	train	placeholder	The ⟦0⟧ is there.	Тэнд ⟦0⟧ байна.
+ek-0218	train	placeholder	The ⟦7⟧, the ⟦6⟧ and the ⟦3⟧.	⟦7⟧, ⟦6⟧ ба ⟦3⟧.
+ek-0219	train	placeholder	This is the ⟦8⟧.	Энэ бол ⟦8⟧.
+ek-0220	train	placeholder	Where is the ⟦8⟧?	⟦8⟧ хаана байна вэ?
+ek-0221	train	placeholder	The ⟦9⟧ and the ⟦7⟧.	⟦9⟧ ба ⟦7⟧.
+ek-0222	train	placeholder	The ⟦1⟧ is here.	⟦1⟧ энд байна.
+ek-0223	train	placeholder	The ⟦0⟧ is here.	⟦0⟧ энд байна.
+ek-0224	train	placeholder	The ⟦0⟧ and the ⟦4⟧.	⟦0⟧ ба ⟦4⟧.
+ek-0225	train	placeholder	The ⟦4⟧ is there.	Тэнд ⟦4⟧ байна.
+ek-0226	train	placeholder	The ⟦0⟧ and the ⟦3⟧.	⟦0⟧ ба ⟦3⟧.
+ek-0227	train	placeholder	The ⟦0⟧, the ⟦2⟧ and the ⟦4⟧.	⟦0⟧, ⟦2⟧ ба ⟦4⟧.
+ek-0228	train	placeholder	This is the ⟦7⟧.	Энэ бол ⟦7⟧.
+ek-0229	train	placeholder	Where is the ⟦9⟧?	⟦9⟧ хаана байна вэ?
+ek-0230	train	placeholder	The ⟦5⟧, the ⟦3⟧ and the ⟦7⟧.	⟦5⟧, ⟦3⟧ ба ⟦7⟧.
+ek-0231	train	placeholder	Where is the ⟦7⟧?	⟦7⟧ хаана байна вэ?
+ek-0232	train	placeholder	The ⟦8⟧ is there.	Тэнд ⟦8⟧ байна.
+ek-0233	train	placeholder	The ⟦6⟧ is there.	Тэнд ⟦6⟧ байна.
+ek-0234	train	placeholder	The ⟦2⟧ and the ⟦8⟧.	⟦2⟧ ба ⟦8⟧.
+ek-0235	train	placeholder	The ⟦9⟧ and the ⟦6⟧.	⟦9⟧ ба ⟦6⟧.
+ek-0236	train	placeholder	The ⟦1⟧ is there.	Тэнд ⟦1⟧ байна.
+ek-0237	train	placeholder	The ⟦0⟧, the ⟦7⟧ and the ⟦1⟧.	⟦0⟧, ⟦7⟧ ба ⟦1⟧.
+ek-0238	train	placeholder	The ⟦4⟧ and the ⟦9⟧.	⟦4⟧ ба ⟦9⟧.
+ek-0239	train	placeholder	The ⟦7⟧ is here.	⟦7⟧ энд байна.
+ek-0240	train	placeholder	The ⟦6⟧ is here.	⟦6⟧ энд байна.
+ek-0241	train	placeholder	The ⟦2⟧ is there.	Тэнд ⟦2⟧ байна.
+ek-0242	train	placeholder	The ⟦4⟧ and the ⟦6⟧.	⟦4⟧ ба ⟦6⟧.
+ek-0243	train	placeholder	The ⟦4⟧ and the ⟦8⟧.	⟦4⟧ ба ⟦8⟧.
+ek-0244	train	placeholder	This is the ⟦0⟧.	Энэ бол ⟦0⟧.
+ek-0245	train	placeholder	The ⟦0⟧, the ⟦1⟧ and the ⟦4⟧.	⟦0⟧, ⟦1⟧ ба ⟦4⟧.
+ek-0246	train	placeholder	The ⟦9⟧ is there.	Тэнд ⟦9⟧ байна.
+ek-0247	train	placeholder	Where is the ⟦5⟧?	⟦5⟧ хаана байна вэ?
+ek-0248	train	placeholder	The ⟦7⟧, the ⟦9⟧ and the ⟦1⟧.	⟦7⟧, ⟦9⟧ ба ⟦1⟧.
+ek-0249	train	placeholder	This is the ⟦4⟧.	Энэ бол ⟦4⟧.
+ek-0250	train	placeholder	The ⟦1⟧ and the ⟦7⟧.	⟦1⟧ ба ⟦7⟧.
+ek-0251	train	placeholder	This is the ⟦3⟧.	Энэ бол ⟦3⟧.
+ek-0252	train	placeholder	The ⟦7⟧ is there.	Тэнд ⟦7⟧ байна.
+ek-0253	train	placeholder	Where is the ⟦0⟧?	⟦0⟧ хаана байна вэ?
+ek-0254	train	placeholder	The ⟦3⟧ and the ⟦0⟧.	⟦3⟧ ба ⟦0⟧.
+ek-0255	train	placeholder	The ⟦6⟧, the ⟦8⟧ and the ⟦2⟧.	⟦6⟧, ⟦8⟧ ба ⟦2⟧.
+ek-0256	train	placeholder	This is the ⟦6⟧.	Энэ бол ⟦6⟧.
+ek-0257	train	placeholder	The ⟦4⟧ and the ⟦7⟧.	⟦4⟧ ба ⟦7⟧.
+ek-0258	train	placeholder	The ⟦5⟧ and the ⟦0⟧.	⟦5⟧ ба ⟦0⟧.
+ek-0259	train	placeholder	The ⟦7⟧, the ⟦3⟧ and the ⟦6⟧.	⟦7⟧, ⟦3⟧ ба ⟦6⟧.
+ek-0260	train	placeholder	The ⟦1⟧, the ⟦0⟧ and the ⟦9⟧.	⟦1⟧, ⟦0⟧ ба ⟦9⟧.
+ek-0261	train	placeholder	The ⟦7⟧, the ⟦9⟧ and the ⟦8⟧.	⟦7⟧, ⟦9⟧ ба ⟦8⟧.
+ek-0262	train	placeholder	The ⟦9⟧, the ⟦6⟧ and the ⟦1⟧.	⟦9⟧, ⟦6⟧ ба ⟦1⟧.
+ek-0263	train	placeholder	This is the ⟦1⟧.	Энэ бол ⟦1⟧.
+ek-0264	train	placeholder	The ⟦5⟧ and the ⟦6⟧.	⟦5⟧ ба ⟦6⟧.
+ek-0265	train	placeholder	Where is the ⟦6⟧?	⟦6⟧ хаана байна вэ?
+ek-0266	train	placeholder	The ⟦6⟧, the ⟦7⟧ and the ⟦1⟧.	⟦6⟧, ⟦7⟧ ба ⟦1⟧.
+ek-0267	train	placeholder	The ⟦5⟧, the ⟦0⟧ and the ⟦8⟧.	⟦5⟧, ⟦0⟧ ба ⟦8⟧.
+ek-0268	train	placeholder	This is the ⟦5⟧.	Энэ бол ⟦5⟧.
+ek-0269	train	placeholder	The ⟦8⟧ and the ⟦3⟧.	⟦8⟧ ба ⟦3⟧.
+ek-0270	train	placeholder	The ⟦2⟧, the ⟦8⟧ and the ⟦9⟧.	⟦2⟧, ⟦8⟧ ба ⟦9⟧.
+ek-0271	train	entity	Bold lives in Uliastai.	Болд Улиастайд амьдардаг.
+ek-0272	train	entity	Is Oyun in Darkhan?	Оюун Дарханд байна уу?
+ek-0273	train	entity	Saraa is from Bayankhongor.	Сараа Баянхонгораас ирсэн.
+ek-0274	train	entity	Dorj is from Khovd.	Дорж Ховдаас ирсэн.
+ek-0275	train	entity	Is Bat in Murun?	Бат Мөрөнд байна уу?
+ek-0276	train	entity	Is Oyun in Sukhbaatar?	Оюун Сүхбаатард байна уу?
+ek-0277	train	entity	Enkh is from Bayankhongor.	Энх Баянхонгораас ирсэн.
+ek-0278	train	entity	Oyun lives in Bayankhongor.	Оюун Баянхонгорд амьдардаг.
+ek-0279	train	entity	Dorj is from Murun.	Дорж Мөрөнаас ирсэн.
+ek-0280	train	entity	Is Enkh in Ulaanbaatar?	Энх Улаанбаатард байна уу?
+ek-0281	train	entity	Naran is from Khovd.	Наран Ховдаас ирсэн.
+ek-0282	train	entity	Is Munkh in Sukhbaatar?	Мөнх Сүхбаатард байна уу?
+ek-0283	train	entity	Enkh is from Erdenet.	Энх Эрдэнэтаас ирсэн.
+ek-0284	train	entity	Oyun lives in Uliastai.	Оюун Улиастайд амьдардаг.
+ek-0285	train	entity	Bold lives in Ulaanbaatar.	Болд Улаанбаатард амьдардаг.
+ek-0286	train	entity	Is Naran in Bayankhongor?	Наран Баянхонгорд байна уу?
+ek-0287	train	entity	Oyun lives in Sukhbaatar.	Оюун Сүхбаатард амьдардаг.
+ek-0288	train	entity	Is Naran in Ulaanbaatar?	Наран Улаанбаатард байна уу?
+ek-0289	train	entity	Tuya lives in Bayankhongor.	Туяа Баянхонгорд амьдардаг.
+ek-0290	train	entity	Is Saraa in Khovd?	Сараа Ховдд байна уу?
+ek-0291	train	entity	Is Bat in Erdenet?	Бат Эрдэнэтд байна уу?
+ek-0292	train	entity	Ganaa lives in Ulaanbaatar.	Ганаа Улаанбаатард амьдардаг.
+ek-0293	train	entity	Tuya lives in Uliastai.	Туяа Улиастайд амьдардаг.
+ek-0294	train	entity	Saraa is from Zuunmod.	Сараа Зуунмодаас ирсэн.
+ek-0295	train	entity	Tuya is from Darkhan.	Туяа Дарханаас ирсэн.
+ek-0296	train	entity	Enkh is from Darkhan.	Энх Дарханаас ирсэн.
+ek-0297	train	entity	Enkh lives in Erdenet.	Энх Эрдэнэтд амьдардаг.
+ek-0298	train	entity	Ganaa is from Khovd.	Ганаа Ховдаас ирсэн.
+ek-0299	train	entity	Munkh lives in Uliastai.	Мөнх Улиастайд амьдардаг.
+ek-0300	train	entity	Munkh lives in Erdenet.	Мөнх Эрдэнэтд амьдардаг.
+ek-0301	dev	base	The sun and the mother.	Нар ба ээж.
+ek-0302	dev	base	The teacher and the star.	Багш ба од.
+ek-0303	dev	base	The flower and the road.	Цэцэг ба зам.
+ek-0304	dev	base	This is the window.	Энэ бол цонх.
+ek-0305	dev	base	Where is the rain?	Бороо хаана байна вэ?
+ek-0306	dev	base	The snow and the apple.	Цас ба алим.
+ek-0307	dev	base	The eye and the home.	Нүд ба гэр.
+ek-0308	dev	base	The tree and the eye.	Мод ба нүд.
+ek-0309	dev	int	The teacher is 76.	Багш 76 байна.
+ek-0310	dev	int	The fish is 858.	Загас 858 байна.
+ek-0311	dev	decimal	The rain is 98.8.	Бороо 98,8 байна.
+ek-0312	dev	grouped	The mother is 19,516.	Ээж 19 516 байна.
+ek-0313	dev	placeholder	The ⟦5⟧ is there.	Тэнд ⟦5⟧ байна.
+ek-0314	dev	placeholder	The ⟦3⟧ is there.	Тэнд ⟦3⟧ байна.
+ek-0315	dev	entity	Naran is from Sukhbaatar.	Наран Сүхбаатараас ирсэн.
+ek-0316	test	base	The teacher is here.	Багш энд байна.
+ek-0317	test	base	The road is there.	Тэнд зам байна.
+ek-0318	test	base	The tree is there.	Тэнд мод байна.
+ek-0319	test	base	The father is here.	Аав энд байна.
+ek-0320	test	base	The flower, the road and the eye.	Цэцэг, зам ба нүд.
+ek-0321	test	base	This is the snow.	Энэ бол цас.
+ek-0322	test	base	The mother and the dog.	Ээж ба нохой.
+ek-0323	test	base	The water, the table and the window.	Ус, ширээ ба цонх.
+ek-0324	test	base	The tree and the car.	Мод ба машин.
+ek-0325	test	base	The milk is there.	Тэнд сүү байна.
+ek-0326	test	base	Where is the apple?	Алим хаана байна вэ?
+ek-0327	test	base	The flower is here.	Цэцэг энд байна.
+ek-0328	test	base	This is the river.	Энэ бол гол.
+ek-0329	test	base	The flower and the rain.	Цэцэг ба бороо.
+ek-0330	test	base	The water and the mountain.	Ус ба уул.
+ek-0331	test	int	The dog is 314.	Нохой 314 байна.
+ek-0332	test	int	The door is 493.	Хаалга 493 байна.
+ek-0333	test	int	The city is 409.	Хот 409 байна.
+ek-0334	test	decimal	The bird is 89.8.	Шувуу 89,8 байна.
+ek-0335	test	decimal	The car is 45.4.	Машин 45,4 байна.
+ek-0336	test	grouped	The mountain is 82,110.	Уул 82 110 байна.
+ek-0337	test	grouped	The person is 85,688.	Хүн 85 688 байна.
+ek-0338	test	placeholder	The ⟦0⟧, the ⟦4⟧ and the ⟦5⟧.	⟦0⟧, ⟦4⟧ ба ⟦5⟧.
+ek-0339	test	placeholder	The ⟦9⟧ is here.	⟦9⟧ энд байна.
+ek-0340	test	placeholder	The ⟦2⟧ and the ⟦7⟧.	⟦2⟧ ба ⟦7⟧.
+ek-0341	test	placeholder	The ⟦4⟧, the ⟦5⟧ and the ⟦1⟧.	⟦4⟧, ⟦5⟧ ба ⟦1⟧.
+ek-0342	test	placeholder	Where is the ⟦2⟧?	⟦2⟧ хаана байна вэ?
+ek-0343	test	entity	Is Munkh in Uliastai?	Мөнх Улиастайд байна уу?
+ek-0344	test	entity	Bat lives in Choibalsan.	Бат Чойбалсанд амьдардаг.
+ek-0345	test	entity	Ganaa lives in Uliastai.	Ганаа Улиастайд амьдардаг.
