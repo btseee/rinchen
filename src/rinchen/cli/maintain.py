@@ -48,7 +48,7 @@ from typing import Annotated, Final, NamedTuple
 import typer
 
 from rinchen.cli.errors import rinchen_errors_as_exit_codes
-from rinchen.cli.maintain_doctor import run_cpu_checks
+from rinchen.cli.maintain_doctor import device_hidden, run_cpu_checks
 from rinchen.cli.maintain_inputs import (
     HashedInputs,
     absolute,
@@ -202,7 +202,11 @@ def check_command(
     Writes maintain_report.json, maintain_report.md and manifest.json, and only reads the project.
 
     Exit codes: 0 when the run is ok or drift; 4 when it fails (or drifts, with --fail-on-drift); 2 for a bad option or configuration; 3 for a missing or invalid pyproject.toml or uv.lock; 1 when the output cannot be written; 130 when interrupted."""
-    with rinchen_errors_as_exit_codes(), exit_on_termination_signals():
+    with (
+        rinchen_errors_as_exit_codes(),
+        exit_on_termination_signals(),
+        device_hidden(),
+    ):
         plan = _plan(
             out_dir=out_dir,
             cadence=cadence,
