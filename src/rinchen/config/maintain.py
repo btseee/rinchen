@@ -6,10 +6,16 @@ document is closed (an unknown key is an error). The guards of M6 are enforced h
 time, and not where uv is run: no configuration reaches the runner with an argument list that can
 write the lock file or upgrade one package (the first argument is `lock`, every other one is one
 of four flags, none repeats, the drift list holds `--dry-run`, and the lock check holds
-`--check` and no flag but `--offline`). A rerun of kind `pytest` never selects a test of the
-maintenance check itself, so a rerun cannot rerun the gate of the command that makes it. Only a
-doctor check that asks a device question can be skipped (`SKIPPABLE_DOCTOR_CHECKS`): a skip of
-any other check would let a broken stack pass. Every number is an unvalidated prior.
+`--check` and no flag but `--offline`). A rerun of kind `pytest` is kept from selecting a test of
+the maintenance check itself, so that a rerun cannot rerun the gate of the command that makes it,
+but only BY NAME: a target is refused when `maintain` is in any component of its path (after NFKC
+normalisation and case folding, node id included) and when it is one of the directories that hold
+maintenance tests among others (`DIRECTORIES_WITH_MAINTENANCE_TESTS`). The guard does not look
+inside a file, expand a directory, follow a link or see what a test imports: a test that drives the
+maintenance check without `maintain` in its path is not seen, and a test resolves the shipped
+targets against the repository instead. Only a doctor check that asks a device question can be
+skipped (`SKIPPABLE_DOCTOR_CHECKS`): a skip of any other check would let a broken stack pass.
+Every number is an unvalidated prior.
 
 The document is read from the bytes the caller hands in, so that the caller can hash the file
 before it is read and parse the bytes it hashed. An error names the field and never quotes the
@@ -18,6 +24,7 @@ value that was refused.
 
 from __future__ import annotations
 
+import unicodedata
 from collections.abc import Sequence
 from typing import Annotated, Any, Final, Literal
 
@@ -50,6 +57,13 @@ _RULE_ID: Final = r"^[a-z0-9-]{1,40}$"
 _PACKAGE: Final = r"^(?:[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?|[a-z0-9][a-z0-9.-]*\*)$"
 _CHECK_ID: Final = r"^D-[A-Z0-9-]{1,30}$"
 _FORBIDDEN_IN_TARGET: Final = "maintain"
+# Directories that hold tests of the maintenance check among others. The guard is by name, and a
+# directory's name says nothing of the files under it, so a pytest rerun may not take one whole.
+DIRECTORIES_WITH_MAINTENANCE_TESTS: Final = (
+    "tests/unit",
+    "tests/integration",
+    "tests/property",
+)
 _MAX_TARGETS: Final = 20
 
 
@@ -69,8 +83,14 @@ def _checked_target(path: str) -> str:
         raise ValueError("must be a path under tests/")
     if any(part in ("", ".", "..") for part in parts):
         raise ValueError("must hold no empty, . or .. component")
-    if _FORBIDDEN_IN_TARGET in path.casefold():
+    folded = unicodedata.normalize("NFKC", path).casefold()
+    if any(_FORBIDDEN_IN_TARGET in part for part in folded.split("/")):
         raise ValueError("must not name a test of the maintenance check itself")
+    if path in DIRECTORIES_WITH_MAINTENANCE_TESTS:
+        raise ValueError(
+            f"must be a file or a narrower directory: {path} holds tests of the "
+            "maintenance check itself"
+        )
     return path
 
 
