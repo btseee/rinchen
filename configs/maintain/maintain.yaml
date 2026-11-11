@@ -1,0 +1,140 @@
+# Maintenance check (D14): the uv argument lists and bounds, the pin rules and the parity reruns
+# of `rinchen maintain check`, as data. Every number and every rule below is an unvalidated
+# prior: the rules were written from the recorded decisions (DECISIONS.md, docs/VERIFY.md) and
+# the bounds from the times of ONE machine (a bound is at least three times its measured time and
+# at least 300 s), and nothing was run on a CI runner or against the real state of PyPI.
+#
+# skipped_doctor_checks: doctor checks that are never called, each with its skip reason (one of
+#   the closed reasons of rinchen.maintain.states). The GPU check is one: this command never
+#   asks a device question.
+# lock_check: `uv lock --check`, does the lock still satisfy pyproject.toml.
+# drift: `uv lock --upgrade --dry-run`, what uv could take within the constraints of
+#   pyproject.toml. A package pinned with == never appears in it. The loader refuses any argument
+#   list that does not start with `lock`, holds a flag outside --upgrade, --dry-run, --offline,
+#   --check, repeats a flag, or lacks --dry-run (here) or --check (lock_check).
+# rules: the first rule that names a package (or a prefix with a final *) labels its row
+#   `blocked`; `requires` names the reruns (and `gate`, the full local gate) that must be green
+#   before the package is taken. `torch-*` covers torch-cuda and not torchvision.
+# reruns: `pytest` reruns the tests of `targets` and fails when fewer than `min_passed` pass or
+#   more than `max_skipped` are skipped; `export_parity` runs the parity command over an export
+#   the operator gives. A rerun never selects a test of the maintenance check itself.
+
+skipped_doctor_checks:
+  D-TORCH-CUDA: "a GPU check: maintain check never asks a device question"
+
+lock_check:
+  uv_args: [lock, --check]
+  timeout_seconds: 120
+
+drift:
+  uv_args: [lock, --upgrade, --dry-run]
+  timeout_seconds: 300
+  rules:
+    - id: eole
+      packages: [eole]
+      decision: "DECISIONS.md: the eole==0.6.4 pin, upgraded only after the parity smoke test; docs/VERIFY.md rows D-EOLE-PY, D-EOLE-CLI, D-STRICT-PARITY"
+      requires: [parity_tiny, parity_export, gate]
+    - id: ctranslate2
+      packages: [ctranslate2]
+      decision: "docs/VERIFY.md rows D-CT2-CONV, D-CT2-IMPORT, D-CT2-EOLE-CUDA, D-CT2-QUANT-CPU, D-CT2-SUPPRESS; DECISIONS.md: SinusoidalInterleaved positions only (the Eole to CTranslate2 converter)"
+      requires: [parity_tiny, parity_export, serving_tiny]
+    - id: torch-family
+      packages: [torch, torch-*, torchcodec, triton, nvidia-*, cuda-*]
+      decision: "DECISIONS.md: torch 2.14.1 from the cu130 index and vLLM kept out of the workspace; docs/VERIFY.md rows D-TORCH-CUDA, D-IMAGE-CUDA-WHEELS"
+      requires: [parity_tiny, robustness_tiny, gate]
+    - id: sacrebleu-numpy
+      packages: [sacrebleu, numpy]
+      decision: "docs/VERIFY.md rows D13-SACREBLEU-STATISTICS, D13-SACREBLEU-PAIRED-TEST, D13-OWN-BOOTSTRAP: the private statistics API and the goldens"
+      requires: [numerics, evaluation_tiny]
+    - id: sentencepiece
+      packages: [sentencepiece]
+      decision: "DECISIONS.md: the D3 tokenizer entries of 2026-11-06 (the reserved symbols and the goldens); docs/VERIFY.md row D-EOLE-VOCAB-NOT-SPM"
+      requires: [numerics, gate]
+    - id: transformers-stack
+      packages: [transformers, tokenizers, safetensors, sentence-transformers]
+      decision: "DECISIONS.md: the transformers==5.21.0 pin and the own COMET-22 and MetricX-24 inference that depends on it"
+      requires: [gate]
+    - id: polars-arrow
+      packages: [polars, polars-*, pyarrow]
+      decision: "docs/VERIFY.md rows D-POLARS-GLOB, D-POLARS-PANIC, D-POLARS-SIGINT"
+      requires: [gate]
+    - id: serving-stack
+      packages: [fastapi, starlette, uvicorn, h11]
+      decision: "docs/VERIFY.md rows D-SERVE-SIGTERM-EXIT, D-UVICORN-LIFESPAN-ORDER"
+      requires: [serving_tiny, gate]
+    - id: hub-client
+      packages: [huggingface-hub, datasets, hf-xet]
+      decision: "docs/VERIFY.md rows D13-HUB-OFFLINE, D13-HUB-CREATE-REPO-EXIST-OK"
+      requires: [evaluation_tiny, gate]
+    - id: vendored-wheels
+      packages: [pyonmttok, fasttext-wheel, fasttext-new]
+      decision: "DECISIONS.md entries of 2026-10-29: the pyonmttok build for cp314 and the fasttext-wheel shim via fasttext-new; the wheels are committed under vendor/wheels"
+      requires: [gate]
+
+reruns:
+  - id: numerics
+    kind: pytest
+    cadence: nightly
+    timeout_seconds: 300
+    why: the sacrebleu statistics, the bootstrap, the golden report and the metric goldens, which a library or Python update can move (1,110 passed in 4.64 s on one machine)
+    min_passed: 1100
+    targets:
+      - tests/unit/test_metrics_segment_stats.py
+      - tests/unit/test_metrics_corpus_scores.py
+      - tests/unit/test_metrics_bleu_chrf.py
+      - tests/property/test_metrics_segment_stats_property.py
+      - tests/unit/test_eval_bootstrap.py
+      - tests/unit/test_eval_bootstrap_reference.py
+      - tests/unit/test_eval_bootstrap_determinism.py
+      - tests/property/test_eval_bootstrap_property.py
+      - tests/unit/test_eval_golden.py
+      - tests/unit/test_eval_report_golden.py
+      - tests/unit/test_eval_suite_golden.py
+      - tests/unit/test_eval_significance.py
+      - tests/unit/test_eval_robust_numbers.py
+      - tests/unit/test_eval_robust_placeholders.py
+      - tests/unit/test_eval_robust_script.py
+      - tests/golden
+  - id: parity_tiny
+    kind: pytest
+    cadence: nightly
+    timeout_seconds: 600
+    why: Eole against CTranslate2 on the toy models, the greedy output and the log-probabilities (13 passed in 137 s on one machine)
+    min_passed: 13
+    targets:
+      - tests/integration/test_export_parity.py
+  - id: parity_export
+    kind: export_parity
+    cadence: nightly
+    timeout_seconds: 600
+    why: the parity command over an export, a checkpoint and a corpus the operator gives (skipped without them)
+  - id: robustness_tiny
+    kind: pytest
+    cadence: weekly
+    timeout_seconds: 1200
+    why: the robustness gate on the toy, which holds the floors for numbers, placeholders, names, terms and script purity (31 passed in 388 s on one machine)
+    min_passed: 31
+    targets:
+      - tests/integration/test_robustness_gate.py
+      - tests/integration/test_robustness_gate_refusals.py
+  - id: evaluation_tiny
+    kind: pytest
+    cadence: weekly
+    timeout_seconds: 1200
+    why: the evaluation and release gates on the toy, from the run to the report and the dry-run upload plan (99 passed in 384 s on one machine)
+    min_passed: 99
+    targets:
+      - tests/integration/test_eval_gate.py
+      - tests/integration/test_eval_gate_controls.py
+      - tests/integration/test_release_gate.py
+  - id: serving_tiny
+    kind: pytest
+    cadence: weekly
+    timeout_seconds: 1000
+    why: the serving gate, its process tests and the engine surfaces on the toy (55 passed in 310 s on one machine)
+    min_passed: 55
+    targets:
+      - tests/integration/test_serving_gate.py
+      - tests/integration/test_serving_gate_process.py
+      - tests/integration/test_serving_stop_budget.py
+      - tests/integration/test_engine_surfaces.py

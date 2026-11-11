@@ -1,0 +1,86 @@
+# A HAND-WRITTEN sample in the shape of uv.lock (format version 1, revision 5), written from the
+# structure of the repository's own lock file and never produced by uv. Six entries, five names:
+#   alpha       a registry package with an sdist and a wheel (hashes are made-up digests)
+#   Beta_Pkg    a name that is NOT in normal form: a reader must give it as beta-pkg
+#   gamma       a version with a local label, from another registry: kept verbatim
+#   delta       the same name and version twice, from two path sources (one wheel per platform)
+#   rinchen     the editable project: no hash
+version = 1
+revision = 5
+requires-python = "==3.14.*"
+resolution-markers = [
+    "sys_platform == 'win32'",
+    "sys_platform == 'linux'",
+]
+supported-markers = [
+    "sys_platform == 'win32'",
+    "sys_platform == 'linux'",
+]
+
+[[package]]
+name = "alpha"
+version = "1.2.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.example.invalid/packages/alpha-1.2.3.tar.gz", hash = "sha256:5b13055cceab12983ce8b9b86ed595304d0f7b73180eec4d62af20f93d8d1f53", size = 1000, upload-time = "2026-01-01T00:00:00.000Z" }
+wheels = [
+    { url = "https://files.example.invalid/packages/alpha-1.2.3-py3-none-any.whl", hash = "sha256:e731096b7c3519f2c9d37a8805be7b49609e6de09f8d8b5299975efd96371b59", size = 900, upload-time = "2026-01-01T00:00:00.000Z" },
+]
+
+[[package]]
+name = "Beta_Pkg"
+version = "2.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "alpha" },
+]
+sdist = { url = "https://files.example.invalid/packages/beta_pkg-2.0.tar.gz", hash = "sha256:e4407474fa5308b5166656f3152f3d8b7f61da0ae23146e7a4d91803f1a7aa4f", size = 2000, upload-time = "2026-01-01T00:00:00.000Z" }
+
+[[package]]
+name = "gamma"
+version = "2.14.1+cu130"
+source = { registry = "https://download.example.invalid/whl/cu130" }
+wheels = [
+    { url = "https://download.example.invalid/whl/cu130/gamma-2.14.1%2Bcu130-cp314-cp314-manylinux_2_28_x86_64.whl", hash = "sha256:003d303b5fece87785e832c98aeef40f73fe0e8f9e8220cfd4762b70ee9426e4" },
+]
+
+[[package]]
+name = "delta"
+version = "1.0"
+source = { path = "vendor/wheels/delta-1.0-cp314-cp314-manylinux_2_28_x86_64.whl" }
+resolution-markers = [
+    "sys_platform == 'linux'",
+]
+wheels = [
+    { filename = "delta-1.0-cp314-cp314-manylinux_2_28_x86_64.whl", hash = "sha256:9a97cbd04c57457324ff7ca10a7bd822e9a8ac14ee9615e1e5d03e6574a74d1a" },
+]
+
+[[package]]
+name = "delta"
+version = "1.0"
+source = { path = "vendor/wheels/delta-1.0-cp314-cp314-win_amd64.whl" }
+resolution-markers = [
+    "sys_platform == 'win32'",
+]
+wheels = [
+    { filename = "delta-1.0-cp314-cp314-win_amd64.whl", hash = "sha256:1892e93882d9e7cef8bbd3215d54bf6f66d1e66c1f87e8ce50657c64383e173d" },
+]
+
+[[package]]
+name = "rinchen"
+version = "0.0.0"
+source = { editable = "." }
+dependencies = [
+    { name = "alpha" },
+    { name = "beta-pkg" },
+    { name = "delta", version = "1.0", source = { path = "vendor/wheels/delta-1.0-cp314-cp314-manylinux_2_28_x86_64.whl" }, marker = "sys_platform != 'win32'" },
+    { name = "delta", version = "1.0", source = { path = "vendor/wheels/delta-1.0-cp314-cp314-win_amd64.whl" }, marker = "sys_platform == 'win32'" },
+    { name = "gamma" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "alpha" },
+    { name = "beta-pkg" },
+    { name = "delta" },
+    { name = "gamma", specifier = "==2.14.1" },
+]
