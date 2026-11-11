@@ -278,6 +278,48 @@ REVIEWED: Final[tuple[tuple[str, str, str, str], ...]] = (
         "shown",
         "the token the family's table (D6's code tables) holds for a registry code, in parentheses and only when it is not the code: never an entry of the vocabulary",
     ),
+    # ---- cli/eval_report*.py ----
+    (
+        "cli/eval_report.py",
+        "_refuse_dev_runs",
+        "one.record.suite.name",
+        "the name of the suite of a run, an id: `run_from_bytes` checked it against the pattern",
+    ),
+    (
+        "cli/eval_report.py",
+        "_suite_of",
+        "one.record.system.name",
+        "the name of the system of a run, an id: `run_from_bytes` checked it against the pattern",
+    ),
+    (
+        "cli/eval_report.py",
+        "_suite_of",
+        "one.record.suite.name",
+        "the name of the suite of a run, an id: `run_from_bytes` checked it against the pattern",
+    ),
+    ("cli/eval_report_inputs.py", "read_run_record", "directory", OPERATOR_PATH),
+    ("cli/eval_report_inputs.py", "read_run_record", "RUN_FILE", CONSTANT),
+    (
+        "cli/eval_report_inputs.py",
+        "read_run_record",
+        "name",
+        (
+            "a relative path inside the run directory that `run.json` lists (`run_from_bytes` "
+            "refuses `..`, a leading `/` and a backslash): a file name of the operator's run, not a "
+            "text of a suite or of an output"
+        ),
+    ),
+    ("cli/eval_report_inputs.py", "_manifest_of", "directory", OPERATOR_PATH),
+    (
+        "cli/eval_report_inputs.py",
+        "_require_a_finished_run",
+        "directory",
+        OPERATOR_PATH,
+    ),
+    ("cli/eval_report_inputs.py", "_require_a_finished_run", "RUN_STAGE", CONSTANT),
+    ("cli/eval_report_output.py", "commit", "target", OPERATOR_PATH),
+    ("cli/eval_report_output.py", "commit", "exc", OS_ERROR),
+    ("cli/eval_report_output.py", "commit", "_OUTPUTS", CONSTANT),
 )
 
 
@@ -285,6 +327,7 @@ def scanned_paths() -> list[Path]:
     return [
         *sorted(CLI.glob("eval_suite*.py")),
         SOURCE_ROOT / "config" / "eval_suites.py",
+        *sorted(CLI.glob("eval_report*.py")),
     ]
 
 
@@ -365,6 +408,16 @@ def test_the_scan_covers_the_modules_of_the_suite_commands_and_the_configuration
         "cli/eval_suite.py",
         "cli/eval_suite_files.py",
         "config/eval_suites.py",
+    } <= covered
+
+
+def test_the_scan_covers_the_modules_of_the_report_command() -> None:
+    covered = {path.relative_to(SOURCE_ROOT).as_posix() for path in scanned_paths()}
+
+    assert {
+        "cli/eval_report.py",
+        "cli/eval_report_inputs.py",
+        "cli/eval_report_output.py",
     } <= covered
 
 

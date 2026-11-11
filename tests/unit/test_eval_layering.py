@@ -56,6 +56,9 @@ COMMAND_MODULES = [
     CLI / "eval_run_inputs.py",
     CLI / "eval_run_output.py",
     CLI / "eval_run_plan.py",
+    CLI / "eval_report.py",
+    CLI / "eval_report_inputs.py",
+    CLI / "eval_report_output.py",
 ]
 COMMAND_FORBIDDEN_LAYERS = (
     "rinchen.train",
@@ -449,9 +452,28 @@ REPORT_MODULES = (
 )
 
 
-def test_the_scan_covers_the_report_modules() -> None:
+def test_the_scan_covers_the_report_modules_and_the_report_command() -> None:
     for module in REPORT_MODULES:
         assert PACKAGE / f"{module}.py" in MODULES
+    for name in ("eval_report", "eval_report_inputs", "eval_report_output"):
+        assert CLI / f"{name}.py" in COMMAND_MODULES
+
+
+def test_the_report_commands_reach_neither_the_engine_nor_the_generators_nor_a_library_that_loads_data() -> (
+    None
+):
+    for module in sorted(CLI.glob("eval_report*.py")):
+        names = imported_names(module.read_text(encoding="utf-8"))
+        for layer in ("rinchen.synth", "rinchen.infer.engine"):
+            assert not any(is_inside(name, layer) for name in names), (
+                module.name,
+                layer,
+            )
+        for library in ("datasets", "huggingface_hub", "httpx", "polars"):
+            assert not any(is_inside(name, library) for name in names), (
+                module.name,
+                library,
+            )
 
 
 @pytest.mark.parametrize(
