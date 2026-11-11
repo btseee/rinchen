@@ -21,6 +21,13 @@ The `d12_*` fixtures are the robustness gate's (`tests/integration/test_robustne
 `d12_robust_teacher` the tiny teacher trained on it once for 6,000 steps (about 190 s),
 `d12_robust_export` its float32 CTranslate2 export and `d12_suites` the four suite files of the gate.
 They run under the same `d11_gpu_hidden`.
+
+The `d13_*` fixtures are the evaluation and release gates' (`tests/integration/test_eval_gate.py`,
+`test_eval_gate_controls.py` and `test_release_gate.py`): `d13_offline` switches the Hub libraries to
+offline for the session, removes any token from the environment and blocks the Hub libraries for the
+commands, `d13_suites` writes the two fixture suites of the toy and `d13_runs` makes the three runs the
+gates share (the D12 export, the D11 teacher and the export's outputs fed back as a file) with the real
+`rinchen eval run`. They run under `d11_gpu_hidden`.
 """
 
 from __future__ import annotations
@@ -49,6 +56,14 @@ from tests.support.d11_gate import (
 from tests.support.d11_gate_doc import DocumentModel, build_document_model
 from tests.support.distill_gate_stages import Teacher, Workspace, make_workspace
 from tests.support.engines import SilentLog
+from tests.support.eval_gate import (
+    HUB_BLOCKED_VARIABLE,
+    Runs,
+    block_hub_libraries,
+    make_runs,
+)
+from tests.support.eval_toy import Suites as ToySuites
+from tests.support.eval_toy import write_toy_suites
 from tests.support.robust_gate import (
     Suites,
     export_robust,
@@ -216,3 +231,45 @@ def d12_robust_export(
 def d12_suites(tmp_path_factory: pytest.TempPathFactory) -> Suites:
     """The main suite and the three control suites of the robustness toy, as files."""
     return write_suites(tmp_path_factory.mktemp("d12_suites"))
+
+
+@pytest.fixture(scope="session")
+def d13_offline(
+    d11_gpu_hidden: None, tmp_path_factory: pytest.TempPathFactory
+) -> Iterator[None]:
+    """The Hub libraries are offline for every process of the D13 gates, their home is an empty
+    directory, no token is in the environment and a directory of blocked libraries (`huggingface_hub`
+    and `datasets` that raise `ImportError`) is named for the commands to put first on their path."""
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("HF_HUB_OFFLINE", "1")
+        patch.setenv("HF_DATASETS_OFFLINE", "1")
+        patch.setenv("HF_HOME", str(tmp_path_factory.mktemp("d13_hf_home")))
+        patch.delenv("HF_TOKEN", raising=False)
+        blocked = block_hub_libraries(tmp_path_factory.mktemp("d13_hub_blocked"))
+        patch.setenv(HUB_BLOCKED_VARIABLE, str(blocked))
+        yield
+
+
+@pytest.fixture(scope="session")
+def d13_suites(
+    d13_offline: None, tmp_path_factory: pytest.TempPathFactory
+) -> ToySuites:
+    """The fixture suites `toy-devtest` and `toy-dev`, made from the robustness toy."""
+    return write_toy_suites(tmp_path_factory.mktemp("d13_suites"))
+
+
+@pytest.fixture(scope="session")
+def d13_runs(
+    d13_suites: ToySuites,
+    d12_robust_export: Path,
+    d11_tiny_export_dir: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Runs:
+    """`rinchen eval run` over the devtest suite for the D12 export (`a-model`), the D11 teacher
+    (`d11-teacher`) and the export's outputs as a file (`a-file`), under one output root."""
+    return make_runs(
+        d13_suites,
+        d12_robust_export,
+        d11_tiny_export_dir,
+        tmp_path_factory.mktemp("d13_runs"),
+    )
