@@ -17,8 +17,8 @@ from pathlib import Path
 import pytest
 
 from rinchen.cli import maintain
-from rinchen.cli.maintain_doctor import device_hidden
 from rinchen.maintain.check_types import DoctorFinding
+from rinchen.maintain.commands import device_hidden
 from tests.support.maintain_check import finding, golden_doctor
 from tests.support.maintain_cli import install, invoke, make_workspace
 from tests.support.no_network import no_network  # noqa: F401 - the fixture of the mark

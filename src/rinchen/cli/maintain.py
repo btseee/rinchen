@@ -48,7 +48,7 @@ from typing import Annotated, Final, NamedTuple
 import typer
 
 from rinchen.cli.errors import rinchen_errors_as_exit_codes
-from rinchen.cli.maintain_doctor import device_hidden, run_cpu_checks
+from rinchen.cli.maintain_doctor import run_cpu_checks
 from rinchen.cli.maintain_inputs import (
     HashedInputs,
     absolute,
@@ -88,6 +88,7 @@ from rinchen.maintain.commands import (
     CommandRunner,
     SubprocessRunner,
     child_environment,
+    device_hidden,
     read_log,
 )
 from rinchen.maintain.environment import installed_versions

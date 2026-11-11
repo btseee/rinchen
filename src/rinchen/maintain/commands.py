@@ -22,7 +22,8 @@ bar and without interpreter downloads. A secret is a variable whose name ends in
 `_SECRET`, `_PASSWORD` or `_API_KEY` (`HF_TOKEN` and `HUGGING_FACE_HUB_TOKEN` among them), matched
 in upper case only: a pytest rerun runs the project's tests, and a changed dependency should not
 see what the check was given. Nothing else of the parent's is removed, and nothing of the
-environment is written anywhere.
+environment is written anywhere. The command's own process hides the device for the whole of its
+run through `device_hidden`, which puts the caller's value back afterwards.
 """
 
 from __future__ import annotations
@@ -32,7 +33,7 @@ import os
 import signal
 import subprocess
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
@@ -50,6 +51,7 @@ HIDDEN_ENVIRONMENT: Final[Mapping[str, str]] = MappingProxyType(
     }
 )
 LOG_LIMIT: Final = 64 * 1024
+_DEVICE_VARIABLE: Final = "CUDA_VISIBLE_DEVICES"
 # The variables a child never inherits: the ones whose upper-case name ends in one of these.
 SECRET_SUFFIXES: Final = ("_TOKEN", "_SECRET", "_PASSWORD", "_API_KEY")
 
@@ -97,6 +99,23 @@ def child_environment(parent: Mapping[str, str], *, uv: bool = False) -> dict[st
         if not name.endswith(SECRET_SUFFIXES)
     }
     return {**kept, **HIDDEN_ENVIRONMENT, **(UV_ENVIRONMENT if uv else {})}
+
+
+@contextlib.contextmanager
+def device_hidden() -> Iterator[None]:
+    """Hide every GPU from THIS process for the block (the device variable is the empty text), and
+    put the caller's value back, or remove the variable if there was none, whatever the block
+    does. The children get the same from `child_environment`; the doctor checks of the command run
+    in process and need this."""
+    previous = os.environ.get(_DEVICE_VARIABLE)
+    os.environ[_DEVICE_VARIABLE] = HIDDEN_ENVIRONMENT[_DEVICE_VARIABLE]
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop(_DEVICE_VARIABLE, None)
+        else:
+            os.environ[_DEVICE_VARIABLE] = previous
 
 
 class SubprocessRunner:

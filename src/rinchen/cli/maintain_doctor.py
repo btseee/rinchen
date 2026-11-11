@@ -10,17 +10,11 @@ doctor's list is exactly this one plus the device check, so that the decision is
 A check that raises is a failed check of its own id, derived from the function's name
 (`check_eole_cli` is `D-EOLE-CLI`), so the rest of the checks still run. The message of a finding
 can hold an exception text and a path: the command prints it and never writes it to a file.
-
-The checks run in this process, so the process must not see the caller's device either: a child
-gets `CUDA_VISIBLE_DEVICES=""` from `rinchen.maintain.commands.child_environment`, and the command
-holds `device_hidden` open for the whole of its own run.
 """
 
 from __future__ import annotations
 
-import os
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from collections.abc import Callable
 from typing import Final
 
 from rinchen.cli import doctor
@@ -36,7 +30,6 @@ CPU_CHECKS: Final[tuple[Callable[[], DoctorResult], ...]] = (
     doctor.check_ct2_import,
 )
 
-_DEVICE_VARIABLE: Final = "CUDA_VISIBLE_DEVICES"
 _PREFIX: Final = "check_"
 _STATUSES: Final[dict[str, DoctorStatus]] = {
     "pass": "pass",
@@ -76,19 +69,3 @@ def _finding_of(check: Callable[[], DoctorResult]) -> DoctorFinding:
 def run_cpu_checks() -> list[DoctorFinding]:
     """Each of `CPU_CHECKS` once, in order, as a finding."""
     return [_finding_of(check) for check in CPU_CHECKS]
-
-
-@contextmanager
-def device_hidden() -> Iterator[None]:
-    """Hide every GPU from this process for the block (`CUDA_VISIBLE_DEVICES` is the empty text),
-    and put the caller's value back, or remove the variable if there was none, whatever the block
-    does."""
-    previous = os.environ.get(_DEVICE_VARIABLE)
-    os.environ[_DEVICE_VARIABLE] = ""
-    try:
-        yield
-    finally:
-        if previous is None:
-            os.environ.pop(_DEVICE_VARIABLE, None)
-        else:
-            os.environ[_DEVICE_VARIABLE] = previous
