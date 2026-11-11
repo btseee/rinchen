@@ -15,20 +15,29 @@ logs of the commands it ran (`logs/`, `junit/`) and, last, `<DIR>/manifest.json`
 make it anything else), never asks a device question and writes nothing outside `--out-dir`. The
 program `uv` is `--uv` or the one on `PATH`; the environment variable `UV` is not read.
 
-The order: the options are checked; `pyproject.toml`, `uv.lock` and the configuration are hashed
-BEFORE any is read; an output directory that is an input's is refused and so is another stage's
-manifest in it; the three files are parsed from the bytes that were hashed (a file that changed in
-between is refused) and the `--rerun` ids are checked against the configuration; only then is
-anything written: the output directory is made, the old manifest and the files it listed are
-removed, the check runs, the messages of the doctor checks that failed are printed to standard
+The order: the options are checked (`--no-reruns` and `--rerun` contradict each other); `pyproject.toml`,
+`uv.lock` and the configuration are hashed BEFORE any is read; an output directory that is an
+input's is refused, so is another stage's manifest in it, and so is an existing directory that
+holds anything but the names this command writes; the three files are parsed from the bytes that
+were hashed (a file that changed in between is refused) and the `--rerun` ids are checked against
+the configuration; the code version of the checkout is read; only then is anything written: the
+output directory is made, the old manifest and the files it listed are removed, the check runs, the messages of the doctor checks that failed are printed to standard
 output as `[FAIL] <id>: <message>` (they reach no file), the version of uv is read for the manifest
-and the report, the Markdown and the manifest are written. No text of a file or of another
-program's output is in a message of this command.
+and the report, the Markdown and the manifest are written. The command hides every GPU from its own
+process for the whole run and puts the caller's setting back when it ends, whatever the exit.
+
+What reaches the screen: the lines of the run, which hold states, counts and closed reasons, and
+the `[FAIL] <id>: <message>` lines, the one place where the words of another program can appear. A
+doctor message can hold an exception text, a path and the last 500 characters of what a program
+printed (the `--help` runs of Eole and CTranslate2, one such tail for each); it is printed and
+never written to a file. No text of a file is in any message of this command, and the output of
+`uv` and of a rerun is in the logs only.
 
 Exit codes: 0 when the run is `ok` or `drift`; 4 when it is `fail` (a measured result: everything is
 written and printed) or when it is `drift` and `--fail-on-drift` was given; 2 for a bad option, an
-invalid configuration, a `--rerun` that names no rerun of the configuration, a file that changed
-after it was hashed and an output directory that is the project's or an input's; 3 for a missing or
+invalid configuration, `--no-reruns` together with `--rerun`, a `--rerun` that names no rerun of the
+configuration, a file that changed after it was hashed and an output directory that is the project's,
+an input's or holds entries this command does not write; 3 for a missing or
 invalid `pyproject.toml` or `uv.lock` and for the manifest of another stage in the output
 directory; 1 when the output cannot be written; 130 when interrupted (SIGTERM and SIGHUP end it
 with 143 and 129); an interrupt writes no manifest.

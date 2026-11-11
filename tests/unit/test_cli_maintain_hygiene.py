@@ -12,11 +12,13 @@ themselves tested on source strings that break each rule.
 from __future__ import annotations
 
 import ast
+import inspect
 import sys
 from pathlib import Path
 
 import pytest
 
+from rinchen.cli import maintain
 from rinchen.maintain.commands import CommandResult
 from tests.support.maintain_check import golden_doctor
 from tests.support.maintain_cli import (
@@ -482,3 +484,45 @@ def test_no_line_of_the_output_of_uv_reaches_the_screen_or_a_document(
         assert UV_MARKER not in text and "/home/someone" not in text, name
     for name in ("maintain_report.json", "maintain_report.md"):
         assert content_violations(written[name].decode()) == [], name
+
+
+def one_line_docstring() -> str | None:
+    """The docstring of the command module with every run of white space made one space."""
+    doc = inspect.getdoc(maintain)
+    return None if doc is None else " ".join(doc.split())
+
+
+def test_the_docstring_says_where_the_words_of_a_program_reach_the_screen() -> None:
+    # The `[FAIL] <id>: <message>` line of a failed doctor check can hold the last 500 characters
+    # of what a program printed (a `--help` run); the docstring used to say that no program output
+    # is in any message of the command.
+    doc = one_line_docstring()
+
+    assert doc is not None
+    assert "[FAIL] <id>: <message>" in doc
+    assert "500 characters" in doc
+    assert (
+        "the `[FAIL] <id>: <message>` lines, the one place where the words of another "
+        "program can appear" in doc
+    )
+    assert "No text of a file or of another program's output" not in doc
+    assert "never written to a file" in doc
+
+
+def test_the_docstring_says_the_device_is_hidden_for_the_whole_run() -> None:
+    doc = one_line_docstring()
+
+    assert doc is not None
+    assert "hides every GPU from its own process" in doc
+
+
+def test_the_docstring_names_the_refusals_and_the_code_version_of_the_fix_wave() -> (
+    None
+):
+    doc = one_line_docstring()
+
+    assert doc is not None
+    assert "`--no-reruns` and `--rerun` contradict each other" in doc
+    assert "holds anything but the names this command writes" in doc
+    assert "the code version of the checkout is read" in doc
+    assert "`--no-reruns` together with `--rerun`" in doc
