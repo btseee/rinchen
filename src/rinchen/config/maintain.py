@@ -7,8 +7,9 @@ time, and not where uv is run: no configuration reaches the runner with an argum
 write the lock file or upgrade one package (the first argument is `lock`, every other one is one
 of four flags, none repeats, the drift list holds `--dry-run`, and the lock check holds
 `--check` and no flag but `--offline`). A rerun of kind `pytest` never selects a test of the
-maintenance check itself, so a rerun cannot rerun the gate of the command that makes it. Every
-number is an unvalidated prior.
+maintenance check itself, so a rerun cannot rerun the gate of the command that makes it. Only a
+doctor check that asks a device question can be skipped (`SKIPPABLE_DOCTOR_CHECKS`): a skip of
+any other check would let a broken stack pass. Every number is an unvalidated prior.
 
 The document is read from the bytes the caller hands in, so that the caller can hash the file
 before it is read and parse the bytes it hashed. An error names the field and never quotes the
@@ -39,6 +40,10 @@ CADENCES: Final = ("nightly", "weekly")
 GATE: Final = "gate"
 ALLOWED_UV_FLAGS: Final = frozenset({"--upgrade", "--dry-run", "--offline", "--check"})
 LOCK_CHECK_FLAGS: Final = frozenset({"--check", "--offline"})
+# The doctor checks a configuration may skip: the ones that ask a device question, which this
+# command never asks. Every other check is a question about the stack, and a skip would let a
+# broken stack pass.
+SKIPPABLE_DOCTOR_CHECKS: Final = frozenset({"D-TORCH-CUDA"})
 
 _RERUN_ID: Final = r"^[a-z][a-z0-9_]{0,31}$"
 _RULE_ID: Final = r"^[a-z0-9-]{1,40}$"
@@ -67,6 +72,15 @@ def _checked_target(path: str) -> str:
     if _FORBIDDEN_IN_TARGET in path.casefold():
         raise ValueError("must not name a test of the maintenance check itself")
     return path
+
+
+def _skippable_check(check_id: str) -> str:
+    if check_id not in SKIPPABLE_DOCTOR_CHECKS:
+        raise ValueError(
+            "must be a check that asks a device question: "
+            f"{', '.join(sorted(SKIPPABLE_DOCTOR_CHECKS))}"
+        )
+    return check_id
 
 
 def _closed_skip_reason(reason: str) -> str:
@@ -203,7 +217,7 @@ class MaintainConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     skipped_doctor_checks: dict[
-        Annotated[str, Field(pattern=_CHECK_ID)],
+        Annotated[str, Field(pattern=_CHECK_ID), AfterValidator(_skippable_check)],
         Annotated[str, AfterValidator(_closed_skip_reason)],
     ]
     lock_check: LockCheckConfig

@@ -57,6 +57,7 @@ def test_the_checks_table_has_one_row_per_doctor_check_and_one_per_other_step() 
         {
             "environment": "1 packages differ from the lock, 0 are not in it",
             "drift": "disabled by --no-drift",
+            "reruns": "disabled by --no-reruns",
         },
         doctor=doctor_detail(
             check_row("D-PY"),
@@ -82,7 +83,7 @@ def test_the_checks_table_has_one_row_per_doctor_check_and_one_per_other_step() 
         "| lock_consistent | - | ok |  |\n"
         "| environment | - | fail | 1 packages differ from the lock, 0 are not in it |\n"
         "| drift | - | skipped | disabled by --no-drift |\n"
-        "| reruns | - | skipped |  |\n"
+        "| reruns | - | skipped | disabled by --no-reruns |\n"
     ) in markdown
 
 

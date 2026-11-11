@@ -17,6 +17,7 @@ import pytest
 from rinchen.cli import doctor, maintain_doctor
 from rinchen.cli.doctor import DoctorResult
 from rinchen.cli.maintain_doctor import CPU_CHECKS, run_cpu_checks
+from rinchen.config.maintain import SKIPPABLE_DOCTOR_CHECKS
 from rinchen.maintain.check_types import DoctorFinding
 
 CPU_NAMES = (
@@ -86,6 +87,14 @@ def test_the_doctor_holds_the_cpu_list_and_the_gpu_check_and_nothing_else() -> N
 
 def test_the_gpu_check_is_not_in_the_cpu_list() -> None:
     assert doctor.check_torch_cuda not in CPU_CHECKS
+
+
+def test_the_checks_a_configuration_may_skip_are_the_doctors_device_checks() -> None:
+    device_checks = [check for check in doctor.ALL_CHECKS if check not in CPU_CHECKS]
+
+    assert {maintain_doctor.check_id_of(check) for check in device_checks} == (
+        SKIPPABLE_DOCTOR_CHECKS
+    )
 
 
 # ---- running them -----------------------------------------------------------------------------------

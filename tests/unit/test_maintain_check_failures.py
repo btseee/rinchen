@@ -4,9 +4,9 @@ when the doctor or the environment check failed.
 
 Against the scripted runner and the doubles of `tests/support/maintain_check.py`. The doctor's
 message (it can hold an exception text and a path) goes to `doctor_messages` for the command to
-print and into the report not at all. `D-TORCH-CUDA` is a configured skip: a finding of it is
-dropped and the configured row stands in its place; a configured skip the doctor never reports is
-listed all the same. The environment detail shows at most 20 names of each kind and counts the
+print and into the report not at all. `D-TORCH-CUDA` is a configured skip: a finding of it that
+did not fail is dropped and the configured row stands in its place (a failure is never silenced);
+a configured skip the doctor never reports is listed all the same. The environment detail shows at most 20 names of each kind and counts the
 rest; a locked package that is not installed is a count.
 """
 
@@ -231,7 +231,7 @@ def test_a_doctor_that_raises_is_one_failed_check_named_doctor(tmp_path: Path) -
 def test_a_finding_of_a_configured_skip_is_dropped_and_the_configured_row_stands_in(
     tmp_path: Path,
 ) -> None:
-    doctor = Doctor([finding(GPU_CHECK, "fail"), *(finding(i) for i in CPU_CHECKS)])
+    doctor = Doctor([finding(GPU_CHECK, "skip"), *(finding(i) for i in CPU_CHECKS)])
     runner = golden_runner()
 
     run = execute(tmp_path, runner, seams=make_seams(runner, doctor=doctor))
@@ -262,9 +262,7 @@ def test_a_configured_skip_the_doctor_never_reports_is_listed_after_its_findings
 def test_the_configured_skips_come_with_the_reasons_of_the_configuration(
     tmp_path: Path,
 ) -> None:
-    config = config_with(
-        skipped_doctor_checks={"D-WHEELS": SKIP_NO_DRIFT, GPU_CHECK: SKIP_GPU_CHECK}
-    )
+    config = config_with(skipped_doctor_checks={GPU_CHECK: SKIP_NO_DRIFT})
     runner = golden_runner()
 
     run = execute(
@@ -276,11 +274,11 @@ def test_the_configured_skips_come_with_the_reasons_of_the_configuration(
 
     checks = step_of(document_of(run), "doctor")["detail"]["checks"]  # type: ignore[index]
     by_id = {c["id"]: c for c in checks}
-    assert (by_id["D-WHEELS"]["state"], by_id["D-WHEELS"]["reason"]) == (
+    assert (by_id[GPU_CHECK]["state"], by_id[GPU_CHECK]["reason"]) == (
         "skipped",
         SKIP_NO_DRIFT,
     )
-    assert [c["id"] for c in checks].count("D-WHEELS") == 1
+    assert [c["id"] for c in checks].count(GPU_CHECK) == 1
 
 
 def test_a_configured_skip_reported_twice_is_listed_once_and_other_findings_as_given(
@@ -290,7 +288,7 @@ def test_a_configured_skip_reported_twice_is_listed_once_and_other_findings_as_g
         [
             finding(GPU_CHECK, "skip"),
             finding("D-PY"),
-            finding(GPU_CHECK, "fail"),
+            finding(GPU_CHECK, "pass"),
             finding("D-PY"),
         ]
     )

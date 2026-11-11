@@ -651,9 +651,20 @@ def test_a_skipped_doctor_check_key_that_is_not_a_check_id_is_refused(bad: str) 
     assert "skipped_doctor_checks" in message
 
 
-@pytest.mark.parametrize("good", ["D-A", "D-TORCH-CUDA", "D-" + "A" * 30, "D-A1-B2"])
-def test_a_skipped_doctor_check_key_that_is_a_check_id_is_accepted(good: str) -> None:
-    load(edited("skipped_doctor_checks", value={good: SKIP_GPU_CHECK}))
+def test_the_one_skipped_doctor_check_key_that_is_accepted_is_the_device_check() -> (
+    None
+):
+    load(edited("skipped_doctor_checks", value={"D-TORCH-CUDA": SKIP_GPU_CHECK}))
+
+
+@pytest.mark.parametrize("other", ["D-A", "D-" + "A" * 30, "D-A1-B2", "D-PY"])
+def test_a_check_id_that_is_not_a_device_check_is_refused_as_a_skipped_key(
+    other: str,
+) -> None:
+    message = refusal(
+        dump(edited("skipped_doctor_checks", value={other: SKIP_GPU_CHECK}))
+    )
+    assert "skipped_doctor_checks" in message
 
 
 @pytest.mark.parametrize("bad", ["because", "", "a GPU check", 3, None])

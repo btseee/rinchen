@@ -59,9 +59,10 @@ def doctor_step(
 ) -> tuple[Step, tuple[tuple[str, str], ...]]:
     """The doctor's findings as checks, and the `(id, message)` of each failed one.
 
-    A finding of a configured skip is dropped and that skip stands in its place; a configured skip
-    the doctor did not report follows the findings. A doctor that raises is one failed check named
-    `doctor`.
+    A finding of a configured skip is dropped and that skip stands in its place, unless the
+    finding failed: a skip never covers a failure, which is listed as the failure it is. A
+    configured skip the doctor did not report follows the findings. A doctor that raises is one
+    failed check named `doctor`.
     """
     skips = config.skipped_doctor_checks
     rows: list[dict[str, Any]] = []
@@ -74,7 +75,7 @@ def doctor_step(
         messages.append(("doctor", f"{type(error).__name__}: {error}"))
     listed: set[str] = set()
     for found in findings:
-        if found.check_id in skips:
+        if found.check_id in skips and found.status != "fail":
             if found.check_id not in listed:
                 rows.append(
                     _check_row(found.check_id, "skipped", skips[found.check_id])
@@ -83,6 +84,7 @@ def doctor_step(
             continue
         state, reason = _DOCTOR_STATES[found.status]
         rows.append(_check_row(found.check_id, state, reason))
+        listed.add(found.check_id)
         if state == "fail":
             messages.append((found.check_id, found.message))
     rows += [

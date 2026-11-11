@@ -24,7 +24,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final, Literal
 
-from rinchen.maintain.states import STATES, State
+from rinchen.maintain.states import STATES, State, is_closed_reason
 
 SCHEMA: Final = "rinchen.maintain/1"
 STEP_IDS: Final = (
@@ -35,6 +35,9 @@ STEP_IDS: Final = (
     "drift",
     "reruns",
 )
+# The steps that hold several items: they list the reason of each item in their detail and have
+# none of their own, unless they were skipped as a whole.
+GROUP_STEP_IDS: Final = ("doctor", "reruns")
 EXIT_SUCCESS: Final = 0
 EXIT_FAILED: Final = 4
 
@@ -46,9 +49,12 @@ OverallState = Literal["ok", "drift", "fail"]
 
 @dataclass(frozen=True, slots=True)
 class Step:
-    """One step: its state, the reason when it is not `ok` and the detail of its shape.
+    """One step: its state, the reason and the detail of its shape.
 
-    Only the drift step can be in the `drift` state.
+    Only the drift step can be in the `drift` state. An `ok` or `drift` step has no reason; a
+    `skipped` step has one; a `fail` step has one unless it is a group step (`GROUP_STEP_IDS`),
+    whose items carry their own; and a reason is always a closed one of
+    `rinchen.maintain.states`, never free text.
     """
 
     id: str
@@ -61,6 +67,16 @@ class Step:
             raise ValueError(f"a step's state is none of {', '.join(STATES)}")
         if self.state == "drift" and self.id != _DRIFT_STEP:
             raise ValueError("only the drift step can be in the drift state")
+        if self.state in ("ok", "drift"):
+            if self.reason is not None:
+                raise ValueError("an ok or drift step has no reason")
+        elif self.reason is None:
+            if self.state == "skipped" or self.id not in GROUP_STEP_IDS:
+                raise ValueError(
+                    "a skipped step, and a failed step that is no group, has a reason"
+                )
+        elif not is_closed_reason(self.reason):
+            raise ValueError("a step's reason is none of the closed reasons")
 
 
 @dataclass(frozen=True, slots=True)

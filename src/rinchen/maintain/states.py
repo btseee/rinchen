@@ -12,6 +12,7 @@ what could not be looked at is `fail` with one of the fail reasons.
 
 from __future__ import annotations
 
+import re
 from typing import Final, Literal
 
 State = Literal["ok", "drift", "fail", "skipped"]
@@ -78,6 +79,30 @@ ALL_REASONS: Final = (
     _COMMAND_EXIT,
     FAIL_NO_FIGURES,
 )
+
+
+def _closed_pattern(template: str) -> re.Pattern[str]:
+    """The pattern of the strings a template stands for: a `<cadence>` is one of the two words
+    and any other placeholder a whole number (ASCII digits, a minus sign allowed)."""
+    pieces = []
+    last = 0
+    for found in re.finditer(r"<([a-z]+)>", template):
+        pieces.append(re.escape(template[last : found.start()]))
+        pieces.append(
+            "(?:nightly|weekly)" if found.group(1) == "cadence" else "-?[0-9]+"
+        )
+        last = found.end()
+    pieces.append(re.escape(template[last:]))
+    return re.compile("".join(pieces))
+
+
+_CLOSED_PATTERNS: Final = tuple(_closed_pattern(reason) for reason in ALL_REASONS)
+
+
+def is_closed_reason(reason: str) -> bool:
+    """Whether `reason` is one of the closed strings or a template of the list with every
+    placeholder filled in: anything else is free text, which a report never holds."""
+    return any(pattern.fullmatch(reason) for pattern in _CLOSED_PATTERNS)
 
 
 def _fill(template: str, **values: int | str) -> str:
