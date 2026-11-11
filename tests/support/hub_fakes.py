@@ -44,6 +44,14 @@ class RepoCall:
 
 
 @dataclass(frozen=True)
+class VisibilityCall:
+    """A question to the Hub: is this repository private? (`repo_is_private`)."""
+
+    repo_id: str
+    token: str
+
+
+@dataclass(frozen=True)
 class CommitCall:
     repo_id: str
     operations: tuple[tuple[str, Path], ...]
@@ -60,7 +68,12 @@ class RecordingHub:
     oid: str = COMMIT_OID
     repo_error: BaseException | None = None
     commit_error: BaseException | None = None
-    calls: list[RepoCall | CommitCall] = field(default_factory=list)
+    # What the Hub REPORTS about the repository after `create_repo`: private by default. A
+    # repository that already existed and was made public in the web page is `reports_private=False`
+    # whatever `create_repo` was asked for (the library ignores the flag for an existing repository).
+    reports_private: object = True
+    visibility_error: BaseException | None = None
+    calls: list[RepoCall | VisibilityCall | CommitCall] = field(default_factory=list)
 
     def create_repo(
         self, repo_id: str, *, private: bool, exist_ok: bool, token: str
@@ -68,6 +81,12 @@ class RecordingHub:
         self.calls.append(RepoCall(repo_id, private, exist_ok, token))
         if self.repo_error is not None:
             raise self.repo_error
+
+    def repo_is_private(self, repo_id: str, *, token: str) -> bool:
+        self.calls.append(VisibilityCall(repo_id, token))
+        if self.visibility_error is not None:
+            raise self.visibility_error
+        return self.reports_private  # type: ignore[return-value]
 
     def create_commit(
         self,
@@ -94,6 +113,10 @@ class RecordingHub:
         return [call for call in self.calls if isinstance(call, RepoCall)]
 
     @property
+    def visibility_calls(self) -> list[VisibilityCall]:
+        return [call for call in self.calls if isinstance(call, VisibilityCall)]
+
+    @property
     def commit_calls(self) -> list[CommitCall]:
         return [call for call in self.calls if isinstance(call, CommitCall)]
 
@@ -103,6 +126,14 @@ class FakeCommitInfo:
     """What the library's `CommitInfo` gives the adapter: the commit's id."""
 
     oid: str
+
+
+@dataclass(frozen=True)
+class FakeRepoInfo:
+    """What the library's `ModelInfo` gives the adapter: whether the repository is private (`None`
+    is what the library holds when the Hub did not say)."""
+
+    private: bool | None
 
 
 @dataclass
@@ -117,6 +148,7 @@ class FakeHfApi:
         default_factory=list
     )
     oid: str = COMMIT_OID
+    private: bool | None = True
 
     def __call__(self, token: str | None = None) -> FakeHfApi:
         self.built_with.append(token)
@@ -124,6 +156,10 @@ class FakeHfApi:
 
     def create_repo(self, *args: Any, **kwargs: Any) -> None:
         self.calls.append(("create_repo", args, kwargs))
+
+    def repo_info(self, *args: Any, **kwargs: Any) -> FakeRepoInfo:
+        self.calls.append(("repo_info", args, kwargs))
+        return FakeRepoInfo(self.private)
 
     def create_commit(self, *args: Any, **kwargs: Any) -> FakeCommitInfo:
         self.calls.append(("create_commit", args, kwargs))

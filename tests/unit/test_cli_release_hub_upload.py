@@ -83,7 +83,11 @@ def test_an_upload_creates_a_private_repository_and_makes_one_commit_of_the_nine
 
     assert made.exit_code == 0, made.output
     assert opened == [token]
-    assert [type(call).__name__ for call in hub.calls] == ["RepoCall", "CommitCall"]
+    assert [type(call).__name__ for call in hub.calls] == [
+        "RepoCall",
+        "VisibilityCall",
+        "CommitCall",
+    ]
     repo, commit = hub.repo_calls[0], hub.commit_calls[0]
     assert (repo.repo_id, repo.private, repo.exist_ok, repo.token) == (
         release.repo_id,
@@ -102,7 +106,7 @@ def test_an_upload_creates_a_private_repository_and_makes_one_commit_of_the_nine
 def test_public_is_passed_through_and_is_the_only_way_to_a_public_repository(
     release: Release, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    private, public = RecordingHub(), RecordingHub()
+    private, public = RecordingHub(), RecordingHub(reports_private=False)
 
     uploading(release, tmp_path / "a", monkeypatch, private)
     uploading(release, tmp_path / "b", monkeypatch, public, "--public")
@@ -159,6 +163,7 @@ def test_the_commit_record_holds_the_repository_the_commit_and_the_release_diges
         "repo_id": release.repo_id,
         "commit_oid": COMMIT_OID,
         "release_sha256": plan.release_sha256,
+        "visibility": "private",
     }
     assert text == json.dumps(json.loads(text), sort_keys=True, indent=2) + "\n"
     assert (out / PLAN_FILE).read_bytes() == plan.to_bytes()

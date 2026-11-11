@@ -12,8 +12,11 @@ and is known and left out (it holds the paths of the machine that made it). `Upl
 `rinchen.export.hub_files`' and the release record's is `rinchen.export.hub_record`'s.
 
 `upload(plan, stage, client, token)` re-hashes every file of the plan just before the operations are
-built and refuses a change, creates the repository (private unless `public`), and makes ONE commit of
-the nine files in the order of `UPLOAD_NAMES`. It talks to the Hub only through a `HubClient`. An error
+built and refuses a change, creates the repository (private unless `public`), asks the Hub whether the
+repository IS private (creating an existing repository changes nothing about it, so the flag asked for
+says nothing about one that was there already) and refuses, before any commit, a public repository that
+`public` did not allow, and makes ONE commit of the nine files in the order of `UPLOAD_NAMES`; what it
+returns carries the visibility the Hub reported. It talks to the Hub only through a `HubClient`. An error
 of the client is turned into an `UpstreamError` that names its class and nothing else (its text may
 hold the token), raised outside the `except` block so that the error is not kept as its cause or its
 context. A file could still change between the re-hash and the moment the library reads it: the stage
@@ -32,7 +35,7 @@ import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Final, NamedTuple, Protocol
+from typing import Any, Final, Literal, NamedTuple, Protocol
 
 from rinchen.errors import ConfigError, DataError, RinchenError, UpstreamError
 from rinchen.export.hub_files import Problem, Seen, read_hashed, read_stage, shown
@@ -54,6 +57,7 @@ __all__ = [
     "PlannedFile",
     "UploadOperation",
     "UploadPlan",
+    "UploadResult",
     "commit_to_bytes",
     "plan_upload",
     "upload",
@@ -124,12 +128,25 @@ class CommitResult:
     commit_oid: str
 
 
+@dataclass(frozen=True, slots=True)
+class UploadResult:
+    """What an upload did: the id of its commit and the visibility the Hub REPORTED for the
+    repository (not the one that was asked for)."""
+
+    commit_oid: str
+    visibility: Literal["private", "public"]
+
+
 class HubClient(Protocol):
-    """The two calls an upload makes. `token` is the one the upload was given."""
+    """The calls an upload makes. `token` is the one the upload was given. `repo_is_private`
+    answers what the Hub says the repository is, after `create_repo`, which does not change an
+    existing repository."""
 
     def create_repo(
         self, repo_id: str, *, private: bool, exist_ok: bool, token: str
     ) -> None: ...
+
+    def repo_is_private(self, repo_id: str, *, token: str) -> bool: ...
 
     def create_commit(
         self,
@@ -244,15 +261,16 @@ def upload(
     token: str,
     *,
     public: bool = False,
-) -> CommitResult:
-    """Create the repository of `plan` (private unless `public`) and make ONE commit of its nine
-    files, through `client`.
+) -> UploadResult:
+    """Create the repository of `plan` (private unless `public`), check that it is private unless
+    `public` allows otherwise, and make ONE commit of its nine files, through `client`.
 
     Raises:
-        ConfigError: `token` is blank, or a file of the plan is not what it was when it was
-            planned (nothing was sent).
-        UpstreamError: the Hub, or the client, failed; the message names the class of the error and
-            never its text, which may hold the token.
+        ConfigError: `token` is blank, a file of the plan is not what it was when it was planned,
+            or the repository exists and is public while `public` is false (nothing was sent).
+        UpstreamError: the Hub, or the client, failed or did not say whether the repository is
+            private; the message names the class of the error and never its text, which may hold
+            the token.
     """
     if not token.strip():
         raise ConfigError("the token is blank")
@@ -264,6 +282,16 @@ def upload(
             plan.repo_id, private=not public, exist_ok=True, token=token
         ),
     )
+    private = _through_the_client(
+        "the Hub could not say what the repository is",
+        lambda: client.repo_is_private(plan.repo_id, token=token),
+    )
+    if not isinstance(private, bool):
+        raise UpstreamError("the Hub did not say whether the repository is private")
+    if not private and not public:
+        raise ConfigError(
+            "the repository exists and is public: pass --public to upload into it"
+        )
     result = _through_the_client(
         "the Hub refused the upload",
         lambda: client.create_commit(
@@ -275,17 +303,19 @@ def upload(
     )
     if not isinstance(result.commit_oid, str) or not _OID.fullmatch(result.commit_oid):
         raise UpstreamError("the Hub answered with a commit id that is not one")
-    return result
+    return UploadResult(result.commit_oid, "private" if private else "public")
 
 
-def commit_to_bytes(plan: UploadPlan, result: CommitResult) -> bytes:
-    """The bytes of `hub_commit.json`: the repository, the commit and the release it carried."""
+def commit_to_bytes(plan: UploadPlan, result: UploadResult) -> bytes:
+    """The bytes of `hub_commit.json`: the repository, the commit, the release it carried and the
+    visibility the Hub reported for the repository."""
     return _json_bytes(
         {
             "schema": HUB_COMMIT_SCHEMA,
             "repo_id": plan.repo_id,
             "commit_oid": result.commit_oid,
             "release_sha256": plan.release_sha256,
+            "visibility": result.visibility,
         }
     )
 
@@ -362,6 +392,14 @@ class HfHubClient:
         self._api.create_repo(
             repo_id, private=private, exist_ok=exist_ok, repo_type="model"
         )
+
+    def repo_is_private(self, repo_id: str, *, token: str) -> bool:
+        self._require_own(token)
+        info = self._api.repo_info(repo_id, repo_type="model")
+        # The library holds None when the Hub did not say: that is not an answer.
+        if not isinstance(info.private, bool):
+            raise UpstreamError("the Hub did not say whether the repository is private")
+        return info.private
 
     def create_commit(
         self,

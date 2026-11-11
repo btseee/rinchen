@@ -103,10 +103,13 @@ def commit(
     *,
     commit_record: bytes | None,
     commit_oid: str | None,
+    visibility: str | None = None,
 ) -> Path:
     """Write the files into `target` (made when missing) and, last, the manifest; return the
-    manifest's path. `commit_record` and `commit_oid` are given after an upload and only then.
-    Exits with code 1 when anything cannot be written or a file read back differs.
+    manifest's path. `commit_record`, `commit_oid` and `visibility` (what the Hub REPORTED for the
+    repository, which the manifest records in place of the one that was asked for) are given after
+    an upload and only then. Exits with code 1 when anything cannot be written or a file read back
+    differs.
 
     Raises:
         DataError: the directory holds the manifest of another stage.
@@ -143,17 +146,19 @@ def commit(
                 "bytes": float(ready.plan.total_bytes),
             },
             packages=("huggingface_hub",) if ready.mode == "upload" else (),
-            status=_status(ready, commit_oid),
+            status=_status(ready, commit_oid, visibility),
         )
     except OSError as exc:
         exit_cannot_write(target, exc, what=_OUTPUTS)
 
 
-def _status(ready: Prepared, commit_oid: str | None) -> Mapping[str, str]:
+def _status(
+    ready: Prepared, commit_oid: str | None, visibility: str | None
+) -> Mapping[str, str]:
     status = {
         "mode": ready.mode,
         "repo_id": ready.plan.repo_id,
-        "visibility": ready.visibility,
+        "visibility": ready.visibility if visibility is None else visibility,
     }
     if commit_oid is not None:
         status["commit_oid"] = commit_oid

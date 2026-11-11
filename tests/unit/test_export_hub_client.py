@@ -28,9 +28,9 @@ import pytest
 
 from rinchen.errors import ConfigError, UpstreamError
 from rinchen.export.hub import (
-    CommitResult,
     HfHubClient,
     UploadOperation,
+    UploadResult,
     plan_upload,
     upload,
 )
@@ -57,7 +57,7 @@ def release(tmp_path: Path) -> Release:
     return staged_release(tmp_path)
 
 
-def run_upload(release: Release, hub: RecordingHub, **options: bool) -> CommitResult:
+def run_upload(release: Release, hub: RecordingHub, **options: bool) -> UploadResult:
     plan = plan_upload(release.stage, release.repo_id)
     return upload(plan, release.stage, hub, fake_token(), **options)
 
@@ -73,8 +73,12 @@ def test_the_repository_is_created_private_and_one_commit_holds_the_nine_files_i
 
     result = run_upload(release, hub)
 
-    assert result == CommitResult(COMMIT_OID)
-    assert [type(call).__name__ for call in hub.calls] == ["RepoCall", "CommitCall"]
+    assert result == UploadResult(COMMIT_OID, "private")
+    assert [type(call).__name__ for call in hub.calls] == [
+        "RepoCall",
+        "VisibilityCall",
+        "CommitCall",
+    ]
     repo, commit = hub.repo_calls[0], hub.commit_calls[0]
     assert (repo.repo_id, repo.private, repo.exist_ok, repo.token) == (
         release.repo_id,
@@ -450,7 +454,11 @@ def test_the_commit_of_the_adapter_goes_through_upload_as_one_commit(
     result = upload(plan, release.stage, HfHubClient(token), token)
 
     assert result.commit_oid == COMMIT_OID
-    assert [call for call, *_ in api.calls] == ["create_repo", "create_commit"]
+    assert [call for call, *_ in api.calls] == [
+        "create_repo",
+        "repo_info",
+        "create_commit",
+    ]
     assert api.calls[0][2]["private"] is True
 
 
@@ -475,10 +483,12 @@ from rinchen.export.hub import HfHubClient, UploadOperation
 token = sys.argv[3]
 client = HfHubClient(token)
 found = {}
-for step in ("create_repo", "create_commit"):
+for step in ("create_repo", "repo_is_private", "create_commit"):
     try:
         if step == "create_repo":
             client.create_repo("org/name", private=True, exist_ok=True, token=token)
+        elif step == "repo_is_private":
+            client.repo_is_private("org/name", token=token)
         else:
             client.create_commit(
                 "org/name",
@@ -526,6 +536,7 @@ def test_the_real_library_refuses_offline_before_any_socket_is_opened(
     assert report["attempts"] == 0
     assert report["errors"] == {
         "create_repo": "huggingface_hub.errors.OfflineModeIsEnabled",
+        "repo_is_private": "huggingface_hub.errors.OfflineModeIsEnabled",
         "create_commit": "huggingface_hub.errors.OfflineModeIsEnabled",
     }
     assert token not in completed.stdout and token not in completed.stderr
