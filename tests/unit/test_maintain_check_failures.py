@@ -30,6 +30,7 @@ from rinchen.maintain.states import (
     SKIP_GPU_CHECK,
     SKIP_NO_DRIFT,
     SKIP_NO_RERUNS,
+    SKIP_NOT_SELECTED,
     fail_environment,
     fail_floor,
     fail_timeout,
@@ -627,7 +628,7 @@ def test_a_failed_doctor_with_a_selected_weekly_rerun_skips_it_with_the_environm
 
     states = item_states(run)
     assert states["serving_tiny"] == ("skipped", SKIP_ENVIRONMENT)
-    assert states["numerics"] == ("skipped", skip_not_due("nightly"))
+    assert states["numerics"] == ("skipped", SKIP_NOT_SELECTED)
     reruns = step_of(document_of(run), "reruns")
     assert (reruns["state"], reruns["reason"]) == ("skipped", SKIP_ENVIRONMENT)
 

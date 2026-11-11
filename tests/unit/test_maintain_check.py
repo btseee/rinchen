@@ -35,6 +35,7 @@ from rinchen.maintain.states import (
     SKIP_NO_DRIFT,
     SKIP_NO_EXPORT,
     SKIP_NO_RERUNS,
+    SKIP_NOT_SELECTED,
     skip_not_due,
 )
 from tests.support.maintain_check import (
@@ -481,7 +482,7 @@ def test_selected_runs_exactly_those_whatever_the_cadence(tmp_path: Path) -> Non
         if rerun_id != "serving_tiny":
             assert (items[rerun_id]["state"], items[rerun_id]["reason"]) == (
                 "skipped",
-                skip_not_due("nightly"),
+                SKIP_NOT_SELECTED,
             )
 
 
@@ -506,7 +507,7 @@ def test_selecting_the_export_rerun_without_an_export_runs_nothing_and_says_why(
         "skipped",
         SKIP_NO_EXPORT,
     )
-    assert items["numerics"]["reason"] == skip_not_due("nightly")
+    assert items["numerics"]["reason"] == SKIP_NOT_SELECTED
     step = step_of(document_of(run), "reruns")
     assert (step["state"], step["reason"]) == ("skipped", SKIP_NO_EXPORT)
 
@@ -666,7 +667,7 @@ def test_selected_wins_over_the_weekly_cadence_too(tmp_path: Path) -> None:
     )
 
     assert [rerun_id_of(argv) for argv in runner.argvs[2:]] == ["numerics"]
-    assert items_of(run)["serving_tiny"]["reason"] == skip_not_due("weekly")
+    assert items_of(run)["serving_tiny"]["reason"] == SKIP_NOT_SELECTED
 
 
 # ---- refusals of the arguments ---------------------------------------------------------------------

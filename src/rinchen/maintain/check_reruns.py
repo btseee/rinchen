@@ -3,10 +3,11 @@ parity reruns this run makes, and the item for each.
 
 Every configured rerun is listed, run or not. The selection is `--no-reruns` (none), else the
 reruns named with `--rerun` (exactly those, whatever the cadence), else the reruns due at the
-cadence. A rerun that is not selected is `skipped` as not due; a selected one is `skipped` too,
-and not run, when the doctor or the environment check failed (its numbers would be about another
-stack), and otherwise run by `rinchen.maintain.reruns`. The step's state is that of the group; a
-step in which nothing ran says why with the reason of the first selected rerun.
+cadence. A rerun that is not selected is `skipped`: as not selected with `--rerun` when
+`--rerun` named others (it may well be due), else as not due at the cadence. A selected one is
+`skipped` too, and not run, when the doctor or the environment check failed (its numbers would be
+about another stack), and otherwise run by `rinchen.maintain.reruns`. The step's state is that of
+the group; a step in which nothing ran says why with the reason of the first selected rerun.
 """
 
 from __future__ import annotations
@@ -33,6 +34,13 @@ def _selected_ids(config: MaintainConfig, options: CheckOptions) -> frozenset[st
 
 def _skipped(rerun: RerunConfig, reason: str) -> RerunResult:
     return RerunResult(rerun.id, rerun.kind, rerun.cadence, "skipped", reason)
+
+
+def _left_out_reason(options: CheckOptions) -> str:
+    """Why a rerun that is not selected was not made: `--rerun` named others, or it is not due."""
+    if options.selected:
+        return states.SKIP_NOT_SELECTED
+    return states.skip_not_due(options.cadence)
 
 
 def _rerun_item(result: RerunResult) -> dict[str, Any]:
@@ -86,7 +94,7 @@ def reruns_step(
         if not options.reruns:
             result = _skipped(rerun, states.SKIP_NO_RERUNS)
         elif rerun.id not in selected:
-            result = _skipped(rerun, states.skip_not_due(options.cadence))
+            result = _skipped(rerun, _left_out_reason(options))
         elif environment_failed:
             result = _skipped(rerun, states.SKIP_ENVIRONMENT)
         elif rerun.kind == "pytest":

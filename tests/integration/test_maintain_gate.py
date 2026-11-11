@@ -116,6 +116,7 @@ OUT_DIR_NAME = "maintain-out"
 PROJECT_FILES = ("pyproject.toml", "uv.lock")
 GPU_REASON = "a GPU check: maintain check never asks a device question"
 NOT_DUE = "not due at the nightly cadence"
+NOT_SELECTED = "not selected with --rerun"
 CPU_CHECKS = [
     "D-PY",
     "D-WHEELS",
@@ -704,7 +705,7 @@ def test_the_selection_wins_over_the_cadence_and_the_drift_is_not_asked(
             "evaluation_tiny",
             "serving_tiny",
         ],
-        NOT_DUE,
+        NOT_SELECTED,
     )
     assert (drift["state"], drift["reason"]) == ("skipped", "disabled by --no-drift")
     assert not any(

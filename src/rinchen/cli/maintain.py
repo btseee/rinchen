@@ -57,6 +57,7 @@ from rinchen.cli.maintain_inputs import (
     read_inputs,
     require_cadence,
     require_known_reruns,
+    require_rerun_options_agree,
 )
 from rinchen.cli.maintain_output import (
     STAGE,
@@ -270,6 +271,7 @@ def _plan(
             of another stage.
     """
     require_cadence(cadence)
+    require_rerun_options_agree(reruns=reruns, selected=selected)
     target = absolute(out_dir)
     project = absolute(project_dir)
     hashed = hash_inputs(project, absolute(config))

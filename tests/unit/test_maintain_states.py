@@ -31,6 +31,7 @@ from rinchen.maintain.states import (
     SKIP_NO_DRIFT,
     SKIP_NO_EXPORT,
     SKIP_NO_RERUNS,
+    SKIP_NOT_SELECTED,
     SKIP_REASONS,
     STATES,
     fail_command_exit,
@@ -59,6 +60,7 @@ EXPECTED_REASONS = (
     "a doctor or environment check failed",
     "reported by the doctor itself",
     "not due at the <cadence> cadence",
+    "not selected with --rerun",
     "uv was not found",
     "uv exited with code <n>",
     "timed out after <s> s",
@@ -111,6 +113,7 @@ def test_the_constants_hold_the_strings_of_the_interface() -> None:
     assert SKIP_NO_EXPORT == "no export was given"
     assert SKIP_ENVIRONMENT == "a doctor or environment check failed"
     assert SKIP_DOCTOR_SELF == "reported by the doctor itself"
+    assert SKIP_NOT_SELECTED == "not selected with --rerun"
     assert FAIL_UV_MISSING == "uv was not found"
     assert FAIL_NO_RESULT == "uv printed no recognisable result"
     assert FAIL_CONTRADICTION == "uv printed a no-change line next to change lines"
@@ -257,6 +260,6 @@ def test_every_constant_of_the_module_is_in_the_closed_list() -> None:
         for name, value in vars(states).items()
         if name.startswith(("SKIP_", "FAIL_")) and isinstance(value, str)
     }
-    assert len(constants) == 6 + 7
+    assert len(constants) == 7 + 7
     for name, value in constants.items():
         assert value in ALL_REASONS, name

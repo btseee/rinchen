@@ -559,8 +559,11 @@ def test_the_real_binary_refuses_and_writes_nothing(
         arguments = [*arguments, "--out-dir", out_dir]
     before = _tree(tmp_path)
 
+    # `--rerun` contradicts `--no-reruns`, so the case that names a rerun leaves the latter out
+    # (an unknown rerun is refused before anything runs).
+    no_reruns = [] if "--rerun" in arguments else ["--no-reruns"]
     run = run_maintain(
-        [*arguments, "--no-drift", "--no-reruns", "--uv", NO_SUCH_UV], cwd=tmp_path
+        [*arguments, "--no-drift", *no_reruns, "--uv", NO_SUCH_UV], cwd=tmp_path
     )
 
     assert run.returncode == exit_code, run.stderr

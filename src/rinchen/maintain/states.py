@@ -34,6 +34,7 @@ SKIP_REASONS: Final = (
     SKIP_DOCTOR_SELF,
 )
 _NOT_DUE: Final = "not due at the <cadence> cadence"
+SKIP_NOT_SELECTED: Final = "not selected with --rerun"
 
 FAIL_UV_MISSING: Final = "uv was not found"
 _UV_EXIT: Final = "uv exited with code <n>"
@@ -60,6 +61,7 @@ FAIL_NO_FIGURES: Final = "the command wrote no readable parity.json"
 ALL_REASONS: Final = (
     *SKIP_REASONS,
     _NOT_DUE,
+    SKIP_NOT_SELECTED,
     FAIL_UV_MISSING,
     _UV_EXIT,
     _TIMEOUT,

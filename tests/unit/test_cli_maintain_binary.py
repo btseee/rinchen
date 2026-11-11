@@ -134,7 +134,9 @@ def refuse_half_an_export(ws: Workspace) -> list[str]:
 
 
 def refuse_unknown_rerun(ws: Workspace) -> list[str]:
-    return args(ws, "--rerun", "nosuch")
+    # Without `--no-reruns`, which `--rerun` contradicts (that pair is refused first): a command
+    # that wrongly got past the refusal still runs nothing, for `nosuch` is no rerun of the file.
+    return ws.args("--rerun", "nosuch", "--no-drift", uv="/nonexistent/uv")
 
 
 def refuse_missing_config(ws: Workspace) -> list[str]:

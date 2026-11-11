@@ -55,6 +55,16 @@ def require_cadence(cadence: str) -> None:
         raise ConfigError(f"--cadence must be one of: {', '.join(CADENCES)}")
 
 
+def require_rerun_options_agree(*, reruns: bool, selected: Sequence[str]) -> None:
+    """Raise ConfigError when `--no-reruns` (`reruns` False) comes with `--rerun`: the first runs
+    none and the second runs exactly the ones it names."""
+    if selected and not reruns:
+        raise ConfigError(
+            "--no-reruns and --rerun contradict each other: --no-reruns runs no rerun, "
+            "--rerun runs exactly the ones it names; give one of them"
+        )
+
+
 def export_inputs(
     export: Path | None, checkpoint: Path | None, corpus: list[Path] | None
 ) -> ExportInputs | None:
