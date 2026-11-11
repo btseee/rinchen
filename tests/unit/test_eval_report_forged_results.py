@@ -11,6 +11,7 @@ interval stay what the result says (they are not recomputable here).
 
 from __future__ import annotations
 
+import importlib.metadata
 from dataclasses import replace
 from typing import Any
 
@@ -196,6 +197,53 @@ def test_a_signature_of_another_version_than_the_recomputed_one_is_refused(
         match=f"{WHERE}: the {field} of the result does not match its outputs",
     ):
         report_of(runs)
+
+
+def test_a_signature_refusal_says_what_it_may_mean_and_what_to_do() -> None:
+    # The message cannot tell an edited result from one that another sacrebleu made, so it says
+    # both, names the version installed here and tells the operator to run the scoring again.
+    run = golden_run("alpha")
+    stale = run.results[0].chrf_pp_signature.replace("version:2.6.0", "version:9.9.9")
+
+    with pytest.raises(DataError) as refused:
+        report_of(forged(run, chrf_pp_signature=stale))
+
+    message = str(refused.value)
+    assert message.startswith(
+        f"{WHERE}: the chrf_pp_signature of the result does not match its outputs: "
+    )
+    assert (
+        "another version of sacrebleu than the one installed on this machine" in message
+    )
+    assert f"({importlib.metadata.version('sacrebleu')})" in message
+    assert "or may have been edited" in message
+    assert "run `rinchen eval run` again" in message
+    assert "9.9.9" not in message
+
+
+def test_the_signature_refusal_names_the_version_the_machine_reports(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(importlib.metadata, "version", lambda package: "7.7.7")
+    run = golden_run("alpha")
+    stale = run.results[0].bleu_signature.replace("version:2.6.0", "version:9.9.9")
+
+    with pytest.raises(DataError, match=r"installed on this machine \(7\.7\.7\)"):
+        report_of(forged(run, bleu_signature=stale))
+
+
+def test_the_signature_refusal_says_so_when_sacrebleu_has_no_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def missing(package: str) -> str:
+        raise importlib.metadata.PackageNotFoundError(package)
+
+    monkeypatch.setattr(importlib.metadata, "version", missing)
+    run = golden_run("alpha")
+    stale = run.results[0].bleu_signature.replace("version:2.6.0", "version:9.9.9")
+
+    with pytest.raises(DataError, match=r"installed on this machine \(not installed\)"):
+        report_of(forged(run, bleu_signature=stale))
 
 
 def test_a_result_that_names_the_signature_of_another_tokenizer_is_refused() -> None:

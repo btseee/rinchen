@@ -33,6 +33,7 @@ robustness block's values (its file is not in the run directory). A message name
 
 from __future__ import annotations
 
+import importlib.metadata
 import math
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
@@ -396,7 +397,10 @@ def _require_the_scoring_record(
         field = _SIGNATURE_FIELDS[name]
         if getattr(result, field) != computed.metrics[name].signature:
             raise DataError(
-                f"{place}: the {field} of the result does not match its outputs"
+                f"{place}: the {field} of the result does not match its outputs: it may "
+                "have been made with another version of sacrebleu than the one installed "
+                f"on this machine ({_installed_sacrebleu()}) or may have been edited; "
+                "run `rinchen eval run` again"
             )
     for name in COUNT_METRICS:
         if not _same_interval(
@@ -435,6 +439,13 @@ def _require_the_neural_presence(
                 f"{place}: the unmeasured reason of the {name} of the result is not the "
                 "one the runner writes"
             )
+
+
+def _installed_sacrebleu() -> str:
+    try:
+        return importlib.metadata.version("sacrebleu")
+    except importlib.metadata.PackageNotFoundError:
+        return "not installed"
 
 
 def _interval_of(

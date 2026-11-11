@@ -100,7 +100,8 @@ def read_report_dir(hashed: HashedReport) -> LoadedReport:
     if render_markdown(json.loads(report_bytes)).encode("utf-8") != markdown_bytes:
         raise DataError(
             f"report.md of the report directory {directory} is not the rendering of its "
-            "report.json"
+            "report.json: the directory was made by another version of the renderer or "
+            "was edited: run `rinchen eval report` again"
         )
     return LoadedReport(view, report_bytes, markdown_bytes)
 

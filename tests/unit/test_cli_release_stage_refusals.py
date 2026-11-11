@@ -571,6 +571,21 @@ def test_a_report_md_that_is_not_the_rendering_of_report_json_is_refused_with_3_
     assert "An edited line" not in result.output
 
 
+def test_the_refusal_of_a_stale_report_md_says_what_it_may_mean_and_what_to_do(
+    release: Release,
+) -> None:
+    # After the renderer changes, every older report.md differs from what the code now renders:
+    # the operator is told so, and to write both files again.
+    stale = report_dir_with_markdown(release, "stale", release.markdown_bytes + b"x")
+
+    result = refused(release, 3, report_dir=stale)
+
+    assert (
+        "was made by another version of the renderer or was edited: run "
+        "`rinchen eval report` again"
+    ) in result.stderr
+
+
 def test_a_report_md_with_one_changed_digit_is_refused(release: Release) -> None:
     markdown = release.markdown_bytes
     index = markdown.index(b"73.08")

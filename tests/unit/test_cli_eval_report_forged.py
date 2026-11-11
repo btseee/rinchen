@@ -8,6 +8,7 @@ run, the suite, the direction and the field and quotes no value, and nothing wri
 
 from __future__ import annotations
 
+import importlib.metadata
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -94,6 +95,18 @@ def test_a_consistently_re_digested_forgery_is_a_data_error_naming_the_field(
     assert_one_error(result, 3, START + field)
     assert result.stdout == ""
     assert not workspace.report_out.exists()
+
+
+def test_the_signature_refusal_names_the_installed_sacrebleu_and_the_command_to_run(
+    workspace: ReportWorkspace,
+) -> None:
+    forge_result(workspace.alpha, FIRST, forged_signature)
+
+    result = invoke_report(workspace)
+
+    assert_one_error(result, 3, START + "chrf_pp_signature of the result")
+    assert f"({importlib.metadata.version('sacrebleu')})" in result.stderr
+    assert "run `rinchen eval run` again" in result.stderr
 
 
 def test_the_digest_chain_alone_does_not_see_the_forgery(
