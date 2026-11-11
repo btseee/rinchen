@@ -1,0 +1,254 @@
+{
+  "cadence": "nightly",
+  "inputs": {
+    "config": "2d621646a38435e8ba27038119241232ca0f00432c3b39ef1ba224cfc762ac83",
+    "lock": "c41c8411249b6f351215bfff0127c38c07596161e90ab16ebe716d9758fcf94a",
+    "pyproject": "e2f3f9864eb5bce0d16732944f1e3ce1930800d8f462fb70052d43062ab5ad23"
+  },
+  "lock": {
+    "format": {
+      "revision": 5,
+      "version": 1
+    },
+    "names": 6,
+    "packages": 6
+  },
+  "schema": "rinchen.maintain/1",
+  "state": "drift",
+  "steps": [
+    {
+      "detail": {
+        "checks": [
+          {
+            "id": "D-PY",
+            "reason": null,
+            "state": "ok"
+          },
+          {
+            "id": "D-WHEELS",
+            "reason": null,
+            "state": "ok"
+          },
+          {
+            "id": "D-EOLE-PY",
+            "reason": null,
+            "state": "ok"
+          },
+          {
+            "id": "D-EOLE-CLI",
+            "reason": null,
+            "state": "ok"
+          },
+          {
+            "id": "D-CT2-CONV",
+            "reason": null,
+            "state": "ok"
+          },
+          {
+            "id": "D-CT2-IMPORT",
+            "reason": null,
+            "state": "ok"
+          },
+          {
+            "id": "D-TORCH-CUDA",
+            "reason": "a GPU check: maintain check never asks a device question",
+            "state": "skipped"
+          }
+        ]
+      },
+      "id": "doctor",
+      "reason": null,
+      "state": "ok"
+    },
+    {
+      "detail": {},
+      "id": "lock_file",
+      "reason": null,
+      "state": "ok"
+    },
+    {
+      "detail": {},
+      "id": "lock_consistent",
+      "reason": null,
+      "state": "ok"
+    },
+    {
+      "detail": {
+        "extra": [],
+        "extra_more": 0,
+        "installed": 6,
+        "mismatched": [],
+        "mismatched_more": 0,
+        "not_installed": 0
+      },
+      "id": "environment",
+      "reason": null,
+      "state": "ok"
+    },
+    {
+      "detail": {
+        "counts": {
+          "add": 1,
+          "blocked": 4,
+          "drift": 3,
+          "remove": 1,
+          "update": 5
+        },
+        "entries": [
+          {
+            "available": "2.3.1",
+            "change": "update",
+            "class": "blocked",
+            "locked": "2.3.0",
+            "package": "huggingface-hub",
+            "requires": [
+              "evaluation_tiny",
+              "gate"
+            ],
+            "rule": "hub-client"
+          },
+          {
+            "available": "2.5.5",
+            "change": "update",
+            "class": "blocked",
+            "locked": "2.5.4",
+            "package": "numpy",
+            "requires": [
+              "numerics",
+              "evaluation_tiny"
+            ],
+            "rule": "sacrebleu-numpy"
+          },
+          {
+            "available": "9.25.0.10",
+            "change": "update",
+            "class": "blocked",
+            "locked": "9.24.0.43",
+            "package": "nvidia-cudnn-cu13",
+            "requires": [
+              "parity_tiny",
+              "robustness_tiny",
+              "gate"
+            ],
+            "rule": "torch-family"
+          },
+          {
+            "available": "15.0.1",
+            "change": "update",
+            "class": "drift",
+            "locked": "15.0.0",
+            "package": "rich",
+            "requires": [],
+            "rule": null
+          },
+          {
+            "available": "0.8.1",
+            "change": "update",
+            "class": "blocked",
+            "locked": "0.8.0",
+            "package": "safetensors",
+            "requires": [
+              "gate"
+            ],
+            "rule": "transformers-stack"
+          },
+          {
+            "available": null,
+            "change": "remove",
+            "class": "drift",
+            "locked": "2.4.0",
+            "package": "sortedcontainers",
+            "requires": [],
+            "rule": null
+          },
+          {
+            "available": "1.2.0",
+            "change": "add",
+            "class": "drift",
+            "locked": null,
+            "package": "tomli-w",
+            "requires": [],
+            "rule": null
+          }
+        ],
+        "warnings": 0
+      },
+      "id": "drift",
+      "reason": null,
+      "state": "drift"
+    },
+    {
+      "detail": {
+        "items": [
+          {
+            "cadence": "nightly",
+            "figures": null,
+            "id": "numerics",
+            "kind": "pytest",
+            "reason": null,
+            "state": "ok",
+            "tests": {
+              "errors": 0,
+              "failed": 0,
+              "passed": 1110,
+              "skipped": 0
+            }
+          },
+          {
+            "cadence": "nightly",
+            "figures": null,
+            "id": "parity_tiny",
+            "kind": "pytest",
+            "reason": null,
+            "state": "ok",
+            "tests": {
+              "errors": 0,
+              "failed": 0,
+              "passed": 13,
+              "skipped": 0
+            }
+          },
+          {
+            "cadence": "nightly",
+            "figures": null,
+            "id": "parity_export",
+            "kind": "export_parity",
+            "reason": "no export was given",
+            "state": "skipped",
+            "tests": null
+          },
+          {
+            "cadence": "weekly",
+            "figures": null,
+            "id": "robustness_tiny",
+            "kind": "pytest",
+            "reason": "not due at the nightly cadence",
+            "state": "skipped",
+            "tests": null
+          },
+          {
+            "cadence": "weekly",
+            "figures": null,
+            "id": "evaluation_tiny",
+            "kind": "pytest",
+            "reason": "not due at the nightly cadence",
+            "state": "skipped",
+            "tests": null
+          },
+          {
+            "cadence": "weekly",
+            "figures": null,
+            "id": "serving_tiny",
+            "kind": "pytest",
+            "reason": "not due at the nightly cadence",
+            "state": "skipped",
+            "tests": null
+          }
+        ]
+      },
+      "id": "reruns",
+      "reason": null,
+      "state": "ok"
+    }
+  ]
+}
