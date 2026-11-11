@@ -143,7 +143,8 @@ def test_the_plan_is_printed_before_the_upload_and_the_commit_after_it(
     assert [line.split()[0] for line in lines[2:11]] == list(UPLOAD_NAMES)
     assert lines[11] == f"total: {total}"
     assert lines[12] == f"commit: {COMMIT_OID}"
-    assert lines[13:] == [
+    assert lines[13] == "visibility: private"
+    assert lines[14:] == [
         f"plan: {out / PLAN_FILE}",
         f"commit record: {out / COMMIT_FILE}",
         f"manifest: {out / MANIFEST}",

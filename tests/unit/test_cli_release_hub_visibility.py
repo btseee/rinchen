@@ -134,3 +134,56 @@ def test_a_hub_that_does_not_say_is_exit_4_with_no_commit_and_nothing_written(
     assert_one_error(made, 4, "the Hub did not say whether the repository is private")
     assert hub.commit_calls == []
     assert not out.exists()
+
+
+# ---- the printed line (D13 fix wave 2, finding m5) -----------------------------------------------------------------
+
+
+def commit_and_visibility_lines(stdout: str) -> list[str]:
+    lines = stdout.splitlines()
+    index = next(i for i, line in enumerate(lines) if line.startswith("commit: "))
+    return lines[index : index + 2]
+
+
+@pytest.mark.parametrize(
+    ("reports_private", "extra", "expected"),
+    [
+        (True, (), "private"),
+        (False, ("--public",), "public"),
+        # the case of the review: --public over a repository that already exists and is private
+        # exits 0 and used to say nothing; the line says what the Hub reports.
+        (True, ("--public",), "private"),
+    ],
+    ids=["private", "public", "public-asked-private-reported"],
+)
+def test_the_visibility_the_hub_reported_is_printed_right_after_the_commit_line(
+    release: Release,
+    out: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    reports_private: bool,
+    extra: tuple[str, ...],
+    expected: str,
+) -> None:
+    hub = RecordingHub(reports_private=reports_private)
+
+    made = uploading(release, out, monkeypatch, hub, *extra)
+
+    assert made.exit_code == 0, made.output
+    assert commit_and_visibility_lines(made.stdout)[1] == f"visibility: {expected}"
+    assert recorded_visibility(out) == (expected, expected)
+
+
+def test_a_dry_run_prints_no_visibility_line(release: Release, out: Path) -> None:
+    made = invoke_hub(release, out)
+
+    assert made.exit_code == 0, made.output
+    assert not any(line.startswith("visibility:") for line in made.stdout.splitlines())
+
+
+def test_a_refused_public_repository_prints_no_visibility_line(
+    release: Release, out: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    made = uploading(release, out, monkeypatch, RecordingHub(reports_private=False))
+
+    assert_one_error(made, 2, REFUSAL)
+    assert "visibility:" not in made.stdout

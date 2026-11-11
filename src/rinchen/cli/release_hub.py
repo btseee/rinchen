@@ -16,11 +16,12 @@ With `--upload` the variable `HF_TOKEN` must be set and not blank: it is read he
 anything else is hashed. The plan is printed, the repository is created PRIVATE (`--public` is explicit
 and never the default) and the Hub is asked what it is: an existing repository that is public (creating
 it again changes nothing about it) is refused unless `--public` is given, before any commit. ONE commit
-holds the nine files, `commit: <oid>` is printed, and `hub_commit.json`, `hub_plan.json` and, last, the
-manifest are written; `hub_commit.json` and the manifest record the visibility the Hub reported. The
-token is passed to the client and to nothing else: it is never printed, never written, never in a
-message; an error of the Hub is named by its class. `rinchen` never logs in and never reads a token
-file. Nothing is uploaded unless `--upload` is given, and no test or workflow of D13 gives it.
+holds the nine files, `commit: <oid>` and `visibility: <what the Hub reported>` are printed, and
+`hub_commit.json`, `hub_plan.json` and, last, the manifest are written; `hub_commit.json` and the
+manifest record the visibility the Hub reported. The token is passed to the client and to nothing
+else: it is never printed, never written, never in a message; an error of the Hub is named by its
+class. `rinchen` never logs in and never reads a token file. Nothing is uploaded unless `--upload` is
+given, and no test or workflow of D13 gives it.
 
 Exit codes: 0; 2 for a bad option, a repository other than the one the stage was made for, an
 `--out-dir` that is the stage, a missing or blank `HF_TOKEN` for `--upload`, a stage whose file
@@ -128,6 +129,7 @@ def hub_command(
             return
         result = upload(ready.plan, stage_dir, open_client(token), token, public=public)
         typer.echo(f"commit: {result.commit_oid}")
+        typer.echo(f"visibility: {result.visibility}")
         manifest = commit(
             target,
             ready,
