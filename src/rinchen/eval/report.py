@@ -84,7 +84,7 @@ def build_report(
     held = hold_runs(runs, suites, settings)
     named = baseline if baseline is not None else config.baseline_system
     _require_a_system_of_the_runs(named, held)
-    rows = {(one.suite_name, one.system): verified_rows(one) for one in held}
+    rows = {(one.suite_name, one.system): verified_rows(one, settings) for one in held}
 
     comparisons = _comparisons(held, rows, named, config, settings)
     results = [

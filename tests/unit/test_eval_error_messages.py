@@ -1563,7 +1563,31 @@ REVIEWED: Final[tuple[tuple[str, str, str, str], ...]] = (
     ("eval/report_runs.py", "verified_rows", "len(computed.labels)", COUNT),
     (
         "eval/report_runs.py",
-        "verified_rows",
+        "_require_the_points",
+        "name",
+        "the name of a count metric: `bleu`, `chrf` or `chrf_pp`",
+    ),
+    (
+        "eval/report_runs.py",
+        "_require_the_points",
+        "place",
+        "`the run of the system <id> over the suite <id>, direction <registry codes>`",
+    ),
+    (
+        "eval/report_runs.py",
+        "_require_the_scoring_record",
+        "place",
+        "`the run of the system <id> over the suite <id>, direction <registry codes>`",
+    ),
+    (
+        "eval/report_runs.py",
+        "_require_the_scoring_record",
+        "field",
+        "a field name of the result format taken from `_SIGNATURE_FIELDS`, three literals",
+    ),
+    (
+        "eval/report_runs.py",
+        "_require_the_scoring_record",
         "name",
         "the name of a count metric: `bleu`, `chrf` or `chrf_pp`",
     ),

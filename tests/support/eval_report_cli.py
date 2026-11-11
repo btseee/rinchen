@@ -137,6 +137,39 @@ def rewrite_run_json(run: Path, edit: Callable[[dict[str, Any]], None]) -> None:
     vouch_for(run, RUN_JSON)
 
 
+def forge_result(
+    run: Path, direction: str, edit: Callable[[dict[str, Any]], None]
+) -> None:
+    """Edit the `result.json` of `direction` in the run directory `run` and make `run.json` and the
+    manifest vouch for the new bytes: a result that was edited and re-digested, which the digest
+    chain cannot tell from a genuine one."""
+    relative = f"{direction}/result.json"
+    path = run / relative
+    document = json.loads(path.read_text("utf-8"))
+    edit(document)
+    path.write_text(
+        json.dumps(document, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+        "utf-8",
+    )
+    digest = sha256_of(path)
+    size = path.stat().st_size
+
+    def lists_the_new_bytes(run_document: dict[str, Any]) -> None:
+        run_document["files"][relative] = digest
+
+    rewrite_run_json(run, lists_the_new_bytes)
+
+    def vouches_for_the_new_bytes(manifest: Manifest) -> None:
+        manifest.outputs = [
+            item.model_copy(update={"sha256": digest, "bytes": size})
+            if Path(item.path).as_posix().endswith(f"/{relative}")
+            else item
+            for item in manifest.outputs
+        ]
+
+    rewrite_manifest(run, vouches_for_the_new_bytes)
+
+
 def listing(directory: Path) -> list[str]:
     return sorted(
         path.relative_to(directory).as_posix()

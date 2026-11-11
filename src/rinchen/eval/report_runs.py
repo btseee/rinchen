@@ -18,18 +18,22 @@ order (suite name, then system name), so that the report is a function of the SE
   that is not the one `run.json` names.
 
 `verified_rows` then recomputes the statistics of every direction from the suite and the outputs
-and refuses a result whose segment count, resampling unit or point value is not what its outputs
-score: a result file is never believed to hold more than it says, and the comparisons are made from
-these rows and from nothing a result file holds. A message names suites, systems (ids) and
-directions and never a text.
+and refuses a result whose segment count, bootstrap record, resampling unit, point value, interval,
+statuses, sacrebleu signatures or `trained` flag is not what its outputs score (the digest chain
+catches a flipped byte, not a result that was edited and re-digested): a result file is never
+believed to hold more than it says, and the comparisons are made from these rows and from nothing a
+result file holds. The neural metrics are the exception that cannot be recomputed here (a report holds
+no segment scores): their value and interval are what the result says. A message names suites,
+systems (ids), directions and fields and never a text or a value.
 """
 
 from __future__ import annotations
 
 import math
+from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Final
 
 from rinchen.errors import ConfigError, DataError
 from rinchen.eval.bootstrap import BootstrapSettings
@@ -37,9 +41,10 @@ from rinchen.eval.outputs import Output, OutputKey
 from rinchen.eval.result import OUTPUTS_FILE, DirectionResult
 from rinchen.eval.robust_suite_rules import is_id
 from rinchen.eval.run_record import RunRecord
-from rinchen.eval.scoring import DirectionRows, direction_rows
+from rinchen.eval.scoring import DirectionRows, MetricRows, direction_rows
+from rinchen.eval.significance import estimate
 from rinchen.eval.suites import Suite
-from rinchen.metrics.registry import COUNT_METRICS
+from rinchen.metrics.registry import COUNT_METRICS, CountMetricName
 from rinchen.metrics.segment_stats import score_from_statistics
 
 __all__ = ["HeldRun", "RunInput", "hold_runs", "robustness_of", "verified_rows"]
@@ -47,6 +52,11 @@ __all__ = ["HeldRun", "RunInput", "hold_runs", "robustness_of", "verified_rows"]
 _ROBUSTNESS_FIELDS = ("robustness", "robustness_coverage", "robustness_source")
 # A point of the report may differ from the one of the result by the rounding of a C library.
 _POINT_TOLERANCE = 1e-9
+_SIGNATURE_FIELDS: Final[Mapping[CountMetricName, str]] = {
+    "bleu": "bleu_signature",
+    "chrf": "chrf_signature",
+    "chrf_pp": "chrf_pp_signature",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -293,13 +303,17 @@ def robustness_of(held: HeldRun) -> dict[str, Any] | None:
 # ---- the statistics ------------------------------------------------------------------------------
 
 
-def verified_rows(held: HeldRun) -> dict[str, DirectionRows]:
+def verified_rows(
+    held: HeldRun, settings: BootstrapSettings
+) -> dict[str, DirectionRows]:
     """The statistics of every direction that ran, recomputed from the suite and the outputs of the
-    run, after checking that each result is what those outputs score.
+    run, after checking that each result is what those outputs score (with the bootstrap
+    `settings` the report is made with).
 
     Raises:
-        DataError: the outputs lack a segment, or a result's segment count, resampling unit or
-            point value is not what the outputs give.
+        DataError: the outputs lack a segment, or a result's segment count, bootstrap record,
+            resampling unit, point value, interval, statuses, signatures or `trained` flag is not
+            what the outputs give.
     """
     where = _where(held.system, held.suite_name)
     rows: dict[str, DirectionRows] = {}
@@ -311,7 +325,8 @@ def verified_rows(held: HeldRun) -> dict[str, DirectionRows]:
             raise DataError(
                 f"{where} has no output for {len(missing)} segments of {direction}"
             )
-        computed = direction_rows(view, [held.input.outputs[key] for key in keys])
+        outputs = [held.input.outputs[key] for key in keys]
+        computed = direction_rows(view, outputs)
         place = f"{where}, direction {direction}"
         if result.n_segments != len(view.ids):
             raise DataError(
@@ -327,17 +342,87 @@ def verified_rows(held: HeldRun) -> dict[str, DirectionRows]:
                 f"is {result.bootstrap.unit} over {result.bootstrap.units} units and the "
                 f"outputs give {computed.unit} over {len(computed.labels)}"
             )
-        for name in COUNT_METRICS:
-            counted = computed.metrics[name]
-            point = score_from_statistics(
-                counted.metric, counted.rows.sum(axis=0).tolist()
-            )
-            reported = result.metrics[name]
-            if reported is None or not math.isclose(
-                reported, point, rel_tol=_POINT_TOLERANCE, abs_tol=_POINT_TOLERANCE
-            ):
-                raise DataError(
-                    f"{place}: the {name} of the result does not match its outputs"
-                )
+        _require_the_points(result, computed, place)
+        _require_the_scoring_record(result, outputs, computed, settings, place)
         rows[direction] = computed
     return rows
+
+
+def _require_the_points(
+    result: DirectionResult, computed: DirectionRows, place: str
+) -> None:
+    for name in COUNT_METRICS:
+        counted = computed.metrics[name]
+        point = score_from_statistics(counted.metric, counted.rows.sum(axis=0).tolist())
+        reported = result.metrics[name]
+        if reported is None or not _same_number(reported, point):
+            raise DataError(
+                f"{place}: the {name} of the result does not match its outputs"
+            )
+
+
+def _require_the_scoring_record(
+    result: DirectionResult,
+    outputs: Sequence[Output],
+    computed: DirectionRows,
+    settings: BootstrapSettings,
+    place: str,
+) -> None:
+    """What a result says about HOW it was scored: the bootstrap record, the statuses, the
+    signatures, the intervals and `trained`; none of it is believed because a digest vouches for
+    the file, since a file that was edited can be re-digested."""
+    bootstrap = result.bootstrap
+    if (bootstrap.resamples, bootstrap.seed, bootstrap.alpha) != (
+        settings.resamples,
+        settings.seed,
+        settings.alpha,
+    ):
+        raise DataError(
+            f"{place}: the bootstrap of the result is not the one the report is made with"
+        )
+    if dict(result.statuses) != dict(Counter(output.status for output in outputs)):
+        raise DataError(f"{place}: the statuses of the result do not match its outputs")
+    for name in COUNT_METRICS:
+        field = _SIGNATURE_FIELDS[name]
+        if getattr(result, field) != computed.metrics[name].signature:
+            raise DataError(
+                f"{place}: the {field} of the result does not match its outputs"
+            )
+    for name in COUNT_METRICS:
+        if not _same_interval(
+            result.ci95[name], _interval_of(computed.metrics[name], settings)
+        ):
+            raise DataError(
+                f"{place}: the ci95 of the {name} of the result does not match its outputs"
+            )
+    if result.trained is not True:
+        raise DataError(
+            f"{place}: the trained flag of the result does not match its run: a "
+            "direction that ran is a trained one"
+        )
+
+
+def _interval_of(
+    counted: MetricRows, settings: BootstrapSettings
+) -> tuple[float, float] | None:
+    def score(totals: Sequence[int]) -> float:
+        return score_from_statistics(counted.metric, totals)
+
+    return estimate(counted.rows, score, settings).interval
+
+
+def _same_number(reported: float, recomputed: float) -> bool:
+    return math.isclose(
+        reported, recomputed, rel_tol=_POINT_TOLERANCE, abs_tol=_POINT_TOLERANCE
+    )
+
+
+def _same_interval(
+    reported: Sequence[float] | None, recomputed: Sequence[float] | None
+) -> bool:
+    if reported is None or recomputed is None:
+        return reported is None and recomputed is None
+    return len(reported) == len(recomputed) and all(
+        _same_number(given, found)
+        for given, found in zip(reported, recomputed, strict=True)
+    )
