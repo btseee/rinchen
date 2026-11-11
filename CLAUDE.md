@@ -267,7 +267,7 @@ currency symbol to the number it touches (`$5 $7` against `$7 $5` is exact, `5 $
 of a date (a copy-through echo is surface-exact on 568 of 960 again) and fixed five minors; the per-row `value_cyrl` supports a ratio-of-mean-sentence-chrF
 PROXY of the retention, not the corpus statistic, and D13's report must embed `robustness_coverage` beside the six-key block.
 D13 (Final eval and release tooling) is done locally on branch `d13-release`, stacked on `d12-robustness` (cut from it at `1a378d0`; code tip
-`2df73c1`), not merged and not pushed, and no CI run covers it: its STOP gate ("tiny report.md + model card generated; dry-run hub upload (mock)") is met on the
+`413bc94`), not merged and not pushed, and no CI run covers it: its STOP gate ("tiny report.md + model card generated; dry-run hub upload (mock)") is met on the
 toy. Through the real `rinchen` binary and the real Eole, CTranslate2, SentencePiece and sacrebleu on the CPU, with no network and no token, the toy export of D12
 (`model.bin` `e28d1566...a6`) and the D11 teacher translate a FLORES-like fixture suite built from the toy; `rinchen eval run`, `eval report`, `release stage` and
 `release hub` (the dry run) write the results, the report, the model card and the nine-file upload plan: chrF++ 97.03, 99.05, 98.97 and 98.38 for the export
@@ -284,7 +284,10 @@ untrained pair with `ok` in the wrong language, that D6's `CT2Translator` is sil
 Important ones (the report believed a re-digested result file; the card's evidence came from the whole report; flagged output failures and the dataset and revision were
 invisible in `report.md`; private-by-default did not hold for an existing repository); its fix wave (six commits, gate 17,666 passed, 1 skipped, 10 deselected, against
 13,583 at the end of D12) fixed them and eleven Minor findings and left open on purpose the limits that `docs/runbooks/13_release.md` lists under "Known limits". A scoped
-re-review of the fix wave was running when the records were written and its verdict is not recorded.
+re-review of the fix wave (one independent reader) ran and approved it with minors: no Critical, no Important and seven Minor findings (a re-digested result could still plant a neural metric or, through the dataset of a suite, a
+heading; the devtest guard did not see the eval commands or an aliased dynamic import; two refusals did not say what to do; `--public` over a private repository said nothing; the card printed `n/a ()`; two sentences of the
+uploaded text named internal milestones); its final wave (seven commits, `2df73c1..413bc94`, 72 mutants, gate 17,852 passed, 1 skipped, 10 deselected) fixed all seven and left open that a re-digested
+result can still plant a free-text reason and D12's robustness block values, which the report cannot recompute; no reader has read the final wave.
 Next up: D14 (Maintenance loop). See `STATE.md`, `docs/runbooks/13_release.md` and `docs/runbooks/12_robustness.md`.
 
 ## Evidence and full plan
