@@ -135,7 +135,8 @@ class SubprocessRunner:
 
 def read_log(path: Path, limit: int = LOG_LIMIT) -> str:
     """The first `limit` bytes of the log at `path`, decoded as UTF-8 with replacement; the
-    empty text when there is no such file.
+    empty text when there is no such file. For a text of which only the beginning matters (the
+    first line of `uv --version`): a text that is judged goes through `read_complete_log`.
 
     Raises:
         ValueError: `limit` is negative (a negative size would read the whole file).
@@ -147,6 +148,28 @@ def read_log(path: Path, limit: int = LOG_LIMIT) -> str:
             data = handle.read(limit)
     except FileNotFoundError:
         return ""
+    return data.decode("utf-8", errors="replace")
+
+
+def read_complete_log(path: Path, limit: int = LOG_LIMIT) -> str | None:
+    """The whole log at `path`, decoded as UTF-8 with replacement; the empty text when there is
+    no such file; `None` when the log holds more than `limit` bytes.
+
+    A text that is judged is read whole or not at all: the first `limit` bytes of a longer log
+    can end on a line boundary and look like a complete one, with the lines after the cut lost.
+
+    Raises:
+        ValueError: `limit` is negative.
+    """
+    if limit < 0:
+        raise ValueError("limit must not be negative")
+    try:
+        with path.open("rb") as handle:
+            data = handle.read(limit + 1)
+    except FileNotFoundError:
+        return ""
+    if len(data) > limit:
+        return None
     return data.decode("utf-8", errors="replace")
 
 

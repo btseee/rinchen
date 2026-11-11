@@ -20,10 +20,11 @@ from rinchen.config.maintain import MaintainConfig
 from rinchen.maintain import states
 from rinchen.maintain.check_types import DoctorFinding
 from rinchen.maintain.commands import (
+    LOG_LIMIT,
     CommandResult,
     CommandRunner,
     child_environment,
-    read_log,
+    read_complete_log,
 )
 from rinchen.maintain.drift import DriftOutcome, drift_outcome
 from rinchen.maintain.environment import EnvironmentResult, check_environment
@@ -236,10 +237,11 @@ def drift_step(
     decided = drift_outcome(
         exit_code=outcome.exit_code,
         timed_out=outcome.timed_out,
-        text=read_log(log),
+        text=read_complete_log(log, LOG_LIMIT),
         lock=lock,
         rules=config.drift.rules,
         timeout_seconds=config.drift.timeout_seconds,
+        log_limit=LOG_LIMIT,
     )
     detail = _drift_detail(decided) if decided.state != "fail" else {}
     return Step("drift", decided.state, decided.reason, detail)

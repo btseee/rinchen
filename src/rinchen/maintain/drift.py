@@ -7,13 +7,15 @@ that is one of the strings of `rinchen.maintain.states` and holds nothing of the
 1. the run timed out;
 2. uv did not run to an exit (it was not found);
 3. its exit code is not 0;
-4. its text, read by `parse_dry_run`: an unrecognised line, the positive line next to change lines
+4. its text is longer than the limit of the log (`text` is None): the text is never parsed, since
+   the lines after a cut could hold the one that says the table is not complete;
+5. its text, read by `parse_dry_run`: an unrecognised line, the positive line next to change lines
    and no result at all are each a failure;
-5. the cross-check: an update and a remove must name a version the lock lists for that name, an
+6. the cross-check: an update and a remove must name a version the lock lists for that name, an
    add must name a package the lock does not hold, and no `(package, change)` is listed twice.
    Each change line that breaks one of these counts once. A mis-parse, or a format that changed,
    cannot get past this: it needs the lock's own table;
-6. nothing but the positive line is `ok`; changes are `drift`, one entry each, sorted by package
+7. nothing but the positive line is `ok`; changes are `drift`, one entry each, sorted by package
    and then by change. `locked` is the lock's string, never the output's.
 
 `blocked` marks an entry some pin rule names. It says which reruns to make before taking the
@@ -29,6 +31,7 @@ from typing import Literal
 
 from rinchen.config.maintain import PinRule, rule_for
 from rinchen.maintain import states
+from rinchen.maintain.commands import LOG_LIMIT
 from rinchen.maintain.lock import LockFile
 from rinchen.maintain.uv_output import Change, ChangeKind, parse_dry_run
 
@@ -104,19 +107,23 @@ def drift_outcome(
     *,
     exit_code: int | None,
     timed_out: bool,
-    text: str,
+    text: str | None,
     lock: LockFile,
     rules: Sequence[PinRule],
     timeout_seconds: int,
+    log_limit: int = LOG_LIMIT,
 ) -> DriftOutcome:
     """The state, the reason and the table of one run of uv; `exit_code` is None when the
-    process did not run to an exit. See the module docstring for the order of the decision."""
+    process did not run to an exit, and `text` is None when its output was longer than
+    `log_limit` bytes. See the module docstring for the order of the decision."""
     if timed_out:
         return _failure(states.fail_timeout(timeout_seconds))
     if exit_code is None:
         return _failure(states.FAIL_UV_MISSING)
     if exit_code != 0:
         return _failure(states.fail_uv_exit(exit_code))
+    if text is None:
+        return _failure(states.fail_log_too_long(log_limit))
 
     run = parse_dry_run(text)
     if run.unrecognised:

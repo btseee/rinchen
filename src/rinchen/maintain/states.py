@@ -38,6 +38,7 @@ FAIL_UV_MISSING: Final = "uv was not found"
 _UV_EXIT: Final = "uv exited with code <n>"
 _TIMEOUT: Final = "timed out after <s> s"
 _UNRECOGNISED: Final = "the output of uv has <n> lines this version does not recognise"
+_LOG_TOO_LONG: Final = "the output of uv is longer than <limit> bytes"
 FAIL_NO_RESULT: Final = "uv printed no recognisable result"
 FAIL_CONTRADICTION: Final = "uv printed a no-change line next to change lines"
 _CROSS_CHECK: Final = (
@@ -62,6 +63,7 @@ ALL_REASONS: Final = (
     _UV_EXIT,
     _TIMEOUT,
     _UNRECOGNISED,
+    _LOG_TOO_LONG,
     FAIL_NO_RESULT,
     FAIL_CONTRADICTION,
     _CROSS_CHECK,
@@ -99,6 +101,10 @@ def fail_timeout(seconds: int) -> str:
 
 def fail_unrecognised(count: int) -> str:
     return _fill(_UNRECOGNISED, n=count)
+
+
+def fail_log_too_long(limit: int) -> str:
+    return _fill(_LOG_TOO_LONG, limit=limit)
 
 
 def fail_cross_check(count: int) -> str:
