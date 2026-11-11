@@ -37,3 +37,7 @@ with CPython 3.14, syncs with `uv sync --frozen --group dev`, then runs
 tiny` (currently a stub that always succeeds — real from D15 onward).
 GPU checks are not run in CI (no GPU runner); `D-TORCH-CUDA` reports
 `skip` there, which is expected and does not fail the gate.
+
+A second workflow, `.github/workflows/nightly.yml` (D14), runs `rinchen maintain check` every night and a heavier set of reruns on Sundays and on demand (`workflow_dispatch`, `cadence` `weekly`):
+the doctor's CPU checks, the lock against `pyproject.toml`, the installed packages against `uv.lock`, the dependency drift table and the parity reruns, with the report on the run page. It only
+reports (it never upgrades, uploads or needs a secret) and was checked statically; it never ran on GitHub. See `docs/runbooks/14_maintenance.md`.

@@ -34,6 +34,7 @@ NEVER:
 - `uv run rinchen eval suite fetch|build|inspect` (D13: `fetch --benchmark B --split S --out-dir DIR (--revision HEX | --unpinned)` is the ONLY network step and was never run; `build --benchmark B|human --from PATH --out-dir DIR` turns local files into a suite file and refuses `khk_Mong` by name; `inspect --suite FILE`)
 - `uv run rinchen eval run --suite FILE --out-dir DIR (--model DIR | --generator NAME | --hypotheses FILE)` and `uv run rinchen eval report --run DIR ... --suite FILE ... --out-dir DIR [--baseline SYSTEM]` (D13: BLEU, chrF and chrF++ with 95 % bootstrap intervals, paired comparisons, `report.json` and `report.md`; they measure and exit 0 whenever they measured; `docs/runbooks/13_release.md`)
 - `uv run rinchen release stage --export DIR --report-dir DIR --system NAME --repo-id ORG/NAME --out-dir DIR` and `uv run rinchen release hub --stage DIR --repo-id ORG/NAME --out-dir DIR [--upload] [--public]` (D13: the staging directory with the model card; `hub` is a DRY RUN unless `--upload`, which needs `HF_TOKEN` in the environment, creates the repository private and was never run)
+- `uv run --frozen --no-sync rinchen maintain check --out-dir DIR [--cadence nightly|weekly] [--no-drift] [--no-reruns] [--rerun ID] [--fail-on-drift] [--export DIR --checkpoint DIR --corpus FILE]` (D14: the doctor's CPU checks, `uv lock --check`, the installed packages against `uv.lock`, the dependency drift table from `uv lock --upgrade --dry-run` (the ONLY step that queries an index: never run it for a test or a measurement) and the parity reruns; writes `maintain_report.json`, `maintain_report.md` and `manifest.json`, only reads the project, exit 0 for ok or drift and 4 for fail; the upgrade procedure and the rollback are `docs/runbooks/14_maintenance.md`)
 
 ## Repo layout
 
@@ -48,7 +49,7 @@ configs/eole/converter{,_tiny}.yaml configs/spm/converter_char.yaml
 configs/eole/{multilingual_tiny,ablation_tiny,multilingual_proxy,ablation_priors}.yaml
 configs/eole/{teacher,teacher_tiny}.yaml configs/eole/{teacher_doc,teacher_doc_tiny}.yaml
 configs/eole/student_{server,edge,tiny}.yaml configs/serve/{tiny,server,edge}.yaml
-configs/eval/{metrics,suites}.yaml
+configs/eval/{metrics,suites}.yaml configs/maintain/maintain.yaml
 docker/{Dockerfile.cpu,compose.serve.yaml} .dockerignore
 docs/STACK.md docs/VERIFY.md
 docs/runbooks/00_environment.md docs/runbooks/01_acquisition.md
@@ -57,8 +58,9 @@ docs/runbooks/04_filtering_mining.md docs/runbooks/05_script_converter.md
 docs/runbooks/06_synthetic.md docs/runbooks/07_ablations.md docs/runbooks/08_teacher.md
 docs/runbooks/09_document_level.md docs/runbooks/10_distillation.md
 docs/runbooks/11_serving.md docs/runbooks/12_robustness.md docs/runbooks/13_release.md
+docs/runbooks/14_maintenance.md
 docs/research/  docs/superpowers/{specs,plans}/
-src/rinchen/{config,manifest,utils,cli,text,lang,split,spm,corpus,filter,mine,script_conv,synth,metrics,eval,serve,export}/
+src/rinchen/{config,manifest,utils,cli,text,lang,split,spm,corpus,filter,mine,script_conv,synth,metrics,eval,serve,export,maintain}/
 src/rinchen/acquire/{http,opus,hf,warc,commoncrawl,registry}.py
 src/rinchen/annotate/{db,export,agreement,app,routes,models}.py
 src/rinchen/spm/{symbols,corpus,train,check}.py src/rinchen/split/rules.py
@@ -98,11 +100,13 @@ src/rinchen/cli/{eval_suite,eval_suite_files,eval_suite_plan,eval_suite_output}.
 src/rinchen/cli/{eval_run,eval_run_plan,eval_run_inputs,eval_run_output,eval_systems}.py
 src/rinchen/cli/{eval_report,eval_report_inputs,eval_report_output}.py
 src/rinchen/cli/{release,release_stage,release_stage_inputs,release_stage_output,release_hub,release_hub_output}.py
+src/rinchen/maintain/{states,lock,environment,uv_output,drift,commands,reruns,report,report_markdown,check,check_types,check_steps,check_reruns}.py
+src/rinchen/config/maintain.py src/rinchen/cli/{maintain,maintain_inputs,maintain_doctor,maintain_output,maintain_signals}.py
 src/rinchen/utils/{logged_process,integers}.py
 src/rinchen/errors.py src/rinchen/__init__.py
 tests/ scripts/ plans/ reports/ manifests/
 manifests/ucd_standardized_variants.json
-tests/{unit,property,golden,integration}/ tests/fixtures/{annot,golden,raw,spm,script_conv,robustness,eval}/
+tests/{unit,property,golden,integration}/ tests/fixtures/{annot,golden,raw,spm,script_conv,robustness,eval,maintain}/
 tests/support/ (planted corpus and alignments, fake embedders, tiny LID model,
   tiny_converter, stub_runtime, fake_process, script_reference, planted_synth,
   synth_cli, fake_llm_server, shard_files, corpus_rows, eole_train_config, tiny_parallel,
@@ -113,13 +117,15 @@ tests/support/ (planted corpus and alignments, fake embedders, tiny LID model,
   docker_files, d11_gate, d11_gate_doc, serving_gate, serving_gate_fixtures, robust_toy, robust_toy_text,
   robust_suites, robust_gate, robust_golden, robust_cli, robust_suite_documents, no_network, module_imports,
   eval_golden, eval_fakes, eval_cli, eval_suite_cli, eval_suite_documents, eval_result_documents, eval_report,
-  eval_report_cli, eval_report_golden, eval_toy, eval_gate, release_documents, release_fixture, hub_fakes, hub_stage)
+  eval_report_cli, eval_report_golden, eval_toy, eval_gate, release_documents, release_fixture, hub_fakes, hub_stage,
+  maintain_check, maintain_cli, maintain_fakes, maintain_gate, maintain_gate_hygiene, maintain_project, maintain_reports,
+  maintain_scans, uv_outputs, fake_uv, nightly_workflow, workflow_expression)
 scripts/build_spm_fixture.py (regenerates tests/fixtures/spm/tiny_corpus)
 scripts/build_script_conv_fixtures.py (reference TSV -> lexicon, golden words, tiny fixture)
 data/{raw,clean,mined,synth,test}/ (gitignored content, tracked dirs)
 vendor/wheels/ (committed binary wheels with no cp314 upstream release)
 vendor/fasttext-wheel-shim/ (pure-Python shim package, see DECISIONS.md)
-.github/workflows/{ci,release}.yml
+.github/workflows/{ci,release,nightly}.yml
 ```
 
 Note: `data/`, `align/`, and `convert/` under `src/rinchen/` from the old
@@ -288,7 +294,22 @@ re-review of the fix wave (one independent reader) ran and approved it with mino
 heading; the devtest guard did not see the eval commands or an aliased dynamic import; two refusals did not say what to do; `--public` over a private repository said nothing; the card printed `n/a ()`; two sentences of the
 uploaded text named internal milestones); its final wave (seven commits, `2df73c1..413bc94`, 72 mutants, gate 17,852 passed, 1 skipped, 10 deselected) fixed all seven and left open that a re-digested
 result can still plant a free-text reason and D12's robustness block values, which the report cannot recompute; no reader has read the final wave.
-Next up: D14 (Maintenance loop). See `STATE.md`, `docs/runbooks/13_release.md` and `docs/runbooks/12_robustness.md`.
+D14 (Maintenance loop) is done locally on branch `d14-maintenance`, stacked on `d13-release` (cut from it at `0f3f6ba`; code tip `51c4489`), not merged and not pushed, and no CI run
+covers it: its STOP gate ("nightly workflow green on tiny") is met ONLY as "the workflow's own command, read from `nightly.yml`, runs green natively on the CPU through a uv shim that never forwards
+the upgrade dry run"; GitHub Actions is UNMEASURED. Through the real `rinchen` binary and the real Eole, CTranslate2 and pytest on the CPU with the GPU hidden, `uv run --frozen --no-sync rinchen maintain
+check --out-dir maintain-out --cadence "$CADENCE"` (`CADENCE=nightly`, through `sh` with a `uv` shim first on `PATH`) exits 0 in about 150 s (doctor 13.2 s, the two nightly reruns 136.2 s) and writes a
+report, a Markdown summary and a manifest: the lock 187 entries and 186 names, 186 installed packages and none differing, the drift table of a HAND-WRITTEN sample (7 entries, 4 blocked by pin rules),
+numerics 1,110 passed (floor 1,100) and `parity_tiny` 13 passed, 188 `tool_versions` keys, the two documents byte-equal across hash seeds and free of paths, timestamps and the environment, `uv.lock`
+and `pyproject.toml` untouched, and the controls (a failing, shrunken or overrunning rerun, a bad uv output, a held package, the refusals, the interrupts) fail as they should; no floor was lowered.
+It is a CHECK and a schedule, not a verdict on any stack or model: it reports and never changes anything (nothing writes `uv.lock` or `pyproject.toml`, nothing upgrades, nothing asks a device question;
+an upgrade is an operator's procedure on a branch, `docs/runbooks/14_maintenance.md`), the reruns run on the toy and rank nothing, no GPU was used (the one on this machine was not authorised; the doctor's
+GPU check is never called) and no test or measurement reached a package index (the gate answers the dry run from a sample through a shim; one mutation run of Task 7 ran the real online dry run once in a
+copy of the tree by a slip, disclosed). `configs/maintain/maintain.yaml` (10 pin rules, 6 reruns) is a table of unvalidated priors. D14 found that uv's offline dry run fails for any change here, so the lines
+for an update, an add and a remove were never measured (a second-hand report of one real run is recorded as such and is not a fixture), that the dry run is blind to the 12 of 38 direct dependencies pinned
+with `==` (Eole, CTranslate2, sacrebleu, SentencePiece, torch ...), that a plain `uv run` locks and syncs first (so the workflow uses `--frozen --no-sync`), that the nightly job keeps no log, and that the
+floors have margins of 10 (`numerics`) and 0 (the other four reruns). The combined review of the code has NOT run yet; a follow-up commit will record it (gate 19,818 passed, 1 skipped, 10 deselected
+before it, against 17,852 at the end of D13). The open gates: everything GPU, the real PyPI state and the lines of a real change, GitHub Actions and its minutes budget, every real export, and the D3 to D13 gates.
+Next up: D15 (the tiny end-to-end pipeline; D15 decides whether `just tiny` calls `maintain check --no-drift --no-reruns`). See `STATE.md`, `docs/runbooks/14_maintenance.md` and `docs/runbooks/13_release.md`.
 
 ## Evidence and full plan
 
