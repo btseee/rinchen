@@ -263,7 +263,6 @@ def test_the_files_the_old_manifest_listed_go_and_no_others(
     assert invoke(ws.args("--cadence", "weekly")).exit_code == 0
     assert (ws.out / "logs" / "robustness_tiny.log").is_file()
     assert (ws.out / "junit" / "robustness_tiny.xml").is_file()
-    (ws.out / "notes.txt").write_text("the operator's own note")
     (ws.out / "logs" / "extra.log").write_text("not listed by the manifest")
     install(monkeypatch)
 
@@ -273,7 +272,6 @@ def test_the_files_the_old_manifest_listed_go_and_no_others(
     assert "logs/robustness_tiny.log" not in after
     assert "junit/robustness_tiny.xml" not in after
     assert "logs/serving_tiny.log" not in after
-    assert after["notes.txt"] == b"the operator's own note"
     assert after["logs/extra.log"] == b"not listed by the manifest"
     assert sorted(after) == [
         "junit/numerics.xml",
@@ -286,7 +284,6 @@ def test_the_files_the_old_manifest_listed_go_and_no_others(
         "maintain_report.json",
         "maintain_report.md",
         "manifest.json",
-        "notes.txt",
     ]
 
 

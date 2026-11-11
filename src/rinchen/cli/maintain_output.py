@@ -3,6 +3,9 @@ that ends the commit and the lines on standard output. The order of the steps be
 hashing and the exit codes are the command's (`rinchen.cli.maintain`); the report, the Markdown and
 the figures are `rinchen.maintain`'s.
 
+An existing output directory may hold only the names this command writes
+(`require_only_own_entries`): the command removes and replaces files in it.
+
 The commit has two halves, `begin` before the check runs and `commit` after it. `begin` removes the
 old manifest first, so that a run that is interrupted or fails part-way leaves none that vouches for
 a mix of old and new files, and then the files it listed: each is taken by its place INSIDE the
@@ -27,7 +30,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
 
-from rinchen.errors import DataError
+from rinchen.errors import ConfigError, DataError
 from rinchen.maintain.check_types import CheckResult
 from rinchen.maintain.lock import LockFile
 from rinchen.maintain.report import Report, Step, overall_state
@@ -46,6 +49,7 @@ __all__ = [
     "commit",
     "observe_code_version",
     "parse_uv_version",
+    "require_only_own_entries",
     "result_lines",
 ]
 
@@ -58,6 +62,8 @@ UNKNOWN_VERSION: Final = "unknown"
 _NO_SEED: Final = -1
 _DOCUMENTS: Final = (REPORT_FILE, SUMMARY_FILE)
 _SUBDIRECTORIES: Final = (LOGS_DIR, JUNIT_DIR, PARITY_DIR)
+# The top-level names of an output directory that this command writes.
+_OWN_ENTRIES: Final = (*_DOCUMENTS, store.manifest_path(Path()).name, *_SUBDIRECTORIES)
 _UV_VERSION: Final = re.compile(r"uv ([0-9][0-9A-Za-z.+-]{0,31})(?: .*)?")
 
 
@@ -69,6 +75,30 @@ def observe_code_version() -> str:
     nightly's output directory is inside the checkout, and the logs and documents of the run would
     make the tree `-dirty` (an untracked file counts) in every manifest that asked afterwards."""
     return code_version()
+
+
+# ---- what an output directory may hold --------------------------------------------------------------------
+
+
+def require_only_own_entries(out_dir: Path) -> None:
+    """Raise ConfigError unless an existing `out_dir` holds only the names this command writes at
+    its top level (the two documents, the manifest and the directories `logs`, `junit` and
+    `parity_export`); a directory that does not exist, and an empty one, pass.
+
+    The command removes and replaces files in the directory it is given: an output directory that
+    was any project subdirectory would take them. The message counts the other entries and names
+    none of them.
+    """
+    if not out_dir.is_dir():
+        return
+    others = sum(1 for entry in out_dir.iterdir() if entry.name not in _OWN_ENTRIES)
+    if others:
+        raise ConfigError(
+            f"--out-dir {out_dir} holds {others} {'entry' if others == 1 else 'entries'} "
+            f"that this command does not write (it writes only {', '.join(_OWN_ENTRIES)} "
+            "there); pass an empty directory, one that does not exist yet or the one an "
+            "earlier run wrote"
+        )
 
 
 # ---- the first half: the old files go ---------------------------------------------------------------------

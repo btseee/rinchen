@@ -65,6 +65,7 @@ from rinchen.cli.maintain_output import (
     commit,
     observe_code_version,
     parse_uv_version,
+    require_only_own_entries,
     result_lines,
 )
 from rinchen.cli.maintain_signals import exit_on_termination_signals
@@ -276,6 +277,7 @@ def _plan(
         target, [Path(entry.path) for entry in hashed.entries()], option="--out-dir"
     )
     refuse_foreign_manifest(target, STAGE)
+    require_only_own_entries(target)
     inputs = read_inputs(hashed)
     require_known_reruns(inputs.config, selected)
     options = CheckOptions(
