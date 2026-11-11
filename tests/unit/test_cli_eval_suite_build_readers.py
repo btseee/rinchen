@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from rinchen.config.eval_suites import DEFAULT_EVAL_SUITES_PATH
 
+from rinchen.config.eval_suites import DEFAULT_EVAL_SUITES_PATH
 from rinchen.eval.suites import Suite
 from tests.support.eval_suite_cli import (
     LANGUAGES,

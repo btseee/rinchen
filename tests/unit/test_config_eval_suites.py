@@ -10,13 +10,13 @@ from typing import Any
 
 import pytest
 import yaml
+
+from rinchen.config import eval_suites
 from rinchen.config.eval_suites import (
     BenchmarkConfig,
     EvalSuitesConfig,
     load_eval_suites_config,
 )
-
-from rinchen.config import eval_suites
 from rinchen.config.languages import known_language_codes
 from rinchen.config.loader import REPO_ROOT
 from rinchen.errors import ConfigError

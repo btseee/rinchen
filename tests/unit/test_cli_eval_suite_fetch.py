@@ -14,8 +14,8 @@ from typing import Any
 
 import polars as pl
 import pytest
-from rinchen.config.eval_suites import DEFAULT_EVAL_SUITES_PATH
 
+from rinchen.config.eval_suites import DEFAULT_EVAL_SUITES_PATH
 from tests.support.distill_cli import write_foreign_manifest
 from tests.support.eval_suite_cli import (
     LANGUAGES,

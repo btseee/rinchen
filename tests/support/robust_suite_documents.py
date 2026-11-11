@@ -12,9 +12,9 @@ from collections.abc import Callable
 from typing import Any
 
 import pytest
-from rinchen.eval.robust_suite import SUITE_SCHEMA, Suite
 
 from rinchen.errors import DataError
+from rinchen.eval.robust_suite import SUITE_SCHEMA, Suite
 from rinchen.spm.symbols import PLACEHOLDER_COUNT, user_defined_symbols
 
 MARKER = "SECRET-MARKER-77"

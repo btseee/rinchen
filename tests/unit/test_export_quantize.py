@@ -6,14 +6,14 @@ quantises even a float32 export to int8 on a CPU (measured in the D11 spike)."""
 from __future__ import annotations
 
 import pytest
+
+from rinchen.errors import ConfigError
 from rinchen.export.quantize import (
     QUANTIZATIONS,
     effective_compute_type,
     require_compute_type,
     require_quantization,
 )
-
-from rinchen.errors import ConfigError
 
 
 def test_an_export_offers_four_quantizations_the_reference_first() -> None:
