@@ -44,6 +44,7 @@ __all__ = [
     "UNKNOWN_VERSION",
     "begin",
     "commit",
+    "observe_code_version",
     "parse_uv_version",
     "result_lines",
 ]
@@ -58,6 +59,16 @@ _NO_SEED: Final = -1
 _DOCUMENTS: Final = (REPORT_FILE, SUMMARY_FILE)
 _SUBDIRECTORIES: Final = (LOGS_DIR, JUNIT_DIR, PARITY_DIR)
 _UV_VERSION: Final = re.compile(r"uv ([0-9][0-9A-Za-z.+-]{0,31})(?: .*)?")
+
+
+# ---- the code version ------------------------------------------------------------------------------------
+
+
+def observe_code_version() -> str:
+    """The code version of the checkout, to be taken BEFORE the command writes anything: the
+    nightly's output directory is inside the checkout, and the logs and documents of the run would
+    make the tree `-dirty` (an untracked file counts) in every manifest that asked afterwards."""
+    return code_version()
 
 
 # ---- the first half: the old files go ---------------------------------------------------------------------
@@ -134,12 +145,14 @@ def commit(
     inputs: list[ManifestFile],
     lock: LockFile,
     config_sha256: str,
+    code_version: str,
     python_version: str,
     uv_version: str,
 ) -> Path:
     """Write the two documents into `out_dir`, then the manifest, and return the manifest's path.
 
-    `inputs` are the files that were hashed before they were read; the outputs the manifest lists
+    `code_version` is the one `observe_code_version` gave before anything was written. `inputs`
+    are the files that were hashed before they were read; the outputs the manifest lists
     are the two documents, the logs the run wrote, the JUnit report of each pytest rerun that ran
     and the parity figures of the parity rerun when it wrote them, whichever of them exist.
 
@@ -157,7 +170,7 @@ def commit(
     manifest = Manifest(
         stage=STAGE,
         created=datetime.now(UTC).isoformat(),
-        code_version=code_version(),
+        code_version=code_version,
         config_sha256=config_sha256,
         seed=_NO_SEED,
         inputs=inputs,

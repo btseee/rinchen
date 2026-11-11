@@ -196,11 +196,12 @@ def install(
     doctor: Callable[[], Sequence[DoctorFinding]] | None = None,
     installed: Callable[[], Mapping[str, Sequence[str]]] | None = None,
     versions: Mapping[str, Sequence[str]] = LOCKED,
+    constant_code_version: bool = True,
 ) -> FakeRunner:
     """Replace the seams of the command: the runner (`cli_runner()` by default), the doctor (six
     passes and the GPU skip) and the installed versions (`versions`, the lock's own, by default).
-    The code version of the manifest is a constant, so that a test never asks git. Returns the
-    runner."""
+    The code version of the manifest is a constant, so that a test never asks git, unless
+    `constant_code_version` is False (a test of the code version itself). Returns the runner."""
     chosen = cli_runner() if runner is None else runner
     monkeypatch.setattr(maintain, "make_runner", lambda: chosen)
     monkeypatch.setattr(
@@ -209,7 +210,8 @@ def install(
     monkeypatch.setattr(
         maintain, "installed", (lambda: versions) if installed is None else installed
     )
-    monkeypatch.setattr(maintain_output, "code_version", lambda: CODE_VERSION)
+    if constant_code_version:
+        monkeypatch.setattr(maintain_output, "code_version", lambda: CODE_VERSION)
     return chosen
 
 

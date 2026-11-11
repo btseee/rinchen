@@ -63,6 +63,7 @@ from rinchen.cli.maintain_output import (
     UNKNOWN_VERSION,
     begin,
     commit,
+    observe_code_version,
     parse_uv_version,
     result_lines,
 )
@@ -221,6 +222,7 @@ def check_command(
                 inputs=plan.hashed.entries(),
                 lock=plan.inputs.lock,
                 config_sha256=plan.hashed.config.sha256,
+                code_version=plan.code_version,
                 python_version=platform.python_version(),
                 uv_version=uv_version,
             )
@@ -242,6 +244,7 @@ class _Plan(NamedTuple):
     inputs: Inputs
     options: CheckOptions
     uv: str | None
+    code_version: str
 
 
 def _plan(
@@ -256,7 +259,8 @@ def _plan(
     selected: tuple[str, ...],
     export: ExportInputs | None,
 ) -> _Plan:
-    """Check the options and the files, in the order of the module docstring, and write nothing.
+    """Check the options and the files, in the order of the module docstring, and write nothing;
+    the last thing it does is read the code version, before the output directory is made.
 
     Raises:
         ConfigError: a bad option, an invalid configuration, a rerun the configuration does not
@@ -281,7 +285,15 @@ def _plan(
         selected=selected,
         export=export,
     )
-    return _Plan(target, project, hashed, inputs, options, _uv_program(uv))
+    return _Plan(
+        target,
+        project,
+        hashed,
+        inputs,
+        options,
+        _uv_program(uv),
+        observe_code_version(),
+    )
 
 
 def _run(plan: _Plan) -> tuple[CheckResult, str]:

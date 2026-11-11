@@ -237,3 +237,5 @@ data/*/*
 !data/*/.gitkeep
 /runs/
 /models/
+# The output directory of the nightly maintenance check (.github/workflows/nightly.yml)
+/maintain-out/

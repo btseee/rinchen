@@ -26,6 +26,7 @@ from rinchen.cli.maintain_output import (
     SUMMARY_FILE,
     begin,
     commit,
+    observe_code_version,
     parse_uv_version,
     result_lines,
 )
@@ -66,11 +67,6 @@ ENVIRONMENT = {
 }
 
 
-@pytest.fixture(autouse=True)
-def constant_code_version(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(maintain_output, "code_version", lambda: CODE_VERSION)
-
-
 def written(run: Run, *, lock: LockFile | None = None, uv: str = UV) -> Path:
     """Commit the documents and the manifest of a scripted run; return the manifest's path."""
     project = run.project
@@ -82,6 +78,7 @@ def written(run: Run, *, lock: LockFile | None = None, uv: str = UV) -> Path:
         inputs=build_inputs([project / "pyproject.toml", project / "uv.lock"]),
         lock=lock_for_samples() if lock is None else lock,
         config_sha256=digest_of_label("maintain.yaml of the golden run"),
+        code_version=CODE_VERSION,
         python_version=PYTHON,
         uv_version=uv,
     )
@@ -148,6 +145,28 @@ def test_the_manifest_is_written_after_every_file_it_lists(
     written(run)
 
     assert order == [REPORT_FILE, SUMMARY_FILE, "manifest.json"]
+
+
+def test_the_manifest_records_the_code_version_it_was_given_and_never_asks_git(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def refuse() -> str:
+        raise AssertionError("commit asked for the code version")
+
+    monkeypatch.setattr(maintain_output, "code_version", refuse)
+    run = golden_run(tmp_path)
+
+    written(run)
+
+    assert manifest_of(run.out)["code_version"] == CODE_VERSION
+
+
+def test_the_version_to_hand_to_the_commit_is_the_one_git_gives(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(maintain_output, "code_version", lambda: "feed123-dirty")
+
+    assert observe_code_version() == "feed123-dirty"
 
 
 def test_the_manifest_records_the_stage_the_inputs_the_seed_and_the_config_digest(
