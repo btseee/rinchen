@@ -19,10 +19,10 @@ from rinchen.eval.report_markdown_cells import (
     FEWER_THAN_TWO_UNITS,
     LABELS,
     TABLE_ORDER,
-    inline,
     label,
     number,
     plural,
+    reason_text,
     short,
     source_cells,
     status_cell,
@@ -47,6 +47,7 @@ __all__ = [
 _NOT_IN_THE_SUITE = "not in the suite"
 _NOT_TRAINED = "not trained"
 _NO_RUN = "no run"
+_NO_RESULT = "no result in this suite"
 _FEWER_THAN_TWO_UNITS = FEWER_THAN_TWO_UNITS
 # The count metrics in the order of the report's tables: the headline first.
 _COUNT_COLUMNS = tuple(metric for metric in TABLE_ORDER if metric in COUNT_METRICS)
@@ -210,7 +211,7 @@ def _units(result: DirectionResult) -> str:
 def _cell(result: DirectionResult, metric: str) -> str:
     value = result.metrics[metric]
     if value is None:
-        return f"n/a ({inline(result.unmeasured[metric])})"
+        return f"n/a ({reason_text(result.unmeasured[metric])})"
     interval = result.ci95[metric]
     spread = (
         f"[{interval[0]:.2f}, {interval[1]:.2f}]"
@@ -260,7 +261,9 @@ def _unscored_lines(results: Sequence[DirectionResult]) -> list[str]:
     metrics that share a reason on one line."""
     by_reasons: dict[tuple[str, ...], list[str]] = {}
     for metric in unscored_neural_metrics(results):
-        reasons = tuple(sorted({inline(r.unmeasured[metric]) for r in results}))
+        reasons = tuple(
+            sorted({reason_text(r.unmeasured[metric]) for r in results})
+        ) or (_NO_RESULT,)
         by_reasons.setdefault(reasons, []).append(LABELS[metric])
     return [
         line
@@ -403,5 +406,5 @@ def targets_section(report: ReportView) -> list[str]:
 
 def _target_value(value: float | None, basis: str) -> str:
     if value is None:
-        return f"n/a ({inline(basis)})"
-    return f"{number(value)} ({inline(basis)})"
+        return f"n/a ({reason_text(basis)})"
+    return f"{number(value)} ({reason_text(basis)})"

@@ -555,7 +555,7 @@ def test_a_null_robustness_value_is_n_a_with_its_reason() -> None:
 def test_the_not_measured_list_names_the_neural_metrics_with_their_counts() -> None:
     block = block_after(golden_markdown(), "## Not measured")
 
-    reason = "no segment scores were given: no scorer is built (B1 and B2 are open)"
+    reason = "no segment scores were given: the COMET and MetricX scorers are not built"
     assert f"- comet22: {reason} (4 of 4 results)" in block
     assert f"- metricx24: {reason} (4 of 4 results)" in block
     assert f"- metricx24_qe: {reason} (4 of 4 results)" in block
@@ -706,7 +706,7 @@ def test_the_unmeasured_count_is_the_results_that_lack_the_metric_of_all_the_res
 
     block = block_after(render_markdown(report), "## Not measured")
 
-    reason = "no segment scores were given: no scorer is built (B1 and B2 are open)"
+    reason = "no segment scores were given: the COMET and MetricX scorers are not built"
     assert f"- comet22: {reason} (2 of 4 results)" in block
     assert f"- metricx24: {reason} (4 of 4 results)" in block
     table = block_after(render_markdown(report), "### golden", "#### COMET-22")

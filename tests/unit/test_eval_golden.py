@@ -80,7 +80,7 @@ TOTALS = {
     "chrf": CHRF_TOTALS,
     "chrf_pp": CHRF_TOTALS + (42, 50, 40, 33, 40, 26),
 }
-RESULT_FILE_SHA256 = "05212b4fdd52448d4981e5e21f3f6b9315f16d7cfd38fd7c195d62172eb08dde"
+RESULT_FILE_SHA256 = "f31880cb2147d82f7d6ecb0b2018639bb505a788720e07e926c217f69ec4b28b"
 
 
 def outputs_of(system: str, direction: str) -> list[Output]:

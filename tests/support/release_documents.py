@@ -63,8 +63,8 @@ GOLDEN_FILE_SIZES: Final[Mapping[str, int]] = {
     "config.json": 312,
     "spm.model": 128,
     "rinchen.json": 1089,
-    "report.json": 14894,
-    "report.md": 7644,
+    "report.json": 14942,
+    "report.md": 7656,
 }
 
 

@@ -64,7 +64,7 @@ def test_the_direction_table_is_read_only() -> None:
 
 def test_the_reason_of_an_unmeasured_neural_metric_is_the_one_of_the_spec() -> None:
     assert NO_SCORER_REASON == (
-        "no segment scores were given: no scorer is built (B1 and B2 are open)"
+        "no segment scores were given: the COMET and MetricX scorers are not built"
     )
 
 

@@ -282,5 +282,5 @@ GOLDEN_BOOTSTRAP_SEGMENT: Final[Mapping[str, object]] = {
 }
 # The words of the reason every neural metric carries when no segment scores were given.
 GOLDEN_NO_SCORER_REASON: Final = (
-    "no segment scores were given: no scorer is built (B1 and B2 are open)"
+    "no segment scores were given: the COMET and MetricX scorers are not built"
 )

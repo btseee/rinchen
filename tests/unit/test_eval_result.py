@@ -62,9 +62,9 @@ pytestmark = pytest.mark.usefixtures("no_network")
 SETTINGS = BootstrapSettings()
 # `sha256sum` and `wc -c` of the golden result file, taken after the file was checked against
 # `golden_result_document()` (a document built from the golden tables with the standard library).
-GOLDEN_RESULT_BYTES = 1954
+GOLDEN_RESULT_BYTES = 1966
 GOLDEN_RESULT_SHA256 = (
-    "05212b4fdd52448d4981e5e21f3f6b9315f16d7cfd38fd7c195d62172eb08dde"
+    "f31880cb2147d82f7d6ecb0b2018639bb505a788720e07e926c217f69ec4b28b"
 )
 MODEL = "a1" * 32
 MANIFEST = "b2" * 32

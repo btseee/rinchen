@@ -14,8 +14,8 @@ from typing import Any, Final
 from rinchen.eval.report_format import ABSENT_STATE
 from rinchen.eval.report_markdown_cells import (
     TABLE_ORDER,
-    inline,
     label,
+    reason_text,
     status_cell,
     table,
     verdict,
@@ -118,7 +118,7 @@ def _score_cell(
         return f"n/a ({state or 'no run'})"
     value = result["metrics"][metric]
     if value is None:
-        return f"n/a ({inline(result['unmeasured'][metric])})"
+        return f"n/a ({reason_text(result['unmeasured'][metric])})"
     interval = result["ci95"][metric]
     spread = "[n/a]" if interval is None else f"[{interval[0]:.2f}, {interval[1]:.2f}]"
     return f"{value:.2f} {spread}"

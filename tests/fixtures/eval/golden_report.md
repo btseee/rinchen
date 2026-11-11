@@ -107,9 +107,9 @@ No robustness run was given.
 
 ## Not measured
 
-- comet22: no segment scores were given: no scorer is built (B1 and B2 are open) (4 of 4 results)
-- metricx24: no segment scores were given: no scorer is built (B1 and B2 are open) (4 of 4 results)
-- metricx24_qe: no segment scores were given: no scorer is built (B1 and B2 are open) (4 of 4 results)
+- comet22: no segment scores were given: the COMET and MetricX scorers are not built (4 of 4 results)
+- metricx24: no segment scores were given: the COMET and MetricX scorers are not built (4 of 4 results)
+- metricx24_qe: no segment scores were given: the COMET and MetricX scorers are not built (4 of 4 results)
 - golden: 14 expected directions are not in the suite.
 - The share of outputs in the wrong language: no language identification is run.
 
@@ -133,5 +133,5 @@ A target is a measurement: no command fails because one is not met.
 
 | suite | system | run.json |
 | --- | --- | --- |
-| golden | alpha | b46ccb72f2f4 |
-| golden | beta | 2babc57034c6 |
+| golden | alpha | 1bc91f732e59 |
+| golden | beta | b7e19a5d0144 |

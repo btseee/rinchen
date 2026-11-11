@@ -262,7 +262,7 @@ def test_the_limits_say_that_the_robustness_suite_kind_is_not_recorded(
 
     limits = card[card.index("\n## Limits\n") :]
     assert (
-        "- The kind of the robustness suite is not recorded in D12's block, so the "
+        "- The kind of the robustness suite is not recorded in the robustness block, so the "
         "evidence above counts only the suites of the evaluation tables.\n"
     ) in limits
 

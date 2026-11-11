@@ -179,9 +179,9 @@
       "system": "alpha",
       "trained": true,
       "unmeasured": {
-        "comet22": "no segment scores were given: no scorer is built (B1 and B2 are open)",
-        "metricx24": "no segment scores were given: no scorer is built (B1 and B2 are open)",
-        "metricx24_qe": "no segment scores were given: no scorer is built (B1 and B2 are open)"
+        "comet22": "no segment scores were given: the COMET and MetricX scorers are not built",
+        "metricx24": "no segment scores were given: the COMET and MetricX scorers are not built",
+        "metricx24_qe": "no segment scores were given: the COMET and MetricX scorers are not built"
       }
     },
     {
@@ -245,9 +245,9 @@
       "system": "alpha",
       "trained": true,
       "unmeasured": {
-        "comet22": "no segment scores were given: no scorer is built (B1 and B2 are open)",
-        "metricx24": "no segment scores were given: no scorer is built (B1 and B2 are open)",
-        "metricx24_qe": "no segment scores were given: no scorer is built (B1 and B2 are open)"
+        "comet22": "no segment scores were given: the COMET and MetricX scorers are not built",
+        "metricx24": "no segment scores were given: the COMET and MetricX scorers are not built",
+        "metricx24_qe": "no segment scores were given: the COMET and MetricX scorers are not built"
       }
     },
     {
@@ -311,9 +311,9 @@
       "system": "beta",
       "trained": true,
       "unmeasured": {
-        "comet22": "no segment scores were given: no scorer is built (B1 and B2 are open)",
-        "metricx24": "no segment scores were given: no scorer is built (B1 and B2 are open)",
-        "metricx24_qe": "no segment scores were given: no scorer is built (B1 and B2 are open)"
+        "comet22": "no segment scores were given: the COMET and MetricX scorers are not built",
+        "metricx24": "no segment scores were given: the COMET and MetricX scorers are not built",
+        "metricx24_qe": "no segment scores were given: the COMET and MetricX scorers are not built"
       }
     },
     {
@@ -377,21 +377,21 @@
       "system": "beta",
       "trained": true,
       "unmeasured": {
-        "comet22": "no segment scores were given: no scorer is built (B1 and B2 are open)",
-        "metricx24": "no segment scores were given: no scorer is built (B1 and B2 are open)",
-        "metricx24_qe": "no segment scores were given: no scorer is built (B1 and B2 are open)"
+        "comet22": "no segment scores were given: the COMET and MetricX scorers are not built",
+        "metricx24": "no segment scores were given: the COMET and MetricX scorers are not built",
+        "metricx24_qe": "no segment scores were given: the COMET and MetricX scorers are not built"
       }
     }
   ],
   "robustness": {},
   "runs": [
     {
-      "run_sha256": "b46ccb72f2f4c55daf8d471db294ff2ada598e45a999107167429aafebfc5789",
+      "run_sha256": "1bc91f732e59ff57bf013c0b2f60991a9d8a474f7d2e753b535f91f542ecf021",
       "suite": "golden",
       "system": "alpha"
     },
     {
-      "run_sha256": "2babc57034c694bb5f9042966db044f8799eaafdacaa2abaed80c9694c2336e8",
+      "run_sha256": "b7e19a5d0144c79a0642390a2cc16be47b349dcfb897a5c96a9b46f8a4294c10",
       "suite": "golden",
       "system": "beta"
     }

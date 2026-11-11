@@ -20,9 +20,9 @@ from rinchen.export.record import ModelRecord
 
 __all__ = ["limits_section", "provenance_section"]
 
-# D12's block records the suite it was measured on by name and digest and not by kind.
+# The robustness block records the suite it was measured on by name and digest and not by kind.
 _ROBUSTNESS_KIND = (
-    "- The kind of the robustness suite is not recorded in D12's block, so the evidence above "
+    "- The kind of the robustness suite is not recorded in the robustness block, so the evidence above "
     "counts only the suites of the evaluation tables."
 )
 

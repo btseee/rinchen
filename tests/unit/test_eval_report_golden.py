@@ -34,8 +34,8 @@ from tests.support.no_network import no_network  # noqa: F401 - the fixture of t
 pytestmark = pytest.mark.usefixtures("no_network")
 
 # `sha256sum` of the two files, taken from the files and not from the code.
-GOLDEN_JSON_SHA256 = "c8d2095fb0109e7682a3558261778031ca3d34fdce65f96f43f766755874ce30"
-GOLDEN_MD_SHA256 = "a6b30c0dcceec9e08bc9f2b0a7ed22d38c722d645e00a9648087efde1d6f8a3f"
+GOLDEN_JSON_SHA256 = "1fd86b2dfd670b71ddfd83b50ca928e28f4f32600acfaf39fdf53dab132bca65"
+GOLDEN_MD_SHA256 = "c1622d70bcb98bb4dffe7bfa72f07121576d8be96319155eb2cfe1f2760f9f51"
 
 
 def golden_report() -> dict[str, object]:

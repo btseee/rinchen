@@ -10,7 +10,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from rinchen.eval.report_format import ABSENT_STATE
-from rinchen.eval.report_markdown_cells import inline, plural, short, table
+from rinchen.eval.report_markdown_cells import plural, reason_text, short, table
 from rinchen.eval.robustness_input import BLOCK_KEYS
 from rinchen.metrics.registry import METRIC_NAMES
 
@@ -25,8 +25,8 @@ def robustness_section(report: Mapping[str, Any]) -> list[str]:
         (
             "A value is a share of the units that were scored: read it with its counts. The "
             "retention is a ratio of two chrF scores (see report.json). The kind of the "
-            "robustness suite is not recorded in D12's block, so the evidence banner above "
-            "does not count it."
+            "robustness suite is not recorded in the robustness block, so the evidence "
+            "banner above does not count it."
         ),
         "",
     ]
@@ -69,7 +69,7 @@ def not_measured_section(report: Mapping[str, Any]) -> list[str]:
         )
         for reason, count in sorted(reasons.items()):
             lines.append(
-                f"- {metric}: {inline(reason)} ({count} of {len(results)} results)"
+                f"- {metric}: {reason_text(reason)} ({count} of {len(results)} results)"
             )
     for suite in report["suites"]:
         missing = sum(entry["rows"] is None for entry in suite["directions"])

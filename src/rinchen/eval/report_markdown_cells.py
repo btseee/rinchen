@@ -20,6 +20,7 @@ __all__ = [
     "label",
     "number",
     "plural",
+    "reason_text",
     "row",
     "short",
     "source_cells",
@@ -48,12 +49,18 @@ TABLE_ORDER: Final[tuple[MetricName, ...]] = (
 _DIGEST_SHOWN: Final = 12
 NO_SOURCE_RECORD: Final = "n/a (no source record)"
 UNPINNED: Final = "unpinned"
+NO_REASON: Final = "no reason recorded"
 FEWER_THAN_TWO_UNITS: Final = "n/a (fewer than two units)"
 
 
 def inline(text: str) -> str:
     """Free text for a cell or a line: one line, no table separator."""
     return " ".join(text.split()).replace("|", "\\|")
+
+
+def reason_text(text: str) -> str:
+    """The reason of an `n/a (...)`: free text as `inline` gives it, and never empty."""
+    return inline(text) or NO_REASON
 
 
 def row(cells: Sequence[str]) -> str:

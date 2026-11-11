@@ -40,8 +40,8 @@ Trained for 6 directions: eng_Latn-khk_Cyrl, khk_Cyrl-eng_Latn, khk_Cyrl-rus_Cyr
 | config.json | 312 | 587cb980af76fdc7e52369fd0b9d926dff266976b6f8ac631e358fecc49ff8cf |
 | spm.model | 128 | 26d706159878af9911c037ebf1fa8ee71a186d498a36583e4184910f3e8707e3 |
 | rinchen.json | 1089 | 590688d0a34415f238ae0ad5ed45d88f68158515b77323eb7a851f3a5e4ad38c |
-| report.json | 14894 | 9dbd9380216097555c9deac98aaf3b54257134bb78ccbae4d771b3935525d9ef |
-| report.md | 7644 | a22350b28862150572f20bd8fc9de640d6fb5d9a0435c61423ad6d6ab8f96369 |
+| report.json | 14942 | 9dbd9380216097555c9deac98aaf3b54257134bb78ccbae4d771b3935525d9ef |
+| report.md | 7656 | a22350b28862150572f20bd8fc9de640d6fb5d9a0435c61423ad6d6ab8f96369 |
 
 `README.md` is this card and `release.json` lists the digest of every other file, this card included.
 
@@ -83,7 +83,7 @@ n/a (not in the suite): khk_Cyrl-rus_Cyrl, rus_Cyrl-khk_Cyrl, mn_Mong-eng_Latn, 
 
 n/a (not trained): khk_Cyrl-deu_Latn, deu_Latn-khk_Cyrl, khk_Cyrl-jpn_Jpan, jpn_Jpan-khk_Cyrl, khk_Cyrl-kaz_Cyrl, kaz_Cyrl-khk_Cyrl, khk_Cyrl-kor_Hang, kor_Hang-khk_Cyrl, khk_Cyrl-tur_Latn, tur_Latn-khk_Cyrl, khk_Cyrl-zho_Hans, zho_Hans-khk_Cyrl.
 
-COMET-22, MetricX-24, MetricX-24-QE: n/a (no segment scores were given: no scorer is built (B1 and B2 are open)).
+COMET-22, MetricX-24, MetricX-24-QE: n/a (no segment scores were given: the COMET and MetricX scorers are not built).
 
 ### Paired comparisons
 

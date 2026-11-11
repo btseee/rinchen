@@ -46,7 +46,7 @@ HIGHER_IS_BETTER: Final[Mapping[MetricName, bool]] = MappingProxyType(
 )
 
 NO_SCORER_REASON: Final = (
-    "no segment scores were given: no scorer is built (B1 and B2 are open)"
+    "no segment scores were given: the COMET and MetricX scorers are not built"
 )
 
 

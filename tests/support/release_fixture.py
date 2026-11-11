@@ -245,7 +245,7 @@ def disk_facts(release: Release) -> list[FileFacts]:
 
 
 NO_SCORER: Final = (
-    "no segment scores were given: no scorer is built (B1 and B2 are open)"
+    "no segment scores were given: the COMET and MetricX scorers are not built"
 )
 
 
