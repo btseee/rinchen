@@ -5,9 +5,10 @@ Every key is required unless a default is named, nothing is read from the enviro
 document is closed (an unknown key is an error). The guards of M6 are enforced here, at load
 time, and not where uv is run: no configuration reaches the runner with an argument list that can
 write the lock file or upgrade one package (the first argument is `lock`, every other one is one
-of four flags, none repeats, the drift list holds `--dry-run` and the lock check holds
-`--check`). A rerun of kind `pytest` never selects a test of the maintenance check itself, so a
-rerun cannot rerun the gate of the command that makes it. Every number is an unvalidated prior.
+of four flags, none repeats, the drift list holds `--dry-run`, and the lock check holds
+`--check` and no flag but `--offline`). A rerun of kind `pytest` never selects a test of the
+maintenance check itself, so a rerun cannot rerun the gate of the command that makes it. Every
+number is an unvalidated prior.
 
 The document is read from the bytes the caller hands in, so that the caller can hash the file
 before it is read and parse the bytes it hashed. An error names the field and never quotes the
@@ -37,6 +38,7 @@ from rinchen.maintain.states import SKIP_REASONS
 CADENCES: Final = ("nightly", "weekly")
 GATE: Final = "gate"
 ALLOWED_UV_FLAGS: Final = frozenset({"--upgrade", "--dry-run", "--offline", "--check"})
+LOCK_CHECK_FLAGS: Final = frozenset({"--check", "--offline"})
 
 _RERUN_ID: Final = r"^[a-z][a-z0-9_]{0,31}$"
 _RULE_ID: Final = r"^[a-z0-9-]{1,40}$"
@@ -142,13 +144,16 @@ class DriftConfig(UvCommand):
 
 
 class LockCheckConfig(UvCommand):
-    """The check that the lock still satisfies `pyproject.toml`."""
+    """The check that the lock still satisfies `pyproject.toml`: `lock --check`, with `--offline`
+    as the only other flag, so that it cannot be made to upgrade anything."""
 
     @field_validator("uv_args")
     @classmethod
     def _checks(cls, args: list[str]) -> list[str]:
         if "--check" not in args:
             raise ValueError("must hold --check")
+        if any(flag not in LOCK_CHECK_FLAGS for flag in args[1:]):
+            raise ValueError("must hold no flag but --check and --offline")
         return args
 
 

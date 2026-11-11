@@ -256,6 +256,15 @@ LOCK_CHECK_ARGS_REFUSED = [
     pytest.param(["lock", "--check", "--upgrade-package"], id="upgrade-package"),
     pytest.param(["lock", "--check", "-U"], id="short-upgrade"),
     pytest.param(["lock", "--check", "--frozen"], id="frozen"),
+    pytest.param(["lock", "--check", "--upgrade"], id="check-with-upgrade"),
+    pytest.param(["lock", "--upgrade", "--check"], id="upgrade-before-check"),
+    pytest.param(
+        ["lock", "--check", "--offline", "--upgrade"], id="offline-check-with-upgrade"
+    ),
+    pytest.param(["lock", "--check", "--dry-run"], id="check-with-dry-run"),
+    pytest.param(
+        ["lock", "--dry-run", "--check", "--upgrade"], id="upgrade-dry-run-check"
+    ),
     pytest.param([], id="empty"),
 ]
 
@@ -279,6 +288,12 @@ def test_a_lock_check_argument_list_without_check_or_with_another_flag_is_refuse
 )
 def test_a_lock_check_argument_list_with_check_is_accepted(args: list[str]) -> None:
     assert load(edited("lock_check", "uv_args", value=args)).lock_check.uv_args == args
+
+
+def test_the_lock_check_is_lock_check_with_at_most_offline_and_no_other_flag() -> None:
+    for flag in sorted(ALLOWED_UV_FLAGS - {"--check", "--offline"}):
+        args = edited("lock_check", "uv_args", value=["lock", "--check", flag])
+        assert "lock_check.uv_args" in refusal(dump(args)), flag
 
 
 TIMEOUT_PLACES = [
