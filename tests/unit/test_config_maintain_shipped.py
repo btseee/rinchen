@@ -30,7 +30,6 @@ from tests.support.no_network import no_network  # noqa: F401 - the fixture of t
 pytestmark = pytest.mark.usefixtures("no_network")
 
 SHIPPED = REPO_ROOT / "configs" / "maintain" / "maintain.yaml"
-VERIFY = REPO_ROOT / "docs" / "VERIFY.md"
 
 
 def three_reruns() -> MaintainConfig:
@@ -311,20 +310,6 @@ def test_every_shipped_rerun_and_rule_says_why_in_one_line() -> None:
             or "Wiki page Verification-Log" in rule.decision
         ), rule.id
         assert ".md" not in rule.decision, rule.id
-
-
-def test_every_id_of_a_recorded_row_that_a_decision_names_is_in_the_verify_table() -> (
-    None
-):
-    verify = VERIFY.read_text(encoding="utf-8")
-    named = 0
-    for rule in shipped().drift.rules:
-        for row in re.findall(
-            r"\bD(?:[0-9]+)?-[A-Z0-9]+(?:-[A-Z0-9]+)*", rule.decision
-        ):
-            named += 1
-            assert f"| {row} " in verify, (rule.id, row)
-    assert named >= 10
 
 
 def test_every_requires_of_the_shipped_table_names_a_rerun_or_the_gate() -> None:

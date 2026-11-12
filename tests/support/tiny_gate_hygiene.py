@@ -45,7 +45,8 @@ _WAITS: Final = frozenset({"communicate", "wait"})
 # The two words of a device that is not the CPU, in pieces: this file is scanned too.
 _NOT_THE_CPU: Final = ("au" + "to", "cu" + "da")
 
-# Everything D15 adds that a human reads or a run reads: code, configurations, documents, fixtures and tests.
+# Everything D15 adds that a human reads or a run reads: code, configurations, fixtures and tests (its
+# documents moved to the Wiki, whose pages scripts/check_wiki.py scans with the same needles).
 CONTENT_GLOBS: Final = (
     "src/rinchen/tiny/*.py",
     "src/rinchen/config/tiny.py",
@@ -55,9 +56,6 @@ CONTENT_GLOBS: Final = (
     "configs/eole/tiny.yaml",
     "configs/data/sources.tiny_parallel.yaml",
     "configs/profiles/tiny.yaml",
-    "docs/superpowers/specs/2026-11-11-d15-*",
-    "docs/superpowers/plans/2026-11-11-d15-*",
-    "docs/runbooks/15_*.md",
     "scripts/build_parallel_fixtures.py",
     "justfile",
     "tests/fixtures/parallel/*",

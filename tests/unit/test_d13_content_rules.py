@@ -11,10 +11,11 @@ on purpose, to be refused.
 
 What is scanned: the code D13 adds or edits (`rinchen.eval`, `rinchen.export`, `rinchen.metrics`, the
 commands `eval*` and `release*`, the configurations `config/eval_*`, `acquire/hf.py`), `configs/eval/`,
-the workflow `release.yml` and the runbook `13_release.md` when they exist, the fixtures of
-`tests/fixtures/eval/`, the spec and the plan of D13, the tests and support modules of D13 (by name)
-and the files the release stage generates (the card, the release record and the copies of the report).
-The scan is itself tested on a text that holds a needle.
+the workflow `release.yml` when it exists, the fixtures of `tests/fixtures/eval/`, the tests and
+support modules of D13 (by name) and the files the release stage generates (the card, the release
+record and the copies of the report). The scan is itself tested on a text that holds a needle. The
+runbook, the spec and the plan of D13 moved to the Wiki; `scripts/check_wiki.py` scans its pages with
+the same needles.
 """
 
 from __future__ import annotations
@@ -215,9 +216,6 @@ GLOBS: Final = (
     "src/rinchen/acquire/hf.py",
     "configs/eval/*",
     ".github/workflows/release.yml",
-    "docs/runbooks/13_release.md",
-    "docs/superpowers/specs/2026-11-10-d13-release-design.md",
-    "docs/superpowers/plans/2026-11-10-d13-release.md",
     "tests/fixtures/eval/*",
     "tests/support/eval_*.py",
     "tests/support/hub_*.py",
@@ -324,8 +322,6 @@ def test_the_scan_reaches_what_d13_adds() -> None:
         "tests/fixtures/eval/golden_report.md",
         "tests/support/release_fixture.py",
         "tests/unit/test_d13_content_rules.py",
-        "docs/superpowers/specs/2026-11-10-d13-release-design.md",
-        "docs/superpowers/plans/2026-11-10-d13-release.md",
     ):
         assert wanted in names, wanted
 

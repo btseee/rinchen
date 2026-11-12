@@ -204,7 +204,5 @@ def test_the_files_to_scan_reach_every_part_of_d15_and_no_file_twice() -> None:
         "tests/integration/test_tiny_gate.py",
         "tests/unit/test_tiny_gate_helpers.py",
         "scripts/build_parallel_fixtures.py",
-        "docs/superpowers/specs/2026-11-11-d15-tiny-pipeline-design.md",
-        "docs/superpowers/plans/2026-11-11-d15-tiny-pipeline.md",
     ):
         assert wanted in names, wanted
