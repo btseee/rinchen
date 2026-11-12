@@ -1,0 +1,54 @@
+name: Feature request
+description: Suggest an addition or a change to the pipeline or its tools.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for the idea. A request is easiest to judge when it starts from a problem, so please describe the problem first.
+
+        Rinchen trains every model from random initialization and runs on the CPU by default. A request to fine-tune or continue training a pretrained model cannot be accepted, because the project rules forbid it.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Who has the problem, and what do they do today?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: What should the project do, in your own words?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+      description: Other ways to solve the problem, and why they do not fit.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area of the pipeline
+      options:
+        - Data acquisition, filtering and mining
+        - Text normalization, tokenizer and SentencePiece
+        - Script converter (Cyrillic and traditional Mongolian script)
+        - Synthetic data
+        - Training, distillation and model export
+        - Evaluation, reports and release tooling
+        - Serving (command line, HTTP service, Python package)
+        - Tiny pipeline, CI and maintenance
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: checkboxes
+    id: checked
+    attributes:
+      label: Before you send
+      options:
+        - label: I searched the open issues and the Wiki and found nothing like this.
+          required: true
