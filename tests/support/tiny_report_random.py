@@ -55,12 +55,27 @@ def random_reason(rng: random.Random) -> str:
     return rng.choice(choices)()
 
 
+# Figures a hair either side of the bounds and the floors a table writes them beside.
+NEAR_SHARES = (0.95, 0.9500000000000001, 0.94999, 0.99, 0.99999, 0.9999999999999999)
+NEAR_SCORES = (50.0, 50.00001, 49.99999, 49.99999999999999)
+NEAR_DELTAS = (0.001, 0.0010000001, 0.00099999)
+NEAR_DROPS = (1.0, 1.0000001, 0.9999999)
+
+
 def _share(rng: random.Random) -> float:
-    return rng.choice([0.0, 1.0, rng.random(), rng.random()])
+    return rng.choice([0.0, 1.0, rng.random(), rng.random(), rng.choice(NEAR_SHARES)])
 
 
 def _score(rng: random.Random) -> float:
-    return rng.choice([0.0, 100.0, rng.uniform(0, 100), rng.uniform(40, 100)])
+    return rng.choice(
+        [
+            0.0,
+            100.0,
+            rng.uniform(0, 100),
+            rng.uniform(40, 100),
+            rng.choice(NEAR_SCORES),
+        ]
+    )
 
 
 def _change_figures(rng: random.Random, facts: dict[str, dict[str, Any]]) -> None:
@@ -71,17 +86,25 @@ def _change_figures(rng: random.Random, facts: dict[str, dict[str, Any]]) -> Non
                 score = _score(rng)
                 evaluation["memorised_chrf"][direction][system] = score
                 evaluation["memorised"][direction][system]["metrics"]["chrf"] = score
+        for direction in MEMORISED_DIRECTIONS:
+            if rng.random() < 0.15:
+                held = evaluation["memorised_chrf"][direction]
+                near = min(100.0, held["int8"] + rng.choice(NEAR_DROPS))
+                held["float32"] = near
+                evaluation["memorised"][direction]["float32"]["metrics"]["chrf"] = near
         for by_system in evaluation["heldout"].values():
             by_system["int8"]["metrics"]["bleu"] = _score(rng)
         evaluation["agreement"]["share"] = _share(rng)
         evaluation["int8_chrf_drop"] = {
             "least": rng.uniform(-5, 0),
-            "largest": rng.uniform(0, 5),
+            "largest": rng.choice([rng.uniform(0, 5), *NEAR_DROPS]),
         }
     parity = facts.get("parity")
     if parity:
         parity["exact_share"] = _share(rng)
-        parity["mean_abs_delta"] = rng.choice([0.0, 1.6e-06, rng.random() * 0.01])
+        parity["mean_abs_delta"] = rng.choice(
+            [0.0, 1.6e-06, rng.random() * 0.01, *NEAR_DELTAS]
+        )
     robustness = facts.get("robustness")
     if robustness:
         for key in (

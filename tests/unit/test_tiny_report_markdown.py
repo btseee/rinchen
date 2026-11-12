@@ -6,18 +6,22 @@ the filter and of the evaluation (and the note of the filter's skipped token-rat
 `length` part), the table of the thresholds with their bounds, values and verdicts, the held-out table
 with the line that says it is never gated and the neural score or the reason it was not measured, the
 six robustness values beside D12's reference floors, and the fixed list of what was not measured. A
-float is written with two decimals, a null as a hyphen, and nothing comes from the clock.
+float beside a bound or a floor is written with the fewest significant digits (four or more) that keep
+it on its bound's side, a float elsewhere with two decimals, a null as a hyphen, and nothing comes from
+the clock.
 """
 
 from __future__ import annotations
 
+import dataclasses
+import math
 import re
 
 import pytest
 
 from rinchen.tiny.context import StageResult
 from rinchen.tiny.report import Report, parse_report, to_bytes
-from rinchen.tiny.report_markdown import render
+from rinchen.tiny.report_markdown import figure_beside_bound, render
 from rinchen.tiny.report_schema import ROBUSTNESS_KEYS, UNMEASURED
 from rinchen.tiny.states import (
     FAIL_INPUT,
@@ -269,7 +273,7 @@ def test_a_cell_cannot_break_the_table() -> None:
 # ---- the thresholds ----------------------------------------------------------------------------------
 
 
-def test_the_threshold_table_has_the_eight_rows_with_two_decimals() -> None:
+def test_the_threshold_table_has_the_eight_rows_with_four_significant_digits() -> None:
     table = rows(build(), "## Thresholds")
     assert [row[0] for row in table] == [
         "stages",
@@ -287,11 +291,11 @@ def test_the_threshold_table_has_the_eight_rows_with_two_decimals() -> None:
     cells = {row[0]: row[1:4] for row in table}
     assert cells["stages"] == ["<= 0", "0", "pass"]
     assert cells["train_chrf"] == [">= 50.0", "99.36", "pass"]
-    assert cells["parity_exact"] == [">= 0.95", "1.00", "pass"]
-    assert cells["parity_delta"] == ["<= 0.001", "0.00", "pass"]
-    assert cells["int8_chrf_drop"] == ["<= 1.0", "0.00", "pass"]
-    assert cells["script_purity"] == [">= 1.0", "1.00", "pass"]
-    assert cells["placeholder_acc"] == [">= 1.0", "1.00", "pass"]
+    assert cells["parity_exact"] == [">= 0.95", "1", "pass"]
+    assert cells["parity_delta"] == ["<= 0.001", "1.622e-06", "pass"]
+    assert cells["int8_chrf_drop"] == ["<= 1.0", "0", "pass"]
+    assert cells["script_purity"] == [">= 1.0", "1", "pass"]
+    assert cells["placeholder_acc"] == [">= 1.0", "1", "pass"]
     assert cells["wall_time"] == ["<= 1200", "-", "pass"]
 
 
@@ -299,9 +303,17 @@ def test_a_float_is_never_written_in_full() -> None:
     text = render(build())
     assert "99.35849111913797" not in text
     assert "1.6221680949143363e-06" not in text
-    # The two bounds and the floor that are written with three decimals are texts, not figures.
-    without_texts = text.replace("0.999", "").replace("0.001", "")
-    assert re.search(r"[0-9]\.[0-9]{3,}", without_texts) is None
+
+
+def test_a_float_beside_a_bound_has_four_significant_digits_when_it_is_far_from_it() -> (
+    None
+):
+    # The golden figures are far from their bounds: none needs more than four digits.
+    for name in ("## Thresholds", "## Robustness"):
+        for row in rows(build(), name):
+            figure = row[2] if name == "## Thresholds" else row[1]
+            digits = re.sub(r"e[+-][0-9]+$", "", figure).replace(".", "").lstrip("0-")
+            assert len(digits) <= 4, (row[0], figure)
 
 
 def test_the_detail_of_each_threshold_is_in_the_table() -> None:
@@ -334,6 +346,98 @@ def test_a_missing_figure_is_a_hyphen_with_its_reason_and_a_failed_verdict() -> 
     assert table["wall_time"][2:4] == ["-", "pass"]
 
 
+def with_thresholds(**changes: tuple[float, str]) -> Report:
+    """The golden report with the value and the verdict of some thresholds changed."""
+    report = build()
+    table = []
+    for result in report.thresholds:
+        if result.id in changes:
+            value, verdict = changes[result.id]
+            result = dataclasses.replace(result, value=value, verdict=verdict)
+        table.append(result)
+    return dataclasses.replace(report, thresholds=tuple(table))
+
+
+def test_a_failing_value_is_never_written_as_one_that_meets_its_bound() -> None:
+    # Two decimals wrote 49.996 as `50.00` beside `>= 50.0` and 237/238 as `1.00` beside `>= 1.0`,
+    # both with the verdict fail: a reader of the table saw a value that met its bound.
+    report = with_thresholds(
+        train_chrf=(49.996, "fail"), placeholder_acc=(237 / 238, "fail")
+    )
+    table = {row[0]: row for row in rows(report, "## Thresholds")}
+    assert table["train_chrf"][1:4] == [">= 50.0", "49.996", "fail"]
+    assert table["placeholder_acc"][1:4] == [">= 1.0", "0.9958", "fail"]
+
+
+def test_a_value_that_passes_is_never_written_as_one_that_misses_its_bound() -> None:
+    report = with_thresholds(
+        parity_delta=(1.6221680949143363e-06, "pass"),
+        parity_exact=(0.9500000000000001, "pass"),
+        int8_chrf_drop=(1.0, "pass"),
+    )
+    table = {row[0]: row for row in rows(report, "## Thresholds")}
+    assert table["parity_delta"][1:4] == ["<= 0.001", "1.622e-06", "pass"]
+    assert table["parity_exact"][1:4] == [">= 0.95", "0.95", "pass"]
+    assert table["int8_chrf_drop"][1:4] == ["<= 1.0", "1", "pass"]
+
+
+def test_a_value_that_misses_its_bound_by_a_hair_is_written_with_the_digits_that_show_it() -> (
+    None
+):
+    report = with_thresholds(
+        parity_delta=(0.0010004, "fail"), parity_exact=(0.94999, "fail")
+    )
+    table = {row[0]: row for row in rows(report, "## Thresholds")}
+    assert table["parity_delta"][1:4] == ["<= 0.001", "0.0010004", "fail"]
+    assert table["parity_exact"][1:4] == [">= 0.95", "0.94999", "fail"]
+
+
+def test_a_robustness_value_under_its_floor_is_not_written_as_meeting_it() -> None:
+    results = golden_results()
+    facts = dict(results[13].facts)
+    facts["values"] = {**facts["values"], "term_acc": 0.98999}
+    record = StageRecord("robustness", "ok", detail={})
+    report = build(replaced(results, "robustness", StageResult(record, facts)))
+    table = {row[0]: row for row in rows(report, "## Robustness")}
+    assert table["term_acc"][1:3] == ["0.98999", "0.99"]
+
+
+# The figure a cell holds beside a bound: a null, a whole number, and floats that need only four
+# digits or more of them.
+BESIDE = [
+    (None, ">= 50.0", "-"),
+    (3, "<= 0", "3"),
+    (49.996, ">= 50.0", "49.996"),
+    (237 / 238, ">= 1.0", "0.9958"),
+    (1.6221680949143363e-06, "<= 0.001", "1.622e-06"),
+    (99.35849111913797, ">= 50.0", "99.36"),
+    (1.0, ">= 0.95", "1"),
+    (0.0, "<= 1.0", "0"),
+    (0.99996, ">= 1.0", "0.99996"),
+    (0.0010004, "<= 0.001", "0.0010004"),
+    (50.0, ">= 50.0", "50"),
+    (50.00001, ">= 50.0", "50"),
+    (math.nextafter(50.0, 0.0), ">= 50.0", "49.99999999999999"),
+    (math.nextafter(0.001, 1.0), "<= 0.001", "0.0010000000000000002"),
+    (0.9999999999999999, ">= 1.0", "0.9999999999999999"),
+    (0.99999999123, ">= 1.0", "0.99999999"),
+    (-1e-15, "<= 1.0", "-1e-15"),
+]
+
+
+@pytest.mark.parametrize(("value", "bound", "text"), BESIDE)
+def test_a_figure_beside_its_bound_is_written_as_the_table_says(
+    value: float | None, bound: str, text: str
+) -> None:
+    assert figure_beside_bound(value, bound) == text
+
+
+def test_a_figure_that_is_not_beside_a_bound_keeps_two_decimals() -> None:
+    held = {row[0]: row for row in rows(build(), "## Held-out")}
+    assert held["eng_Latn-khk_Cyrl"][3:6] == ["72.00", "71.02", "54.55"]
+    assert "3.88 over 30 rows" in "\n".join(section(build(), "## Held-out"))
+
+
 def test_a_failed_threshold_shows_its_value_and_its_verdict() -> None:
     facts = evaluate_facts()
     facts["memorised_chrf"]["rus_Cyrl-khk_Cyrl"]["int8"] = 40.0
@@ -345,7 +449,7 @@ def test_a_failed_threshold_shows_its_value_and_its_verdict() -> None:
     )
     report = build(replaced(golden_results(), "evaluate", StageResult(record, facts)))
     table = {row[0]: row for row in rows(report, "## Thresholds")}
-    assert table["train_chrf"][1:4] == [">= 50.0", "40.00", "fail"]
+    assert table["train_chrf"][1:4] == [">= 50.0", "40", "fail"]
 
 
 def test_the_wall_time_row_has_a_hyphen_and_the_sentence_says_where_the_seconds_are() -> (
@@ -469,12 +573,12 @@ def test_the_robustness_table_lists_the_six_values_beside_the_reference_floors()
     assert [row[0] for row in table] == list(ROBUSTNESS_KEYS)
     assert {row[0]: row[2] for row in table} == FLOORS
     assert {row[0]: row[1] for row in table} == {
-        "entity_acc": "0.98",
-        "mong_source_retention": "0.99",
-        "numbers_acc": "1.00",
-        "placeholder_acc": "1.00",
-        "script_purity": "1.00",
-        "term_acc": "1.00",
+        "entity_acc": "0.9792",
+        "mong_source_retention": "0.9936",
+        "numbers_acc": "1",
+        "placeholder_acc": "1",
+        "script_purity": "1",
+        "term_acc": "0.9991",
     }
     assert {row[0]: row[3:] for row in table}["term_acc"] == ["1134", "1134", "0"]
     assert {row[0]: row[3:] for row in table}["mong_source_retention"] == [

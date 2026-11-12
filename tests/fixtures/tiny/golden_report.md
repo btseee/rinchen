@@ -37,11 +37,11 @@
 | --- | --- | --- | --- | --- |
 | stages | <= 0 | 0 | pass | no stage failed and every skip has a reason of the closed list |
 | train_chrf | >= 50.0 | 99.36 | pass | least of 5 directions, mn_Mong-eng_Latn, int8 export |
-| parity_exact | >= 0.95 | 1.00 | pass | exact_share of the parity figures |
-| parity_delta | <= 0.001 | 0.00 | pass | mean_abs_delta of the parity figures |
-| int8_chrf_drop | <= 1.0 | 0.00 | pass | largest float32 minus int8 chrF over 5 directions, eng_Latn-khk_Cyrl |
-| script_purity | >= 1.0 | 1.00 | pass | script_purity of the robustness figures |
-| placeholder_acc | >= 1.0 | 1.00 | pass | placeholder_acc of the robustness figures |
+| parity_exact | >= 0.95 | 1 | pass | exact_share of the parity figures |
+| parity_delta | <= 0.001 | 1.622e-06 | pass | mean_abs_delta of the parity figures |
+| int8_chrf_drop | <= 1.0 | 0 | pass | largest float32 minus int8 chrF over 5 directions, eng_Latn-khk_Cyrl |
+| script_purity | >= 1.0 | 1 | pass | script_purity of the robustness figures |
+| placeholder_acc | >= 1.0 | 1 | pass | placeholder_acc of the robustness figures |
 | wall_time | <= 1200 | - | pass | seconds from the first line of the run |
 
 The wall-time figure is in manifest.json: this report holds no duration and no timestamp.
@@ -65,12 +65,12 @@ The six values of the robustness measurement beside the reference floors of that
 
 | measure | value | reference floor | scored | total | excluded |
 | --- | --- | --- | --- | --- | --- |
-| entity_acc | 0.98 | 0.90 | 240 | 240 | 0 |
-| mong_source_retention | 0.99 | 0.95 | 48 | 48 | 0 |
-| numbers_acc | 1.00 | 0.90 | 240 | 240 | 0 |
-| placeholder_acc | 1.00 | 0.99 | 238 | 238 | 0 |
-| script_purity | 1.00 | 0.999 | 600 | 600 | 0 |
-| term_acc | 1.00 | 0.99 | 1134 | 1134 | 0 |
+| entity_acc | 0.9792 | 0.90 | 240 | 240 | 0 |
+| mong_source_retention | 0.9936 | 0.95 | 48 | 48 | 0 |
+| numbers_acc | 1 | 0.90 | 240 | 240 | 0 |
+| placeholder_acc | 1 | 0.99 | 238 | 238 | 0 |
+| script_purity | 1 | 0.999 | 600 | 600 | 0 |
+| term_acc | 0.9991 | 0.99 | 1134 | 1134 | 0 |
 
 ## Not measured
 

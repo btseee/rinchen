@@ -96,6 +96,28 @@ def _two(value: Any) -> str:
     return str(value)
 
 
+def _beside(value: Any, bound: str) -> str:
+    """A figure beside its bound (`>= 50.0`), by its own statement of the rule: take the first of the
+    texts with 4, 5 ... 16 significant digits that reads back on the same side of the bound as the
+    figure, else the text that reads back as the figure itself. A null is a hyphen and a whole number
+    is itself."""
+    if value is None:
+        return "-"
+    if not isinstance(value, float):
+        return str(value)
+    sign, limit_text = bound.split(" ")
+    edge = float(limit_text)
+
+    def meets(number: float) -> bool:
+        return number >= edge if sign == ">=" else number <= edge
+
+    for digits in range(4, 17):
+        text = format(value, "." + str(digits) + "g")
+        if meets(float(text)) == meets(value):
+            return text
+    return repr(value)
+
+
 def _row(cells: list[Any]) -> str:
     line = "|"
     for cell in cells:
@@ -146,7 +168,13 @@ def reference_markdown(report: Report) -> str:
     out.append(["## Stages", ""] + _table(["stage", "state", "reason"], rows))
 
     rows = [
-        [t["id"], t["bound"], _two(t["value"]), t["verdict"], t["detail"]]
+        [
+            t["id"],
+            t["bound"],
+            _beside(t["value"], t["bound"]),
+            t["verdict"],
+            t["detail"],
+        ]
         for t in document["thresholds"]
     ]
     out.append(
@@ -235,7 +263,7 @@ def reference_markdown(report: Report) -> str:
             body.append(
                 [
                     key,
-                    _two(blocks["robustness"]["values"][key]),
+                    _beside(blocks["robustness"]["values"][key], ">= " + floor),
                     floor,
                     count["scored"],
                     count["total"],

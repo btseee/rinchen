@@ -12,6 +12,10 @@ server answered, the agreement of the two exports and the planted scores of the 
 run passes every threshold: `wall_time` holds the verdict and a null value, because the seconds are the
 manifest's and never the report's.
 
+The Markdown was written again by the fix wave of the review, by that script with the rule of the
+figures beside a bound (the fewest significant digits, four or more, that keep a figure on its bound's
+side: `1`, `99.36`, `1.622e-06`); the JSON did not change.
+
 The script is not kept in the repository: after an intended change of the layout, write both files
 again from the spec and the figures of `tests/support/tiny_report_inputs.py` with a script that, like
 that one, shares no code with `rinchen.tiny`, check them against the spec and commit them with the
@@ -44,9 +48,9 @@ from tests.support.tiny_report_walk import (
 
 # `sha256sum` of the two files and their sizes, taken from the files and not from the code.
 GOLDEN_JSON_SHA256 = "98c2504bf16f5a4fcb6569f4399501f9023e8097c91cb26383c3c238ee0c0fc7"
-GOLDEN_MD_SHA256 = "d617c28b40ee5078ad6802c6edddb708bf5f0212ea1859d44fad84c71c5f76bd"
+GOLDEN_MD_SHA256 = "e5c9755c98d54af53ed9395e3e6e4ebe184c6ddd55c2dd1efac41a44021dad6a"
 GOLDEN_JSON_SIZE = 26309
-GOLDEN_MD_SIZE = 3227
+GOLDEN_MD_SIZE = 3217
 
 
 def golden_bytes() -> bytes:

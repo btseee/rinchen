@@ -15,9 +15,12 @@ Blocks separated by one blank line, line feeds only, one final line feed:
   of this run) with the counts each rests on;
 - `## Not measured`: the fixed list.
 
-A float is written with two decimals, a null as a hyphen, and every cell is escaped (a line break becomes a
-space and a backslash, a pipe and a backtick are escaped) so that nothing can break a table. Nothing comes
-from the clock, the environment or a file.
+A float beside a bound or a floor (the thresholds and the robustness tables) is written with the fewest
+significant digits, four or more, that keep it on its bound's side (`figure_beside_bound`: `1`, `99.36`,
+`1.622e-06`, and `49.996` beside `>= 50.0`); any other float (the held-out scores) is written with two
+decimals; a null is a hyphen, and every cell is escaped (a line break becomes a space and a backslash, a
+pipe and a backtick are escaped) so that nothing can break a table. Nothing comes from the clock, the
+environment or a file.
 """
 
 from __future__ import annotations
@@ -56,6 +59,10 @@ NOTED_PART: Final = "length"
 NEURAL_STAGE: Final = "evaluate"
 NEURAL_PART: Final = "neural_seam"
 _NONE: Final = "-"
+# The digits a figure beside a bound is first written with, and the count at which `repr` takes over
+# (a float needs up to 17 digits to read back as itself and `repr` is the shortest text that does).
+_SHORT_DIGITS: Final = 4
+_LONG_DIGITS: Final = 17
 _LINE_BREAKS: Final = re.compile(r"[\r\n]+")
 
 
@@ -70,11 +77,39 @@ def _table(header: Sequence[str], rows: Sequence[Sequence[object]]) -> list[str]
 
 
 def _number(value: object) -> str:
+    """A figure with no bound beside it (a held-out score): two decimals, a null as a hyphen."""
     if value is None:
         return _NONE
     if isinstance(value, float):
         return f"{value:.2f}"
     return str(value)
+
+
+def figure_beside_bound(value: object, bound: str) -> str:
+    """A figure as its cell writes it beside its `bound` (`>= 50.0`, `<= 0.001`).
+
+    A null is a hyphen and a whole number is itself. A float is the text with the fewest significant
+    digits, four or more, that read back as a number is on the same side of the bound as the float:
+    so a value that fails is never written as one that meets its bound, nor the other way round (two
+    decimals wrote 49.996 as `50.00` and 237/238 as `1.00` beside `>= 1.0`, both `fail`). A figure far
+    from its bound has four digits (`99.36`, `1`, `1.622e-06`) and one a hair from it as many as show
+    the side, up to `repr`, which reads back as the float itself.
+    """
+    if value is None:
+        return _NONE
+    if not isinstance(value, float):
+        return str(value)
+    comparison, _, limit_text = bound.partition(" ")
+    limit = float(limit_text)
+
+    def meets(number: float) -> bool:
+        return number >= limit if comparison == ">=" else number <= limit
+
+    for digits in range(_SHORT_DIGITS, _LONG_DIGITS):
+        text = f"{value:.{digits}g}"
+        if meets(float(text)) == meets(value):
+            return text
+    return repr(value)
 
 
 # ---- stages ------------------------------------------------------------------------------------------
@@ -110,7 +145,13 @@ def _stages(report: Report) -> str:
 
 def _thresholds(report: Report) -> str:
     rows = [
-        [result.id, result.bound, _number(result.value), result.verdict, result.detail]
+        [
+            result.id,
+            result.bound,
+            figure_beside_bound(result.value, result.bound),
+            result.verdict,
+            result.detail,
+        ]
         for result in report.thresholds
     ]
     table = _table(["threshold", "bound", "value", "verdict", "detail"], rows)
@@ -190,7 +231,7 @@ def _robustness(report: Report) -> str:
     rows = [
         [
             key,
-            _number(block["values"][key]),
+            figure_beside_bound(block["values"][key], f">= {REFERENCE_FLOORS[key]}"),
             REFERENCE_FLOORS[key],
             block["coverage"][key]["scored"],
             block["coverage"][key]["total"],
