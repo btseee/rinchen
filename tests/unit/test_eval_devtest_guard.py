@@ -67,6 +67,8 @@ ALLOWED_EVAL_IMPORTERS: Final = {
     "cli/release_stage_output.py": "writes the stage outputs with the manifest-led helpers begin_outputs and options_digest of cli.eval_suite_output, which read no suite",
     "cli/release_hub_output.py": "writes the plan outputs with the manifest-led helpers begin_outputs and options_digest of cli.eval_suite_output, which read no suite",
     "cli/main.py": "registers the `eval` command group (`from rinchen.cli import eval`) and takes nothing of a suite",
+    "tiny/suites.py": "makes the robustness suite and the evaluation suites of the tiny pipeline from its fixtures through the two writers (`rinchen.eval.robust_suite` and the write-only `rinchen.eval.fixture_suites`), never a suite reader",
+    "tiny/eval_stages.py": "the stages that run the evaluation commands of the tiny pipeline and write the neural scores file with D13's own writer (`rinchen.eval.segment_scores`, `rinchen.eval.outputs`): no suite is read and no benchmark is touched",
 }
 
 

@@ -291,6 +291,10 @@ def eval_robustness(
     )
 
 
+def _resamples_option(resamples: int | None) -> list[str]:
+    return [] if resamples is None else ["--resamples", str(resamples)]
+
+
 def eval_run(
     suite: Path,
     model: Path,
@@ -298,7 +302,11 @@ def eval_run(
     out_dir: Path,
     beam_size: int,
     robustness_dir: Path | None,
+    *,
+    resamples: int | None = None,
 ) -> list[str]:
+    """`--resamples` (the bootstrap's draws) is given only when `resamples` is: otherwise the
+    metrics configuration's own count stands."""
     attached: list[str | Path] = (
         [] if robustness_dir is None else ["--robustness", robustness_dir]
     )
@@ -316,6 +324,7 @@ def eval_run(
         "--out-dir",
         out_dir,
         *attached,
+        *_resamples_option(resamples),
     )
 
 
@@ -325,7 +334,10 @@ def eval_run_hypotheses(
     system: str,
     out_dir: Path,
     segment_scores: Mapping[str, Path],
+    *,
+    resamples: int | None = None,
 ) -> list[str]:
+    """`--resamples` is given only when `resamples` is (see `eval_run`)."""
     scores = [
         part
         for metric, scored in segment_scores.items()
@@ -343,6 +355,7 @@ def eval_run_hypotheses(
         "--out-dir",
         out_dir,
         *scores,
+        *_resamples_option(resamples),
     )
 
 
