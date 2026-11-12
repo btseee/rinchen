@@ -13,7 +13,7 @@ doctor:
     uv run rinchen doctor
 
 tiny:
-    echo "just tiny: not implemented until D15 (tiny end-to-end pipeline). See docs/research/2026-10-29-rinchen-dev-agent-prompt.md milestone D15."
+    uv run --frozen --no-sync rinchen tiny run --profile tiny
 
 accept:
     echo "just accept: not implemented until the full project-wide definition of done is met. See <mission> in docs/research/2026-10-29-rinchen-dev-agent-prompt.md."

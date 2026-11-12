@@ -556,7 +556,7 @@ BREAKS: Final[dict[str, tuple[str, str, str]]] = {
         STEPS,
     ),
     "no tiny pipeline step": (
-        "      - name: Tiny pipeline (stub until D15)\n        run: just tiny\n\n",
+        "      - name: Tiny pipeline\n        run: just tiny\n\n",
         "",
         STEPS,
     ),

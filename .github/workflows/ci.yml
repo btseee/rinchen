@@ -31,9 +31,6 @@ jobs:
       - name: Doctor (environment checks must all pass or skip, never fail)
         run: just doctor
 
-      - name: Tiny pipeline (stub until D15)
-        run: just tiny
-
       - name: Upload coverage
         if: always()
         uses: actions/upload-artifact@v7
@@ -41,3 +38,45 @@ jobs:
           name: coverage
           path: coverage.xml
           if-no-files-found: ignore
+
+  # The tiny pipeline (just tiny) on the CPU, a job of its own so that a failing gate does not hide
+  # its report and the other way round. It uploads artifacts/tiny/report.json and report.md only:
+  # the rest of the run directory holds paths of the machine that ran it. UNMEASURED on a runner.
+  tiny:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.3.3
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
+      - name: Install just
+        uses: extractions/setup-just@v4
+
+      - name: Sync dependencies
+        run: uv sync --frozen --group dev
+
+      - name: Tiny pipeline
+        run: just tiny
+
+      - name: Upload the tiny report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tiny-report
+          path: |
+            artifacts/tiny/report.json
+            artifacts/tiny/report.md
+          if-no-files-found: ignore
+
+      - name: Show the report on the run page
+        if: ${{ always() && hashFiles('artifacts/tiny/report.md') != '' }}
+        run: cat artifacts/tiny/report.md >> "$GITHUB_STEP_SUMMARY"

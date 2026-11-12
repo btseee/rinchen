@@ -239,3 +239,5 @@ data/*/*
 /models/
 # The output directory of the nightly maintenance check (.github/workflows/nightly.yml)
 /maintain-out/
+# The output directory of the tiny pipeline (just tiny)
+/artifacts/

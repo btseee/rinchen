@@ -44,7 +44,7 @@ jobs:
       - name: Maintenance check (doctor, lock, dependency drift, parity reruns)
         run: uv run --frozen --no-sync rinchen maintain check --out-dir maintain-out --cadence "$CADENCE"
 
-      - name: Tiny pipeline (stub until D15)
+      - name: Tiny pipeline
         run: just tiny
 
       - name: Show the report on the run page
