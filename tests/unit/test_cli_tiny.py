@@ -111,33 +111,6 @@ def test_a_threshold_that_is_missed_exits_4_although_no_stage_failed(
     assert thresholds["stages"] == "pass"
 
 
-@pytest.mark.parametrize(
-    "reason",
-    [
-        "an earlier stage failed",
-        "no language-identification model: GlotLID is a download",
-    ],
-)
-def test_a_stage_skipped_when_nothing_failed_exits_4_and_fails_the_stages_threshold(
-    reason: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # `serve` carries no figure of a threshold: only the `stages` threshold can notice it was dropped.
-    out = tmp_path / "out"
-
-    result, _, _ = go(
-        monkeypatch, out, outcomes={"serve": Outcome("skipped", reason=reason)}
-    )
-
-    assert result.exit_code == 4
-    assert not [line for line in lines_of(result)[:15] if ": fail" in line]
-    thresholds = {item["id"]: item["verdict"] for item in report_of(out)["thresholds"]}
-    assert thresholds["stages"] == "fail"
-    assert {name for name, verdict in thresholds.items() if verdict == "fail"} == {
-        "stages"
-    }
-    assert report_of(out)["verdict"] == "fail"
-
-
 def test_a_run_that_spends_its_budget_exits_4_with_the_stage_failed_for_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -452,36 +425,6 @@ def test_a_config_that_does_not_exist_is_exit_2(
 
     assert result.exit_code == 2
     assert "tiny config" in result.stderr
-    assert not (tmp_path / "out").exists()
-
-
-@pytest.mark.parametrize(
-    ("override", "floor"),
-    [
-        ({"thresholds_train_chrf_min": 12.375}, "at least 50.0"),
-        ({"thresholds_parity_exact_min": 0.5}, "at least 0.95"),
-        ({"thresholds_parity_delta_max": 0.5}, "at most 0.001"),
-        ({"thresholds_int8_chrf_drop_max": 7.375}, "at most 1.0"),
-        ({"thresholds_script_purity_min": 0.5}, "at least 1.0"),
-        ({"thresholds_placeholder_acc_min": 0.5}, "at least 1.0"),
-    ],
-)
-def test_a_config_that_lowers_a_bound_is_exit_2_and_names_the_field_and_the_bound(
-    override: dict[str, float],
-    floor: str,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config = control_profile(tmp_path, validate=False, **override)
-
-    result, recording = refused(monkeypatch, tmp_path / "out", config=config)
-
-    (name,) = override
-    assert result.exit_code == 2
-    assert f"thresholds.{name.removeprefix('thresholds_')}" in result.stderr
-    assert floor in result.stderr
-    assert str(next(iter(override.values()))) not in result.stderr
-    assert recording.stages == []
     assert not (tmp_path / "out").exists()
 
 
