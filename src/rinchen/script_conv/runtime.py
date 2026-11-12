@@ -64,7 +64,7 @@ class _Translator(Protocol):
 
 
 class _Processor(Protocol):
-    def encode(self, text: str, out_type: type = str) -> list[str]: ...
+    def encode(self, text: str, /, return_type: type[str] = str) -> list[str]: ...
 
     def decode(self, tokens: list[str]) -> str: ...
 
@@ -284,7 +284,9 @@ class ScriptConverter:
         return outputs
 
     def _translate(self, tag: str, words: Sequence[str]) -> dict[str, str]:
-        source = [[tag, *self._processor.encode(word, out_type=str)] for word in words]
+        source = [
+            [tag, *self._processor.encode(word, return_type=str)] for word in words
+        ]
         longest = max(len(word) for word in words)
         try:
             results = self._translator.translate_batch(

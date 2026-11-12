@@ -125,7 +125,7 @@ class SymbolProcessor(FakeProcessor):
         )
         self._symbols = frozenset(symbols)
 
-    def encode(self, text: str, out_type: type = str) -> list[str]:
+    def encode(self, text: str, return_type: type = str) -> list[str]:
         self.encoded.append(text)
         pieces: list[str] = []
         for word in text.split():

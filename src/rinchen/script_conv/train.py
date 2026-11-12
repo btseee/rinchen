@@ -161,7 +161,7 @@ def predict(
     raw_lines = eole_run.predict_tokens(
         ckpt_dir,
         [
-            " ".join([tag, *processor.encode(line, out_type=str)])
+            " ".join([tag, *processor.encode(line, return_type=str)])
             for line in source_lines
         ],
         out_dir=out_file.parent,

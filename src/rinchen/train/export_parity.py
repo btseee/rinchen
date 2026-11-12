@@ -129,7 +129,7 @@ class ParityReport:
 class TokenProcessor(Protocol):
     """What the parity asks of a SentencePiece processor (`SentencePieceProcessor` has it)."""
 
-    def encode(self, text: str, out_type: type = str) -> list[str]: ...
+    def encode(self, text: str, /, return_type: type[str] = str) -> list[str]: ...
 
 
 class _Hypotheses(Protocol):
@@ -375,7 +375,7 @@ def _pieces_of(
 ) -> list[list[str]]:
     pieces: list[list[str]] = []
     for number, source in enumerate(sources, start=1):
-        each = processor.encode(source.text, out_type=str)
+        each = processor.encode(source.text, return_type=str)
         if not each:
             # Eole drops such a line without a word, and there would be nothing to compare.
             raise DataError(f"source {number} has no piece: its text is empty or blank")

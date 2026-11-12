@@ -277,8 +277,8 @@ def test_when_nothing_can_be_sent_nothing_is_called(tmp_path: Path) -> None:
 
 def test_a_text_the_model_cuts_into_no_piece_is_empty(tmp_path: Path) -> None:
     class NoPieces(FakeProcessor):
-        def encode(self, text: str, out_type: type = str) -> list[str]:
-            return [] if text == "zzz" else super().encode(text, out_type)
+        def encode(self, text: str, return_type: type = str) -> list[str]:
+            return [] if text == "zzz" else super().encode(text, return_type)
 
     fixture = scripted_engine(tmp_path, processor=NoPieces(ENGINE_PIECES))
 

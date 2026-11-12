@@ -66,7 +66,7 @@ class WordProcessor:
     def __init__(self):
         self.encoded: list[str] = []
 
-    def encode(self, text, out_type=str):
+    def encode(self, text, return_type=str):
         self.encoded.append(text)
         return [SP + word for word in text.split(" ")]
 

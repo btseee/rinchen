@@ -8,6 +8,7 @@ invariants.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TypedDict
 
 import sentencepiece
 
@@ -71,7 +72,24 @@ def _write_sample(sample: list[str], output_prefix: Path) -> Path:
     return sampled_path
 
 
-def _trainer_options(cfg: SpmConfig, sampled_path: Path) -> dict[str, object]:
+class _TrainerOptions(TypedDict):
+    """The trainer's keyword options; none of them is one of its named parameters."""
+
+    input: str
+    model_prefix: str
+    vocab_size: int
+    character_coverage: float
+    input_sentence_size: int
+    model_type: str
+    byte_fallback: bool
+    split_digits: bool
+    normalization_rule_name: str
+    user_defined_symbols: list[str]
+    shuffle_input_sentence: bool
+    minloglevel: int
+
+
+def _trainer_options(cfg: SpmConfig, sampled_path: Path) -> _TrainerOptions:
     return {
         "input": str(sampled_path),
         "model_prefix": str(cfg.output_prefix),

@@ -175,7 +175,7 @@ class FakeProcessor:
         self._pieces = list(pieces)
         self.encoded: list[str] = []
 
-    def encode(self, text: str, out_type: type = str) -> list[str]:
+    def encode(self, text: str, return_type: type = str) -> list[str]:
         self.encoded.append(text)
         return [SPIECE + word for word in text.split()]
 

@@ -82,7 +82,7 @@ def parity(
     processor = load_char_processor(spm_model)
     translator = ctranslate2.Translator(str(ct2_dir), device="cpu", intra_threads=1)
     results = translator.translate_batch(
-        [[tag, *processor.encode(line, out_type=str)] for line in src_lines],
+        [[tag, *processor.encode(line, return_type=str)] for line in src_lines],
         beam_size=1,
         max_decoding_length=max_decoding_length,
     )

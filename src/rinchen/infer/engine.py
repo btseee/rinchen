@@ -454,7 +454,9 @@ class Engine:
     ) -> Prepared:
         src, language = source_language(row.text, row.src)
         text = normalize(row.text, language)
-        pieces = self._processor.encode(text, out_type=str) if has_alnum(text) else []
+        pieces = (
+            self._processor.encode(text, return_type=str) if has_alnum(text) else []
+        )
         if not pieces:
             return Prepared(route, src, "empty", None)
         for piece in pieces:
@@ -668,7 +670,7 @@ class Engine:
         def translate_window(joined: str) -> str:
             label = f"window {tally['windows']}"
             tally["windows"] += 1
-            pieces = self._processor.encode(joined, out_type=str)
+            pieces = self._processor.encode(joined, return_type=str)
             tokens = [route.tag, DOC_MARKER, *pieces]
             job = Job(label, tokens, None, route, allow_separator=True)
             (outcome,) = self._decode_masked([job], window_options, tally)
@@ -685,7 +687,7 @@ class Engine:
             translate_window=translate_window,
             translate_sentence=translate_sentence,
             count_pieces=lambda joined: len(
-                self._processor.encode(joined, out_type=str)
+                self._processor.encode(joined, return_type=str)
             ),
             max_pieces=options.max_source_pieces,
         )

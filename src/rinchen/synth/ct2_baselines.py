@@ -63,7 +63,7 @@ class _TranslatorLike(Protocol):
 
 
 class _ProcessorLike(Protocol):
-    def encode(self, text: str, out_type: type = str) -> list[str]: ...
+    def encode(self, text: str, /, return_type: type[str] = str) -> list[str]: ...
 
     def decode(self, tokens: list[str]) -> str: ...
 
@@ -105,7 +105,7 @@ class _Nllb(_Family):
         source_code: str,
         target_code: str,
     ) -> list[str]:
-        return [source_code, *processor.encode(text, out_type=str), _END_OF_SENTENCE]
+        return [source_code, *processor.encode(text, return_type=str), _END_OF_SENTENCE]
 
     def target_prefix(self, target_code: str) -> list[str] | None:
         return [target_code]
@@ -130,7 +130,7 @@ class _Madlad(_Family):
         # The tag is a user-defined SentencePiece symbol, which is matched only
         # when it is encoded inside the text. The source language is not part
         # of the input.
-        pieces = processor.encode(f"{target_code} {text}", out_type=str)
+        pieces = processor.encode(f"{target_code} {text}", return_type=str)
         return [*pieces, _END_OF_SENTENCE]
 
     def target_prefix(self, target_code: str) -> list[str] | None:

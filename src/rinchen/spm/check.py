@@ -108,7 +108,7 @@ def _load_processor(model_path: Path) -> sentencepiece.SentencePieceProcessor:
 
 
 def _is_atomic(processor: sentencepiece.SentencePieceProcessor, symbol: str) -> bool:
-    pieces = processor.encode(symbol, out_type=str)
+    pieces = processor.encode(symbol, return_type=str)
     return pieces == [symbol] or pieces == [_DUMMY_PREFIX, symbol]
 
 
@@ -129,7 +129,7 @@ def _measure_coverage(
     sample_lines: int,
 ) -> LanguageCoverage:
     lines = read_lines(path, limit=sample_lines)
-    encoded = processor.encode(lines, out_type=int)
+    encoded = processor.encode(lines, return_type=int)
     piece_ids = [piece_id for ids in encoded for piece_id in ids]
     fallback_pieces = sum(
         1

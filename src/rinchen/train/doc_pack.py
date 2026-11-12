@@ -113,7 +113,9 @@ def _piece_counts(
     lines = texts.to_list()
     counts: list[int] = []
     for start in range(0, len(lines), _ENCODE_CHUNK):
-        encoded = processor.encode(lines[start : start + _ENCODE_CHUNK], out_type=int)
+        encoded = processor.encode(
+            lines[start : start + _ENCODE_CHUNK], return_type=int
+        )
         counts.extend(len(pieces) for pieces in encoded)
     return counts
 

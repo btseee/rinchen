@@ -16,7 +16,7 @@ DUMMY_PREFIX = chr(0x2581)
 
 
 class StubProcessor:
-    def encode(self, text: str, out_type: type = str) -> list[str]:
+    def encode(self, text: str, return_type: type = str) -> list[str]:
         return [DUMMY_PREFIX, *text]
 
     def decode(self, tokens: list[str]) -> str:

@@ -161,7 +161,7 @@ class Ct2Like(Protocol):
 class ProcessorLike(Protocol):
     """What the teacher asks of a SentencePiece processor (`SentencePieceProcessor` has it)."""
 
-    def encode(self, text: str, out_type: type = str) -> list[str]: ...
+    def encode(self, text: str, /, return_type: type[str] = str) -> list[str]: ...
 
     def decode(self, pieces: list[str]) -> str: ...
 
@@ -255,7 +255,7 @@ class TeacherTranslator:
         if not texts:
             return []
         require_encodable(texts)
-        pieces = [self._processor.encode(text, out_type=str) for text in texts]
+        pieces = [self._processor.encode(text, return_type=str) for text in texts]
         tally = dict.fromkeys(COUNTER_KEYS, 0)
         tally["sources"] = len(texts)
         sent = self._sendable(pieces, tally)

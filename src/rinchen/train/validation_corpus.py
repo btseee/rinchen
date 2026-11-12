@@ -12,6 +12,7 @@ import sentencepiece
 from rinchen.config.ablation import TagPlacement, require_placement
 from rinchen.config.languages import direction_tag
 from rinchen.errors import ConfigError
+from rinchen.infer.source_tokens import PieceLookup
 from rinchen.train.mixture import DevSet
 from rinchen.utils.part_file import lines_as_bytes, replace_file
 
@@ -68,7 +69,7 @@ def load_processor(spm_model: Path) -> sentencepiece.SentencePieceProcessor:
 
 
 def require_one_piece(
-    processor: sentencepiece.SentencePieceProcessor,
+    processor: PieceLookup,
     symbol: str,
     spm_model: Path,
     *,
@@ -122,8 +123,8 @@ def dev_token_lines(
         dev_set = dev[direction]
         tag = direction_tag(dev_set.tgt_lang)
         require_one_piece(processor, tag, spm_model)
-        sources = processor.encode(list(dev_set.src), out_type=str)
-        targets = processor.encode(list(dev_set.tgt), out_type=str)
+        sources = processor.encode(list(dev_set.src), return_type=str)
+        targets = processor.encode(list(dev_set.tgt), return_type=str)
         for source, target in zip(sources, targets, strict=True):
             if placement == "src":
                 source = [tag, *source]

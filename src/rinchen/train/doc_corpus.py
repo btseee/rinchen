@@ -168,8 +168,8 @@ def write_doc_validation(
     tags = {lang: direction_tag(lang) for lang in frame["tgt_lang"].unique()}
     for tag in tags.values():
         require_one_piece(processor, tag, spm_model)
-    sources = processor.encode(frame["src"].to_list(), out_type=str)
-    targets = processor.encode(frame["tgt"].to_list(), out_type=str)
+    sources = processor.encode(frame["src"].to_list(), return_type=str)
+    targets = processor.encode(frame["tgt"].to_list(), return_type=str)
     src_lines = [
         " ".join([tags[lang], DOC_MARKER, *pieces])
         for lang, pieces in zip(frame["tgt_lang"], sources, strict=True)
