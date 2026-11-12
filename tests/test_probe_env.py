@@ -167,6 +167,9 @@ def test_render_report_includes_python_and_package_table():
     assert "⚠️" in report  # the flagged pyonmttok row
     assert "## Blockers" in report
     assert "## Open questions" in report
+    assert "does eole's own code import pyonmttok eagerly?\n" in report
+    assert "DECISIONS.md" not in report
+    assert "/wiki/" not in report
 
 
 def test_render_report_flags_uv_lock_failure():

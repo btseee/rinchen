@@ -226,9 +226,6 @@ __marimo__/
 
 # Superpowers
 .superpowers/
-*/superpowers/
-!docs/superpowers/
-!docs/superpowers/**
 
 # Rinchen data/training artifacts
 data/*

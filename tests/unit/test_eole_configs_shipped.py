@@ -432,12 +432,15 @@ def test_the_teacher_base_says_in_a_comment_that_every_value_is_an_unmeasured_pr
     assert "unmeasured prior" in comments
 
 
-def test_the_teacher_base_cites_the_master_plan_lines_its_numbers_come_from() -> None:
+def test_the_teacher_base_says_its_shape_is_the_master_plans_and_links_no_page() -> (
+    None
+):
     comments = " ".join(_comment_lines(TEACHER_BASE))
 
-    assert "2026-10-29-rinchen-dev-agent-prompt.md" in comments
-    assert "511" in comments
-    assert "514" in comments
+    assert "master plan" in comments
+    assert "hidden 1536" in comments
+    assert "Research-" not in comments
+    assert "/wiki/" not in comments
 
 
 def test_the_teacher_base_is_accepted_by_eoles_own_schema_with_its_8_gpu_settings() -> (

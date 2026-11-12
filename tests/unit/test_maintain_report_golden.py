@@ -44,7 +44,7 @@ GOLDEN_JSON = FIXTURES / "golden_report.json"
 GOLDEN_MD = FIXTURES / "golden_report.md"
 # `sha256sum` of the two files, taken from the files and not from the code.
 GOLDEN_JSON_SHA256 = "833f29c1450ef51c07a385906d685ef5a077844fd68700b9531b32c5c2139866"
-GOLDEN_MD_SHA256 = "e634fbf9104822af5e27133581cc76a3cda5034e7f7e713a440d39504f6763da"
+GOLDEN_MD_SHA256 = "02831fb76252612b667f244293851e9fda867a15a7e32087fb4c21f9ef2d1f69"
 MAX_BYTES = 8 * 1024
 
 

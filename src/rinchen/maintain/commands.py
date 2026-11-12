@@ -57,8 +57,8 @@ SECRET_SUFFIXES: Final = ("_TOKEN", "_SECRET", "_PASSWORD", "_API_KEY")
 
 # With polars imported (every `rinchen` command has it) SIGINT is handled by a handler that
 # restarts a blocking call: a wait without a timeout is not woken, while a wait with a timeout
-# is interrupted at once. So the wait is made in slices of this length (docs/VERIFY.md,
-# D-POLARS-SIGINT).
+# is interrupted at once. So the wait is made in slices of this length (Wiki page
+# Verification-Log, D-POLARS-SIGINT).
 _INTERRUPT_POLL_SECONDS: Final = 0.2
 _TERM_GRACE_SECONDS: Final = 2.0
 

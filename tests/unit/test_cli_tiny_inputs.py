@@ -79,7 +79,8 @@ def test_a_profile_with_no_pipeline_file_is_refused_with_the_message_of_the_spec
     message = str(raised.value)
     assert "no pipeline configuration for the profile 'full'" in message
     assert "(configs/tiny/full.yaml)" in message
-    assert "docs/runbooks/15_tiny_pipeline.md" in message
+    assert "https://github.com/btseee/rinchen/wiki/Runbook-15-Tiny-Pipeline" in message
+    assert "docs/" not in message
     assert str(REPO_ROOT) not in message
 
 

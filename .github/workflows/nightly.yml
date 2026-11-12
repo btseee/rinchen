@@ -1,6 +1,6 @@
 name: Nightly
 
-# A schedule starts the maintenance check (docs/runbooks/14_maintenance.md). The drift step of the
+# A schedule starts the maintenance check (Wiki page Runbook-14-Maintenance). The drift step of the
 # check is a dry run that never writes the lock file, and an upgrade is an operator's procedure on
 # a branch. The job fails when a check fails; it needs no secret.
 on:

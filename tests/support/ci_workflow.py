@@ -1,8 +1,9 @@
 """The rules of the files of D15's Task 8 as a function of their texts (spec P16): the two jobs of
 `.github/workflows/ci.yml`, the `tiny` recipe of the justfile, the ignore rule of `artifacts/`, and the
 two things the other workflows owe the new job (the same version of every action in the three
-workflows, a nightly timeout that covers the pipeline). The workflows are never run here: what they do
-on a runner is UNMEASURED, and the rules only say what their text must be.
+workflows, a nightly timeout that covers the pipeline). The workflows are never run here (the runs on
+the runner are recorded in the comment above the job tiny), and the rules only say what their text must
+be.
 
 `findings(files, tiny_config, maintain_config)` says what is wrong with a set of files, one short
 sentence each, and nothing for a good set; the readers and the constants it judges by are here too,
@@ -85,8 +86,9 @@ HUB_WORDS: Final = (
 # Said by no `run:` of the tiny job: a download by hand.
 DOWNLOADS: Final = ("curl ", "wget ", "git clone", "git lfs")
 
-# The steps of the job `gate` as they were before the pipeline got its own job (without the version
-# of an action: the versions are compared across the three workflows), in order.
+# The steps of the job `gate`: the set-up, the sync, the gate and the doctor (without the version of an
+# action: the versions are compared across the three workflows), in order. It uploads nothing: the
+# upload of a `coverage.xml` that no step wrote was removed.
 GATE_STEPS: Final[list[dict[str, Any]]] = [
     {"uses": "actions/checkout"},
     {"name": "Install uv", "uses": "astral-sh/setup-uv"},
@@ -101,16 +103,6 @@ GATE_STEPS: Final[list[dict[str, Any]]] = [
     {
         "name": "Doctor (environment checks must all pass or skip, never fail)",
         "run": "just doctor",
-    },
-    {
-        "name": "Upload coverage",
-        "if": "always()",
-        "uses": "actions/upload-artifact",
-        "with": {
-            "name": "coverage",
-            "path": "coverage.xml",
-            "if-no-files-found": "ignore",
-        },
     },
 ]
 # The steps of the job `tiny`, in order: the set-up of `gate`, the sync, the pipeline, the upload of
@@ -331,7 +323,7 @@ def gate_problems(job: object) -> list[str]:
         problems.append("job gate holds keys other than runs-on and steps")
     if [identity_of(step) for step in steps] != GATE_STEPS:
         problems.append(
-            "the steps of job gate are not the ones it had before the pipeline job, in order"
+            "the steps of job gate are not the set-up, the sync, the gate and the doctor, in order"
         )
     if any(TINY_RUN in run for run in runs_in(steps)):
         problems.append("job gate runs the tiny pipeline")

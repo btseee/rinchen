@@ -50,7 +50,6 @@ EXCLUDED_FROM_THE_CONTEXT = (
     "data",
     "models",
     "tests",
-    "docs",
     ".superpowers",
 )
 # What a reader of the file must be told was never measured (the phrases the comments use).

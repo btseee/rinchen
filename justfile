@@ -16,7 +16,13 @@ tiny:
     uv run --frozen --no-sync rinchen tiny run --profile tiny
 
 accept:
-    echo "just accept: not implemented until the full project-wide definition of done is met. See <mission> in docs/research/2026-10-29-rinchen-dev-agent-prompt.md."
+    echo "just accept: not implemented until the full project-wide definition of done is met. See the definition of done on https://github.com/btseee/rinchen/wiki/State."
+
+# Checks a clone of the Wiki (https://github.com/btseee/rinchen.wiki.git), where the documents live:
+# the content rules, internal links, characters, code fences, page names and the Verification-Log
+# rows that configs/maintain/maintain.yaml names. Example: just wiki-check ../rinchen.wiki
+wiki-check wiki_dir:
+    uv run --frozen --no-sync python scripts/check_wiki.py "{{wiki_dir}}" --verify-ids-from configs/maintain/maintain.yaml
 
 # The CPU container of the tiny export (D11). Documentation: nothing runs these two recipes in CI
 # and the image was never built (UNMEASURED). The model directory is RINCHEN_MODEL_DIR (default

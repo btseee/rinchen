@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Project Wiki
+    url: https://github.com/btseee/rinchen/wiki
+    about: Guides, the command reference and the records of the project. Please look here before you open an issue.
+  - name: Report a security vulnerability
+    url: https://github.com/btseee/rinchen/security/advisories/new
+    about: Report it privately. Do not open a public issue for a vulnerability.

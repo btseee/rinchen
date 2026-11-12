@@ -25,6 +25,16 @@ def test_check_wheels_passes_for_real_installed_environment():
     assert "torch" in result.message
 
 
+def test_check_eole_cli_points_its_note_at_the_wiki_page_of_the_record(monkeypatch):
+    monkeypatch.setattr(doctor, "_run_help", lambda command: (True, ""))
+    result = doctor.check_eole_cli()
+    assert result.status == "pass"
+    assert result.message.endswith(
+        "see https://github.com/btseee/rinchen/wiki/Verification-Log)"
+    )
+    assert "docs/" not in result.message
+
+
 def test_run_all_returns_one_result_per_check():
     results = doctor.run_all()
     check_ids = {result.check_id for result in results}

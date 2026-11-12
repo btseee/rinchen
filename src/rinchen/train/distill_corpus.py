@@ -193,7 +193,8 @@ def _read_file(
         raise
     except (pl.exceptions.PolarsError, pl.exceptions.PanicException, OSError) as exc:
         # A damaged file can make the Parquet reader panic, which polars raises as a
-        # BaseException (docs/VERIFY.md, D-POLARS-PANIC): it is a bad file too.
+        # BaseException (Wiki page Verification-Log, D-POLARS-PANIC): it is a bad file
+        # too.
         raise DataError(f"cannot read KD file {path}: {exc}") from exc
     usable = frame.filter(pl.col(_REASON).is_null()).select(
         "id", "src_lang", "tgt_lang", "src", "tgt", "corpus"

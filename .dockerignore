@@ -1,8 +1,8 @@
 # Build context of docker/Dockerfile.cpu (D11). The image copies pyproject.toml, uv.lock,
 # README.md, vendor/, src/ and configs/ and nothing else, so everything below stays out of the
 # context: the local environment, the history, the data and the models (large, and never part
-# of an image), the tests, the documents and the tool caches. The vendored wheels in vendor/ are
-# NOT excluded: uv.lock names them by path.
+# of an image), the tests and the tool caches. The vendored wheels in vendor/ are NOT excluded:
+# uv.lock names them by path.
 .git
 .github
 .venv
@@ -20,4 +20,3 @@ runs
 data
 models
 tests
-docs

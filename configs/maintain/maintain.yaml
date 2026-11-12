@@ -1,8 +1,9 @@
 # Maintenance check (D14): the uv argument lists and bounds, the pin rules and the parity reruns
 # of `rinchen maintain check`, as data. Every number and every rule below is an unvalidated
-# prior: the rules were written from the recorded decisions (DECISIONS.md, docs/VERIFY.md) and
-# the bounds from the times of ONE machine (a bound is at least three times its measured time and
-# at least 300 s), and nothing was run on a CI runner or against the real state of PyPI.
+# prior: the rules were written from the recorded decisions (each stated in its rule, with the rows
+# of the Wiki page Verification-Log that record it) and the bounds from the times of ONE machine (a
+# bound is at least three times its measured time and at least 300 s), and nothing was run on a CI
+# runner or against the real state of PyPI.
 #
 # skipped_doctor_checks: doctor checks that are never called, each with its skip reason (one of
 #   the closed reasons of rinchen.maintain.states). The GPU check is one: this command never
@@ -34,43 +35,43 @@ drift:
   rules:
     - id: eole
       packages: [eole, aiohttp]
-      decision: "DECISIONS.md: the eole==0.6.4 pin, upgraded only after the parity smoke test; docs/VERIFY.md rows D-EOLE-PY, D-EOLE-CLI, D-STRICT-PARITY"
+      decision: "the exact eole pin, upgraded only after the parity smoke test; Wiki page Verification-Log rows D-EOLE-PY, D-EOLE-CLI, D-STRICT-PARITY"
       requires: [parity_tiny, parity_export, gate]
     - id: ctranslate2
       packages: [ctranslate2]
-      decision: "docs/VERIFY.md rows D-CT2-CONV, D-CT2-IMPORT, D-CT2-EOLE-CUDA, D-CT2-QUANT-CPU, D-CT2-SUPPRESS; DECISIONS.md: SinusoidalInterleaved positions only (the Eole to CTranslate2 converter)"
+      decision: "Wiki page Verification-Log rows D-CT2-CONV, D-CT2-IMPORT, D-CT2-EOLE-CUDA, D-CT2-QUANT-CPU, D-CT2-SUPPRESS; SinusoidalInterleaved positions only (the Eole to CTranslate2 converter)"
       requires: [parity_tiny, parity_export, serving_tiny]
     - id: torch-family
       packages: [torch, torch-*, torchcodec, triton, nvidia-*, cuda-*]
-      decision: "DECISIONS.md: torch 2.14.1 from the cu130 index and vLLM kept out of the workspace; docs/VERIFY.md rows D-TORCH-CUDA, D-IMAGE-CUDA-WHEELS"
+      decision: "torch 2.14.1 from the cu130 index and vLLM kept out of the workspace; Wiki page Verification-Log rows D-TORCH-CUDA, D-IMAGE-CUDA-WHEELS"
       requires: [parity_tiny, robustness_tiny, gate]
     - id: sacrebleu-numpy
       packages: [sacrebleu, numpy]
-      decision: "docs/VERIFY.md rows D13-SACREBLEU-STATISTICS, D13-SACREBLEU-PAIRED-TEST, D13-OWN-BOOTSTRAP: the private statistics API and the goldens"
+      decision: "Wiki page Verification-Log rows D13-SACREBLEU-STATISTICS, D13-SACREBLEU-PAIRED-TEST, D13-OWN-BOOTSTRAP: the private statistics API and the goldens"
       requires: [numerics, evaluation_tiny]
     - id: sentencepiece
       packages: [sentencepiece]
-      decision: "DECISIONS.md: the D3 tokenizer entries of 2026-11-06 (the reserved symbols and the goldens); docs/VERIFY.md row D-EOLE-VOCAB-NOT-SPM"
+      decision: "the D3 tokenizer rulings of 2026-11-06 (the reserved symbols and the goldens); Wiki page Verification-Log row D-EOLE-VOCAB-NOT-SPM"
       requires: [numerics, gate]
     - id: transformers-stack
       packages: [transformers, tokenizers, safetensors, sentence-transformers]
-      decision: "DECISIONS.md: the transformers==5.21.0 pin and the own COMET-22 and MetricX-24 inference that depends on it"
+      decision: "the transformers==5.21.0 pin and the own COMET-22 and MetricX-24 inference that depends on it"
       requires: [gate]
     - id: polars-arrow
       packages: [polars, polars-*, pyarrow]
-      decision: "docs/VERIFY.md rows D-POLARS-GLOB, D-POLARS-PANIC, D-POLARS-SIGINT"
+      decision: "Wiki page Verification-Log rows D-POLARS-GLOB, D-POLARS-PANIC, D-POLARS-SIGINT"
       requires: [gate]
     - id: serving-stack
       packages: [fastapi, starlette, uvicorn, h11]
-      decision: "docs/VERIFY.md rows D-SERVE-SIGTERM-EXIT, D-UVICORN-LIFESPAN-ORDER"
+      decision: "Wiki page Verification-Log rows D-SERVE-SIGTERM-EXIT, D-UVICORN-LIFESPAN-ORDER"
       requires: [serving_tiny, gate]
     - id: hub-client
       packages: [huggingface-hub, datasets, hf-xet]
-      decision: "docs/VERIFY.md rows D13-HUB-OFFLINE, D13-HUB-CREATE-REPO-EXIST-OK"
+      decision: "Wiki page Verification-Log rows D13-HUB-OFFLINE, D13-HUB-CREATE-REPO-EXIST-OK"
       requires: [evaluation_tiny, gate]
     - id: vendored-wheels
       packages: [pyonmttok, fasttext-wheel, fasttext-new]
-      decision: "DECISIONS.md entries of 2026-10-29: the pyonmttok build for cp314 and the fasttext-wheel shim via fasttext-new; the wheels are committed under vendor/wheels"
+      decision: "the pyonmttok build for cp314 and the fasttext-wheel shim via fasttext-new (2026-10-29); the wheels are committed under vendor/wheels"
       requires: [gate]
 
 reruns:

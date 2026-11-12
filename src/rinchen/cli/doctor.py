@@ -89,7 +89,7 @@ def check_eole_cli() -> DoctorResult:
         " (NOTE: 'eole model average' from the master plan does not exist in"
         " the installed eole's CLI -- top-level subcommands are"
         " {convert,build_vocab,predict,serve,train,tools}, no 'model' group;"
-        " see docs/VERIFY.md)"
+        " see https://github.com/btseee/rinchen/wiki/Verification-Log)"
     )
     return DoctorResult(
         "D-EOLE-CLI", "pass", f"{len(subcommands)} subcommands parsed --help{note}"

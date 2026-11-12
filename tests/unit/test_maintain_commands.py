@@ -565,7 +565,8 @@ def test_an_interrupt_in_the_wait_kills_the_group_before_it_propagates(
 @pytest.mark.usefixtures("default_signal_handlers")
 def test_a_real_sigint_interrupts_the_wait_while_the_child_runs(tmp_path: Path) -> None:
     # Once polars is imported (every `rinchen` command has it) a SIGINT does not wake a blocking
-    # wait that has no timeout; a wait with a timeout is woken (docs/VERIFY.md, D-POLARS-SIGINT).
+    # wait that has no timeout; a wait with a timeout is woken (Wiki page Verification-Log,
+    # D-POLARS-SIGINT).
     # The child lives 8 s, so a wait that is not woken by the signal fails the assertion below.
     importlib.import_module("polars")
     pid_file = tmp_path / "pids"

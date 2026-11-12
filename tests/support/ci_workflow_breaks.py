@@ -108,32 +108,27 @@ GATE_CASES: Final = [
     (
         "the stub put back in the gate: it runs the pipeline",
         ci(
-            COVERAGE_STEP,
-            STUB_STEP + COVERAGE_STEP,
+            DOCTOR_STEP,
+            DOCTOR_STEP + STUB_STEP,
             CI + "job gate runs the tiny pipeline",
         ),
     ),
     (
         "the stub put back in the gate: it names the stub",
-        ci(COVERAGE_STEP, STUB_STEP + COVERAGE_STEP, "ci.yml" + NAMES_STUB),
+        ci(DOCTOR_STEP, DOCTOR_STEP + STUB_STEP, "ci.yml" + NAMES_STUB),
     ),
     (
         "the pipeline in the gate under another name",
         ci(
-            COVERAGE_STEP,
-            "      - name: Pipeline\n        run: just tiny\n\n" + COVERAGE_STEP,
+            DOCTOR_STEP,
+            DOCTOR_STEP + "      - name: Pipeline\n        run: just tiny\n\n",
             CI + "job gate runs the tiny pipeline",
         ),
     ),
     ("the gate without the doctor", ci(DOCTOR_STEP, "", GATE_STEPS_SENTENCE)),
     (
-        "the gate without its coverage upload",
-        ci(
-            "      - name: Upload coverage\n        if: always()\n        uses: actions/upload-artifact@v7\n"
-            "        with:\n          name: coverage\n          path: coverage.xml\n          if-no-files-found: ignore\n",
-            "",
-            GATE_STEPS_SENTENCE,
-        ),
+        "the coverage upload that nothing fed put back in the gate",
+        ci(DOCTOR_STEP, DOCTOR_STEP + COVERAGE_STEP, GATE_STEPS_SENTENCE),
     ),
     (
         "the gate on another runner",
@@ -388,15 +383,6 @@ VERSION_CASES: Final = [
         ),
     ),
     (
-        "the upload of the coverage at another version",
-        ci(
-            "uses: actions/upload-artifact@v7",
-            "uses: actions/upload-artifact@v6",
-            ONE_VERSION + "actions/upload-artifact",
-            0,
-        ),
-    ),
-    (
         "checkout at another version in the gate",
         ci(
             "uses: actions/checkout@v7",
@@ -531,7 +517,6 @@ UPLOAD_CASES: Final = [
             "if-no-files-found: ignore",
             "if-no-files-found: error",
             CI + UPLOAD + "does not ignore missing files",
-            1,
         ),
     ),
     (

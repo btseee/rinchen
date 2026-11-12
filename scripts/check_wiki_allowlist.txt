@@ -1,0 +1,4 @@
+# The needle hits of scripts/check_wiki.py accepted for now: one line per Wiki page, "<page> <hits>".
+# A listed page that is gone or has another number of hits is a problem of the checker, so an entry
+# lives only as long as its page needs it. A guide page may never be listed.
+# Empty: at Wiki commit e59f9d1 no page holds a hit (the 46 hits of 14 history pages went with them).

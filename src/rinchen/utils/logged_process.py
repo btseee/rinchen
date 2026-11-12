@@ -32,7 +32,7 @@ _POSIX = os.name == "posix"
 # handler that restarts a blocking call: a wait without a timeout is not woken, and
 # Ctrl-C would be raised only when the command ends (hours into an Eole training),
 # while a wait with a timeout is interrupted at once. So the wait is made in slices
-# of this length (docs/VERIFY.md, D-POLARS-SIGINT).
+# of this length (Wiki page Verification-Log, D-POLARS-SIGINT).
 _INTERRUPT_POLL_S = 0.2
 # The signals that end a process without Ctrl-C: `kill`, a service stop (SIGTERM) and
 # a closed terminal or SSH session (SIGHUP, absent on Windows).

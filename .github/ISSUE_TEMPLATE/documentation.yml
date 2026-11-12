@@ -1,0 +1,41 @@
+name: Documentation problem
+description: A page, a file or a message is missing, wrong, unclear or out of date.
+title: "[Docs]: "
+labels: ["documentation"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for helping the documentation. The long-form pages live on the [project Wiki](https://github.com/btseee/rinchen/wiki); short ones are in the repository, such as the README and the guides in the `.github` directory.
+  - type: input
+    id: location
+    attributes:
+      label: Page or file
+      description: The Wiki page title, the file path, the README section, or the command whose `--help` text is at fault.
+      placeholder: Wiki page "Getting started", or the output of `rinchen serve --help`
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind of problem
+      options:
+        - Missing
+        - Wrong
+        - Unclear
+        - Out of date
+        - Typo
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is missing or wrong?
+      description: Quote the text if you can, and say what you expected to find.
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested text
+      description: Optional. If you know what the page should say, write it here.

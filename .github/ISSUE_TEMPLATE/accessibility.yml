@@ -1,0 +1,60 @@
+name: Accessibility problem
+description: Something in the project's text, output or pages is hard or impossible to use.
+title: "[Accessibility]: "
+labels: ["accessibility"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for telling us. We treat an accessibility report as expertise, not as a complaint.
+
+        You do not have to tell us why you use an assistive tool or share any medical or personal detail. Every field except the first two is optional. Please do not paste secrets: remove tokens, passwords and personal data from anything you post.
+
+        The [accessibility statement](https://github.com/btseee/rinchen/blob/main/ACCESSIBILITY.md) says what the project covers and what to expect.
+  - type: textarea
+    id: barrier
+    attributes:
+      label: What barrier did you meet?
+      description: What were you trying to do, and what got in the way?
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where did you meet it?
+      options:
+        - CLI output (messages or --help text in a terminal)
+        - A report file such as report.md
+        - A Wiki page
+        - The README
+        - HTTP service error messages
+        - An issue form or the pull request template
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: location
+    attributes:
+      label: Page, file or command
+      description: The page address, the file path, or the command you ran.
+  - type: input
+    id: assistive-technology
+    attributes:
+      label: Tool or setup you use
+      description: Optional. The name and version of your screen reader, magnifier, speech input, terminal or browser, and your operating system.
+  - type: dropdown
+    id: severity
+    attributes:
+      label: How much does it get in the way?
+      description: Optional. The maintainer confirms the severity when the issue is triaged.
+      options:
+        - Critical (I cannot complete a core task)
+        - Serious (it is very hard, but there is a workaround)
+        - Moderate (it is annoying or inconsistent)
+        - Minor (it has little effect)
+        - Not sure
+  - type: textarea
+    id: fix
+    attributes:
+      label: Suggested fix
+      description: Optional. How could it work better for you?
