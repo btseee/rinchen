@@ -1,19 +1,22 @@
 """Check a clone of the project's GitHub Wiki, where the documents of the repository moved.
 
-    uv run python scripts/check_wiki.py WIKI_DIR [--verify-ids-from FILE ...]
+    uv run python scripts/check_wiki.py WIKI_DIR [--verify-ids-from FILE ...] [--allowlist FILE]
 
 The checks, over every `*.md` page of WIKI_DIR (the `.git` directory of a clone is skipped):
 
-- the content rules: no page holds a word of the two subjects the project's rules exclude, except the
-  moved records (`is_record_page`), whose original text is kept as it was written. The needles are
-  spelled as code points, the same ones as `tests/unit/test_d13_content_rules.py` (a test pins them
-  equal), and a problem names the needle by its number, never the word;
+- the content rules: no page holds a word of the two subjects the project's rules exclude. The needles
+  are spelled as code points, the same ones as `tests/unit/test_d13_content_rules.py` (a test pins them
+  equal), and a problem names the needle by its number, never the word. The hits of a page are accepted
+  only when the allowlist (`check_wiki_allowlist.txt` beside this script, lines `<page> <hits>`) lists
+  that page with exactly that number; a guide page may not be listed, and a listed page that does not
+  exist or has another number of hits is a problem, so the list is emptied as the pages are rewritten
+  or deleted;
 - internal links: a link to a page of the Wiki (a bare page name, `#anchor`, `Page#anchor`, `[[Page]]`
   or the absolute Wiki URL) must name a page that exists and, with an anchor, a heading of that page; a
   relative link that is not a page name (a repository path) points at nothing on the Wiki. Links inside
   code fences and code spans are not links;
-- characters: a page that is not a moved record holds ASCII only; no page holds a carriage return; every
-  code fence is closed;
+- characters: the guide pages, `State`, `_Sidebar` and `_Footer` hold ASCII only; no page holds a
+  carriage return; every code fence is closed;
 - page names: letters and digits in parts joined by single hyphens, or `_Sidebar` and `_Footer`; no two
   names that differ only in case; a `Home` page exists;
 - with `--verify-ids-from FILE`: every Verification-Log row id (`D-...`, `D13-...`) that a `decision:`
@@ -26,10 +29,9 @@ and exits 0 when there is no problem, 1 when there is one and 2 when WIKI_DIR is
 from __future__ import annotations
 
 import argparse
-import fnmatch
 import re
 import sys
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
@@ -38,20 +40,30 @@ WIKI_URL: Final = "https://github.com/btseee/rinchen/wiki"
 HOME: Final = "Home"
 SPECIAL_PAGES: Final = frozenset({"_Sidebar", "_Footer"})
 VERIFICATION_LOG: Final = "Verification-Log"
-# The pages that hold the moved records (runbooks, specs, plans, research, the history of the state, the
-# decisions and their index, the verification log and the stack) in their original text. `State` is the
-# living status page and is checked like a guide page.
-RECORD_PAGE_PATTERNS: Final = (
-    "Runbook-*",
-    "Spec-*",
-    "Plan-*",
-    "Research-*",
-    "State-History-*",
-    "Decision-*",
-    "Decisions",
-    VERIFICATION_LOG,
-    "Stack",
+# The guide pages: written from the code, never on the allowlist.
+GUIDE_PAGES: Final = frozenset(
+    {
+        HOME,
+        "Getting-Started",
+        "Architecture",
+        "CLI-Reference",
+        "Configuration",
+        "Data-Policy",
+        "Training-Pipeline",
+        "Evaluation-and-Release",
+        "Serving",
+        "Testing-and-Gates",
+        "CI-and-Workflows",
+        "Maintenance",
+        "Troubleshooting",
+        "Glossary",
+        "Roadmap",
+        "Contributing",
+    }
 )
+# The pages that hold ASCII only.
+ASCII_PAGES: Final = GUIDE_PAGES | SPECIAL_PAGES | {"State"}
+ALLOWLIST: Final = Path(__file__).with_name("check_wiki_allowlist.txt")
 # One tuple of code points per needle; the words are never written out.
 # fmt: off
 NEEDLE_CODE_POINTS: Final[tuple[tuple[int, ...], ...]] = (
@@ -102,9 +114,27 @@ def needles() -> tuple[str, ...]:
     return tuple("".join(map(chr, points)) for points in NEEDLE_CODE_POINTS)
 
 
-def is_record_page(name: str) -> bool:
-    """Whether the page `name` (without `.md`) holds a moved record in its original text."""
-    return any(fnmatch.fnmatchcase(name, pattern) for pattern in RECORD_PAGE_PATTERNS)
+def read_allowlist(path: Path) -> tuple[dict[str, int], list[Problem]]:
+    """The accepted needle hits per page of the allowlist file `path` (`<page> <hits>` per line, `#`
+    comments and blank lines skipped), and the problems of its lines."""
+    allowed: dict[str, int] = {}
+    problems = []
+    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        text = line.strip()
+        if not text or text.startswith("#"):
+            continue
+        parts = text.split()
+        if len(parts) != 2 or not parts[1].isdigit() or int(parts[1]) == 0:
+            detail = "not a page name and a number of hits above 0"
+        elif parts[0] in allowed:
+            detail = f"{parts[0]} is listed twice"
+        elif parts[0] in GUIDE_PAGES:
+            detail = f"{parts[0]} is a guide page"
+        else:
+            allowed[parts[0]] = int(parts[1])
+            continue
+        problems.append(Problem(path.name, number, "allowlist", detail))
+    return allowed, problems
 
 
 def slug(heading: str) -> str:
@@ -202,10 +232,29 @@ def _link_problem(target: str, page: str, anchors: dict[str, set[str]]) -> str |
     return None
 
 
-def _page_problems(name: str, text: str, anchors: dict[str, set[str]]) -> list[Problem]:
+def _needle_problems(
+    page: str, lines: Sequence[str], allowed: int | None
+) -> list[Problem]:
+    """The needle hits of a page, or none when the allowlist accepts exactly that many."""
+    hits = [
+        Problem(page, number, "needle", f"needle {index}")
+        for number, line in enumerate(lines, start=1)
+        for index, needle in enumerate(needles())
+        if needle in line.lower()
+    ]
+    if allowed is None:
+        return hits
+    if len(hits) == allowed:
+        return []
+    detail = f"the allowlist accepts {allowed} needle hits, the page has {len(hits)}"
+    return [Problem(page, 0, "allowlist", detail), *hits]
+
+
+def _page_problems(
+    name: str, text: str, anchors: dict[str, set[str]], allowed: int | None
+) -> list[Problem]:
     page = f"{name}.md"
     lines = text.split("\n")
-    record = is_record_page(name)
     problems: list[Problem] = []
     carriage = next((n for n, line in enumerate(lines, 1) if "\r" in line), None)
     if carriage is not None:
@@ -215,16 +264,13 @@ def _page_problems(name: str, text: str, anchors: dict[str, set[str]]) -> list[P
     opened = _unclosed_fence(lines)
     if opened is not None:
         problems.append(Problem(page, opened, "fence", "a code fence is never closed"))
-    for number, line in enumerate(lines, start=1):
-        if not record and not line.isascii():
-            problems.append(Problem(page, number, "ascii", "a character outside ASCII"))
-        if not record:
-            lowered = line.lower()
-            problems += [
-                Problem(page, number, "needle", f"needle {index}")
-                for index, needle in enumerate(needles())
-                if needle in lowered
-            ]
+    if name in ASCII_PAGES:
+        problems += [
+            Problem(page, number, "ascii", "a character outside ASCII")
+            for number, line in enumerate(lines, start=1)
+            if not line.isascii()
+        ]
+    problems += _needle_problems(page, lines, allowed)
     for number, line in _text_lines(lines):
         for target in _targets(line.rstrip("\r")):
             why = _link_problem(target, name, anchors)
@@ -278,8 +324,14 @@ def _row_problems(wiki: Path, sources: Sequence[Path]) -> list[Problem]:
     return problems
 
 
-def check_wiki(wiki: Path, verify_ids_from: Sequence[Path] = ()) -> list[Problem]:
-    """Every problem of the Wiki clone `wiki`, sorted by page, line and kind."""
+def check_wiki(
+    wiki: Path,
+    verify_ids_from: Sequence[Path] = (),
+    allowlist: Mapping[str, int] | None = None,
+) -> list[Problem]:
+    """Every problem of the Wiki clone `wiki`, sorted by page, line and kind; `allowlist` gives the
+    accepted needle hits per page (none by default)."""
+    allowed = allowlist or {}
     files = sorted(path for path in wiki.iterdir() if path.is_file())
     pages = {
         path.stem: path.read_bytes().decode("utf-8")
@@ -289,7 +341,17 @@ def check_wiki(wiki: Path, verify_ids_from: Sequence[Path] = ()) -> list[Problem
     anchors = {name: _anchors(text.split("\n")) for name, text in pages.items()}
     problems = _name_problems(files)
     for name, text in pages.items():
-        problems += _page_problems(name, text, anchors)
+        problems += _page_problems(name, text, anchors, allowed.get(name))
+    problems += [
+        Problem(
+            f"{name}.md",
+            0,
+            "allowlist",
+            "the allowlist names a page that does not exist",
+        )
+        for name in allowed
+        if name not in pages
+    ]
     problems += _row_problems(wiki, verify_ids_from)
     return sorted(problems)
 
@@ -305,11 +367,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=[],
         help="a file whose decision lines name Verification-Log rows",
     )
+    parser.add_argument(
+        "--allowlist",
+        type=Path,
+        default=ALLOWLIST,
+        help="the accepted needle hits per page (default: check_wiki_allowlist.txt)",
+    )
     options = parser.parse_args(argv)
     if not options.wiki.is_dir():
         print(f"{options.wiki} is not a directory", file=sys.stderr)
         return 2
-    problems = check_wiki(options.wiki, options.verify_ids_from)
+    allowed, problems = read_allowlist(options.allowlist)
+    problems += check_wiki(options.wiki, options.verify_ids_from, allowed)
     for problem in problems:
         print(problem)
     pages = sum(1 for path in options.wiki.iterdir() if path.suffix == ".md")

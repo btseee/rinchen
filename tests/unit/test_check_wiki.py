@@ -1,8 +1,9 @@
 """`scripts/check_wiki.py`, the checker of a clone of the project's Wiki (the documents moved there).
 
 Every test builds a small Wiki directory in `tmp_path` and asserts what the checker reports: the words
-the content rules exclude (as needle numbers, never the word) on a page that is not a moved record,
-internal links that point at no page or no heading, a character outside ASCII on such a page, a carriage
+the content rules exclude (as needle numbers, never the word) on any page unless the allowlist accepts
+exactly that many hits, the allowlist's own problems, internal links that point at no page or no
+heading, a character outside ASCII on a guide page, `State`, `_Sidebar` or `_Footer`, a carriage
 return or an unclosed code fence on any page, an illegal or duplicate page name, a missing `Home`, and a
 row of the Verification-Log that a repository file names but the page does not hold. The needles are
 spelled as code points here as in the content-rules test, and the checker's own are pinned to them.
@@ -15,11 +16,14 @@ from pathlib import Path
 
 import pytest
 from check_wiki import (
+    ALLOWLIST,
+    ASCII_PAGES,
+    GUIDE_PAGES,
     NEEDLE_CODE_POINTS,
     Problem,
     check_wiki,
-    is_record_page,
     main,
+    read_allowlist,
     slug,
 )
 
@@ -84,47 +88,104 @@ def test_a_needle_on_a_guide_page_is_named_by_number_and_line_never_by_the_word(
 
 
 @pytest.mark.parametrize(
-    "page",
-    [
-        "Runbook-01-Acquisition.md",
-        "Spec-D1-Data-Acquisition.md",
-        "Plan-D1-Data-Acquisition.md",
-        "Research-Master-Plan-D0-D15.md",
-        "State-History-D3.md",
-        "Decision-2026-10-30-D1-Candidate.md",
-        "Verification-Log.md",
-        "Stack.md",
-    ],
+    "page", ["Runbook-01-Acquisition.md", "Verification-Log.md", "Stack.md", "State.md"]
 )
-def test_a_moved_record_may_hold_a_needle_and_other_characters(
+def test_a_needle_on_a_page_that_stays_is_a_problem_without_an_allowlist(
     tmp_path: Path, page: str
 ) -> None:
-    text = (
-        GOOD.get(page, "# A record\n")
-        + f"\nOriginal text: {needles()[0]} {chr(0x0430)}\n"
-    )
+    text = GOOD.get(page, "# A page\n") + f"\nOriginal text: {needles()[0]}\n"
+
+    problems = check_wiki(build(tmp_path, {**GOOD, page: text}))
+
+    assert [kind for _, _, kind in kinds(problems)] == ["needle"]
+
+
+@pytest.mark.parametrize(
+    "page", ["Runbook-01-Acquisition.md", "Verification-Log.md", "Stack.md"]
+)
+def test_a_runbook_the_log_and_the_stack_may_hold_other_characters(
+    tmp_path: Path, page: str
+) -> None:
+    text = GOOD.get(page, "# A page\n") + f"\nA word: {chr(0x0430)}\n"
 
     assert check_wiki(build(tmp_path, {**GOOD, page: text})) == []
 
 
-@pytest.mark.parametrize(
-    ("name", "record"),
-    [
-        ("Runbook-15-Tiny-Pipeline", True),
-        ("Verification-Log", True),
-        ("Stack", True),
-        ("Decisions", True),
-        ("Home", False),
-        ("State", False),
-        ("Decisions-Draft", False),
-        ("Roadmap", False),
-        ("_Sidebar", False),
-        ("Stack-Notes", False),
-        ("Verification-Log-2", False),
-    ],
-)
-def test_which_pages_are_moved_records(name: str, record: bool) -> None:
-    assert is_record_page(name) is record
+def test_the_state_page_holds_ascii_only(tmp_path: Path) -> None:
+    pages = {**GOOD, "State.md": "# State\n\nA word: " + chr(0x0430) + "\n"}
+
+    assert kinds(check_wiki(build(tmp_path, pages))) == [("State.md", 3, "ascii")]
+
+
+def test_the_ascii_pages_are_the_guide_pages_the_state_and_the_sidebar_and_footer() -> (
+    None
+):
+    assert len(GUIDE_PAGES) == 16
+    assert ASCII_PAGES == GUIDE_PAGES | {"State", "_Sidebar", "_Footer"}
+    assert {"Home", "Roadmap", "Contributing", "Architecture"} <= GUIDE_PAGES
+
+
+# ---- the allowlist -------------------------------------------------------------------------------------
+
+RECORD = "Plan-D1-Data-Acquisition.md"
+RECORD_TEXT = f"# A record\n\n{needles()[0]} once\nand {needles()[1]} again\n"
+
+
+def test_the_hits_of_a_page_are_accepted_when_the_allowlist_has_their_number(
+    tmp_path: Path,
+) -> None:
+    wiki = build(tmp_path, {**GOOD, RECORD: RECORD_TEXT})
+
+    assert check_wiki(wiki, allowlist={"Plan-D1-Data-Acquisition": 2}) == []
+
+
+@pytest.mark.parametrize("allowed", [1, 3])
+def test_another_number_of_hits_names_every_hit_and_the_allowlist(
+    tmp_path: Path, allowed: int
+) -> None:
+    wiki = build(tmp_path, {**GOOD, RECORD: RECORD_TEXT})
+
+    problems = check_wiki(wiki, allowlist={"Plan-D1-Data-Acquisition": allowed})
+
+    assert kinds(problems) == [
+        (RECORD, 0, "allowlist"),
+        (RECORD, 3, "needle"),
+        (RECORD, 4, "needle"),
+    ]
+    assert (
+        problems[0].detail
+        == f"the allowlist accepts {allowed} needle hits, the page has 2"
+    )
+
+
+def test_an_allowlisted_page_that_is_gone_is_a_problem(tmp_path: Path) -> None:
+    problems = check_wiki(build(tmp_path, GOOD), allowlist={"Spec-Gone": 1})
+
+    assert kinds(problems) == [("Spec-Gone.md", 0, "allowlist")]
+
+
+def test_the_allowlist_file_is_read_and_its_bad_lines_are_problems(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "allow.txt"
+    path.write_text(
+        "# a comment\n\nPlan-A 2\nHome 1\nPlan-B\nPlan-C 0\nPlan-A 3\nPlan-D x\n",
+        encoding="utf-8",
+    )
+
+    allowed, problems = read_allowlist(path)
+
+    assert allowed == {"Plan-A": 2}
+    assert kinds(problems) == [("allow.txt", n, "allowlist") for n in (4, 5, 6, 7, 8)]
+    assert problems[0].detail == "Home is a guide page"
+
+
+def test_the_shipped_allowlist_lists_no_guide_page_and_no_page_twice() -> None:
+    allowed, problems = read_allowlist(ALLOWLIST)
+
+    assert problems == []
+    assert ALLOWLIST == REPO_ROOT / "scripts" / "check_wiki_allowlist.txt"
+    assert not set(allowed) & ASCII_PAGES
 
 
 # ---- links ---------------------------------------------------------------------------------------------
@@ -336,11 +397,54 @@ def test_a_file_that_names_no_row_is_a_problem(tmp_path: Path) -> None:
 # ---- the command ---------------------------------------------------------------------------------------
 
 
+def no_allowlist(tmp_path: Path) -> list[str]:
+    """The option of an empty allowlist."""
+    path = tmp_path / "empty_allowlist.txt"
+    path.write_text("# nothing is accepted\n", encoding="utf-8")
+    return ["--allowlist", str(path)]
+
+
 def test_the_command_exits_0_on_a_good_wiki_and_says_how_many_pages(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert main([str(build(tmp_path, GOOD))]) == 0
+    assert main([str(build(tmp_path, GOOD)), *no_allowlist(tmp_path)]) == 0
     assert capsys.readouterr().out == "5 pages, 0 problems\n"
+
+
+def test_the_command_reads_the_shipped_allowlist_by_default(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    allowed, _ = read_allowlist(ALLOWLIST)
+
+    assert main([str(build(tmp_path, GOOD))]) == (1 if allowed else 0)
+    out = capsys.readouterr().out.splitlines()
+    gone = [line for line in out if line.endswith("names a page that does not exist")]
+    assert len(gone) == len(allowed)
+
+
+def test_the_command_accepts_the_hits_its_allowlist_names(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    allow = tmp_path / "allow.txt"
+    allow.write_text("Plan-D1-Data-Acquisition 2\n", encoding="utf-8")
+    wiki = build(tmp_path, {**GOOD, RECORD: RECORD_TEXT})
+
+    assert main([str(wiki), "--allowlist", str(allow)]) == 0
+    assert main([str(wiki), *no_allowlist(tmp_path)]) == 1
+    assert capsys.readouterr().out.count(": needle: ") == 2
+
+
+def test_the_command_reports_a_bad_line_of_its_allowlist(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    allow = tmp_path / "allow.txt"
+    allow.write_text("Roadmap 1\n", encoding="utf-8")
+
+    assert main([str(build(tmp_path, GOOD)), "--allowlist", str(allow)]) == 1
+    assert capsys.readouterr().out.splitlines() == [
+        "allow.txt:1: allowlist: Roadmap is a guide page",
+        "5 pages, 1 problems",
+    ]
 
 
 def test_the_command_exits_1_and_prints_one_line_per_problem(
@@ -348,7 +452,7 @@ def test_the_command_exits_1_and_prints_one_line_per_problem(
 ) -> None:
     pages = {**GOOD, "Home.md": GOOD["Home.md"] + "[x](Missing)\r\n"}
 
-    assert main([str(build(tmp_path, pages))]) == 1
+    assert main([str(build(tmp_path, pages)), *no_allowlist(tmp_path)]) == 1
     assert capsys.readouterr().out.splitlines() == [
         "Home.md:4: crlf: a carriage return ends the line",
         "Home.md:4: link: Missing is not a page",
@@ -418,7 +522,10 @@ def test_the_command_reads_the_rows_of_a_file_it_is_given(
         'decision: "Wiki page Verification-Log row D-GONE"\n', encoding="utf-8"
     )
 
-    assert main([str(build(tmp_path, GOOD)), "--verify-ids-from", str(config)]) == 1
+    wiki = build(tmp_path, GOOD)
+    options = ["--verify-ids-from", str(config), *no_allowlist(tmp_path)]
+
+    assert main([str(wiki), *options]) == 1
     assert (
         "maintain.yaml:1: row: D-GONE is not a row of Verification-Log"
         in capsys.readouterr().out
