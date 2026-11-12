@@ -24,6 +24,7 @@ from rinchen.tiny.states import (
     ALL_REASONS,
     FAIL_BUDGET,
     FAIL_INPUT,
+    OWN_SKIP_REASONS,
     PART_IDS,
     SKIP_EARLIER_FAILED,
     SKIP_NO_LABSE,
@@ -521,6 +522,74 @@ def test_a_stage_that_has_no_parts_has_none_unlisted(stage_id: str) -> None:
 def test_a_part_of_another_type_is_refused() -> None:
     with pytest.raises(ValueError, match="part"):
         StageRecord("filter", "ok", parts=(("numbers", "ok", None),))  # type: ignore[arg-type]
+
+
+# ---- the skips of the parts of a stage ---------------------------------------------------------------
+
+# The four parts an `ok` stage may skip, each for the one reason of its own, as literals.
+OWN_SKIPS = {
+    ("filter", "lid"): SKIP_NO_LID,
+    ("filter", "labse"): SKIP_NO_LABSE,
+    ("filter", "qe"): SKIP_NO_QE,
+    ("evaluate", "neural_seam"): SKIP_NO_NEURAL,
+}
+
+
+def test_the_map_of_the_own_skip_reasons_is_these_four_and_cannot_be_changed() -> None:
+    assert dict(OWN_SKIP_REASONS) == OWN_SKIPS
+    with pytest.raises(TypeError):
+        OWN_SKIP_REASONS[("filter", "numbers")] = SKIP_NO_LID  # type: ignore[index]
+
+
+def test_every_part_with_an_own_reason_is_a_part_of_its_stage_and_the_reason_a_skip_reason() -> (
+    None
+):
+    for (stage_id, part_id), reason in OWN_SKIP_REASONS.items():
+        assert part_id in PART_IDS[stage_id]
+        assert is_skip_reason(reason)
+        assert reason != SKIP_EARLIER_FAILED
+
+
+@pytest.mark.parametrize(("stage_id", "part_id"), list(OWN_SKIPS))
+def test_an_ok_stage_may_skip_a_part_for_its_own_reason(
+    stage_id: str, part_id: str
+) -> None:
+    part = PartRecord(part_id, "skipped", OWN_SKIPS[(stage_id, part_id)])
+    assert StageRecord(stage_id, "ok", parts=(part,)).parts == (part,)
+
+
+@pytest.mark.parametrize("reason", SKIP_REASONS)
+@pytest.mark.parametrize(
+    ("stage_id", "part_id"),
+    [(stage, part) for stage, parts in PART_IDS.items() for part in parts],
+)
+def test_an_ok_stage_refuses_a_skipped_part_for_any_reason_but_its_own(
+    stage_id: str, part_id: str, reason: str
+) -> None:
+    part = PartRecord(part_id, "skipped", reason)
+    if reason == OWN_SKIPS.get((stage_id, part_id)):
+        return
+    with pytest.raises(ValueError, match="its own reason") as refused:
+        StageRecord(stage_id, "ok", parts=(part,))
+    assert reason not in str(refused.value)
+    assert part_id not in str(refused.value)
+
+
+@pytest.mark.parametrize(
+    ("state", "reason"),
+    [("fail", fail_exit(4)), ("skipped", SKIP_EARLIER_FAILED)],
+)
+@pytest.mark.parametrize("part_reason", SKIP_REASONS)
+@pytest.mark.parametrize("stage_id", list(PART_IDS))
+def test_a_stage_that_did_not_end_ok_may_skip_any_part_for_any_closed_reason(
+    stage_id: str, part_reason: str, state: Any, reason: str
+) -> None:
+    # The report fills the parts a failed stage did not judge with "an earlier stage failed": the
+    # rule is about the stages that ended `ok`.
+    parts = tuple(
+        PartRecord(part, "skipped", part_reason) for part in PART_IDS[stage_id]
+    )
+    assert StageRecord(stage_id, state, reason, parts=parts).parts == parts
 
 
 # ---- the detail ------------------------------------------------------------------------------------

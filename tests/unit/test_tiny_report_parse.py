@@ -24,7 +24,10 @@ from rinchen.tiny.states import (
     FAIL_BUDGET,
     FAIL_INPUT,
     SKIP_EARLIER_FAILED,
+    SKIP_NO_LABSE,
     SKIP_NO_LID,
+    SKIP_NO_NEURAL,
+    SKIP_NO_QE,
     PartRecord,
     StageRecord,
     fail_check,
@@ -190,6 +193,58 @@ def test_an_ok_stage_that_lists_only_some_of_its_parts_is_refused(
     )
     assert message.startswith(f"report.stages[{position}]: ")
     assert "every one of its parts" in message
+
+
+def skipped_parts(
+    document: dict[str, Any], position: int, reasons: dict[int, str]
+) -> dict[str, Any]:
+    """A copy of the document whose stage `position` is still `ok` but whose parts at the given
+    indexes are skipped for the given reasons."""
+    for index, reason in reasons.items():
+        path = ("stages", position, "parts", index)
+        document = with_value(document, (*path, "state"), "skipped")
+        document = with_value(document, (*path, "reason"), reason)
+    return document
+
+
+@pytest.mark.parametrize(
+    ("position", "reasons"),
+    [
+        # The filter is `ok` and every one of its parts says "an earlier stage failed".
+        (3, dict.fromkeys(range(7), SKIP_EARLIER_FAILED)),
+        # The evaluation is `ok`; the memorised part says "no neural scorer", the held-out part "no
+        # language-identification model": each is the reason of a part of another stage.
+        (14, {0: SKIP_NO_NEURAL, 1: SKIP_NO_LID}),
+        # One part only, with the reason of the part next to it.
+        (3, {2: SKIP_NO_LABSE}),
+        (14, {2: SKIP_EARLIER_FAILED}),
+    ],
+)
+def test_an_ok_stage_with_a_part_skipped_for_a_reason_that_is_not_its_own_is_refused(
+    position: int, reasons: dict[int, str]
+) -> None:
+    message = refusal_of(skipped_parts(golden_document(), position, reasons))
+    assert message.startswith(f"report.stages[{position}]: ")
+    assert "its own reason" in message
+    for reason in reasons.values():
+        assert reason not in message
+
+
+@pytest.mark.parametrize(
+    ("position", "index", "part_id", "reason"),
+    [
+        (3, 3, "lid", SKIP_NO_LID),
+        (3, 5, "labse", SKIP_NO_LABSE),
+        (3, 6, "qe", SKIP_NO_QE),
+        (14, 2, "neural_seam", SKIP_NO_NEURAL),
+    ],
+)
+def test_the_own_reason_of_a_skipped_part_is_still_read(
+    position: int, index: int, part_id: str, reason: str
+) -> None:
+    document = skipped_parts(golden_document(), position, {index: reason})
+    part = parse_report(dumps(document)).stages[position].parts[index]
+    assert part == PartRecord(part_id, "skipped", reason)
 
 
 def test_a_reason_on_an_ok_stage_is_refused() -> None:

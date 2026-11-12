@@ -54,10 +54,8 @@ from rinchen.tiny.fakes import ConceptEncoder, ConceptQE
 from rinchen.tiny.fixtures import FIXTURE_FILES, Fixtures, read_fixtures
 from rinchen.tiny.states import (
     FAIL_INPUT,
+    OWN_SKIP_REASONS,
     PART_IDS,
-    SKIP_NO_LABSE,
-    SKIP_NO_LID,
-    SKIP_NO_QE,
     SKIP_TOKEN_RATIO,
     PartRecord,
     StageRecord,
@@ -86,8 +84,13 @@ STAGE_OF_REASON: Final = {
     "duplicate": "minhash",
     "labse": "labse",
 }
-# Why a part of the filter did not run when it is not among the stages that were asked.
-UNASKED_PARTS: Final = {"lid": SKIP_NO_LID, "labse": SKIP_NO_LABSE, "qe": SKIP_NO_QE}
+# Why a part of the filter did not run when it is not among the stages that were asked: the one
+# reason the record of an `ok` stage allows for it (`states.OWN_SKIP_REASONS`).
+UNASKED_PARTS: Final = {
+    part: reason
+    for (stage, part), reason in OWN_SKIP_REASONS.items()
+    if stage == "filter"
+}
 
 
 def _own_dir(ctx: StageContext, stage_id: str) -> Path:

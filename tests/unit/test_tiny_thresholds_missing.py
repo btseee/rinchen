@@ -18,8 +18,12 @@ import pytest
 
 from rinchen.config.tiny import STAGE_IDS
 from rinchen.tiny.states import (
+    PART_IDS,
     SKIP_EARLIER_FAILED,
+    SKIP_NO_LABSE,
     SKIP_NO_LID,
+    SKIP_NO_NEURAL,
+    SKIP_NO_QE,
     SKIP_REASONS,
     PartRecord,
     StageRecord,
@@ -531,11 +535,36 @@ def test_a_stage_skipped_for_no_reason_explains_the_skips_after_it() -> None:
         assert "robustness" not in result.detail
 
 
+# The one reason each part that an `ok` stage may skip is skipped for, written out here as literals
+# and not read from the code: a stage skips a part only when it was not asked for.
+OWN_SKIPS = {
+    ("filter", "lid"): SKIP_NO_LID,
+    ("filter", "labse"): SKIP_NO_LABSE,
+    ("filter", "qe"): SKIP_NO_QE,
+    ("evaluate", "neural_seam"): SKIP_NO_NEURAL,
+}
+PARTS_WITHOUT_ONE = [
+    (stage, part)
+    for stage, parts in PART_IDS.items()
+    for part in parts
+    if (stage, part) not in OWN_SKIPS
+]
+
+
 @pytest.mark.parametrize("reason", SKIP_REASONS)
-def test_a_part_keeps_every_closed_skip_reason_on_an_ok_stage(reason: str) -> None:
-    part = PartRecord("lid", "skipped", reason)
-    record = StageRecord("filter", "ok", parts=(part,))
-    result = stages_result(replaced(good_stages(), "filter", record))
+@pytest.mark.parametrize(("stage", "part_id"), [*OWN_SKIPS, *PARTS_WITHOUT_ONE])
+def test_an_ok_stage_keeps_a_skipped_part_only_for_the_reason_of_that_part(
+    stage: str, part_id: str, reason: str
+) -> None:
+    part = PartRecord(part_id, "skipped", reason)
+    if OWN_SKIPS.get((stage, part_id)) != reason:
+        # The reason of another part, "an earlier stage failed" on an ok stage, and any reason at all
+        # for a part that is never skipped: the record cannot be built, so no stage can end like this.
+        with pytest.raises(ValueError, match="own reason"):
+            StageRecord(stage, "ok", parts=(part,))
+        return
+    record = StageRecord(stage, "ok", parts=(part,))
+    result = stages_result(replaced(good_stages(), stage, record))
     assert (result.verdict, result.value) == ("pass", 0)
 
 

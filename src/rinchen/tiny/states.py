@@ -12,7 +12,9 @@ the list, `SKIP_REASONS`), and what could not be done is `fail` with a fail reas
 `StageRecord` refuses a skip or a failure without the reason of its kind, a reason on an `ok`, an id
 that is not one of the fifteen stages, and a part whose state, reason or id is not allowed. A stage
 that has parts (the filter and the evaluation) lists the state of each; it is `ok` only when no part
-failed, and a part that was skipped is one skipped on purpose.
+failed, and a part that an `ok` stage skipped is one skipped on purpose, for the one reason of its own
+(`OWN_SKIP_REASONS`): a stage that did not end `ok` is free to list its parts as skipped for any
+closed reason, and the report fills the ones it did not judge.
 """
 
 from __future__ import annotations
@@ -82,6 +84,18 @@ PART_IDS: Final[Mapping[str, tuple[str, ...]]] = MappingProxyType(
             "qe",
         ),
         "evaluate": ("memorised", "heldout", "neural_seam", "report"),
+    }
+)
+
+# The one reason a part may be skipped for when its stage ended `ok`: the part was not asked for.
+# Every other skip of a part (`an earlier stage failed`, the reason of a part of another stage) belongs
+# to a stage that did not end `ok`, whose parts the report fills in.
+OWN_SKIP_REASONS: Final[Mapping[tuple[str, str], str]] = MappingProxyType(
+    {
+        ("filter", "lid"): SKIP_NO_LID,
+        ("filter", "labse"): SKIP_NO_LABSE,
+        ("filter", "qe"): SKIP_NO_QE,
+        ("evaluate", "neural_seam"): SKIP_NO_NEURAL,
     }
 )
 
@@ -225,8 +239,16 @@ class StageRecord:
             raise ValueError("a part of a stage is none of the parts of that stage")
         if len(set(listed)) != len(listed):
             raise ValueError("a part of a stage is listed twice")
-        if self.state == "ok" and any(part.state == "fail" for part in self.parts):
+        if self.state != "ok":
+            return
+        if any(part.state == "fail" for part in self.parts):
             raise ValueError("an ok stage has no failed part")
+        if any(
+            part.state == "skipped"
+            and OWN_SKIP_REASONS.get((self.id, part.id)) != part.reason
+            for part in self.parts
+        ):
+            raise ValueError("an ok stage skips a part only for its own reason")
 
 
 def unlisted_parts(record: StageRecord) -> tuple[str, ...]:
