@@ -24,6 +24,8 @@ PROC: Final = Path("/proc")
 MARKER_VARIABLE: Final = "RINCHEN_GATE_RUN"
 _ZOMBIE: Final = "Z"
 _POLL_SECONDS: Final = 0.05
+# The longest a process that is being torn down is waited for after its command has been reaped.
+REAPING_GRACE_SECONDS: Final = 1.5
 
 
 @dataclass(frozen=True)
@@ -124,17 +126,33 @@ def wait_for_command(
         time.sleep(_POLL_SECONDS)
 
 
-def wait_until_none_left(
+def left_after_the_end(
     marker: str,
     *,
     session: int | None = None,
-    seconds: float = 10.0,
+    grace: float = REAPING_GRACE_SECONDS,
     proc: Path = PROC,
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> list[RunProcess]:
-    """What of the run is still alive after at most `seconds`: an empty list when nothing is."""
-    deadline = time.monotonic() + seconds
+    """What of the run is alive once its command has ended and been reaped: an empty list when nothing is.
+
+    The table is read at once. A process in it is read again for at most `grace` seconds, and the answer is
+    what is alive when the table is empty or the grace is over. That is how a process that was dying is told
+    from a leak: a zombie is never in the table (its state is `Z`), a process that was sent SIGKILL still
+    reads as running until the kernel has torn it down, which takes milliseconds, and a process that lives
+    past the grace was not being torn down. A longer wait would hide an orphan that ends by itself (the
+    vocabulary build that an interrupt left behind lived 5 to 15 s), so a `grace` above
+    `REAPING_GRACE_SECONDS` is refused. Whatever is left is the caller's to kill.
+
+    Raises:
+        ValueError: `grace` is negative or above `REAPING_GRACE_SECONDS`.
+    """
+    if not 0 <= grace <= REAPING_GRACE_SECONDS:
+        raise ValueError(f"grace is from 0 to {REAPING_GRACE_SECONDS} seconds")
+    deadline = clock() + grace
     while True:
         left = processes_of_the_run(marker, session=session, proc=proc)
-        if not left or time.monotonic() >= deadline:
+        if not left or clock() >= deadline:
             return left
-        time.sleep(_POLL_SECONDS)
+        sleep(_POLL_SECONDS)

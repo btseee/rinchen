@@ -6,7 +6,10 @@ Each run starts through `tests/support/tiny_gate.py` (guarded, in a session of i
 reports what it saw: the exit code, the seconds, what it printed and where it wrote, and, for the runs that end
 early, the processes of the run that were alive at the signal and the ones still alive after the command ended.
 A process of the run is found by the marker of its environment and by the session the command was started in
-(`tests/support/tiny_gate_processes.py`); whatever is alive after the wait is killed by pid, and only that.
+(`tests/support/tiny_gate_processes.py`). What is alive is read at once after the command has ended and been
+reaped, with a grace of at most 1.5 s for a process that is being torn down (`left_after_the_end`): an orphan
+that ends by itself some seconds later is a leak all the same. Whatever is alive is then killed by pid, and only
+that, by `stop_run`.
 """
 
 from __future__ import annotations
@@ -29,9 +32,9 @@ from tests.support.tiny_gate import (
 )
 from tests.support.tiny_gate_processes import (
     RunProcess,
+    left_after_the_end,
     processes_of_the_run,
     wait_for_command,
-    wait_until_none_left,
 )
 
 __all__ = [
@@ -55,7 +58,6 @@ TRAINER_START_SECONDS: Final = 120
 # The trainer runs this long before the signal: it has started its helpers, and no command is starting a child.
 TRAINER_SETTLE_SECONDS: Final = 3
 EXIT_WITHIN_SECONDS: Final = 60
-LEFT_OVER_SECONDS: Final = 10
 # A run with a budget of a few seconds ends by itself within seconds; a run that ignored its budget would take
 # as long as a whole pipeline, so the bound is far above that and the test of the run asserts the short time.
 BUDGET_RUN_BOUND: Final = 400
@@ -117,9 +119,7 @@ def run_with_budget(root: Path, seconds: int) -> BudgetRun:
     )
     try:
         invocation = finish(started, timeout=BUDGET_RUN_BOUND)
-        left = wait_until_none_left(
-            started.marker, session=started.process.pid, seconds=LEFT_OVER_SECONDS
-        )
+        left = left_after_the_end(started.marker, session=started.process.pid)
     finally:
         stop_run(started)
     return BudgetRun(
@@ -194,9 +194,7 @@ def interrupt_run(
         send_to_group(started, number)
         invocation = finish(started, timeout=EXIT_WITHIN_SECONDS)
         after = time.perf_counter() - sent
-        left = wait_until_none_left(
-            started.marker, session=session, seconds=LEFT_OVER_SECONDS
-        )
+        left = left_after_the_end(started.marker, session=session)
     finally:
         stop_run(started)
     return Interrupted(

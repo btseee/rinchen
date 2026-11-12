@@ -13,9 +13,9 @@ from typing import Final
 from tests.support.tiny_gate_processes import (
     RunProcess,
     kill_the_run,
+    left_after_the_end,
     processes_of_the_run,
     wait_for_command,
-    wait_until_none_left,
 )
 
 MARKER: Final = "RINCHEN_GATE_RUN=abc123"
@@ -202,18 +202,18 @@ def test_the_wait_for_a_command_gives_up_when_none_appears(tmp_path: Path) -> No
     assert wait_for_command("abc123", "bin/eole", seconds=0.2, proc=proc) == []
 
 
-def test_the_wait_ends_at_once_when_nothing_is_left(tmp_path: Path) -> None:
+def test_the_check_ends_at_once_when_nothing_is_left(tmp_path: Path) -> None:
     proc = _proc(tmp_path)
 
-    assert wait_until_none_left("abc123", seconds=5.0, proc=proc) == []
+    assert left_after_the_end("abc123", proc=proc) == []
 
 
-def test_the_wait_hands_back_what_is_still_there_when_the_time_is_up(
+def test_the_check_hands_back_what_is_still_there_when_the_grace_is_over(
     tmp_path: Path,
 ) -> None:
     proc = _proc(tmp_path)
     _process(proc, 90, session=90, environment=[MARKER], command=["stays"])
 
-    left = wait_until_none_left("abc123", seconds=0.2, proc=proc)
+    left = left_after_the_end("abc123", grace=0.2, proc=proc)
 
     assert [item.pid for item in left] == [90]

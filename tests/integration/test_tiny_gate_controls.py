@@ -37,7 +37,9 @@ interrupted or timed out must leave none.
         GATE: before `rinchen.tiny.graceful_runner` an interrupt killed `train launch` with SIGKILL, and the
         Eole that leads its own session kept running (the vocabulary build 5 to 15 s, `eole train` 30 s and
         more, after the command had ended with its code); a first version of this control signalled at the
-        spawn of the vocabulary build and passed by the luck of a build that ended within its 10 s
+        spawn of the vocabulary build and passed by the luck of a build that ended within its 10 s wait: the
+        process table is now read at once after the command has ended and been reaped, with a grace of 1.5 s for a
+        process that is being torn down (`left_after_the_end`), so an orphan that lives 2 s or more fails it
     R12 a manifest of another stage in the output directory (exit 3, the file untouched), a foreign entry (exit 2,
         untouched), `--profile full` (exit 2, nothing written) and `--device auto` (typer's own exit 2)
 
