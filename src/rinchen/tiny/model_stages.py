@@ -30,14 +30,17 @@ from rinchen.tiny import commands
 from rinchen.tiny.context import StageContext, StageResult
 from rinchen.tiny.fakes import FakeChatServer
 from rinchen.tiny.fixtures import MonoRow
+from rinchen.tiny.states import StageRecord, fail_check
 from rinchen.tiny.step_runner import (
     StageCommands,
+    StageStopped,
     path_in,
     read_text,
     run_stage,
 )
 from rinchen.utils.part_file import lines_as_bytes, replace_file
 
+SYNTH_CHECK: Final = fail_check("synth_output")
 KEPT_FILE: Final = "kept.parquet"
 SPM_PREFIX: Final = "tiny"
 SPM_MODEL_FILE: Final = f"{SPM_PREFIX}.model"
@@ -184,7 +187,7 @@ def _synth(stage: StageCommands, seed: int) -> Mapping[str, Any]:
     counts = commands.read_synth_counts(run / SYNTH_COUNTS_FILE)
     rows = scan_corpus(run / SYNTH_CORPUS_FILE).select(pl.len()).collect().item()
     # The fingerprint of the job names its shards and holds the port of the listener: not a fact.
-    return {
+    facts = {
         "job": counts["job"],
         "generator": counts["generator"],
         "qe_status": counts["qe_status"],
@@ -193,6 +196,19 @@ def _synth(stage: StageCommands, seed: int) -> Mapping[str, Any]:
         "rows": rows,
         "chat_requests": answered,
     }
+    if not _made_every_row(counts["counts"], rows):
+        raise StageStopped(StageRecord("synth", "fail", SYNTH_CHECK), facts)
+    return facts
+
+
+def _made_every_row(counts: Mapping[str, int], rows: int) -> bool:
+    """A server that answers nothing still lets `synth run` exit 0, with nothing selected and no row:
+    a run is complete when every source was selected and the corpus holds one row for each."""
+    return (
+        rows > 0
+        and rows == counts["selected"]
+        and counts["selected"] == counts["sources"]
+    )
 
 
 def run_synth(ctx: StageContext, seed: int) -> StageResult:
@@ -202,6 +218,8 @@ def run_synth(ctx: StageContext, seed: int) -> StageResult:
 
     The server is stopped, its socket closed and its thread joined however the stage ends, an
     exception of the runner included. The facts are the counts of the run (`counts.json`), the rows of
-    its corpus and the requests the server answered.
+    its corpus and the requests the server answered. The stage fails the check `synth_output` (with
+    the facts) when a source was not selected or the corpus does not hold one row for each selected
+    source, or none: the command exits 0 for a server that answered nothing.
     """
     return run_stage(ctx, "synth", lambda stage: _synth(stage, seed))

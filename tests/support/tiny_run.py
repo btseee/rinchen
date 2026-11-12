@@ -58,7 +58,9 @@ from rinchen.maintain.commands import CommandResult
 from rinchen.manifest import store
 from rinchen.manifest.model import Manifest
 from rinchen.script_conv.char_model import load_char_model_config
+from rinchen.synth.prompts import render_messages
 from rinchen.tiny import data_stages, model_stages, model_stages_rest
+from rinchen.tiny.command_writers import MONO_LANGUAGE, OTHER_LANGUAGE
 from rinchen.tiny.context import StageContext, StageResult, stage_dir
 from rinchen.train.variants import expand_variants
 from tests.support.tiny_stage_inputs import (
@@ -417,7 +419,7 @@ class RecordingRunner:
         body = json.dumps(
             {
                 "model": "tiny-oracle",
-                "messages": [{"role": "user", "content": f"Translate.\n\n{text}"}],
+                "messages": render_messages(MONO_LANGUAGE, OTHER_LANGUAGE, text),
                 "n": n,
             }
         )

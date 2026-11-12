@@ -39,6 +39,7 @@ CHECKS = (
     "command_not_started",
     "service_probe",
     "neural_scores",
+    "synth_output",
 )
 PROFILES = ("tiny", "full", "control", "a1", "t_" + "x" * 13)
 

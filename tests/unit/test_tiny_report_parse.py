@@ -39,6 +39,7 @@ from tests.support.tiny_report_inputs import (
     golden_results,
     replaced,
     stopped_after,
+    synth_facts,
     without_neural_part,
 )
 from tests.support.tiny_report_walk import (
@@ -235,6 +236,7 @@ def test_a_skip_reason_on_a_failure_and_a_failure_reason_on_a_skip_are_refused()
         fail_check("service_refusal"),
         fail_check("service_metrics"),
         fail_check("neural_scores"),
+        fail_check("synth_output"),
     ],
 )
 def test_every_closed_failure_reason_including_the_later_check_identifiers_is_read(
@@ -245,6 +247,29 @@ def test_every_closed_failure_reason_including_the_later_check_identifiers_is_re
     parsed = parse_report(to_bytes(report))
     assert parsed.stages[1].reason == reason
     assert parsed == report
+
+
+def test_a_synth_stage_that_failed_its_check_is_read_back_with_the_block_of_its_facts() -> (
+    None
+):
+    facts = synth_facts()
+    facts["counts"]["selected"] = 0
+    facts["counts"]["no_candidates"] = 64
+    facts["rows"] = 0
+    results = replaced(
+        golden_results(),
+        "synth",
+        failed("synth", reason=fail_check("synth_output"), facts=facts),
+    )
+
+    report = build(results)
+    parsed = parse_report(to_bytes(report))
+
+    assert parsed == report
+    assert parsed.blocks["synth"]["counts"]["selected"] == 0
+    assert parsed.blocks["synth"]["rows"] == 0
+    synth = next(record for record in parsed.stages if record.id == "synth")
+    assert (synth.state, synth.reason) == ("fail", fail_check("synth_output"))
 
 
 @pytest.mark.parametrize(

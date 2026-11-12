@@ -309,6 +309,7 @@ def test_the_schema_refuses_a_wrong_value_and_names_where(
         fail_check("planted_noise"),
         fail_check("service_translate"),
         fail_check("neural_scores"),
+        fail_check("synth_output"),
     ],
 )
 def test_every_closed_reason_of_the_stages_fits_a_reason_of_the_report(
