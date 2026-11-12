@@ -241,3 +241,6 @@ data/*/*
 /maintain-out/
 # The output directory of the tiny pipeline (just tiny)
 /artifacts/
+# The recordings of real command output that the tests replay are data, not logs of a run: a `.log` among
+# them (tests/fixtures/tiny_run/conv_eval.log) must be tracked, or a clean checkout cannot read it.
+!tests/fixtures/**/*.log
