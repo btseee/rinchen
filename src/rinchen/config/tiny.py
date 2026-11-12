@@ -6,7 +6,8 @@ Scaling up is a change of this file and no change of code (P14), so everything t
 a tiny and a larger run is here, and nothing in the pipeline looks at the name of a profile. The
 document is closed: an unknown key is an error (so is a key that names a device, because no section
 has one), every key is required unless a default is named (only the thresholds have defaults, the
-bounds of the master plan), a number is a number and not a boolean or a quoted text, and what a
+bounds of the master plan, and no profile may hold a looser one: a miss is answered with more
+`train.steps`), a number is a number and not a boolean or a quoted text, and what a
 stage's own configuration would refuse is refused here, at load time, so that a bad profile fails
 before anything is read or trained. A path is not blank, has only printable characters and holds no
 `..` component; a relative one is anchored at the repository root and an absolute one is kept (the
@@ -66,6 +67,24 @@ STAGE_IDS: Final[tuple[StageId, ...]] = get_args(StageId)
 Split = Literal["dev", "devtest", "test"]
 Quantization = Literal["float32", "int8"]
 
+# The bounds of the master plan's thresholds (milestone D15): "never lower a bound, raise the steps".
+# A profile may hold a stricter bound and no looser one; a miss is answered with more `train.steps`.
+TRAIN_CHRF_FLOOR: Final = 50.0
+PARITY_EXACT_FLOOR: Final = 0.95
+PARITY_DELTA_CEILING: Final = 0.001
+INT8_CHRF_DROP_CEILING: Final = 1.0
+SCRIPT_PURITY_FLOOR: Final = 1.0
+PLACEHOLDER_ACC_FLOOR: Final = 1.0
+_FLOORS: Final = (
+    ("train_chrf_min", TRAIN_CHRF_FLOOR),
+    ("parity_exact_min", PARITY_EXACT_FLOOR),
+    ("script_purity_min", SCRIPT_PURITY_FLOOR),
+    ("placeholder_acc_min", PLACEHOLDER_ACC_FLOOR),
+)
+_CEILINGS: Final = (
+    ("parity_delta_max", PARITY_DELTA_CEILING),
+    ("int8_chrf_drop_max", INT8_CHRF_DROP_CEILING),
+)
 MAX_SECONDS: Final = 86_400
 MAX_THREADS: Final = 64
 # The fewest resamples of the report's bootstrap (`rinchen.eval.bootstrap.MIN_RESAMPLES`).
@@ -263,14 +282,15 @@ class EvaluationSection(_Closed):
 
 class ThresholdsSection(_Closed):
     """The bounds of the report. The defaults are the master plan's, and a profile never lowers one
-    (the test of the shipped profile pins them); the wall-time bound is the budget of the profile."""
+    (`TinyConfig` refuses it: a section built directly, as the tests of the thresholds do, may hold
+    any bound); the wall-time bound is the budget of the profile."""
 
-    train_chrf_min: _ChrF = 50.0
-    parity_exact_min: _Probability = 0.95
-    parity_delta_max: _Probability = 0.001
-    int8_chrf_drop_max: _ChrFDrop = 1.0
-    script_purity_min: _Probability = 1.0
-    placeholder_acc_min: _Probability = 1.0
+    train_chrf_min: _ChrF = TRAIN_CHRF_FLOOR
+    parity_exact_min: _Probability = PARITY_EXACT_FLOOR
+    parity_delta_max: _Probability = PARITY_DELTA_CEILING
+    int8_chrf_drop_max: _ChrFDrop = INT8_CHRF_DROP_CEILING
+    script_purity_min: _Probability = SCRIPT_PURITY_FLOOR
+    placeholder_acc_min: _Probability = PLACEHOLDER_ACC_FLOOR
 
 
 class TinyConfig(_Closed):
@@ -303,6 +323,24 @@ class TinyConfig(_Closed):
         if missing := [stage for stage in STAGE_IDS if stage not in timeouts]:
             raise ValueError(f"no timeout for: {', '.join(missing)}")
         return {stage: timeouts[stage] for stage in STAGE_IDS}
+
+    @model_validator(mode="after")
+    def _no_bound_of_the_master_plan_is_lowered(self) -> TinyConfig:
+        lowered = [
+            f"thresholds.{name} must be at least {floor}"
+            for name, floor in _FLOORS
+            if getattr(self.thresholds, name) < floor
+        ]
+        lowered += [
+            f"thresholds.{name} must be at most {ceiling}"
+            for name, ceiling in _CEILINGS
+            if getattr(self.thresholds, name) > ceiling
+        ]
+        if lowered:
+            raise ValueError(
+                f"a profile never lowers a bound of the master plan ({'; '.join(lowered)})"
+            )
+        return self
 
 
 def _where(location: tuple[int | str, ...]) -> str:

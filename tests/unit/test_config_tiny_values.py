@@ -18,7 +18,7 @@ from typing import Any
 import pytest
 
 from rinchen.config.loader import REPO_ROOT
-from rinchen.config.tiny import load_tiny_config
+from rinchen.config.tiny import ThresholdsSection, load_tiny_config
 from rinchen.tiny.fixtures import FIXTURE_FILES
 from tests.support.no_network import no_network  # noqa: F401 - the fixture of the mark
 from tests.support.tiny_config_documents import (
@@ -112,35 +112,37 @@ RANGES: list[tuple[tuple[str, ...], list[Any], list[Any]]] = [
         [-0.0001, 1000.0001, True, "0.2", None],
         [0, 0.0, 0.2, 1000, 1000.0],
     ),
+    # The accepted values of a threshold are the ones at or beyond the master plan's bound (below it
+    # the profile is refused, see FLOORS): that range is what the schema of the field itself allows.
     (
         ("thresholds", "train_chrf_min"),
         [0, 0.0, -1, 100.0001, True, "50", None],
-        [0.0001, 50, 50.0, 100, 100.0],
+        [50, 50.0, 50.0001, 100, 100.0],
     ),
     (
         ("thresholds", "parity_exact_min"),
         [0, 0.0, -0.1, 1.0001, True, "0.95", None],
-        [0.0001, 0.95, 1, 1.0],
+        [0.95, 0.99, 1, 1.0],
     ),
     (
         ("thresholds", "parity_delta_max"),
         [0, 0.0, -0.001, 1.0001, True, "0.001", None],
-        [1e-9, 0.001, 1, 1.0],
+        [1e-9, 0.0005, 0.001],
     ),
     (
         ("thresholds", "int8_chrf_drop_max"),
         [-0.0001, -1, 100.0001, True, "1.0", None],
-        [0, 0.0, 1, 1.0, 100],
+        [0, 0.0, 0.5, 1, 1.0],
     ),
     (
         ("thresholds", "script_purity_min"),
         [0, 0.0, -0.1, 1.0001, True, "1.0", None],
-        [0.0001, 0.5, 1, 1.0],
+        [1, 1.0],
     ),
     (
         ("thresholds", "placeholder_acc_min"),
         [0, 0.0, -0.1, 1.0001, True, "1.0", None],
-        [0.0001, 0.5, 1, 1.0],
+        [1, 1.0],
     ),
 ]
 
@@ -168,6 +170,78 @@ def test_a_number_that_is_not_finite_is_refused(
     path: tuple[str, ...], bad: float
 ) -> None:
     assert ".".join(path) in refusal(with_value(path, bad))
+
+
+# ---- the floors of the thresholds ----------------------------------------------------------------------
+
+# Per threshold: the master plan's bound as the message writes it, values on the wrong side of it (the
+# first is a marker the message must not repeat) and values at or beyond it.
+FLOORS = [
+    (
+        "train_chrf_min",
+        "at least 50.0",
+        [41.123456, 49.999, 0.0001],
+        [50.0, 50.0001, 100],
+    ),
+    (
+        "parity_exact_min",
+        "at least 0.95",
+        [0.912345, 0.9499, 0.0001],
+        [0.95, 0.99, 1.0],
+    ),
+    (
+        "parity_delta_max",
+        "at most 0.001",
+        [0.012345, 0.0011, 1.0],
+        [0.001, 0.0005, 1e-9],
+    ),
+    ("int8_chrf_drop_max", "at most 1.0", [7.123456, 1.0001, 100.0], [0, 0.5, 1.0]),
+    ("script_purity_min", "at least 1.0", [0.912345, 0.9999, 0.0001], [1, 1.0]),
+    ("placeholder_acc_min", "at least 1.0", [0.812345, 0.9999, 0.0001], [1, 1.0]),
+]
+
+
+@pytest.mark.parametrize(
+    ("name", "bound", "lowered", "kept"), FLOORS, ids=[floor[0] for floor in FLOORS]
+)
+def test_a_bound_below_the_master_plans_is_refused_naming_the_field_and_the_bound(
+    name: str, bound: str, lowered: list[float], kept: list[float]
+) -> None:
+    for value in lowered:
+        message = refusal(with_value(("thresholds", name), value))
+        assert message.startswith("invalid tiny config: "), message
+        assert f"thresholds.{name} " in message
+        assert bound in message
+        if value == lowered[0]:
+            assert str(value) not in message
+
+
+@pytest.mark.parametrize(
+    ("name", "bound", "lowered", "kept"), FLOORS, ids=[floor[0] for floor in FLOORS]
+)
+def test_a_bound_at_or_beyond_the_master_plans_is_kept(
+    name: str, bound: str, lowered: list[float], kept: list[float]
+) -> None:
+    for value in kept:
+        config = load_tiny_config(dump(with_value(("thresholds", name), value)))
+        assert getattr(config.thresholds, name) == value
+
+
+def test_every_bound_that_was_lowered_is_named_in_one_message() -> None:
+    doc = document()
+    for name, _, lowered, _ in FLOORS:
+        doc["thresholds"][name] = lowered[0]
+    message = refusal(doc)
+    for name, bound, _, _ in FLOORS:
+        assert f"thresholds.{name} " in message
+        assert bound in message
+
+
+def test_the_floors_are_checked_for_a_profile_and_not_for_a_section_built_in_a_test() -> (
+    None
+):
+    # The logic of the thresholds is tested with bounds that a profile may not hold.
+    assert ThresholdsSection(train_chrf_min=10.0).train_chrf_min == 10.0
 
 
 def test_the_character_ratio_bounds_must_be_in_order() -> None:
