@@ -1,6 +1,6 @@
 """The `tiny` job of `.github/workflows/ci.yml`, the `tiny` recipe, the ignore rule of `artifacts/` and what
 the other two workflows owe them, read as data (D15, Task 8, spec P16; the workflows are never run here
-and neither is a recipe: UNMEASURED on a runner). The recipe is the one command of the pipeline; `ci.yml`
+and neither is a recipe: the runs on the runner are recorded in the comment above the job tiny). The recipe is the one command of the pipeline; `ci.yml`
 has two jobs, `gate` with the steps it had before (without the stub) and `tiny` with its own timeout, its
 read-only permissions, the set-up of `gate`, the pipeline, ONE upload of the two files of the report and
 the copy of `report.md` to the run page; every action of the three workflows is at one version; the
@@ -224,6 +224,27 @@ def test_the_gate_job_keeps_its_steps_and_runs_no_pipeline(files: Files) -> None
     assert job["runs-on"] == "ubuntu-24.04"
     assert [identity_of(step) for step in job_steps(job)] == GATE_STEPS
     assert not any(TINY_RUN in run for run in runs_of({"jobs": {"gate": job}}))
+
+
+def test_the_comment_above_the_tiny_job_records_its_measured_runs(files: Files) -> None:
+    lines = files.ci.splitlines()
+    head = lines.index("  tiny:")
+    comment = []
+    for line in reversed(lines[:head]):
+        if not line.startswith("  #"):
+            break
+        comment.insert(0, line.removeprefix("  #").strip())
+    text = " ".join(comment)
+
+    assert "UNMEASURED" not in text
+    for fact in (
+        "43244678285",
+        "43248539643",
+        "3 min 19 s",
+        "191.646 s",
+        "tiny-report",
+    ):
+        assert fact in text, fact
 
 
 def test_the_tiny_job_has_the_steps_of_the_pipeline_in_order(files: Files) -> None:

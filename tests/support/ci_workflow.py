@@ -1,8 +1,9 @@
 """The rules of the files of D15's Task 8 as a function of their texts (spec P16): the two jobs of
 `.github/workflows/ci.yml`, the `tiny` recipe of the justfile, the ignore rule of `artifacts/`, and the
 two things the other workflows owe the new job (the same version of every action in the three
-workflows, a nightly timeout that covers the pipeline). The workflows are never run here: what they do
-on a runner is UNMEASURED, and the rules only say what their text must be.
+workflows, a nightly timeout that covers the pipeline). The workflows are never run here (the runs on
+the runner are recorded in the comment above the job tiny), and the rules only say what their text must
+be.
 
 `findings(files, tiny_config, maintain_config)` says what is wrong with a set of files, one short
 sentence each, and nothing for a good set; the readers and the constants it judges by are here too,

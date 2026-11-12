@@ -41,7 +41,9 @@ jobs:
 
   # The tiny pipeline (just tiny) on the CPU, a job of its own so that a failing gate does not hide
   # its report and the other way round. It uploads artifacts/tiny/report.json and report.md only:
-  # the rest of the run directory holds paths of the machine that ran it. UNMEASURED on a runner.
+  # the rest of the run directory holds paths of the machine that ran it. Measured on the runner in
+  # runs 43244678285 and 43248539643: the job passed, the pipeline step took about 3 min 19 s,
+  # wall_time 191.646 s, and the artifact tiny-report was uploaded.
   tiny:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
