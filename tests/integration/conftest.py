@@ -28,6 +28,11 @@ offline for the session, removes any token from the environment and blocks the H
 commands, `d13_suites` writes the two fixture suites of the toy and `d13_runs` makes the three runs the
 gates share (the D12 export, the D11 teacher and the export's outputs fed back as a file) with the real
 `rinchen eval run`. They run under `d11_gpu_hidden`.
+
+The `tiny_*` fixtures are the D15 gate's (`tests/integration/test_tiny_gate*.py`): `tiny_gpu_hidden` hides
+every device from the test process (the helpers refuse to start a command otherwise), `tiny_shim` writes the
+`uv` shim the recipe finds, `tiny_run_dir` runs the body of the `tiny` recipe ONCE per pytest process (about
+two to three minutes: the modules of the gate share it) and `tiny_report` is its parsed `report.json`.
 """
 
 from __future__ import annotations
@@ -35,6 +40,7 @@ from __future__ import annotations
 import time
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -86,6 +92,7 @@ from tests.support.tiny_converter import (
     TinyRun,
     read_lines,
 )
+from tests.support.tiny_gate import RecipeRun, make_shim, read_report, run_the_recipe
 
 _VALID_FRACTION = 0.1
 _SEED = 1234
@@ -273,3 +280,37 @@ def d13_runs(
         d11_tiny_export_dir,
         tmp_path_factory.mktemp("d13_runs"),
     )
+
+
+@pytest.fixture(scope="session")
+def tiny_gpu_hidden() -> Iterator[None]:
+    """No device is visible to any process of the D15 gate: the helpers that start a command refuse
+    to start it unless the test process itself holds the empty list."""
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("CUDA_VISIBLE_DEVICES", "")
+        yield
+
+
+@pytest.fixture(scope="session")
+def tiny_shim(tiny_gpu_hidden: None, tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """The directory of the `uv` shim of the run of the recipe (and of its call log)."""
+    return make_shim(tmp_path_factory.mktemp("tiny_shim"))
+
+
+@pytest.fixture(scope="session")
+def tiny_run_dir(
+    tiny_gpu_hidden: None, tiny_shim: Path, tmp_path_factory: pytest.TempPathFactory
+) -> RecipeRun:
+    """The body of the `tiny` recipe, run once through `sh` in a temporary directory: paid for once
+    per pytest process, by the first test of the gate that asks."""
+    return run_the_recipe(tmp_path_factory.mktemp("tiny_gate_run"), shim_dir=tiny_shim)
+
+
+@pytest.fixture(scope="session")
+def tiny_report(tiny_run_dir: RecipeRun) -> dict[str, Any]:
+    """`report.json` of `tiny_run_dir`, parsed. Fails with what the recipe printed when there is none."""
+    assert (tiny_run_dir.out_dir / "report.json").is_file(), (
+        f"the recipe exited {tiny_run_dir.invocation.returncode} and wrote no report: "
+        f"{tiny_run_dir.invocation.stderr[-2000:]}"
+    )
+    return read_report(tiny_run_dir.out_dir)
