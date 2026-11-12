@@ -204,7 +204,9 @@ def test_the_purity_floor_is_the_documented_prior() -> None:
 
 # "ba" in Cyrillic, spelled by code point: the second letter looks like a Latin one.
 CYRILLIC_PIECE = SPIECE + chr(0x431) + chr(0x430)
-LATIN_PIECE = SPIECE + "Th"
+# "Ene" in Cyrillic, spelled by code point: a whole-word piece of the toy model (SentencePiece 0.2.2).
+CYRILLIC_WORD_PIECE = SPIECE + chr(0x42D) + chr(0x43D) + chr(0x44D)
+LATIN_PIECE = SPIECE + "The"
 LATIN_TAIL = "e"
 MIXED_PIECE = SPIECE + "Э" + "x"  # a Cyrillic and a Latin letter
 MONGOLIAN_PIECE = SPIECE + MONGOLIAN_WORD
@@ -492,7 +494,8 @@ def test_the_toy_model_has_the_pieces_the_literals_below_name(
 ) -> None:
     pieces = set(eole_vocabulary(real))
 
-    assert {LATIN_PIECE, CYRILLIC_PIECE, SPIECE, "<unk>", "<s>", END} <= pieces
+    assert {LATIN_PIECE, CYRILLIC_PIECE, CYRILLIC_WORD_PIECE, SPIECE} <= pieces
+    assert {"<unk>", "<s>", END} <= pieces
     assert {f"<0x{value:02X}>" for value in range(256)} <= pieces
 
 
@@ -514,7 +517,14 @@ def test_a_cyrillic_target_lists_no_cyrillic_piece_and_no_other_byte_piece(
 ) -> None:
     result = set(real_listed(real, "khk_Cyrl"))
 
-    assert not result & {CYRILLIC_PIECE, SPIECE + "Э", SPIECE, END, "<0x30>", "<0x80>"}
+    assert not result & {
+        CYRILLIC_PIECE,
+        CYRILLIC_WORD_PIECE,
+        SPIECE,
+        END,
+        "<0x30>",
+        "<0x80>",
+    }
     assert not result & {"<0x40>", "<0x5B>", "<0x60>", "<0x7B>", "<0xE0>"}
     assert not result & set(PLACEHOLDERS)
 
@@ -546,7 +556,7 @@ def test_a_latin_target_lists_cyrillic_pieces_and_no_byte_piece_of_a_real_model(
 ) -> None:
     result = real_listed(real, "eng_Latn")
 
-    assert {CYRILLIC_PIECE, SPIECE + "Э"} <= set(result)
+    assert {CYRILLIC_PIECE, CYRILLIC_WORD_PIECE} <= set(result)
     assert not {entry for entry in result if entry.startswith("<0x")}
     assert not set(result) & {LATIN_PIECE, SPIECE + "the", LATIN_TAIL, SPIECE, END}
 

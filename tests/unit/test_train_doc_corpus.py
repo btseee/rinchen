@@ -333,10 +333,8 @@ def test_the_validation_lines_are_the_tag_doc_and_pieces_of_the_joined_windows(
         tmp_path / "out" / "valid.src",
         tmp_path / "out" / "valid.tgt",
     )
-    english = (
-        f"{W}Th is {W} is {W}the {W}book . {W} <sep> {W}Th e {W}water {W} is {W} here ."
-    )
-    mongolian = f"{W}Э н э {W}б ол {W}ном . {W} <sep> {W}Ус {W} э нд {W}байна ."
+    english = f"{W} T h i s {W}is {W}the {W}book . {W} <sep> {W}The {W}water {W}is {W} h e r e ."
+    mongolian = f"{W}Энэ {W}бол {W}ном . {W} <sep> {W}Ус {W}энд {W}байна ."
     assert file_lines(paths.src) == [f"<2khk_Cyrl> <doc> {english}"]
     assert file_lines(paths.tgt) == [mongolian]
 

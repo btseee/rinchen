@@ -385,7 +385,8 @@ def test_report_is_ok_only_when_both_checks_pass(
 @pytest.mark.parametrize(
     ("content", "cause_type"),
     [
-        (None, OSError),
+        # SentencePiece 0.2.2 raises RuntimeError for a missing file too (0.2.1: OSError).
+        (None, RuntimeError),
         (b"this is not a sentencepiece model", RuntimeError),
         (b"", RuntimeError),
     ],

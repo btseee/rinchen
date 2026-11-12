@@ -169,7 +169,7 @@ def test_the_validation_files_hold_one_line_per_dev_row_cut_with_the_student_mod
     assert len(file_lines(student_dir / "valid.src")) == 400
     assert len(file_lines(student_dir / "valid.tgt")) == 400
     assert file_lines(student_dir / "valid.src")[0] == (
-        f"<2khk_Cyrl> {W}Th e {W}door {W} and {W}the {W}road ."
+        f"<2khk_Cyrl> {W}The {W}door {W}and {W}the {W}road ."
     )
     assert file_lines(student_dir / "valid.tgt")[0] == f"{W}Хаалга {W}ба {W}зам ."
 
@@ -407,7 +407,7 @@ def test_the_target_placement_puts_the_ft_tag_alone_in_the_source_prefix(
         f"<2khk_Cyrl> {W}Хаалга {W}ба {W}зам ."
     )
     assert file_lines(tmp_path / "out" / "valid.src")[0] == (
-        f"{W}Th e {W}door {W} and {W}the {W}road ."
+        f"{W}The {W}door {W}and {W}the {W}road ."
     )
 
 
@@ -460,7 +460,7 @@ def test_another_student_model_changes_the_validation_files_and_the_vocabulary_s
     prepared = prepare(inputs, tmp_path / "out", spm_model=inputs.spm500)
 
     assert file_lines(tmp_path / "out" / "valid.src")[0] == (
-        f"<2khk_Cyrl> {W}Th e {W} d o o r {W} and {W}the {W}road ."
+        f"<2khk_Cyrl> {W}The {W} d o o r {W}and {W}the {W}road ."
     )
     assert file_lines(tmp_path / "out" / "valid.tgt")[0] == (
         f"{W} Х а а л г а {W}ба {W}зам ."

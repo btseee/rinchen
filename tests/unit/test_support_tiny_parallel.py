@@ -388,11 +388,11 @@ def test_the_model_is_trained_on_the_training_and_back_translated_text_only(
 def test_the_documented_vocabulary_is_inside_the_feasible_range() -> None:
     low, high = TOY_SPM_VOCAB_RANGE
 
-    assert (low, high) == (458, 674)
+    assert (low, high) == (458, 669)
     assert low + 100 < TOY_SPM_VOCAB_SIZE < high - 10
 
 
-@pytest.mark.parametrize("vocab_size", [458, 674])
+@pytest.mark.parametrize("vocab_size", [458, 669])
 def test_the_ends_of_the_feasible_range_train(tmp_path: Path, vocab_size: int) -> None:
     model = train_toy_spm(tmp_path, vocab_size=vocab_size)
 
@@ -407,8 +407,8 @@ def test_a_vocabulary_below_the_feasible_range_is_refused(tmp_path: Path) -> Non
 
 
 def test_a_vocabulary_above_the_feasible_range_is_refused(tmp_path: Path) -> None:
-    with pytest.raises(UpstreamError, match=r"too high \(675\).*<= 674"):
-        train_toy_spm(tmp_path, vocab_size=675)
+    with pytest.raises(UpstreamError, match=r"too high \(670\).*<= 669"):
+        train_toy_spm(tmp_path, vocab_size=670)
 
 
 def test_a_relative_model_directory_is_the_one_under_the_working_directory(

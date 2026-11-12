@@ -74,8 +74,8 @@ STATISTICS = [
     "excluded too_long: 0",
     "excluded gap_single: 0",
     "excluded tail: 1",
-    "pieces src: min 17, mean 19.600, p95 22, max 22",
-    "pieces tgt: min 13, mean 16.800, p95 20, max 20",
+    "pieces src: min 12, mean 18.800, p95 22, max 22",
+    "pieces tgt: min 10, mean 15.400, p95 20, max 20",
     "dev windows: 2",
     f"corpus {EN_MN_CORPUS}: windows 3, weight 60",
     f"corpus {MN_EN_CORPUS}: windows 2, weight 40",
@@ -394,9 +394,9 @@ def test_every_statistic_is_a_metric_and_the_rows_are_all_counted(
     )
     assert metrics["count.windows"] == 5.0
     assert metrics["count.windows_by_size.2"] == 5.0
-    assert metrics["count.pieces.src.min"] == 17.0
+    assert metrics["count.pieces.src.min"] == 12.0
     assert metrics["count.pieces.src.max"] == 22.0
-    assert metrics["count.pieces.tgt.mean"] == pytest.approx(16.8)
+    assert metrics["count.pieces.tgt.mean"] == pytest.approx(15.4)
     assert metrics["count.dev.windows"] == 2.0
     assert metrics["count.dev.excluded.not_dev"] == 16.0
 

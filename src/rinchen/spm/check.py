@@ -103,7 +103,8 @@ def _load_processor(model_path: Path) -> sentencepiece.SentencePieceProcessor:
     try:
         return sentencepiece.SentencePieceProcessor(model_file=str(model_path))
     except (OSError, RuntimeError) as exc:
-        # OSError: missing or unreadable file. RuntimeError: not a model.
+        # SentencePiece 0.2.2 raises RuntimeError for a missing or unreadable file and for a file
+        # that is not a model; OSError is kept for a file error raised by Python itself.
         raise DataError(f"cannot load SentencePiece model {model_path}: {exc}") from exc
 
 

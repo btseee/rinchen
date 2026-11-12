@@ -345,7 +345,9 @@ def test_clean_rows_have_balanced_lengths(measured: list[Measured]) -> None:
     for row in _with_reason(measured, None):
         assert len(row.src) + len(row.tgt) >= MIN_ORIGINAL_LENGTH, row
         assert 0.7 <= row.char_ratio <= 1.4, row
-        assert 0.6 <= row.token_ratio <= 1.6, row
+        # The tiny_1k model of SentencePiece 0.2.2 cuts the Latin pseudo-words finer: the
+        # largest clean ratio is 1.85 (it was under 1.6 with 0.2.1), the filter's bound 2.5.
+        assert 0.6 <= row.token_ratio <= 2.0, row
 
 
 def test_token_ratio_fails_exactly_the_two_fragmenting_rows(

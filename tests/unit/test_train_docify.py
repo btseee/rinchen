@@ -90,7 +90,7 @@ def test_the_hand_counted_pieces_are_the_toy_models(toy_spm: Path) -> None:
     ):
         assert len(processor.encode(english)) == source
         assert len(processor.encode(mongolian)) == target
-    assert len(processor.encode(JOIN.join(e for e, _ in SENTENCES[:2]))) == 7 + 8 + 2
+    assert len(processor.encode(JOIN.join(e for e, _ in SENTENCES[:2]))) == 9 + 9 + 2
 
 
 # ---- the windows ---------------------------------------------------------------------
@@ -124,10 +124,10 @@ def test_a_window_joins_the_sentences_of_each_side_with_sep_and_counts_its_piece
         "doc_id": "d1",
         "first_seg": 0,
         "n_sentences": 3,
-        # 7 + 8 + 8 + 2 * 2 pieces, and the tag and `<doc>` in front of the source
-        "src_pieces": 2 + 27,
-        # 7 + 6 + 12 + 2 * 2
-        "tgt_pieces": 29,
+        # 9 + 9 + 10 + 2 * 2 pieces, and the tag and `<doc>` in front of the source
+        "src_pieces": 2 + 32,
+        # 4 + 4 + 12 + 2 * 2
+        "tgt_pieces": 24,
     }
 
 
@@ -403,13 +403,13 @@ def test_a_huge_document_is_one_pass_over_its_sentences(toy_spm: Path) -> None:
 
 
 def test_a_window_is_shortened_until_both_sides_fit_the_budget(toy_spm: Path) -> None:
-    # Four sentences are 40 and 37 pieces (source with the tag and `<doc>`, then target);
-    # three are 29 and 29; two are 19 and 15. The size is fixed at 4, so what is left after
+    # Four sentences are 43 and 30 pieces (source with the tag and `<doc>`, then target);
+    # three are 34 and 24; two are 22 and 10. The size is fixed at 4, so what is left after
     # a shortened window is a tail.
     rows = document("d1", range(4))
 
-    whole = windows_of(rows, toy_spm, size=4, max_pieces=40)
-    of_three = windows_of(rows, toy_spm, size=4, max_pieces=39)
+    whole = windows_of(rows, toy_spm, size=4, max_pieces=43)
+    of_three = windows_of(rows, toy_spm, size=4, max_pieces=42)
     of_two = windows_of(rows, toy_spm, size=4, max_pieces=25)
 
     assert spans(whole) == [("d1", 0, 4)]
@@ -421,11 +421,11 @@ def test_a_window_is_shortened_until_both_sides_fit_the_budget(toy_spm: Path) ->
 
 
 def test_the_target_side_alone_can_force_the_shortening(toy_spm: Path) -> None:
-    # Sentences 2 and 5: source 8 + 7 + 2 + 2 = 19 pieces, target 12 + 7 + 2 = 21.
-    rows = [doc_row("d1", 0, 2), doc_row("d1", 1, 5)]
+    # Sentences 2 and 7: source 10 + 10 + 2 + 2 = 24 pieces, target 12 + 12 + 2 = 26.
+    rows = [doc_row("d1", 0, 2), doc_row("d1", 1, 7)]
 
-    fits = windows_of(rows, toy_spm, size=2, max_pieces=21)
-    short_of_target = windows_of(rows, toy_spm, size=2, max_pieces=20)
+    fits = windows_of(rows, toy_spm, size=2, max_pieces=26)
+    short_of_target = windows_of(rows, toy_spm, size=2, max_pieces=25)
 
     assert spans(fits) == [("d1", 0, 2)]
     assert spans(short_of_target) == [("d1", 0, 1)]
@@ -445,8 +445,8 @@ def test_the_piece_counts_of_a_window_never_exceed_the_budget(toy_spm: Path) -> 
 def test_a_budget_that_shortens_a_window_below_the_smallest_size_leaves_a_single(
     toy_spm: Path,
 ) -> None:
-    # A budget of 12: only one sentence fits at a time (7 + 2 and 8 + 2 pieces alone, 19
-    # and 17 together); the single sentence left at the end is a tail.
+    # A budget of 12: only one sentence fits at a time (9 + 2 source pieces alone, 22
+    # for two together); the single sentence left at the end is a tail.
     rows = document("d1", [0, 1, 5])
 
     windows = windows_of(rows, toy_spm, size=2, max_pieces=12)
@@ -459,10 +459,10 @@ def test_a_budget_that_shortens_a_window_below_the_smallest_size_leaves_a_single
 def test_a_sentence_over_the_budget_alone_is_left_out_and_ends_the_run(
     toy_spm: Path,
 ) -> None:
-    # The middle sentence is about 70 pieces on the target side, over a budget of 60;
+    # The middle sentence is 80 pieces on the target side, over a budget of 60;
     # its neighbours are not joined across it, and without a budget they would be.
     rows = document("d1", [0, 1, 2, 5, 6])
-    rows[2]["tgt"] = " ".join(["Энэ бол ном."] * 10)
+    rows[2]["tgt"] = " ".join([SENTENCES[0][1]] * 20)
 
     open_budget = windows_of(rows, toy_spm, size=2, max_pieces=1000)
     tight = windows_of(rows, toy_spm, size=2, max_pieces=60)
@@ -478,7 +478,7 @@ def test_a_sentence_over_the_budget_alone_is_left_out_and_ends_the_run(
 def test_a_sentence_is_kept_when_it_fills_the_budget_exactly_and_dropped_above_it(
     toy_spm: Path,
 ) -> None:
-    # Sentence 2 is 12 pieces on the target side (and 8 + 2 on the source side).
+    # Sentence 2 is 12 pieces on the target side (and 10 + 2 on the source side).
     rows = [doc_row("d1", 0, 2), doc_row("d1", 1, 2)]
 
     exact = windows_of(rows, toy_spm, size=1, max_pieces=12)
@@ -489,11 +489,11 @@ def test_a_sentence_is_kept_when_it_fills_the_budget_exactly_and_dropped_above_i
 
 
 def test_the_tag_and_doc_count_against_the_source_budget(toy_spm: Path) -> None:
-    # Sentence 3 is 9 pieces on the source side, 11 with the tag and `<doc>`.
+    # Sentence 3 is 7 pieces on the source side, 9 with the tag and `<doc>` (4 on the target).
     row = [doc_row("d1", 0, 3), doc_row("d1", 1, 3)]
 
-    kept = windows_of(row, toy_spm, size=1, max_pieces=11)
-    dropped = windows_of(row, toy_spm, size=1, max_pieces=10)
+    kept = windows_of(row, toy_spm, size=1, max_pieces=9)
+    dropped = windows_of(row, toy_spm, size=1, max_pieces=8)
 
     assert kept.stats.windows == 2
     assert dropped.stats.windows == 0
@@ -754,13 +754,13 @@ def test_the_windows_by_size_count_every_size_from_one(toy_spm: Path) -> None:
 
 
 def test_the_piece_summaries_are_over_the_windows(toy_spm: Path) -> None:
-    # Windows of two over sentences 0 to 3: source 19, 21 pieces (tag and `<doc>`
-    # included) and target 15, 20.
+    # Windows of two over sentences 0 to 3: source 22, 21 pieces (tag and `<doc>`
+    # included) and target 10, 18.
     windows = windows_of(document("d1", range(4)), toy_spm, size=2)
 
     pieces = windows.stats.pieces
-    assert pieces["src"] == PieceSummary(min=19, mean=20.0, p95=21, max=21)
-    assert pieces["tgt"] == PieceSummary(min=15, mean=17.5, p95=20, max=20)
+    assert pieces["src"] == PieceSummary(min=21, mean=21.5, p95=22, max=22)
+    assert pieces["tgt"] == PieceSummary(min=10, mean=14.0, p95=18, max=18)
 
 
 def test_the_piece_summary_of_no_window_is_zeros(toy_spm: Path) -> None:
@@ -776,7 +776,7 @@ def test_the_stats_are_json_ready(toy_spm: Path) -> None:
     document_ = json.loads(json.dumps(windows.stats.to_dict()))
 
     assert document_["windows_by_size"] == {"1": 0, "2": 2}
-    assert document_["pieces"]["src"] == {"min": 19, "mean": 20.0, "p95": 21, "max": 21}
+    assert document_["pieces"]["src"] == {"min": 21, "mean": 21.5, "p95": 22, "max": 22}
     assert document_["excluded"]["tail"] == 0
     assert document_["rows_read"] == 4
 

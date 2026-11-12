@@ -100,11 +100,11 @@ TOY_DIRECTIONS = (
 
 # The vocabulary of the toy SentencePiece model. For this text the project's
 # `train_spm` accepts 458 (118 reserved symbols, 256 byte pieces, 3 control symbols
-# and the 81 characters) up to 674 (nothing more to learn). 640 sits clear of both
-# ends and near enough the top that most nouns are one piece: about 7 pieces per
-# sentence, against 14 at 500.
+# and the 81 characters) up to 669 (nothing more to learn; 674 with SentencePiece
+# 0.2.1). 640 sits clear of both ends and near enough the top that most nouns are one
+# piece: about 6 pieces per sentence, against 13 at 500.
 TOY_SPM_VOCAB_SIZE = 640
-TOY_SPM_VOCAB_RANGE = (458, 674)
+TOY_SPM_VOCAB_RANGE = (458, 669)
 
 DEFAULT_SEED = 7
 HELD_OUT_ITEMS = 100

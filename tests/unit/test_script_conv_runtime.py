@@ -244,8 +244,8 @@ def test_the_stub_processor_encodes_and_decodes_like_the_real_model(
     stub = StubProcessor()
 
     for text in ("монгол", NOM_WITH_SUFFIX):
-        assert stub.encode(text, out_type=str) == real_processor.encode(
-            text, out_type=str
+        assert stub.encode(text, return_type=str) == real_processor.encode(
+            text, return_type=str
         )
     for pieces in ([DUMMY_PREFIX, "м"], ["м", "о"], [DUMMY_PREFIX, "м", DUMMY_PREFIX]):
         assert stub.decode(pieces) == real_processor.decode(pieces)
@@ -714,7 +714,8 @@ def test_a_missing_character_model_is_a_data_error_chained_to_the_library_error(
     with pytest.raises(DataError, match="missing.model") as raised:
         ScriptConverter(tmp_path, tmp_path / "missing.model")
 
-    assert isinstance(raised.value.__cause__, OSError)
+    # SentencePiece 0.2.2 raises RuntimeError for a missing file (0.2.1: OSError).
+    assert isinstance(raised.value.__cause__, RuntimeError)
     assert factory.built == []  # the cheap model is checked before the big one loads
 
 

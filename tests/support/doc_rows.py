@@ -19,17 +19,18 @@ from rinchen.corpus.schema import corpus_frame
 
 # (English, Mongolian), then the pieces of each alone: (English, Mongolian).
 SENTENCES: tuple[tuple[str, str], ...] = (
-    ("This is the book.", "Энэ бол ном."),  # 7, 7
-    ("The water is here.", "Ус энд байна."),  # 8, 6
-    ("Where is the dog?", "Нохой хаана байна вэ?"),  # 8, 12
-    ("The tree is there.", "Тэнд мод байна."),  # 9, 6
-    ("The book and the water.", "Ном ба ус."),  # 8, 4
-    ("This is the home.", "Энэ бол гэр."),  # 7, 7
-    ("The sun is here.", "Нар энд байна."),  # 8, 6
-    ("Where is the moon?", "Сар хаана байна вэ?"),  # 8, 12
+    ("This is the book.", "Энэ бол ном."),  # 9, 4
+    ("The water is here.", "Ус энд байна."),  # 9, 4
+    ("Where is the dog?", "Нохой хаана байна вэ?"),  # 10, 12
+    ("The tree is there.", "Тэнд мод байна."),  # 7, 4
+    ("The book and the water.", "Ном ба ус."),  # 6, 4
+    ("This is the home.", "Энэ бол гэр."),  # 9, 4
+    ("The sun is here.", "Нар энд байна."),  # 9, 4
+    ("Where is the moon?", "Сар хаана байна вэ?"),  # 10, 12
 )
-SOURCE_PIECES = (7, 8, 8, 9, 8, 7, 8, 8)
-TARGET_PIECES = (7, 6, 12, 6, 4, 7, 6, 12)
+# Counted with SentencePiece 0.2.2 (0.2.1 gave 7, 8, 8, 9, 8, 7, 8, 8 and 7, 6, 12, 6, 4, 7, 6, 12).
+SOURCE_PIECES = (9, 9, 10, 7, 6, 9, 9, 10)
+TARGET_PIECES = (4, 4, 12, 4, 4, 4, 4, 12)
 JOIN = " <sep> "
 
 EN_MN = ("eng_Latn", "khk_Cyrl")

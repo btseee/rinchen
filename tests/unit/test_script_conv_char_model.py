@@ -538,7 +538,8 @@ def test_check_reads_texts_from_a_one_pass_iterator(trained_model: Path) -> None
 @pytest.mark.parametrize(
     ("kind", "expected_cause"),
     [
-        pytest.param("missing", OSError, id="missing-file"),
+        # SentencePiece 0.2.2 raises RuntimeError for a missing file too (0.2.1: OSError).
+        pytest.param("missing", RuntimeError, id="missing-file"),
         pytest.param("not-a-model", RuntimeError, id="not-a-model"),
         pytest.param("directory", None, id="directory"),
     ],
