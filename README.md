@@ -18,16 +18,14 @@
   <summary>Table of Contents</summary>
   <ol>
     <li><a href="#about">About</a></li>
+    <li><a href="#status">Status</a></li>
     <li><a href="#features">Features</a></li>
-    <li><a href="#supported-languages">Supported Languages</a></li>
-    <li><a href="#models">Models</a></li>
-    <li><a href="#getting-started">Getting Started</a></li>
+    <li><a href="#supported-languages">Supported languages</a></li>
+    <li><a href="#getting-started">Getting started</a></li>
     <li><a href="#usage">Usage</a></li>
-    <li><a href="#evaluation">Evaluation</a></li>
-    <li><a href="#project-structure">Project Structure</a></li>
+    <li><a href="#documentation">Documentation</a></li>
+    <li><a href="#project-layout">Project layout</a></li>
     <li><a href="#development">Development</a></li>
-    <li><a href="#roadmap">Roadmap</a></li>
-    <li><a href="#contributing">Contributing</a></li>
     <li><a href="#community">Community</a></li>
     <li><a href="#license">License</a></li>
   </ol>
@@ -35,299 +33,179 @@
 
 ## About
 
-Rinchen is an open-source machine translation system with Mongolian (Khalkha, Cyrillic) as its central language. It is trained from random initialization for 16 translation directions between Mongolian and English, Russian, Chinese, Korean, Japanese, German, Kazakh, and Turkish.
+Rinchen is an open-source machine translation project with Mongolian (Khalkha, Cyrillic script) as its central language. Every model is trained from random initialisation with Eole, exported to CTranslate2 for fast CPU inference, and served through a command line, a Python API and an HTTP service. External pretrained models are used only as evaluation baselines or to generate synthetic training text.
 
-The system is designed for context-aware translation, preservation of numbers, dates, names, and terminology, and efficient inference on both CPU and GPU.
+The project is named after Byamba Rinchen, a Mongolian writer, linguist, translator and scholar ([Byamba Rinchen on Wikipedia](https://de.wikipedia.org/wiki/Bjambyn_Rintschen)).
 
-About Byamba Rinchen was a renowned Mongolian writer, linguist, translator, and scholar who dedicated his life to preserving Mongolia’s language, history, and cultural heritage. He is regarded as a pioneer of modern Mongolian literature, best known for his historical novel Үүрийн туяа (Rays of Dawn) and his contributions to Mongolian linguistics. [Wikipedia](https://de.wikipedia.org/wiki/Bjambyn_Rintschen)
+## Status
 
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
+Rinchen is pre-release: no real model, no real corpus and no released artifact exist yet. The machinery of every milestone, D0 to D15, is built and was measured on toy data only: templated fixture sentences that a tiny model memorises, so every number the project records is a toy number and ranks nothing. No GPU was used: every measurement ran on the CPU.
+
+The current state and the open gates are on the Wiki pages [State](https://github.com/btseee/rinchen/wiki/State) and [Roadmap](https://github.com/btseee/rinchen/wiki/Roadmap).
 
 ## Features
 
-- Mongolian-centric multilingual machine translation
-- 16 translation directions
-- Mongolian Cyrillic and traditional Mongolian script support
-- Document-level context handling
-- Placeholder and terminology preservation
-- Teacher, server, and edge model variants
-- CTranslate2 INT8 artifacts for fast CPU inference
-- REST API, CLI, and Python package
-- Evaluation against NLLB-200 3.3B using chrF++, BLEU, COMET-22, and MetricX-24
+What the code does today, as commands of the `rinchen` program:
 
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
+- Data acquisition from OPUS, Hugging Face datasets, WARC files and Common Crawl into `data/raw/`, with resumable downloads and checksums (`rinchen data`).
+- Text normalisation and SentencePiece tokenizers whose user-defined symbols are the reserved symbols and the direction tags of the registry (`rinchen spm`).
+- Filtering and mining of parallel text: script ratio, numbers, length, language identification, MinHash deduplication, LaBSE and quality-estimation scores, and sentence and document alignment (`rinchen filter`, `rinchen mine`).
+- A Cyrillic to traditional Mongolian script converter: a rule baseline and a small character model (`rinchen convert-script`).
+- Synthetic data through an OpenAI-compatible chat completions server, such as vLLM or llama.cpp (`rinchen synth`).
+- Training with Eole from random initialisation: multilingual ablations, teacher runs with resume and checkpoint averaging, document-level continuation and distillation into smaller students (`rinchen train`, `rinchen distill`).
+- Export to CTranslate2 in float32, float16, int8 and int8_float16, with a parity check against Eole (`rinchen export`).
+- Translation with an export: `rinchen translate`, the Python class `rinchen.Translator` and the HTTP service `rinchen serve`, with a script mask that keeps the output in the target's script.
+- Evaluation: BLEU, chrF and chrF++ with 95 % bootstrap intervals and paired comparisons, robustness measures for numbers, placeholders, names, glossary terms and script purity, and a report in JSON and Markdown (`rinchen eval`). Neural metrics such as COMET-22 and MetricX-24 are not computed: the evaluation seam accepts score files for them.
+- Release staging with a model card and an upload plan for the Hugging Face Hub, a dry run unless asked (`rinchen release`).
+- A maintenance check of the package stack against the lock file (`rinchen maintain`), a human annotation tool for test sets (`rinchen annotate`), the environment checks (`rinchen doctor`) and an end-to-end tiny pipeline on the CPU (`rinchen tiny`).
 
-## Supported Languages
+## Supported languages
 
-| Language | Code | Target tag |
-|---|---|---|
-| Mongolian, Cyrillic | `mn` | `<2mn>` |
+The language registry, `configs/languages.yaml`, holds ten languages. A model is told the language to write by a direction tag.
+
+| Language | Code | Direction tag |
+| --- | --- | --- |
+| Mongolian (Khalkha), Cyrillic script | `khk_Cyrl` | `<2khk_Cyrl>` |
 | Mongolian, traditional script | `mn_Mong` | `<2mn_Mong>` |
-| English | `en` | `<2en>` |
-| Russian | `ru` | `<2ru>` |
-| Chinese | `zh` | `<2zh>` |
-| Korean | `ko` | `<2ko>` |
-| Japanese | `ja` | `<2ja>` |
-| German | `de` | `<2de>` |
-| Kazakh | `kk` | `<2kk>` |
-| Turkish | `tr` | `<2tr>` |
+| English | `eng_Latn` | `<2eng_Latn>` |
+| Russian | `rus_Cyrl` | `<2rus_Cyrl>` |
+| Chinese (Simplified) | `zho_Hans` | `<2zho_Hans>` |
+| Korean | `kor_Hang` | `<2kor_Hang>` |
+| Japanese | `jpn_Jpan` | `<2jpn_Jpan>` |
+| German | `deu_Latn` | `<2deu_Latn>` |
+| Kazakh | `kaz_Cyrl` | `<2kaz_Cyrl>` |
+| Turkish | `tur_Latn` | `<2tur_Latn>` |
 
-Supported directions:
+## Getting started
 
-```text
-mn  <-> en, ru, zh, ko, ja, de, kk, tr
-```
+### Requirements
 
-Traditional Mongolian script is supported as an output target through the `<2mn_Mong>` tag.
-
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
-
-## Models
-
-| Model | Parameters | Purpose |
-|---|---:|---|
-| Teacher | ~1.3B | Highest-quality translation model |
-| Server student | ~190M | Balanced quality and serving performance |
-| Edge student | ~70M | CPU and resource-constrained deployment |
-
-All models are trained from random initialization. External pretrained models are used only for evaluation baselines or synthetic-data generation.
-
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
-
-## Getting Started
-
-### Prerequisites
-
-- Python 3.14
+- CPython 3.14 (no other version is accepted)
 - [uv](https://docs.astral.sh/uv/)
-- C++ build tools, required for optional Korean and Japanese tokenizer components
-- GPU with CUDA support for training
-- CPU-only environment for inference with the edge model
+- [just](https://just.systems/), for the recipes of the `justfile`
+- Linux or Windows: the lock file is resolved for those two platforms
 
-### Installation
+No GPU is needed: everything runs on the CPU.
+
+### Install
 
 ```bash
-git clone [https://github.com/btseee/rinchen.git](https://github.com/btseee/rinchen.git)
+git clone https://github.com/btseee/rinchen.git
 cd rinchen
-uv sync
+uv sync --frozen --group dev
 ```
 
-Verify the environment:
+`--frozen` installs exactly what `uv.lock` says. This is the command CI runs.
+
+### Check the environment
 
 ```bash
-uv run python -c "import sys; assert sys.version_info[:2] == (3, 14)"
+uv run --frozen --no-sync rinchen doctor
 ```
 
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
+The doctor prints one line per check (`[OK]`, `[FAIL]` or `[SKIP]`) and exits 1 when a check fails. On a machine without a GPU the CUDA check is a skip, which is the expected result.
+
+### Run the tiny pipeline
+
+```bash
+just tiny
+```
+
+The recipe runs `rinchen tiny run --profile tiny`: fifteen stages from committed fixture files to a trained, exported and evaluated toy model, on the CPU and with no network. It writes `report.json`, `report.md` and `manifest.json` under `artifacts/tiny/` and exits 0 when all eight thresholds pass.
 
 ## Usage
 
-### CLI
+The examples translate with an export directory, `EXPORT_DIR`, that `rinchen export convert` wrote. Only toy exports exist so far.
 
-Translate text from Mongolian to English:
-
-```bash
-uv run rinchen translate --src mn --tgt en < input.txt
-```
-
-Translate from English to Mongolian:
+### Command line
 
 ```bash
-uv run rinchen translate --src en --tgt mn < input.txt
+uv run --frozen --no-sync rinchen translate --model EXPORT_DIR --src eng_Latn --tgt khk_Cyrl --input INPUT.txt --output OUTPUT.txt
 ```
 
-Translate into traditional Mongolian script:
-
-```bash
-uv run rinchen translate --src en --tgt mn_Mong < input.txt
-```
+The input is UTF-8 text with one text per line, and the output has exactly one line per input line. `--script Mong` asks for the traditional script on a Mongolian target, and `rinchen translate --help` lists every option.
 
 ### Python
 
 ```python
-from rinchen import Translator
+import rinchen
 
-translator = Translator(
-    model_path="models/server-ct2",
-    source_language="mn",
-    target_language="en",
-)
-
-result = translator.translate("Сайн байна уу?")
-print(result)
+with rinchen.Translator("EXPORT_DIR", device="cpu") as translator:
+    result = translator.translate("the cat sat on the mat", tgt="khk_Cyrl", src="eng_Latn")
+    print(result.text, result.status)
 ```
 
-### API
+The signatures are `Translator(directory, *, device="cpu", compute_type="default", inter_threads=1, intra_threads=1, script_converter=None)` and `translate(texts, *, tgt, src=None, script=None, beam_size=4, n=1, max_decoding_length=256, max_source_pieces=256, script_mask="retry")`. A string gives one `Translation` and a list of strings gives a list.
 
-Start the local API server:
+### HTTP service
 
 ```bash
-uv run uvicorn rinchen.serve.app:app --host 0.0.0.0 --port 8000
+uv run --frozen --no-sync rinchen serve --model EXPORT_DIR --config configs/serve/tiny.yaml
 ```
 
-Translate through the API:
+The service listens on `127.0.0.1:8000` by default and has no authentication.
+
+| Route | Methods | Answer |
+| --- | --- | --- |
+| `/v1/translate` | POST | the translations of the texts of one request |
+| `/healthz` | GET, HEAD | 200 while the process runs |
+| `/readyz` | GET, HEAD | 200 once the model is loaded, 503 before and while stopping |
+| `/metrics` | GET, HEAD | Prometheus metrics |
 
 ```bash
-curl -X POST http://localhost:8000/translate \
+curl -s -X POST http://127.0.0.1:8000/v1/translate \
   -H "Content-Type: application/json" \
-  -d '{
-    "source_language": "mn",
-    "target_language": "en",
-    "text": "Сайн байна уу?"
-  }'
+  -d '{"texts": ["the cat sat on the mat"], "src": "eng_Latn", "tgt": "khk_Cyrl"}'
 ```
 
-Available endpoints:
+## Documentation
 
-```text
-POST /translate
-GET  /languages
-GET  /health
-POST /feedback
-```
+The documentation lives on the [project Wiki](https://github.com/btseee/rinchen/wiki).
 
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
+| Page | What it covers |
+| --- | --- |
+| [Getting Started](https://github.com/btseee/rinchen/wiki/Getting-Started) | requirements, installation, the doctor, the tiny pipeline and the gate |
+| [Architecture](https://github.com/btseee/rinchen/wiki/Architecture) | the package map, the data flow and the design rules |
+| [CLI Reference](https://github.com/btseee/rinchen/wiki/CLI-Reference) | every `rinchen` command with its help text |
+| [Configuration](https://github.com/btseee/rinchen/wiki/Configuration) | every file under `configs/` and the environment variables |
+| [Data Policy](https://github.com/btseee/rinchen/wiki/Data-Policy) | the data rules, the acquisition tools and the human test sets |
+| [Training Pipeline](https://github.com/btseee/rinchen/wiki/Training-Pipeline) | a model from data to export |
+| [Evaluation and Release](https://github.com/btseee/rinchen/wiki/Evaluation-and-Release) | metrics, suites, robustness, the report, the model card and the release tools |
+| [Serving](https://github.com/btseee/rinchen/wiki/Serving) | the HTTP service, `rinchen.Translator` and `rinchen translate` |
+| [Testing and Gates](https://github.com/btseee/rinchen/wiki/Testing-and-Gates) | the test layout, the markers, the fixtures and the gate |
+| [CI and Workflows](https://github.com/btseee/rinchen/wiki/CI-and-Workflows) | the three GitHub workflows |
+| [Maintenance](https://github.com/btseee/rinchen/wiki/Maintenance) | the maintenance check, upgrades and rollback |
+| [Troubleshooting](https://github.com/btseee/rinchen/wiki/Troubleshooting) | failures, their causes and their remedies |
+| [Glossary](https://github.com/btseee/rinchen/wiki/Glossary) | the terms of the code and the documents |
+| [Roadmap](https://github.com/btseee/rinchen/wiki/Roadmap) | the milestones and the open gates |
+| [Contributing](https://github.com/btseee/rinchen/wiki/Contributing) | the development loop and the conventions |
+| [State](https://github.com/btseee/rinchen/wiki/State) and [Decisions](https://github.com/btseee/rinchen/wiki/Decisions) | the project state and every recorded decision |
 
-## Evaluation
+The runbooks, specs, plans and research notes of each milestone are on the Wiki too, as records.
 
-Rinchen is evaluated on FLORES+ devtest and Mongolia-sourced human evaluation sets.
+## Project layout
 
-Primary metrics:
-
-- chrF++
-- BLEU
-- COMET-22
-- MetricX-24
-- Off-target language rate
-- Number and date preservation
-- Placeholder and terminology compliance
-- Translation latency and throughput
-
-Release targets:
-
-- Beat NLLB-200 3.3B on chrF++ in at least 12 of 16 directions on FLORES+ devtest
-- Off-target rate at most 1%
-- Number and date preservation at least 99%
-- Placeholder and tag validity of 100%
-
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
-
-## Project Structure
-
-```text
-.
-├── configs/
-│   ├── spm/
-│   ├── eole/
-│   └── serve/
-├── src/
-│   └── rinchen/
-│       ├── align/
-│       ├── cli/
-│       ├── convert/
-│       ├── data/
-│       ├── eval/
-│       ├── filter/
-│       ├── metrics/
-│       ├── serve/
-│       ├── synth/
-│       └── text/
-├── tests/
-├── scripts/
-├── plans/
-├── reports/
-├── manifests/
-├── data/
-└── .github/
-    └── workflows/
-        └── ci.yml
-```
-
-The `data/` directory is intended to remain local and is excluded from version control.
-
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
+- `src/rinchen/`: the Python package, one subpackage per feature (`acquire`, `spm`, `filter`, `mine`, `script_conv`, `synth`, `train`, `export`, `infer`, `serve`, `eval`, `maintain`, `tiny` and others) and the command line in `cli/`
+- `configs/`: the language registry, the profiles and the configurations of every stage
+- `tests/`: unit, property, golden and integration tests, with their fixtures and support modules
+- `scripts/`: the generators of the committed fixtures, the environment probe and the Wiki checker
+- `docker/`: the CPU image of the HTTP service and its compose file (never built)
+- `vendor/`: the wheels that have no CPython 3.14 release upstream
+- `manifests/` and `reports/`: recorded package versions, build records and the environment probe's report (`plans/` is an empty placeholder)
+- `data/`: local data, ignored by git
+- `.github/`: the workflows, the community files and the issue forms
 
 ## Development
 
-Run tests:
+Run the full local gate, the same checks CI runs:
 
 ```bash
-uv run pytest -q
+just gate
 ```
 
-Run linting:
+It runs `ruff format --check .`, `ruff check .`, `mypy src` and `pytest -m "not network" -q`. CI also runs `just tiny`.
 
-```bash
-uv run ruff check
-```
-
-Run type checking:
-
-```bash
-uv run mypy src
-```
-
-Development workflow:
-
-1. Read `STATE.md` before starting work.
-2. Create a plan in `plans/phase_N.md`.
-3. Write tests before implementation.
-4. Implement the change.
-5. Run tests, linting, and type checks.
-6. Record decisions in `DECISIONS.md`.
-7. Add package versions and checkpoint hashes to `manifests/`.
-8. Open a focused pull request.
-
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
-
-## Roadmap
-
-- [x] Define 16-direction Mongolian-centric translation scope
-- [x] Establish benchmark and baseline evaluation plan
-- [ ] Complete data acquisition and inventory
-- [ ] Build Mongolia-sourced human test sets
-- [ ] Train normalization and tokenizer pipeline
-- [ ] Train Cyrillic-to-traditional-script converter
-- [ ] Generate and filter synthetic training data
-- [ ] Train teacher model
-- [ ] Add document-level training
-- [ ] Distill server and edge student models
-- [ ] Release CTranslate2 INT8 artifacts
-- [ ] Publish API, CLI, and Python package
-- [ ] Establish feedback-driven maintenance loop
-
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
-
-## Contributing
-
-Contributions are welcome.
-
-1. Fork the repository.
-2. Create a feature branch:
-
-   ```bash
-   git checkout -b feature/short-description
-   ```
-
-3. Make focused changes.
-4. Add or update tests.
-5. Run:
-
-   ```bash
-   uv run pytest -q
-   uv run ruff check
-   uv run mypy src
-   ```
-
-6. Commit using a conventional message:
-
-   ```bash
-   git commit -m "feat(cli): add traditional-script translation flag"
-   ```
-
-7. Push the branch and open a pull request.
-
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
+The project's rules are short: CPython 3.14 only, tests before code, numeric thresholds are gates, every model is trained from random initialisation, and the state and decisions are kept on the Wiki and in `manifests/`. The [contributing guide](.github/CONTRIBUTING.md) and the Wiki page [Contributing](https://github.com/btseee/rinchen/wiki/Contributing) give the setup, the conventions and how to open a pull request.
 
 ## Community
 
