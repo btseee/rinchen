@@ -418,9 +418,14 @@ def test_a_report_with_the_robustness_block_gives_a_card_with_its_values_and_its
         assert f"{counts['scored']} of {counts['total']}" in row, key
     targets = {target["id"]: target for target in report["targets"]}
     assert targets["numbers"]["status"] == "not_met"
-    # Re-measured with Eole 0.6.7 and SentencePiece 0.2.2: the toy copies 600 of 600 placeholders
-    # (599 of 600 before), so the target of 1.0 is met.
-    assert targets["placeholders"]["status"] == "met"
+    # The placeholder target follows from the value measured and its threshold, whichever machine
+    # trained the toy: the copy rate is a measurement (599 of 600 with Eole 0.6.4 and SentencePiece
+    # 0.2.1 here, 600 of 600 with Eole 0.6.7 and SentencePiece 0.2.2), not a constant.
+    placeholders = targets["placeholders"]
+    assert placeholders["value"] is not None
+    assert placeholders["status"] == (
+        "met" if placeholders["value"] >= placeholders["threshold"] else "not_met"
+    )
     assert targets["beats_baseline"]["status"] == "unmeasured"
     assert not set(card_decimals(card)) - report_numbers(report)
     assert lines_with_a_needle(card) == []
