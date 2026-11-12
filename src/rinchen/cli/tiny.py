@@ -58,8 +58,9 @@ from rinchen.cli.tiny_inputs import (
 )
 from rinchen.cli.train_common import create_out_dir, exit_cannot_write
 from rinchen.config.tiny import MAX_SECONDS, MAX_THREADS
-from rinchen.maintain.commands import CommandRunner, SubprocessRunner, device_hidden
+from rinchen.maintain.commands import CommandRunner, device_hidden
 from rinchen.manifest.stage import refuse_foreign_manifest
+from rinchen.tiny.graceful_runner import GracefulRunner
 from rinchen.tiny.pipeline import (
     PipelinePlan,
     PipelineRun,
@@ -78,8 +79,9 @@ app = typer.Typer(no_args_is_help=True)
 
 
 def make_runner() -> CommandRunner:
-    """The runner of every command of a stage; the tests of the command replace it."""
-    return SubprocessRunner()
+    """The runner of every command of a stage: it asks a command to end before it kills it, so that a
+    launcher that is interrupted stops the trainer it started; the tests of the command replace it."""
+    return GracefulRunner()
 
 
 # The two other seams of the command, which the tests replace: the table of the fifteen stage functions
