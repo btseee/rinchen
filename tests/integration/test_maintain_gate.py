@@ -81,6 +81,7 @@ import pytest
 import yaml
 
 from rinchen.maintain.report import STEP_IDS
+from rinchen.maintain.report_markdown import RUNBOOK
 from tests.support.d11_gate import Exports, Teachers
 from tests.support.distill_gate import Invocation
 from tests.support.distill_gate_stages import Workspace
@@ -494,9 +495,13 @@ def test_neither_document_holds_a_path_a_timestamp_a_host_or_a_value_of_the_envi
     for name, text in _texts(run).items():
         assert absolute_paths(text) == [], name
         assert timestamps(text) == [], name
+        # The summary links the runbook on the project's public Wiki. That URL is a constant of the
+        # code, not a value of the environment, and its owner's login can hold a local user name as a
+        # substring, so the constant is taken out before the values are looked for.
+        scanned = text.replace(RUNBOOK, "")
         for label, value in secrets.items():
             if value:
-                assert value not in text, (name, label)
+                assert value not in scanned, (name, label)
 
 
 def test_neither_document_holds_a_line_of_the_sample_or_of_the_output_of_uv(
