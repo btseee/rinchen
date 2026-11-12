@@ -43,8 +43,8 @@ FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "maintain"
 GOLDEN_JSON = FIXTURES / "golden_report.json"
 GOLDEN_MD = FIXTURES / "golden_report.md"
 # `sha256sum` of the two files, taken from the files and not from the code.
-GOLDEN_JSON_SHA256 = "ac7f08b1270119b75286e55153e77e38044c4c5730db0c0adcdacd7b4126eeec"
-GOLDEN_MD_SHA256 = "7e7774f8f0dc3b26287aca55851bfdae9e058719fabfb49e76924c94b0f6d07a"
+GOLDEN_JSON_SHA256 = "833f29c1450ef51c07a385906d685ef5a077844fd68700b9531b32c5c2139866"
+GOLDEN_MD_SHA256 = "e634fbf9104822af5e27133581cc76a3cda5034e7f7e713a440d39504f6763da"
 MAX_BYTES = 8 * 1024
 
 
@@ -155,8 +155,8 @@ def expected_document() -> dict[str, Any]:
                         drift(
                             "huggingface-hub",
                             "update",
-                            "2.3.0",
-                            "2.3.1",
+                            "2.4.0",
+                            "2.4.1",
                             "hub-client",
                             ["evaluation_tiny", "gate"],
                         ),

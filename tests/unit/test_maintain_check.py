@@ -203,8 +203,8 @@ def test_the_drift_step_holds_the_seven_entries_of_the_hand_written_run(
         {
             "package": "huggingface-hub",
             "change": "update",
-            "locked": "2.3.0",
-            "available": "2.3.1",
+            "locked": "2.4.0",
+            "available": "2.4.1",
             "class": "blocked",
             "rule": "hub-client",
             "requires": ["evaluation_tiny", "gate"],

@@ -52,7 +52,7 @@ CHANGES_HAND_WRITTEN = (
     "Resolved 189 packages in 2.31s\n"
     "Update numpy v2.5.4 -> v2.5.5\n"
     "Update rich v15.0.0 -> v15.0.1\n"
-    "Update huggingface-hub v2.3.0 -> v2.3.1\n"
+    "Update huggingface-hub v2.4.0 -> v2.4.1\n"
     "Update safetensors v0.8.0 -> v0.8.1\n"
     "Update nvidia-cudnn-cu13 v9.24.0.43 -> v9.25.0.10\n"
     "Add tomli-w v1.2.0\n"
@@ -80,10 +80,12 @@ def resolved_line(elapsed: str, count: int = 187) -> str:
 
 
 # The versions of the lock the samples above speak about: `tomli-w` is not in it (it is an add).
+# They are the real `uv.lock`'s too, because the maintenance gate runs the sample against it
+# (huggingface-hub moved 2.3.0 -> 2.4.0 in the upgrade of 2026-11-12, and the sample with it).
 SAMPLE_LOCKED = {
     "numpy": ("2.5.4",),
     "rich": ("15.0.0",),
-    "huggingface-hub": ("2.3.0",),
+    "huggingface-hub": ("2.4.0",),
     "safetensors": ("0.8.0",),
     "nvidia-cudnn-cu13": ("9.24.0.43",),
     "sortedcontainers": ("2.4.0",),

@@ -23,7 +23,7 @@ State: drift. 7 entries (5 update, 1 add, 1 remove; 3 drift, 4 blocked).
 
 | package | change | locked | available | class | needs |
 | --- | --- | --- | --- | --- | --- |
-| huggingface-hub | update | 2.3.0 | 2.3.1 | blocked | evaluation_tiny, gate |
+| huggingface-hub | update | 2.4.0 | 2.4.1 | blocked | evaluation_tiny, gate |
 | numpy | update | 2.5.4 | 2.5.5 | blocked | numerics, evaluation_tiny |
 | nvidia-cudnn-cu13 | update | 9.24.0.43 | 9.25.0.10 | blocked | parity_tiny, robustness_tiny, gate |
 | rich | update | 15.0.0 | 15.0.1 | drift | - |

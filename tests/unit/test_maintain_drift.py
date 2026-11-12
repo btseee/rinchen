@@ -277,7 +277,7 @@ def test_an_add_of_a_name_the_lock_has_is_refused_in_the_updated_spelling_too() 
 
 
 def test_the_names_of_the_output_and_of_the_lock_are_compared_in_pep_503_form() -> None:
-    result = outcome("Update Huggingface_Hub v2.3.0 -> v2.3.1\n", rules=[])
+    result = outcome("Update Huggingface_Hub v2.4.0 -> v2.4.1\n", rules=[])
     assert result.state == "drift"
     assert result.entries[0].package == "huggingface-hub"
 
@@ -351,8 +351,8 @@ def test_the_sample_with_the_shipped_rules_is_seven_entries_sorted_by_package() 
         entry(
             "huggingface-hub",
             "update",
-            "2.3.0",
-            "2.3.1",
+            "2.4.0",
+            "2.4.1",
             "blocked",
             "hub-client",
             ("evaluation_tiny", "gate"),
@@ -419,7 +419,7 @@ def test_the_first_rule_that_names_a_package_wins() -> None:
 
 
 def test_a_package_the_output_spells_in_another_form_is_still_blocked() -> None:
-    result = outcome("Update Huggingface_Hub v2.3.0 -> v2.3.1\n")
+    result = outcome("Update Huggingface_Hub v2.4.0 -> v2.4.1\n")
     assert (result.entries[0].package, result.entries[0].klass) == (
         "huggingface-hub",
         "blocked",

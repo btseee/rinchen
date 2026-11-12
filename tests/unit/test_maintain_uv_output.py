@@ -34,7 +34,7 @@ NOTHING = DryRun(changes=(), no_changes=False, warnings=0, unrecognised=0)
 SAMPLE_CHANGES = (
     Change("update", "numpy", "2.5.4", "2.5.5"),
     Change("update", "rich", "15.0.0", "15.0.1"),
-    Change("update", "huggingface-hub", "2.3.0", "2.3.1"),
+    Change("update", "huggingface-hub", "2.4.0", "2.4.1"),
     Change("update", "safetensors", "0.8.0", "0.8.1"),
     Change("update", "nvidia-cudnn-cu13", "9.24.0.43", "9.25.0.10"),
     Change("add", "tomli-w", None, "1.2.0"),

@@ -36,6 +36,7 @@ from tests.support.maintain_project import (
     parent_environment,
 )
 from tests.support.no_network import no_network  # noqa: F401 - the fixture of the mark
+from tests.support.uv_outputs import SAMPLE_LOCKED
 
 pytestmark = pytest.mark.usefixtures("no_network")
 
@@ -236,6 +237,15 @@ def test_a_project_holds_a_pyproject_the_sample_lock_and_the_standard_tests(
         assert (project / relative).read_text() == source
     assert (project / EMPTY_TARGET).is_dir()
     assert list((project / EMPTY_TARGET).iterdir()) == []
+
+
+def test_the_versions_the_drift_sample_names_are_the_project_locks() -> None:
+    # The maintenance gate runs the hand-written dry run against the repository's own uv.lock:
+    # a locked version of the sample that the lock does not hold fails that gate.
+    project_lock = read_lock((REPO_ROOT / "uv.lock").read_bytes())
+
+    for name, versions in SAMPLE_LOCKED.items():
+        assert project_lock.versions.get(name) == versions, name
 
 
 def test_a_project_can_be_given_another_lock_and_other_tests(tmp_path: Path) -> None:

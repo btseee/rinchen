@@ -96,10 +96,10 @@
         },
         "entries": [
           {
-            "available": "2.3.1",
+            "available": "2.4.1",
             "change": "update",
             "class": "blocked",
-            "locked": "2.3.0",
+            "locked": "2.4.0",
             "package": "huggingface-hub",
             "requires": [
               "evaluation_tiny",

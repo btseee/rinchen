@@ -196,7 +196,7 @@ def test_the_manifest_is_pinned_by_value(
     assert manifest["tool_versions"] == {
         "numpy": "2.5.4",
         "rich": "15.0.0",
-        "huggingface-hub": "2.3.0",
+        "huggingface-hub": "2.4.0",
         "safetensors": "0.8.0",
         "nvidia-cudnn-cu13": "9.24.0.43",
         "sortedcontainers": "2.4.0",
