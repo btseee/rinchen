@@ -1,7 +1,7 @@
 name: Release
 
 # A tag starts the checks and the build of a release. Nothing here uploads: the upload to the Hub is
-# an operator's command from the machine that holds the model (docs/runbooks/13_release.md). This
+# an operator's command from the machine that holds the model (Wiki page Runbook-13-Release). This
 # workflow only proves, over a fabricated release, that the dry run lists the files it should.
 on:
   push:
