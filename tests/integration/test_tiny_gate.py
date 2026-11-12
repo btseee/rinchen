@@ -18,7 +18,10 @@ Gates (every floor a literal of `tests/support/tiny_gate.py` and never lowered):
         model) and the token-ratio note of `filter.length`, nothing else; the eight thresholds `pass`
         (`train_chrf` at least 50.0, `parity_exact` at least 0.95, `parity_delta` at most 1e-3,
         `int8_chrf_drop` at most 1.0, `script_purity` 1.0, `placeholder_acc` 1.0, `wall_time` at most 1,200
-        and the `stages` threshold); the shim's log holds one `run` call and no refusal
+        and the `stages` threshold); the `synth` block shows every source selected and one row for each and the
+        `train` block shows back-translated rows in the mix (`synth_problems`: no stage and no threshold reads
+        them, and a server that answers nothing still lets the synthetic command exit 0); the shim's log holds
+        one `run` call and no refusal
     R2  `report.md` is the rendering of `report.json` and both documents hold no absolute path, date or time,
         duration key, value of the environment, secret by its shape or text of a fixture
     R3  the manifest: stage `tiny_run`, written after both documents, the 13 inputs with the digests of their
@@ -90,6 +93,7 @@ from tests.support.tiny_gate import (
     run_tiny,
     secret_like_strings,
     stage_of,
+    synth_problems,
     threshold_of,
     timestamps,
 )
@@ -223,6 +227,17 @@ def test_the_report_passes_and_lists_the_fifteen_stages_in_order_all_ok(
     assert len(STAGE_IDS) == 15
     for stage in tiny_report["stages"]:
         assert (stage["state"], stage["reason"]) == ("ok", None), stage["id"]
+
+
+def test_the_synthetic_run_selected_every_source_and_the_training_mix_holds_its_rows(
+    tiny_report: dict[str, Any], record_property: Any
+) -> None:
+    assert synth_problems(tiny_report) == []
+
+    synth = tiny_report["blocks"]["synth"]
+    record_property("synth_counts", synth["counts"])
+    record_property("synth_rows", synth["rows"])
+    record_property("bt_rows", tiny_report["blocks"]["train"]["bt_rows"])
 
 
 def test_only_the_lid_and_the_token_ratio_check_are_skipped_and_each_says_why(

@@ -91,6 +91,7 @@ __all__ = [
     "start_rinchen",
     "start_tiny",
     "stop_run",
+    "synth_problems",
     "threshold_of",
     "timestamps",
     "wait_for_file",
@@ -449,6 +450,48 @@ def threshold_of(report: Mapping[str, Any], threshold_id: str) -> dict[str, Any]
 def part_states(stage: Mapping[str, Any]) -> dict[str, str]:
     """The state of each part of a stage entry, by part id."""
     return {part["id"]: part["state"] for part in stage["parts"]}
+
+
+def _whole_number(document: object, *keys: str) -> int | None:
+    """The whole number under `keys` in nested mappings, or None when a key is missing, a level is not a
+    mapping or the value is no whole number (a bool is not one)."""
+    for key in keys:
+        if not isinstance(document, Mapping) or key not in document:
+            return None
+        document = document[key]
+    return document if type(document) is int else None
+
+
+def synth_problems(report: Mapping[str, Any]) -> list[str]:
+    """What is wrong with the back-translated rows of a report, as sentences; an empty list when nothing is.
+
+    The `synth` block must show every source selected (`counts.selected` equal to `counts.sources`) and a
+    corpus of one row for each (`rows` above zero and equal to `counts.selected`), and the `train` block must
+    show back-translated rows in the training mix (`bt_rows` above zero). A key that is missing, or a figure
+    that is no whole number, is a problem of its own and never a pass. A sentence holds figures and key
+    names, never a text of the report."""
+    places = {
+        "blocks.synth.counts.selected": ("blocks", "synth", "counts", "selected"),
+        "blocks.synth.counts.sources": ("blocks", "synth", "counts", "sources"),
+        "blocks.synth.rows": ("blocks", "synth", "rows"),
+        "blocks.train.bt_rows": ("blocks", "train", "bt_rows"),
+    }
+    figures = {name: _whole_number(report, *keys) for name, keys in places.items()}
+    problems = [
+        f"{name} is missing or not a whole number"
+        for name, value in figures.items()
+        if value is None
+    ]
+    selected, sources, rows, bt_rows = figures.values()
+    if selected is not None and sources is not None and selected != sources:
+        problems.append(f"the synthetic run selected {selected} of {sources} sources")
+    if rows is not None and rows <= 0:
+        problems.append("the synthetic corpus holds no row")
+    elif rows is not None and selected is not None and rows != selected:
+        problems.append(f"rows ({rows}) is not the selected count ({selected})")
+    if bt_rows is not None and bt_rows <= 0:
+        problems.append("the training mix holds no back-translated row")
+    return problems
 
 
 # ---- the content scans -------------------------------------------------------------------------------
