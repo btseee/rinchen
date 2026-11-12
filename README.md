@@ -131,7 +131,9 @@ The input is UTF-8 text with one text per line, and the output has exactly one l
 import rinchen
 
 with rinchen.Translator("EXPORT_DIR", device="cpu") as translator:
-    result = translator.translate("the cat sat on the mat", tgt="khk_Cyrl", src="eng_Latn")
+    result = translator.translate(
+        "the cat sat on the mat", tgt="khk_Cyrl", src="eng_Latn"
+    )
     print(result.text, result.status)
 ```
 
