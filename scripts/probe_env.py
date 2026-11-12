@@ -206,7 +206,8 @@ def render_report(manifest: dict) -> str:
         "- Does `eole --no-deps` (installing only the dependencies that "
         "`import eole.bin.main` and `eole train --help` require) avoid the "
         "`pyonmttok` cp314 gap, or does eole's own code import pyonmttok "
-        "eagerly? See DECISIONS.md."
+        "eagerly? See the Wiki page Decisions "
+        "(https://github.com/btseee/rinchen/wiki/Decisions)."
     )
     lines.append(
         "- Should this probe be re-run once `pyonmttok` or `eole` ship a "
