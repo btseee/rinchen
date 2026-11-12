@@ -227,3 +227,14 @@ class StageRecord:
             raise ValueError("a part of a stage is listed twice")
         if self.state == "ok" and any(part.state == "fail" for part in self.parts):
             raise ValueError("an ok stage has no failed part")
+
+
+def unlisted_parts(record: StageRecord) -> tuple[str, ...]:
+    """The parts of the record's stage that the record does not list, in the order of the stage.
+
+    A stage that did not end `ok` may list some or none of its parts (the report lists the ones it did
+    not judge as skipped); an `ok` stage that leaves one out has dropped a part silently, and the
+    pipeline and the report both refuse it.
+    """
+    listed = {part.id for part in record.parts}
+    return tuple(part for part in PART_IDS.get(record.id, ()) if part not in listed)

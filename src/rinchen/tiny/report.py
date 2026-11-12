@@ -42,6 +42,7 @@ from rinchen.tiny.states import (
     SKIP_EARLIER_FAILED,
     PartRecord,
     StageRecord,
+    unlisted_parts,
 )
 from rinchen.tiny.thresholds import (
     THRESHOLD_IDS,
@@ -109,9 +110,9 @@ class Report:
 
     Raises:
         ShapeError: (a `ValueError`) on construction when anything is not the layout of the schema,
-            when the stages or the thresholds are not the fifteen and the eight in order, or when a
-            threshold's verdict does not follow from its value and its bound; the message names the
-            place and holds no value.
+            when the stages or the thresholds are not the fifteen and the eight in order, when an `ok`
+            stage leaves out one of its parts, or when a threshold's verdict does not follow from its
+            value and its bound; the message names the place and holds no value.
     """
 
     profile: str
@@ -133,6 +134,12 @@ class Report:
             raise ShapeError(
                 "report.thresholds", "are not the eight thresholds, once each, in order"
             )
+        for position, record in enumerate(self.stages):
+            if record.state == "ok" and unlisted_parts(record):
+                raise ShapeError(
+                    f"report.stages[{position}]",
+                    "an ok stage does not list every one of its parts",
+                )
         for position, result in enumerate(self.thresholds):
             if not _follows(result):
                 raise ShapeError(
@@ -219,7 +226,8 @@ def _holdable(detail: Mapping[str, Any]) -> dict[str, Any]:
 
 def _parts(record: StageRecord) -> tuple[PartRecord, ...]:
     """The parts of a record as the report lists them: in the order of the stage's parts, and for a
-    stage that did not end `ok` every part it did not judge skipped for its closed reason."""
+    stage that did not end `ok` every part it did not judge skipped for its closed reason. An `ok`
+    stage's parts are only put in order: one it left out is not made up, and the report refuses it."""
     wanted = PART_IDS.get(record.id, ())
     given = {part.id: part for part in record.parts}
     if record.state == "ok":
@@ -276,7 +284,8 @@ def build_report(
 
     Raises:
         ValueError: a stage has two results.
-        ShapeError: `profile` or `inputs` is not what the schema holds.
+        ShapeError: `profile` or `inputs` is not what the schema holds, or an `ok` result leaves out
+            a part of its stage.
     """
     by_stage: dict[str, StageResult] = {}
     for result in results:

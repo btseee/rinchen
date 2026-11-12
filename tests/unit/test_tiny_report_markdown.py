@@ -196,13 +196,17 @@ def test_the_note_of_the_skipped_token_ratio_check_is_beside_the_length_part() -
 
 
 def test_the_note_is_on_the_stage_row_when_the_filter_lists_no_length_part() -> None:
+    # The report refuses an ok filter that leaves a part out, so the report is damaged after it was
+    # built: the renderer must still put the note where the part is not.
     record = StageRecord(
         "filter",
         "ok",
         detail={"token_ratio_check": SKIP_TOKEN_RATIO},
         parts=(PartRecord("script_ratio", "ok"),),
     )
-    report = build(replaced(golden_results(), "filter", StageResult(record, {})))
+    report = build()
+    stages = tuple(record if stage.id == "filter" else stage for stage in report.stages)
+    object.__setattr__(report, "stages", stages)
     table = {row[0]: row for row in rows(report, "## Stages")}
     assert table["filter"][2] == f"token_ratio_check skipped: {SKIP_TOKEN_RATIO}"
     assert "filter.length" not in table

@@ -32,8 +32,11 @@ from rinchen.tiny.pipeline import PipelineRun, plan_lines, run, stage_functions
 from rinchen.tiny.states import (
     FAIL_BUDGET,
     FAIL_INPUT,
+    PART_IDS,
     SKIP_EARLIER_FAILED,
+    PartRecord,
     StageRecord,
+    State,
     fail_check,
     fail_exit,
 )
@@ -276,6 +279,74 @@ def test_a_stage_that_returns_nothing_is_a_failed_check(tmp_path: Path) -> None:
     result = run(make_plan(tmp_path), FakeClock(), functions=functions)
 
     assert result.results[1].record.reason == fail_check("stage_raised")
+
+
+def parts_function(
+    stage_id: str, state: State, listed: int, reason: str | None = None
+) -> Callable[[StageContext], StageResult]:
+    """A stage function whose record has `state` and lists the first `listed` parts of its stage."""
+    parts = tuple(PartRecord(part, "ok") for part in PART_IDS[stage_id][:listed])
+
+    def function(ctx: StageContext) -> StageResult:
+        return StageResult(StageRecord(stage_id, state, reason, {}, parts), {})
+
+    return function
+
+
+@pytest.mark.parametrize(
+    ("stage_id", "listed"),
+    [
+        (stage_id, listed)
+        for stage_id, parts in PART_IDS.items()
+        for listed in range(len(parts))
+    ],
+)
+def test_an_ok_stage_that_lists_only_some_of_its_parts_is_a_failed_check(
+    stage_id: str, listed: int, tmp_path: Path
+) -> None:
+    functions = fakes()
+    functions[stage_id] = parts_function(stage_id, "ok", listed)
+
+    result = run(make_plan(tmp_path), FakeClock(), functions=functions)
+
+    index = STAGE_IDS.index(stage_id)
+    record = result.results[index].record
+    assert (record.state, record.reason) == ("fail", fail_check("stage_raised"))
+    assert record.parts == ()
+    assert [item.record.state for item in result.results[index + 1 :]] == [
+        "skipped"
+    ] * (14 - index)
+    log = (tmp_path / "logs" / f"{stage_id}-raised.log").read_text(encoding="utf-8")
+    assert "part" in log
+
+
+@pytest.mark.parametrize("stage_id", list(PART_IDS))
+def test_an_ok_stage_that_lists_every_part_is_kept_as_it_is(
+    stage_id: str, tmp_path: Path
+) -> None:
+    functions = fakes()
+    functions[stage_id] = parts_function(stage_id, "ok", len(PART_IDS[stage_id]))
+
+    result = run(make_plan(tmp_path), FakeClock(), functions=functions)
+
+    index = STAGE_IDS.index(stage_id)
+    assert result.results[index].record.state == "ok"
+    assert len(result.results[index].record.parts) == len(PART_IDS[stage_id])
+    assert not (tmp_path / "logs").exists()
+
+
+@pytest.mark.parametrize("stage_id", list(PART_IDS))
+def test_a_failed_stage_with_no_part_listed_is_kept_with_its_own_reason(
+    stage_id: str, tmp_path: Path
+) -> None:
+    # The report lists the parts a failed stage did not judge; only an `ok` has to list them all.
+    functions = fakes()
+    functions[stage_id] = parts_function(stage_id, "fail", 0, fail_exit(4))
+
+    result = run(make_plan(tmp_path), FakeClock(), functions=functions)
+
+    record = result.results[STAGE_IDS.index(stage_id)].record
+    assert (record.state, record.reason) == ("fail", fail_exit(4))
 
 
 @pytest.mark.parametrize("signal_like", [KeyboardInterrupt(), SystemExit(143)])

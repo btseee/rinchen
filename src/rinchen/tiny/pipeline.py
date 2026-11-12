@@ -14,7 +14,9 @@ it is recorded `skipped` for an earlier failure, with no facts. A stage that rai
 whose record holds no text of the exception: a `RinchenError` is a failed input, anything else a failed
 check named `stage_raised`, and the class of the exception, the frames and, for a `RinchenError` (its message
 names a place and holds no text of a file), its message are in `logs/<stage>-raised.log` of the output
-directory when that can be written. An interrupt, `SystemExit` and the exit a signal makes pass through.
+directory when that can be written. A result that is not the stage's own, and an `ok` record that leaves out
+a part of its stage (the report lists every part, so one dropped silently would read as health), are the
+same failed check. An interrupt, `SystemExit` and the exit a signal makes pass through.
 
 The seconds of each stage (0.0 for a stage that did not run) and the elapsed time are the manifest's and the
 verdict of the `wall_time` threshold: they are in no document the report holds.
@@ -59,6 +61,7 @@ from rinchen.tiny.states import (
     SKIP_EARLIER_FAILED,
     StageRecord,
     fail_check,
+    unlisted_parts,
 )
 from rinchen.utils.part_file import replace_file
 
@@ -161,6 +164,14 @@ def _called(stage_id: str, function: StageFunction, ctx: StageContext) -> StageR
     if not isinstance(result, StageResult) or result.record.id != stage_id:
         _log_raised(
             ctx.out_dir, stage_id, "the function did not return its own result\n"
+        )
+        return _failed(stage_id, fail_check(RAISED_CHECK))
+    if result.record.state == "ok" and unlisted_parts(result.record):
+        _log_raised(
+            ctx.out_dir,
+            stage_id,
+            f"the function's ok result leaves out {len(unlisted_parts(result.record))} "
+            "of the parts of its stage\n",
         )
         return _failed(stage_id, fail_check(RAISED_CHECK))
     return result

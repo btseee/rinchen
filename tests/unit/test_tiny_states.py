@@ -42,6 +42,7 @@ from rinchen.tiny.states import (
     is_closed_reason,
     is_fail_reason,
     is_skip_reason,
+    unlisted_parts,
 )
 from tests.support.no_network import no_network  # noqa: F401 - the fixture of the mark
 
@@ -475,6 +476,46 @@ def test_a_part_listed_twice_is_refused() -> None:
             "ok",
             parts=(PartRecord("numbers", "ok"), PartRecord("numbers", "ok")),
         )
+
+
+def test_the_unlisted_parts_are_those_of_the_stage_the_record_does_not_list() -> None:
+    record = StageRecord(
+        "filter", "ok", parts=(PartRecord("qe", "ok"), PartRecord("numbers", "ok"))
+    )
+    assert unlisted_parts(record) == (
+        "script_ratio",
+        "length",
+        "lid",
+        "minhash",
+        "labse",
+    )
+
+
+@pytest.mark.parametrize("stage_id", list(PART_IDS))
+def test_a_record_that_lists_every_part_in_any_order_has_none_unlisted(
+    stage_id: str,
+) -> None:
+    parts = tuple(PartRecord(part, "ok") for part in reversed(PART_IDS[stage_id]))
+    assert unlisted_parts(StageRecord(stage_id, "ok", parts=parts)) == ()
+
+
+@pytest.mark.parametrize("stage_id", list(PART_IDS))
+def test_a_record_with_no_part_lists_none_of_them_whatever_its_state(
+    stage_id: str,
+) -> None:
+    for record in (
+        StageRecord(stage_id, "ok"),
+        StageRecord(stage_id, "skipped", SKIP_EARLIER_FAILED),
+        StageRecord(stage_id, "fail", fail_exit(1)),
+    ):
+        assert unlisted_parts(record) == PART_IDS[stage_id]
+
+
+@pytest.mark.parametrize(
+    "stage_id", [stage for stage in STAGE_IDS if stage not in PART_IDS]
+)
+def test_a_stage_that_has_no_parts_has_none_unlisted(stage_id: str) -> None:
+    assert unlisted_parts(StageRecord(stage_id, "ok")) == ()
 
 
 def test_a_part_of_another_type_is_refused() -> None:

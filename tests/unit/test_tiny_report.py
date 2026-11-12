@@ -274,18 +274,54 @@ def test_a_failed_filter_keeps_the_parts_it_judged_and_skips_the_rest() -> None:
 
 
 def test_an_ok_stage_lists_the_parts_it_gave_in_the_order_of_the_stage() -> None:
-    parts = (
-        PartRecord("qe", "ok"),
-        PartRecord("script_ratio", "ok"),
-        PartRecord("minhash", "ok"),
-    )
+    parts = tuple(PartRecord(part, "ok") for part in reversed(PART_IDS["filter"]))
     record = StageRecord("filter", "ok", parts=parts)
     report = build(replaced(golden_results(), "filter", StageResult(record, {})))
-    assert [part.id for part in stage(report, "filter").parts] == [
-        "script_ratio",
-        "minhash",
-        "qe",
-    ]
+    assert [part.id for part in stage(report, "filter").parts] == list(
+        PART_IDS["filter"]
+    )
+
+
+SOME_PARTS = [
+    (stage_id, listed)
+    for stage_id, parts in PART_IDS.items()
+    for listed in range(len(parts))
+]
+
+
+@pytest.mark.parametrize(("stage_id", "listed"), SOME_PARTS)
+def test_an_ok_stage_that_lists_only_some_of_its_parts_is_refused_and_not_dropped(
+    stage_id: str, listed: int
+) -> None:
+    parts = tuple(PartRecord(part, "ok") for part in PART_IDS[stage_id][:listed])
+    record = StageRecord(stage_id, "ok", parts=parts)
+    place = rf"report\.stages\[{STAGE_IDS.index(stage_id)}\]"
+    with pytest.raises(ShapeError, match=place) as raised:
+        build(replaced(golden_results(), stage_id, StageResult(record, {})))
+    assert "every one of its parts" in str(raised.value)
+
+
+@pytest.mark.parametrize(("stage_id", "listed"), SOME_PARTS)
+def test_the_report_model_refuses_an_ok_stage_that_lists_only_some_of_its_parts(
+    stage_id: str, listed: int
+) -> None:
+    report = build()
+    position = STAGE_IDS.index(stage_id)
+    whole = report.stages[position]
+    cut = dataclasses.replace(whole, parts=whole.parts[:listed])
+    stages = (*report.stages[:position], cut, *report.stages[position + 1 :])
+    with pytest.raises(ShapeError, match=rf"report\.stages\[{position}\]"):
+        dataclasses.replace(report, stages=stages)
+
+
+@pytest.mark.parametrize("stage_id", list(PART_IDS))
+def test_a_stage_that_did_not_end_ok_may_list_none_of_its_parts_and_gets_them_all(
+    stage_id: str,
+) -> None:
+    report = build(replaced(golden_results(), stage_id, failed(stage_id)))
+    assert [part.id for part in stage(report, stage_id).parts] == list(
+        PART_IDS[stage_id]
+    )
 
 
 def test_the_six_robustness_values_and_their_coverage_are_in_the_blocks() -> None:

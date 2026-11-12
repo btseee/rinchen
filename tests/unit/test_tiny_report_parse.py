@@ -176,6 +176,21 @@ def test_a_skipped_part_without_a_reason_is_refused() -> None:
     assert message.startswith("report.stages[3].parts[3]: ")
 
 
+@pytest.mark.parametrize(
+    ("position", "kept"), [(3, 0), (3, 6), (14, 0), (14, 1), (14, 3)]
+)
+def test_an_ok_stage_that_lists_only_some_of_its_parts_is_refused(
+    position: int, kept: int
+) -> None:
+    document = golden_document()
+    parts = document["stages"][position]["parts"]
+    message = refusal_of(
+        with_value(document, ("stages", position, "parts"), parts[:kept])
+    )
+    assert message.startswith(f"report.stages[{position}]: ")
+    assert "every one of its parts" in message
+
+
 def test_a_reason_on_an_ok_stage_is_refused() -> None:
     document = with_value(golden_document(), ("stages", 0, "reason"), SKIP_NO_LID)
     assert refusal_of(document).startswith("report.stages[0]: ")
