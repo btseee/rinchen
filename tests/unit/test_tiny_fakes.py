@@ -5,8 +5,9 @@ P6, brief G3.2).
 entities, their traditional-script spellings, digit strings and the numbered placeholders), each a
 fixed pseudo-random unit vector seeded by the CRC-32 of its name, summed and normalised.
 `ConceptQE` scores a pair as `25 * max(0, 1 - cosine)`, on the scale of MetricX where lower is
-better. What the stand-ins are FOR is checked here over the committed fixtures: every authentic row
-embeds close together (at most one cosine under the 0.7 bound of the filter), the planted
+better. What the stand-ins are FOR is checked here over the committed fixtures: 759 of the 760 authentic
+rows embed close together (the one that does not is `mm-0031`, under the 0.7 bound of the filter: it
+ends in the Mongolian full stop, which the encoder does not take for a separator), the planted
 misalignments do not, and the vectors are the same in every process.
 
 The lexicon words that a test needs are read from the fixtures; Cyrillic enters the source only as
@@ -149,7 +150,7 @@ def test_a_second_call_changes_nothing_and_the_order_of_the_texts_does_not_matte
 # ---- what the stand-ins are for: the authentic rows pass and the planted ones are caught --------
 
 
-def test_at_most_one_of_the_760_authentic_rows_is_below_the_bound(
+def test_exactly_one_of_the_760_authentic_rows_is_below_the_bound_and_it_is_mm_0031(
     encoder: ConceptEncoder, fixtures: Fixtures
 ) -> None:
     below = [
@@ -158,7 +159,23 @@ def test_at_most_one_of_the_760_authentic_rows_is_below_the_bound(
         if pair_cosine(encoder, source, target) < BOUND
     ]
 
-    assert len(below) <= 1, below
+    # The row `mm-0031` ends in the Mongolian full stop U+1803, which the token pattern of the encoder
+    # does not take for a separator (it cuts at `. , ? ! : ;` only): the word it is glued to is no known
+    # word and its concept is missed, so the cosine is 0.633. The filter with the stand-ins rejects the
+    # row. Another row, or a different one, must not slip in; changing the pattern would move the kept
+    # rows, `train.parquet`, the digests and the recordings, so it is left as it is.
+    assert below == ["mm-0031"]
+
+
+def test_the_row_below_the_bound_is_below_it_only_because_of_the_mongolian_full_stop(
+    encoder: ConceptEncoder, fixtures: Fixtures
+) -> None:
+    row = next(row for row in fixtures.mong if row.id == "mm-0031")
+    without_the_mark = row.mong.replace(chr(0x1803), "")
+
+    assert chr(0x1803) in row.mong
+    assert pair_cosine(encoder, row.mong, row.eng) < BOUND
+    assert pair_cosine(encoder, without_the_mark, row.eng) >= BOUND
 
 
 def test_the_two_misaligned_planted_rows_are_below_the_bound(

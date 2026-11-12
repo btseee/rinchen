@@ -17,7 +17,7 @@ Measured on this machine (CPU, 2026-11-12; the second run under `PYTHONHASHSEED=
 `LC_ALL=C`), the second run takes another value of it, `C.UTF-8` for the locale):
 
     R4  the two runs took 143.1 and 128.2 s by the manifests' seconds (three pipelines were running at once);
-           `report.json` (26,545 bytes) and `report.md` (3,228 bytes) byte-equal; the digests of the averaged
+           `report.json` (26,545 bytes) and `report.md` (its size is not pinned) byte-equal; the digests of the averaged
            weights (`4e06ce45faef7c4b...`), the float32 `model.bin` (`f48811a45287337c...`), the int8 `model.bin`
            (`8fa90a266950cfc3...`) and the converter's `model.bin` (`e70a4ccacf85c060...`) equal; the
            SentencePiece models differ (`66f3f736...` and `58af3a54...`), as they must (the converter's digest

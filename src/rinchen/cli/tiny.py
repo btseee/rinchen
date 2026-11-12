@@ -286,8 +286,9 @@ def _report(profile: str, accepted: _Accepted, outcome: PipelineRun) -> Report:
 def _commit(
     accepted: _Accepted, report: Report, outcome: PipelineRun, version: str
 ) -> Path:
-    """Write the two documents and then the manifest, and return the manifest's path. Nothing is written
-    when the report is not a valid report."""
+    """Write the two documents and then the manifest, and return the manifest's path. When the report is
+    not a valid report none of the three is written (the stages have run by then, and their directories
+    stay)."""
     data, markdown = tiny_output.report_documents(report)
     target = accepted.target
     try:

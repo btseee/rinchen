@@ -42,8 +42,9 @@ Measured on this machine (CPU, 20 cores, shared with other work; Eole 0.6.4, CTr
            five directions, `mn_Mong-eng_Latn`), `parity_exact` 1.0 (70 of 70), `parity_delta` 1.62e-06,
            `int8_chrf_drop` 0.0, `script_purity` 1.0, `placeholder_acc` 1.0 (238 of 238); the shim logged
            one call
-    R2  report.json 26,545 bytes, report.md 3,228 bytes, manifest.json 11,513 to 11,564 bytes (it holds the
-           seconds and a creation time: it differs from run to run)
+    R2  report.json 26,545 bytes, report.md (its size is not pinned: the gate compares it with the rendering
+           of report.json and between runs), manifest.json 11,513 to 11,564 bytes (it holds the seconds and a
+           creation time: it differs from run to run)
     R3  13 inputs, 187 `tool_versions` keys (186 names and `python`), 7 outputs
     R5  `reasons` duplicate 4, labse 3, len_ratio_char 3, numbers 2, script_tgt 2; 4 of 760 authentic rows
            flagged; train.parquet 1,316 rows (1,246 train, 70 dev)

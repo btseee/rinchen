@@ -18,7 +18,7 @@ from __future__ import annotations
 import hashlib
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import pytest
 from typer.testing import CliRunner
@@ -47,6 +47,7 @@ from tests.support.tiny_cli import (
     manifest_of,
     report_of,
     run_args,
+    watch_first_stage,
 )
 from tests.support.tiny_pipeline_runs import make_plan, real_table
 from tests.support.tiny_profiles import control_profile
@@ -682,11 +683,22 @@ def test_a_file_that_cannot_be_written_or_removed_is_exit_1_and_no_manifest_is_l
     assert not (out / "manifest.json").exists()
 
 
-def test_a_report_that_is_not_a_valid_report_is_a_defect_exit_1_and_nothing_is_written(
+DEFECT_WORDS: Final = (
+    "the stages that ran wrote their directories, which remain",
+    "report.json, report.md and manifest.json were not written",
+    "the files of an earlier run were removed when this run began",
+)
+
+
+def test_a_report_that_is_not_a_valid_report_is_a_defect_exit_1_and_no_document_is_written(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     out = tmp_path / "out"
-    install(monkeypatch)
+
+    def leave_a_directory(ctx: Any) -> None:
+        (ctx.out_dir / "01_fetch").mkdir(parents=True)
+
+    watch_first_stage(monkeypatch, leave_a_directory)
 
     def invalid(*args: Any, **keywords: Any) -> Any:
         raise ValueError("secret-text-of-a-fixture")
@@ -695,9 +707,13 @@ def test_a_report_that_is_not_a_valid_report_is_a_defect_exit_1_and_nothing_is_w
 
     result = invoke(run_args(out))
 
+    message = " ".join(result.stderr.split())
     assert result.exit_code == 1
-    assert "defect" in result.stderr
+    assert "defect" in message
+    assert all(words in message for words in DEFECT_WORDS)
+    assert "nothing of the run was written" not in message
     assert "secret-text-of-a-fixture" not in result.output
+    assert (out / "01_fetch").is_dir()
     assert not (out / "report.json").exists()
     assert not (out / "report.md").exists()
     assert not (out / "manifest.json").exists()
@@ -719,8 +735,10 @@ def test_a_markdown_that_does_not_survive_a_round_trip_is_a_defect_too(
 
     result = invoke(run_args(out))
 
+    message = " ".join(result.stderr.split())
     assert result.exit_code == 1
-    assert "defect" in result.stderr
+    assert "defect" in message
+    assert all(words in message for words in DEFECT_WORDS)
     assert not (out / "report.json").exists()
     assert not (out / "manifest.json").exists()
 

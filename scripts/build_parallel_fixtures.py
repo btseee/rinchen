@@ -26,9 +26,13 @@ change of the fixtures, and of every measurement made on them.
 
 Determinism: each file draws from its own random.Random stream, seeded with the string
 f"{SEED}-{name}"; a string seed is hashed with SHA-512, so the streams do not depend on
-PYTHONHASHSEED or on the order the files are written in. The sets below answer membership
-only and are never iterated. The generator is self-contained: it embeds its nouns, entities
-and templates and imports nothing but the standard library and the transliteration.
+PYTHONHASHSEED. The files are not independent of the order they are drawn in: one `taken`
+set is shared by the two pair files and the monolingual file, in that order (English pair,
+Russian pair, monolingual), and a draw that an earlier file used is dropped from a later
+one, so the Russian and the monolingual files depend on what was drawn before them. The
+bytes are pinned by the digests of the tests. The sets below answer membership only and are
+never iterated. The generator is self-contained: it embeds its nouns, entities and
+templates and imports nothing but the standard library and the transliteration.
 
 Characters a reader could mistake for another are written with chr(): the two brackets of a
 placeholder and the dash of a Russian number sentence.

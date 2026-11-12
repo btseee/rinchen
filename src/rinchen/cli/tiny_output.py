@@ -75,14 +75,18 @@ _CT2_MODEL_FILE: Final = "model.bin"
 # A run that is killed while it writes a file leaves `<name>.<hex>.part` beside it.
 _PART_HINT: Final = "; an entry ending in .part is left by a run that was killed while it wrote: delete it"
 _DEFECT: Final = (
-    "the report of the run is not a valid report: this is a defect of the program, "
-    "and nothing of the run was written"
+    "the report of the run is not a valid report: this is a defect of the program; "
+    "the stages that ran wrote their directories, which remain, but "
+    "report.json, report.md and manifest.json were not written, and "
+    "the files of an earlier run were removed when this run began"
 )
 
 
 class ReportDefect(RinchenError):
     """The report of a run is not a report that parses back to itself: a defect of the program and not
-    of the run. The message names no value."""
+    of the run. It is raised after the stages ran, so the old manifest, documents and stage directories
+    are already gone (`begin` removed them) and the stage directories of this run remain; only the two
+    documents and the manifest of this run are absent. The message says so and names no value."""
 
     def __init__(self) -> None:
         super().__init__(_DEFECT)
