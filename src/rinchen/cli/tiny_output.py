@@ -38,7 +38,7 @@ from rinchen.tiny.model_stages import CONVERTER_MODEL_DIR, SPM_MODEL_FILE
 from rinchen.tiny.model_stages_rest import ABLATE_DIR, WEIGHTS_FILE
 from rinchen.tiny.pipeline import PipelineRun
 from rinchen.tiny.report import WALL_TIME, Report, parse_report, to_bytes
-from rinchen.tiny.report_markdown import render
+from rinchen.tiny.report_markdown import figure_beside_bound, render
 from rinchen.tiny.states import StageRecord
 from rinchen.tiny.thresholds import ThresholdResult
 from rinchen.utils.part_file import replace_file
@@ -62,6 +62,8 @@ __all__ = [
 ]
 
 STAGE: Final = "tiny_run"
+# The significant digits a figure of a screen line is first written with (the Markdown starts at four).
+_SCREEN_DIGITS: Final = 6
 REPORT_FILE: Final = "report.json"
 SUMMARY_FILE: Final = "report.md"
 LOGS: Final = "logs"
@@ -306,9 +308,11 @@ def _stage_line(record: StageRecord) -> str:
 
 
 def _threshold_line(result: ThresholdResult, elapsed_seconds: float) -> str:
-    # The report keeps the verdict of the wall time and not its seconds; the screen shows them.
+    # The report keeps the verdict of the wall time and not its seconds; the screen shows them. A figure
+    # is written with the rule of the Markdown, from six digits: one a hair from its bound gets the
+    # digits that show which side it is on, as `50` beside `>= 50.0` and `fail` never could.
     value = elapsed_seconds if result.id == WALL_TIME else result.value
-    shown = "-" if value is None else format(value, ".6g")
+    shown = figure_beside_bound(value, result.bound, digits=_SCREEN_DIGITS)
     return (
         f"threshold {result.id}: {result.verdict} (value {shown}, bound {result.bound})"
     )

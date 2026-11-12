@@ -85,16 +85,24 @@ def _number(value: object) -> str:
     return str(value)
 
 
-def figure_beside_bound(value: object, bound: str) -> str:
+def figure_beside_bound(
+    value: object, bound: str, *, digits: int = _SHORT_DIGITS
+) -> str:
     """A figure as its cell writes it beside its `bound` (`>= 50.0`, `<= 0.001`).
 
     A null is a hyphen and a whole number is itself. A float is the text with the fewest significant
-    digits, four or more, that read back as a number is on the same side of the bound as the float:
-    so a value that fails is never written as one that meets its bound, nor the other way round (two
-    decimals wrote 49.996 as `50.00` and 237/238 as `1.00` beside `>= 1.0`, both `fail`). A figure far
-    from its bound has four digits (`99.36`, `1`, `1.622e-06`) and one a hair from it as many as show
-    the side, up to `repr`, which reads back as the float itself.
+    digits, `digits` or more (four for the Markdown, six for the line the command prints), that read
+    back as a number is on the same side of the bound as the float: so a value that fails is never
+    written as one that meets its bound, nor the other way round (two decimals wrote 49.996 as `50.00`
+    and 237/238 as `1.00` beside `>= 1.0`, both `fail`; six digits wrote 49.99999996 as `50`). A figure
+    far from its bound has `digits` of them (`99.36`, `1`, `1.622e-06` at four) and one a hair from it
+    as many as show the side, up to `repr`, which reads back as the float itself.
+
+    Raises:
+        ValueError: `digits` is not from 1 to 17.
     """
+    if not 1 <= digits <= _LONG_DIGITS:
+        raise ValueError(f"digits is from 1 to {_LONG_DIGITS}")
     if value is None:
         return _NONE
     if not isinstance(value, float):
@@ -105,8 +113,8 @@ def figure_beside_bound(value: object, bound: str) -> str:
     def meets(number: float) -> bool:
         return number >= limit if comparison == ">=" else number <= limit
 
-    for digits in range(_SHORT_DIGITS, _LONG_DIGITS):
-        text = f"{value:.{digits}g}"
+    for count in range(digits, _LONG_DIGITS):
+        text = f"{value:.{count}g}"
         if meets(float(text)) == meets(value):
             return text
     return repr(value)
