@@ -165,7 +165,7 @@ def shipped() -> MaintainConfig:
 
 
 EXPECTED_RULES = [
-    ("eole", ["eole"], ["parity_tiny", "parity_export", "gate"]),
+    ("eole", ["eole", "aiohttp"], ["parity_tiny", "parity_export", "gate"]),
     ("ctranslate2", ["ctranslate2"], ["parity_tiny", "parity_export", "serving_tiny"]),
     (
         "torch-family",
@@ -364,6 +364,7 @@ SHIPPED_LOOKUPS: list[tuple[str, str | None]] = [
     ("Huggingface_Hub", "hub-client"),
     ("hf-xet", "hub-client"),
     ("eole", "eole"),
+    ("aiohttp", "eole"),
     ("ctranslate2", "ctranslate2"),
     ("sentencepiece", "sentencepiece"),
     ("sentence-transformers", "transformers-stack"),

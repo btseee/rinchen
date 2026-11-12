@@ -33,7 +33,7 @@ drift:
   timeout_seconds: 300
   rules:
     - id: eole
-      packages: [eole]
+      packages: [eole, aiohttp]
       decision: "DECISIONS.md: the eole==0.6.4 pin, upgraded only after the parity smoke test; docs/VERIFY.md rows D-EOLE-PY, D-EOLE-CLI, D-STRICT-PARITY"
       requires: [parity_tiny, parity_export, gate]
     - id: ctranslate2
