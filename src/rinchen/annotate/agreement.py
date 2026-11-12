@@ -2,7 +2,7 @@
 
 Krippendorff's alpha is hand-implemented (not a new dependency, and not the
 `krippendorff` PyPI package) following the master plan's "Build-ourselves
-(no dependency)" principle (`docs/research/2026-10-29-rinchen-dev-agent-prompt.md`,
+(no dependency)" principle (the Wiki page Research-Master-Plan-D0-D15,
 <toolchain> section, e.g. "sparsemax, rule sentence splitter, DP aligner,
 ..."). That line doesn't name this statistic specifically, but the same
 build-it-ourselves-rather-than-add-a-dependency reasoning applies here. D2

@@ -101,8 +101,8 @@ def read_corpus_rows(
             characters.
         DataError: no file is given; a file is missing, cannot be read or is not a
             corpus table. A damaged file can make the Parquet reader panic, which polars
-            raises as a BaseException (docs/VERIFY.md, D-POLARS-PANIC): it is a bad file
-            too.
+            raises as a BaseException (Wiki page Verification-Log, D-POLARS-PANIC): it is
+            a bad file too.
     """
     if isinstance(splits, str):
         raise TypeError(

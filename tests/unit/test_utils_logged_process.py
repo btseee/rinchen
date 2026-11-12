@@ -382,7 +382,7 @@ def test_a_real_sigint_interrupts_the_wait_while_the_child_runs(tmp_path: Path) 
     # Once polars is imported (every `rinchen` command has it) a SIGINT sent to the
     # process does not wake a blocking wait that has no timeout: the interrupt is
     # raised only when the child ends by itself, which for an Eole training is hours
-    # later (docs/VERIFY.md, D-POLARS-SIGINT). The child here lives 6 s, so a wait
+    # later (Wiki page Verification-Log, D-POLARS-SIGINT). The child here lives 6 s, so a wait
     # that is not woken fails the assertion below and does not hang the suite.
     importlib.import_module("polars")
     pid_file = tmp_path / "pids"

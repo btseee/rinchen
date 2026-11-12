@@ -216,7 +216,7 @@ def _read_file(
         DataError: the file is missing, cannot be read or is not a corpus table; a
             usable row has a null in one of `identity_columns`. A damaged file can make
             the Parquet reader panic, which polars raises as a BaseException
-            (docs/VERIFY.md, D-POLARS-PANIC): it is a bad file too.
+            (Wiki page Verification-Log, D-POLARS-PANIC): it is a bad file too.
     """
     try:
         lazy = scan_corpus(path)

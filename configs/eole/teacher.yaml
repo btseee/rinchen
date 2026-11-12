@@ -1,8 +1,8 @@
 # Base Eole config of the teacher (D8): the model the 8-GPU run trains once the real
 # corpora exist. EVERY VALUE BELOW IS AN UNMEASURED PRIOR: no real corpus and no GPU
 # was available when this was written, so nothing here has been trained, timed or
-# tuned. The shape and the schedule are those of the master plan,
-# docs/research/2026-10-29-rinchen-dev-agent-prompt.md lines 511 to 514 (hidden 1536,
+# tuned. The shape and the schedule are those of the master plan, the Wiki page
+# Research-Master-Plan-D0-D15 lines 513 to 516 (hidden 1536,
 # encoder 24 and decoder 12 layers, 16 heads, feed-forward 4096, bf16, 8 GPUs, batches
 # of 16384 tokens with an accumulation of 8, dropout 0.1, validation every 5000
 # steps, early stopping after 6 validations without improvement); the rest of the

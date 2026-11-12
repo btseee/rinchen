@@ -32,7 +32,7 @@ _PREVIEW_CHARS = 200
 # handler that restarts a blocking call: an untimed `wait` is not woken and the
 # KeyboardInterrupt would be raised only after every queued request was sent,
 # while a wait with a timeout is interrupted at once. So the wait is made in
-# slices of this length (docs/VERIFY.md, D-POLARS-SIGINT).
+# slices of this length (Wiki page Verification-Log, D-POLARS-SIGINT).
 _INTERRUPT_POLL_S = 0.2
 
 

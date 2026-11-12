@@ -1,9 +1,9 @@
 # Base Eole config of the edge student (D10): 12 encoder and 2 decoder layers, 512 wide.
 # EVERY VALUE BELOW IS AN UNMEASURED PRIOR: no real corpus, no teacher and no GPU was
 # available when this was written, so nothing here has been trained, timed or tuned. The
-# shape is the master plan's (docs/research/2026-10-29-rinchen-dev-agent-prompt.md, line
-# 517: encoder 12, decoder 2, hidden 512, heads 8, feed-forward 2048); about 79.0
-# million parameters by the formula of docs/runbooks/08_teacher.md (ARITHMETIC, calibrated
+# shape is the master plan's (the Wiki page Research-Master-Plan-D0-D15, line
+# 519: encoder 12, decoder 2, hidden 512, heads 8, feed-forward 2048); about 79.0
+# million parameters by the formula of the Wiki page Runbook-08-Teacher (ARITHMETIC, calibrated
 # on the two tiny checkpoints), against about 1,103 million for the teacher. The schedule is
 # the teacher's (teacher.yaml) with one difference: this file states `attention_dropout:
 # [0.1]`, which the teacher's file does not state. The learning rate 2.0 with the Noam

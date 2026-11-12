@@ -306,7 +306,11 @@ def test_every_shipped_rerun_and_rule_says_why_in_one_line() -> None:
         assert rerun.why.strip() == rerun.why
     for rule in config.drift.rules:
         assert rule.decision.strip() == rule.decision
-        assert "DECISIONS.md" in rule.decision or "VERIFY.md" in rule.decision, rule.id
+        assert (
+            "Wiki page Decisions" in rule.decision
+            or "Wiki page Verification-Log" in rule.decision
+        ), rule.id
+        assert ".md" not in rule.decision, rule.id
 
 
 def test_every_id_of_a_recorded_row_that_a_decision_names_is_in_the_verify_table() -> (

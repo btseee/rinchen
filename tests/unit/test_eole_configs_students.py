@@ -184,7 +184,7 @@ def test_a_production_student_says_it_is_unmeasured_and_cites_the_master_plan(
     comments = " ".join(_comment_lines(path))
 
     assert "UNMEASURED" in comments
-    assert "2026-10-29-rinchen-dev-agent-prompt.md" in comments
+    assert "Research-Master-Plan-D0-D15" in comments
     assert "random initialisation" in comments
 
 

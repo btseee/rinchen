@@ -164,7 +164,7 @@ def reject_glob_characters(
     # Eole loads a checkpoint through `glob(<model_path>/model.*.safetensors)`
     # (eole/models/model.py, `_load_safetensors_shards`), so these characters in the
     # checkpoint directory make it match no shard, or the shards of its siblings
-    # (docs/VERIFY.md, D-EOLE-GLOB-CKPT).
+    # (Wiki page Verification-Log, D-EOLE-GLOB-CKPT).
     text = str(value)
     found = next((char for char in text if char in _GLOB_CHARACTERS), None)
     if found is not None:
