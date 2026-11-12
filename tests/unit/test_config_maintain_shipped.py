@@ -305,11 +305,11 @@ def test_every_shipped_rerun_and_rule_says_why_in_one_line() -> None:
         assert rerun.why.strip() == rerun.why
     for rule in config.drift.rules:
         assert rule.decision.strip() == rule.decision
-        assert (
-            "Wiki page Decisions" in rule.decision
-            or "Wiki page Verification-Log" in rule.decision
-        ), rule.id
+        # The decision is stated in place or by the Verification-Log rows that record it; it
+        # names no repository document and no Wiki page that does not stay.
+        assert len(rule.decision.split()) >= 5, rule.id
         assert ".md" not in rule.decision, rule.id
+        assert "Decisions" not in rule.decision, rule.id
 
 
 def test_every_requires_of_the_shipped_table_names_a_rerun_or_the_gate() -> None:

@@ -41,13 +41,13 @@ def document() -> dict[str, Any]:
                 {
                     "id": "eole",
                     "packages": ["eole"],
-                    "decision": "Wiki page Decisions: the eole pin",
+                    "decision": "the eole pin",
                     "requires": ["parity_tiny", GATE],
                 },
                 {
                     "id": "torch-family",
                     "packages": ["torch", "torch-*"],
-                    "decision": "Wiki page Decisions: the cu130 pin",
+                    "decision": "the cu130 pin",
                     "requires": ["parity_tiny"],
                 },
             ],

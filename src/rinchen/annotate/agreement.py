@@ -1,13 +1,9 @@
 """Agreement statistics: pairwise chrF and Krippendorff's alpha.
 
 Krippendorff's alpha is hand-implemented (not a new dependency, and not the
-`krippendorff` PyPI package) following the master plan's "Build-ourselves
-(no dependency)" principle (the Wiki page Research-Master-Plan-D0-D15,
-<toolchain> section, e.g. "sparsemax, rule sentence splitter, DP aligner,
-..."). That line doesn't name this statistic specifically, but the same
-build-it-ourselves-rather-than-add-a-dependency reasoning applies here. D2
-produces exactly one review per item, so
-`review_score_alpha` operates on a single-rater vector -- Krippendorff's
+`krippendorff` PyPI package): the project builds small algorithms itself
+rather than adding a dependency for them. D2 produces exactly one review per
+item, so `review_score_alpha` operates on a single-rater vector -- Krippendorff's
 alpha is formally undefined (NaN) for that shape until a later milestone
 captures 2+ independent reviews per item. The function itself is still
 the real, tested formula (not a stub), ready for that future data shape.

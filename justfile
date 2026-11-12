@@ -16,7 +16,7 @@ tiny:
     uv run --frozen --no-sync rinchen tiny run --profile tiny
 
 accept:
-    echo "just accept: not implemented until the full project-wide definition of done is met. See <mission> in https://github.com/btseee/rinchen/wiki/Research-Master-Plan-D0-D15."
+    echo "just accept: not implemented until the full project-wide definition of done is met. See the definition of done on https://github.com/btseee/rinchen/wiki/State."
 
 # Checks a clone of the Wiki (https://github.com/btseee/rinchen.wiki.git), where the documents live:
 # the content rules, internal links, characters, code fences, page names and the Verification-Log

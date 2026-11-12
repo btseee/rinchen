@@ -1,9 +1,8 @@
 # Base Eole config of the server student (D10): 16 encoder and 3 decoder layers, 768 wide.
 # EVERY VALUE BELOW IS AN UNMEASURED PRIOR: no real corpus, no teacher and no GPU was
 # available when this was written, so nothing here has been trained, timed or tuned. The
-# shape is the master plan's (the Wiki page Research-Master-Plan-D0-D15, line
-# 519: encoder 16, decoder 3, hidden 768, heads 12, feed-forward 3072); about 190.8
-# million parameters by the formula of the Wiki page Runbook-08-Teacher (ARITHMETIC, calibrated
+# shape is the master plan's (encoder 16, decoder 3, hidden 768, heads 12, feed-forward
+# 3072); about 190.8 million parameters by the formula of the Wiki page Runbook-08-Teacher (ARITHMETIC, calibrated
 # on the two tiny checkpoints), against about 1,103 million for the teacher. The schedule is
 # the teacher's (teacher.yaml) with one difference: this file states `attention_dropout:
 # [0.1]`, which the teacher's file does not state. The learning rate 2.0 with the Noam

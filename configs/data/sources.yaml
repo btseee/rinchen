@@ -3,8 +3,7 @@
 # This file is deliberately empty of real entries as of D1. Before any
 # source is added here, it must pass the same 100-random-sample,
 # zero-tolerance translation/script/alignment review used during D1's own
-# design -- see the Wiki page
-# Decision-2026-10-30-D1-Candidate-Parallel-Corpus-QA-6-of-7-Rejected, which rejected 6 of 7
+# design -- that review (2026-10-30) rejected 6 of 7
 # candidates reviewed that way (one hard-constraint violation: galig/Latin
 # script; the rest: systematic misalignment, mistranslation, or character-
 # encoding defects). Rinchen is building its own standard dataset from
