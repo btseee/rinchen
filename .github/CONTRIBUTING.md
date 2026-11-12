@@ -101,6 +101,6 @@ The [accessibility statement](../ACCESSIBILITY.md) lists what the project does a
 
 ## Documentation
 
-The long-form documentation lives on the [project Wiki](https://github.com/btseee/rinchen/wiki). Its pages are being moved there, so the Wiki home is the place to start.
+The long-form documentation lives on the [project Wiki](https://github.com/btseee/rinchen/wiki). It describes the current state of the code only, and its home page links every page, so start there.
 
 When a change alters behavior, update the matching Wiki page, or name the page in your pull request if you cannot edit it. To report a page that is missing or wrong, use the documentation form when you open an issue.

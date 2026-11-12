@@ -44,10 +44,10 @@ In the output:
 - The project has not checked how its traditional Mongolian script output looks in any font, and no Mongolian reader has judged the converter's output. We do not know whether screen readers read this script correctly.
 - Mongolian words in Cyrillic appear in the README and elsewhere with no language marked, because Markdown cannot mark the language of a phrase. A screen reader may read them in the voice of the page's language.
 - The `--help` pages and the usage errors of the commands are drawn by the library that formats them, with box-drawing characters, and may use color in a terminal that supports it. A screen reader may read the box characters aloud.
-- The README repeats the link "back to top" at the end of every section, draws the project tree with box-drawing characters, and names one link only "Wikipedia". We plan to fix this when the README is rewritten.
+- The README ends with one "back to top" link that is written as raw HTML. A screen reader may announce it differently from the other links.
 - Some reports have wide tables: the evaluation report has tables of up to ten columns. A screen reader reads them cell by cell, and a narrow screen needs horizontal scrolling.
 - The documentation and the messages are in English only. None of it has been translated into Mongolian.
-- The long-form documentation is being moved to the Wiki, so some pages are not there yet.
+- Some Wiki pages (the runbooks, the Verification Log and the package list) still carry an interim notice: they are being rewritten to describe the current state only, and until then some sentences may be out of date.
 
 ## Standards
 

@@ -643,6 +643,30 @@ def test_the_statement_names_the_limits_that_the_repository_shows() -> None:
         assert wanted in limits, wanted
 
 
+def test_the_statement_describes_the_readme_as_it_is() -> None:
+    readme = read_text(README)
+    limits = section(read_text(ACCESSIBILITY), "Known limitations")
+
+    # What the statement claims about the README is what the README holds: one "back to top" link,
+    # no tree drawn with box-drawing characters, and no link text that is only a site's name.
+    assert readme.count("back to top") == 1
+    assert 'one "back to top" link' in limits
+    assert not re.search(f"[{chr(0x2500)}-{chr(0x257F)}]", readme)
+    assert "box-drawing characters, and names one link only" not in limits
+    assert "plan to fix this when the README is rewritten" not in limits
+
+
+@pytest.mark.parametrize("path", [CONTRIBUTING, ACCESSIBILITY])
+def test_the_files_do_not_say_the_move_of_the_documentation_is_still_to_come(
+    path: str,
+) -> None:
+    # The documentation is on the Wiki and the Wiki describes the current state of the code.
+    text = squeezed(read_text(path))
+
+    assert "being moved" not in text
+    assert "some pages are not there yet" not in text
+
+
 def test_the_statement_says_how_to_report_and_what_to_expect() -> None:
     text = read_text(ACCESSIBILITY)
     reporting = section(text, "Reporting a barrier")
