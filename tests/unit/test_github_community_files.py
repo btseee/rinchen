@@ -34,6 +34,8 @@ from tests.support.community_files import (
     COVENANT_URL,
     EXTRA_NEEDLE_BASE,
     EXTRA_NEEDLE_CODE_POINTS,
+    ISSUE_CONFIG,
+    ISSUE_FORMS,
     MAX_WORDS_IN_A_PARAGRAPH,
     OWNER_ADDRESS,
     PULL_REQUEST_TEMPLATE,
@@ -65,7 +67,7 @@ MARKDOWN_FILES: Final = (
     SECURITY,
     PULL_REQUEST_TEMPLATE,
 )
-NEW_FILES: Final = MARKDOWN_FILES
+NEW_FILES: Final = (*MARKDOWN_FILES, ISSUE_CONFIG, *ISSUE_FORMS)
 # The files that name the address of the owner, and the only ones that may.
 HOLDERS_OF_THE_ADDRESS: Final = (CODE_OF_CONDUCT, SECURITY)
 
@@ -171,7 +173,12 @@ def test_the_file_points_at_the_wiki_home_and_at_no_page_that_will_move(
 def test_the_needles_of_the_scan_are_the_content_rules_and_are_many() -> None:
     assert len(NEEDLE_CODE_POINTS) >= 12
     assert excluded_words("a sentence with nothing in it") == []
-    for source in (Path(__file__), Path(community_files.__file__)):
+    this = Path(__file__)
+    for source in (
+        this,
+        this.with_name("test_github_issue_forms.py"),
+        Path(community_files.__file__),
+    ):
         text = source.read_text(encoding="utf-8")
         assert excluded_words(text) == [], source.name
         assert OWNER_ADDRESS.split("@")[0] not in text.lower(), source.name

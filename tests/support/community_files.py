@@ -18,7 +18,9 @@ import os
 import re
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
+
+import yaml
 
 from tests.unit.test_d13_content_rules import lines_with_a_needle
 
@@ -28,6 +30,16 @@ CODE_OF_CONDUCT: Final = ".github/CODE_OF_CONDUCT.md"
 CONTRIBUTING: Final = ".github/CONTRIBUTING.md"
 SECURITY: Final = ".github/SECURITY.md"
 PULL_REQUEST_TEMPLATE: Final = ".github/PULL_REQUEST_TEMPLATE.md"
+ISSUE_CONFIG: Final = ".github/ISSUE_TEMPLATE/config.yml"
+# The issue forms and the labels each one puts on an issue. The labels `bug`, `enhancement` and
+# `documentation` are GitHub's defaults; `accessibility` is for the owner to create.
+ISSUE_FORMS: Final = {
+    ".github/ISSUE_TEMPLATE/bug_report.yml": ["bug"],
+    ".github/ISSUE_TEMPLATE/feature_request.yml": ["enhancement"],
+    ".github/ISSUE_TEMPLATE/documentation.yml": ["documentation"],
+    ".github/ISSUE_TEMPLATE/accessibility.yml": ["accessibility"],
+}
+BUG_REPORT, FEATURE_REQUEST, DOCUMENTATION, ACCESSIBILITY_FORM = ISSUE_FORMS
 
 WIKI_URL: Final = "https://github.com/btseee/rinchen/wiki"
 ADVISORY_URL: Final = "https://github.com/btseee/rinchen/security/advisories/new"
@@ -236,6 +248,24 @@ def holders_of_the_address() -> list[str]:
         if local_part in text.lower():
             holders.append(path.relative_to(ROOT).as_posix())
     return sorted(holders)
+
+
+def load_yaml(path: str) -> dict[str, Any]:
+    document = yaml.safe_load(read_text(path))
+    assert isinstance(document, dict), path
+    return document
+
+
+def form_items(path: str) -> list[dict[str, Any]]:
+    """The elements of the `body` of an issue form, in order."""
+    body = load_yaml(path)["body"]
+    assert isinstance(body, list)
+    return body
+
+
+def fields(path: str) -> dict[str, dict[str, Any]]:
+    """The elements of an issue form that ask something, by `id`."""
+    return {str(item["id"]): item for item in form_items(path) if "id" in item}
 
 
 def parameter_defaults(function: ast.FunctionDef) -> dict[str, ast.expr | None]:
