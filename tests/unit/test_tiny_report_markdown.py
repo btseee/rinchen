@@ -316,7 +316,7 @@ def test_the_detail_of_each_threshold_is_in_the_table() -> None:
 
 
 def test_a_missing_figure_is_a_hyphen_with_its_reason_and_a_failed_verdict() -> None:
-    report = build(stopped_after(3))
+    report = build(stopped_after(3, failing=True))
     table = {row[0]: row for row in rows(report, "## Thresholds")}
     for name in (
         "train_chrf",
@@ -329,7 +329,8 @@ def test_a_missing_figure_is_a_hyphen_with_its_reason_and_a_failed_verdict() -> 
         assert table[name][2] == "-", name
         assert table[name][3] == "fail", name
         assert table[name][4].startswith("missing or invalid: "), name
-    assert table["stages"][2:4] == ["0", "pass"]
+    # The stage that failed is the one fault: the stages after it are skipped for it.
+    assert table["stages"][2:4] == ["1", "fail"]
     assert table["wall_time"][2:4] == ["-", "pass"]
 
 

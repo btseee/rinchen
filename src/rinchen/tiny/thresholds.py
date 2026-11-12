@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import Any, Final, Literal
 
 from rinchen.config.tiny import STAGE_IDS, ThresholdsSection
-from rinchen.tiny.states import StageRecord, is_skip_reason
+from rinchen.tiny.states import SKIP_EARLIER_FAILED, StageRecord, is_skip_reason
 
 THRESHOLD_IDS: Final = (
     "stages",
@@ -126,9 +126,10 @@ def _missing(
 
 
 def _is_at_fault(state: object, reason: object) -> bool:
-    """Whether a stage or a part that came to `state` for `reason` is a problem for the run: a
-    failure, a skip without one of the skip reasons, an `ok` that holds a reason, or a state that
-    is none of the three."""
+    """Whether a stage or a part that came to `state` for `reason` is a problem for the run on its
+    own: a failure, a skip without one of the skip reasons, an `ok` that holds a reason, or a state
+    that is none of the three. (A stage skipped as a whole also needs a failure before it:
+    `_stage_faults`.)"""
     if state == "ok":
         return reason is not None
     if state == "skipped":
@@ -142,11 +143,38 @@ def _record_at_fault(record: StageRecord) -> bool:
     )
 
 
+def _stage_faults(stages: Sequence[StageRecord]) -> tuple[list[str], list[str]]:
+    """The stages at fault by their own record, and the stages skipped as a whole that nothing
+    before them explains, each in the order of `STAGE_IDS`.
+
+    A stage is skipped as a whole for one reason only, `an earlier stage failed`, and only when a
+    stage before it failed or was itself at fault; the other skip reasons are about a part of a
+    stage (the filter's LID model, the evaluation's neural scorer) and explain no stage. The pipeline
+    skips a stage only after a failure, so a skip that no fault precedes is a stage that was
+    dropped without a cause.
+    """
+    own: set[str] = set()
+    unexplained: set[str] = set()
+    known = [record for record in stages if record.id in STAGE_IDS]
+    for record in sorted(known, key=lambda record: STAGE_IDS.index(record.id)):
+        position = STAGE_IDS.index(record.id)
+        if _record_at_fault(record):
+            own.add(record.id)
+        elif record.state == "skipped" and not (
+            record.reason == SKIP_EARLIER_FAILED
+            and any(STAGE_IDS.index(stage) < position for stage in own | unexplained)
+        ):
+            unexplained.add(record.id)
+    return (
+        [stage for stage in STAGE_IDS if stage in own],
+        [stage for stage in STAGE_IDS if stage in unexplained],
+    )
+
+
 def _stages(stages: Sequence[StageRecord]) -> ThresholdResult:
     counts = Counter(record.id for record in stages)
     unknown = sum(count for stage, count in counts.items() if stage not in STAGE_IDS)
-    faulty = {record.id for record in stages if _record_at_fault(record)}
-    failed = [stage for stage in STAGE_IDS if stage in faulty]
+    failed, unexplained = _stage_faults(stages)
     missing = [stage for stage in STAGE_IDS if counts[stage] == 0]
     repeated = [stage for stage in STAGE_IDS if counts[stage] > 1]
     segments = []
@@ -154,13 +182,17 @@ def _stages(stages: Sequence[StageRecord]) -> ThresholdResult:
         segments.append(
             f"failed or skipped without a closed reason: {', '.join(failed)}"
         )
+    if unexplained:
+        segments.append(
+            f"skipped with no failure before it to explain it: {', '.join(unexplained)}"
+        )
     if missing:
         segments.append(f"no record: {', '.join(missing)}")
     if repeated:
         segments.append(f"recorded twice: {', '.join(repeated)}")
     if unknown:
         segments.append(f"{unknown} records of an unknown stage")
-    at_fault = len({*failed, *missing, *repeated}) + unknown
+    at_fault = len({*failed, *unexplained, *missing, *repeated}) + unknown
     return ThresholdResult(
         "stages",
         _STAGES_BOUND,

@@ -20,6 +20,7 @@ from rinchen.config.tiny import STAGE_IDS
 from rinchen.tiny.states import (
     SKIP_EARLIER_FAILED,
     SKIP_NO_LID,
+    SKIP_REASONS,
     PartRecord,
     StageRecord,
     fail_exit,
@@ -390,13 +391,98 @@ def stages_result(records: list[StageRecord]) -> ThresholdResult:
     return one("stages", with_changes(stages=records))
 
 
-def test_all_stages_ok_or_skipped_with_a_closed_reason_is_a_pass_of_value_zero() -> (
-    None
-):
+def after_a_failure(failing: str) -> list[StageRecord]:
+    """The stages of a run that stopped: `failing` failed and every later one is skipped for it."""
+    records = []
+    for stage in STAGE_IDS:
+        if stage == failing:
+            records.append(StageRecord(stage, "fail", fail_exit(4)))
+        elif STAGE_IDS.index(stage) > STAGE_IDS.index(failing):
+            records.append(StageRecord(stage, "skipped", SKIP_EARLIER_FAILED))
+        else:
+            records.append(StageRecord(stage, "ok"))
+    return records
+
+
+def test_all_stages_ok_is_a_pass_of_value_zero() -> None:
+    result = stages_result(good_stages())
+    assert (result.verdict, result.value) == ("pass", 0)
+
+
+@pytest.mark.parametrize("failing", STAGE_IDS)
+def test_the_stages_skipped_for_an_earlier_failure_are_not_faults_of_their_own(
+    failing: str,
+) -> None:
+    # A stopped run has one fault, the stage that failed; the stages after it are what it caused.
+    result = stages_result(after_a_failure(failing))
+    assert (result.verdict, result.value) == ("fail", 1)
+    assert failing in result.detail
+    assert "no failure before" not in result.detail
+
+
+@pytest.mark.parametrize("stage", STAGE_IDS)
+def test_a_stage_skipped_for_an_earlier_failure_when_nothing_failed_is_a_fault(
+    stage: str,
+) -> None:
+    records = replaced(
+        good_stages(), stage, StageRecord(stage, "skipped", SKIP_EARLIER_FAILED)
+    )
+    result = stages_result(records)
+    assert (result.verdict, result.value) == ("fail", 1)
+    assert stage in result.detail
+    assert "no failure before" in result.detail
+
+
+@pytest.mark.parametrize("reason", SKIP_REASONS)
+@pytest.mark.parametrize("failing", ["train", None])
+def test_a_whole_stage_skip_is_explained_by_a_failure_before_it_and_by_nothing_else(
+    reason: str, failing: str | None
+) -> None:
+    # `serve` comes after `train`: the reasons about a part of a stage (no LID model, no neural
+    # scorer) say nothing about a stage, so they are faults whether something failed before or not.
+    records = after_a_failure(failing) if failing else good_stages()
+    records = replaced(records, "serve", StageRecord("serve", "skipped", reason))
+    result = stages_result(records)
+    explained = failing is not None and reason == SKIP_EARLIER_FAILED
+    assert result.value == (1 if explained else 1 + (failing is not None))
+    assert result.verdict == "fail"
+    assert ("serve" in result.detail) is (not explained)
+
+
+def test_a_skip_for_an_earlier_failure_is_not_explained_by_a_failure_after_it() -> None:
     records = replaced(
         good_stages(), "spm", StageRecord("spm", "skipped", SKIP_EARLIER_FAILED)
     )
-    result = stages_result(records)
+    records = replaced(records, "train", StageRecord("train", "fail", fail_exit(4)))
+    for ordered in (records, list(reversed(records))):
+        result = stages_result(ordered)
+        assert (result.verdict, result.value) == ("fail", 2)
+        assert "spm" in result.detail
+        assert "train" in result.detail
+
+
+def test_a_stage_skipped_for_no_reason_explains_the_skips_after_it() -> None:
+    # The first stage that went wrong is counted; the ones that say "an earlier stage failed" after
+    # it are explained by it, even though it did not fail.
+    records = replaced(
+        good_stages(), "serve", StageRecord("serve", "skipped", SKIP_EARLIER_FAILED)
+    )
+    for stage in ("robustness", "evaluate"):
+        records = replaced(
+            records, stage, StageRecord(stage, "skipped", SKIP_EARLIER_FAILED)
+        )
+    for ordered in (records, list(reversed(records))):
+        result = stages_result(ordered)
+        assert (result.verdict, result.value) == ("fail", 1)
+        assert "serve" in result.detail
+        assert "robustness" not in result.detail
+
+
+@pytest.mark.parametrize("reason", SKIP_REASONS)
+def test_a_part_keeps_every_closed_skip_reason_on_an_ok_stage(reason: str) -> None:
+    part = PartRecord("lid", "skipped", reason)
+    record = StageRecord("filter", "ok", parts=(part,))
+    result = stages_result(replaced(good_stages(), "filter", record))
     assert (result.verdict, result.value) == ("pass", 0)
 
 

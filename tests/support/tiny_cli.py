@@ -103,6 +103,9 @@ def _function(
             raise RuntimeError(SECRET)
         if outcome.kind == "skipped":
             return StageResult(StageRecord(stage_id, "skipped", outcome.reason), {})
+        if outcome.kind == "no_facts":
+            # `ok`, but it measured nothing: the thresholds that read its figures are missing.
+            return StageResult(golden[stage_id].record, {})
         if outcome.kind == "fail":
             return StageResult(
                 StageRecord(stage_id, "fail", fail_exit(outcome.exit_code)), {}

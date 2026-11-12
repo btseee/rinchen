@@ -102,13 +102,40 @@ def test_a_threshold_that_is_missed_exits_4_although_no_stage_failed(
 ) -> None:
     out = tmp_path / "out"
 
-    result, _, _ = go(monkeypatch, out, outcomes={"parity": Outcome("skipped")})
+    result, _, _ = go(monkeypatch, out, outcomes={"parity": Outcome("no_facts")})
 
     assert result.exit_code == 4
     assert not [line for line in lines_of(result)[:15] if ": fail" in line]
     thresholds = {item["id"]: item["verdict"] for item in report_of(out)["thresholds"]}
     assert thresholds["parity_exact"] == "fail"
     assert thresholds["stages"] == "pass"
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "an earlier stage failed",
+        "no language-identification model: GlotLID is a download",
+    ],
+)
+def test_a_stage_skipped_when_nothing_failed_exits_4_and_fails_the_stages_threshold(
+    reason: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # `serve` carries no figure of a threshold: only the `stages` threshold can notice it was dropped.
+    out = tmp_path / "out"
+
+    result, _, _ = go(
+        monkeypatch, out, outcomes={"serve": Outcome("skipped", reason=reason)}
+    )
+
+    assert result.exit_code == 4
+    assert not [line for line in lines_of(result)[:15] if ": fail" in line]
+    thresholds = {item["id"]: item["verdict"] for item in report_of(out)["thresholds"]}
+    assert thresholds["stages"] == "fail"
+    assert {name for name, verdict in thresholds.items() if verdict == "fail"} == {
+        "stages"
+    }
+    assert report_of(out)["verdict"] == "fail"
 
 
 def test_a_run_that_spends_its_budget_exits_4_with_the_stage_failed_for_it(

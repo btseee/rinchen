@@ -9,8 +9,9 @@ which options. From it the oracle derives, by a loop of its own:
 
 - which stages ran and which were left after the first failure or by a spent budget, and the record each
   one came to (the reasons as the closed lists write them);
-- the verdict and the exit code (0 when no stage failed, the stages that carry the figures of a threshold
-  are `ok` and the elapsed time is within the budget, else 4);
+- the verdict and the exit code (0 when every stage ended `ok` and the elapsed time is within the budget,
+  else 4: a stage that failed fails the run, and so does one that was skipped, which only a failure
+  explains);
 - the bytes of `report.json` and the text of `report.md`, from the reports of `build_report` over the
   results it derived and the independent writers of `tiny_report_reference`;
 - the keys and values of `manifest.json` (the inputs by digest of the files on disk, the two documents by
@@ -66,8 +67,6 @@ SKIP_REASONS: Final = (
     "the token-ratio check needs a SentencePiece model, which does not exist yet",
     "an earlier stage failed",
 )
-# The stages whose facts the thresholds read: a threshold without its facts is a failure.
-FIGURE_STAGES: Final = ("evaluate", "parity", "robustness")
 DURATIONS: Final = (0.25, 0.5, 1.0, 2.0, 5.0, 25.0, 60.0, 150.0)
 BUDGETS: Final = (1, 5, 20, 100, 300, 600, 1200, 1200, 1200, 3600)
 THREADS: Final = (None, 1, 4)
@@ -120,18 +119,15 @@ class Scenario:
 
 
 def draw(seed: int) -> Scenario:
-    """The scenario of a seed: a third are clean runs (every stage `ok`, a skip here and there in a stage
-    that carries no figure of a threshold), the others fail, skip, crash or run out of budget."""
+    """The scenario of a seed: a third are clean runs (every stage `ok`), the others fail, skip by
+    themselves, crash or run out of budget."""
     rng = random.Random(f"tiny-oracle-{seed}")
     clean = rng.random() < 0.35
     outcomes = []
-    for stage_id in STAGE_IDS:
+    for _ in STAGE_IDS:
         seconds = rng.choice(DURATIONS)
         draw_kind = rng.random()
-        if clean:
-            skippable = stage_id not in FIGURE_STAGES
-            kind = "skipped" if skippable and draw_kind < 0.08 else "ok"
-        elif draw_kind < 0.88:
+        if clean or draw_kind < 0.88:
             kind = "ok"
         else:
             kind = rng.choice(("skipped", "fail", "data_error", "crash"))
@@ -216,11 +212,10 @@ def expect(scenario: Scenario) -> Expected:
         else:
             results.append(StageResult(StageRecord(stage_id, state, reason), {}))  # type: ignore[arg-type]
         stopped = state == "fail"
-    nothing_failed = all(state != "fail" for state, _ in states.values())
-    figures = all(states[stage_id][0] == "ok" for stage_id in FIGURE_STAGES)
-    verdict = (
-        "pass" if nothing_failed and figures and elapsed <= scenario.budget else "fail"
-    )
+    # A run passes only when every stage ended `ok` within the budget: a failure fails it, and so does a
+    # stage that was skipped, because only a failure explains a skip and a failure fails the run already.
+    every_stage_ok = all(state == "ok" for state, _ in states.values())
+    verdict = "pass" if every_stage_ok and elapsed <= scenario.budget else "fail"
     config = shipped_config()
     return Expected(
         states,
