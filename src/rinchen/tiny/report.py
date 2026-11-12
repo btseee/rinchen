@@ -20,8 +20,11 @@ failed and every threshold passed.
 `parse_report` is strict: it reads only the canonical bytes (`to_bytes` of the report it returns equals
 its argument), refuses each way a document can differ from the layout of `rinchen.tiny.report_schema`
 with an error that names the place and quotes no value, and checks what the schema cannot: the stages
-and thresholds are the fifteen and the eight in order, each threshold's verdict follows from its value and
-its bound, and the verdict follows from the stages and the thresholds.
+and thresholds are the fifteen and the eight in order, an `ok` stage lists every part of its stage, the
+wall-time threshold holds no value, each threshold's verdict follows from its value and its bound, the
+`stages` threshold is the one the stage records give, and the verdict follows from the stages and the
+thresholds: a document that `build_report` could not have written is refused (the model, `Report`, holds
+all of these, so no report of either origin can break them).
 """
 
 from __future__ import annotations
@@ -50,6 +53,7 @@ from rinchen.tiny.thresholds import (
     ThresholdResult,
     Verdict,
     evaluate_thresholds,
+    stages_threshold,
 )
 
 __all__ = [
@@ -111,8 +115,10 @@ class Report:
     Raises:
         ShapeError: (a `ValueError`) on construction when anything is not the layout of the schema,
             when the stages or the thresholds are not the fifteen and the eight in order, when an `ok`
-            stage leaves out one of its parts, or when a threshold's verdict does not follow from its
-            value and its bound; the message names the place and holds no value.
+            stage leaves out one of its parts, when the wall-time threshold holds a value, when a
+            threshold's verdict does not follow from its value and its bound, or when the `stages`
+            threshold is not the one `rinchen.tiny.thresholds.stages_threshold` gives for the
+            stage records; the message names the place and holds no value.
     """
 
     profile: str
@@ -141,11 +147,21 @@ class Report:
                     "an ok stage does not list every one of its parts",
                 )
         for position, result in enumerate(self.thresholds):
+            if result.id == WALL_TIME and result.value is not None:
+                raise ShapeError(
+                    f"report.thresholds[{position}]",
+                    "the wall-time threshold holds no value: the report holds no duration",
+                )
             if not _follows(result):
                 raise ShapeError(
                     f"report.thresholds[{position}]",
                     "the verdict does not follow from the value and the bound",
                 )
+        if self.thresholds[0] != stages_threshold(self.stages):
+            raise ShapeError(
+                "report.thresholds[0]",
+                "is not the stages threshold that the stage records give",
+            )
 
     @property
     def verdict(self) -> Verdict:

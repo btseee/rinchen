@@ -638,6 +638,44 @@ def test_only_the_wall_time_threshold_may_pass_without_a_value() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("value", "verdict"), [(5.0, "pass"), (0.0, "pass"), (5000.0, "fail")]
+)
+def test_the_wall_time_threshold_of_a_report_holds_no_duration(
+    value: float, verdict: str
+) -> None:
+    report = build()
+    wall = dataclasses.replace(report.thresholds[7], value=value, verdict=verdict)
+    with pytest.raises(ShapeError, match=r"report\.thresholds\[7\]: .*holds no value"):
+        dataclasses.replace(report, thresholds=(*report.thresholds[:7], wall))
+
+
+def test_the_stages_threshold_of_a_report_is_the_one_its_stage_records_give() -> None:
+    report = build()
+    failed_stage = StageRecord("serve", "fail", fail_exit(4))
+    position = STAGE_IDS.index("serve")
+    stages = (*report.stages[:position], failed_stage, *report.stages[position + 1 :])
+    with pytest.raises(ShapeError, match=r"report\.thresholds\[0\]"):
+        dataclasses.replace(report, stages=stages)
+    skipped = StageRecord("serve", "skipped", SKIP_EARLIER_FAILED)
+    stages = (*report.stages[:position], skipped, *report.stages[position + 1 :])
+    with pytest.raises(ShapeError, match=r"report\.thresholds\[0\]"):
+        dataclasses.replace(report, stages=stages)
+
+
+def test_a_report_may_hold_the_stages_threshold_of_stages_that_did_not_all_pass() -> (
+    None
+):
+    # The report of the same stages that a run built is whole, so the model accepts it.
+    for results in (
+        stopped_after(9, failing=True),
+        stopped_after(12),
+        stopped_after(0),
+    ):
+        report = build(results)
+        assert dataclasses.replace(report, thresholds=report.thresholds) == report
+
+
 def test_a_report_refuses_blocks_that_are_not_the_schema() -> None:
     report = build()
     blocks = copy.deepcopy(dict(report.blocks))

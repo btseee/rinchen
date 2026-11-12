@@ -30,6 +30,7 @@ from rinchen.tiny.thresholds import (
     MEMORISED_DIRECTIONS,
     ThresholdResult,
     evaluate_thresholds,
+    stages_threshold,
 )
 from tests.support.no_network import no_network  # noqa: F401 - the fixture of the mark
 from tests.support.tiny_threshold_inputs import (
@@ -402,6 +403,16 @@ def after_a_failure(failing: str) -> list[StageRecord]:
         else:
             records.append(StageRecord(stage, "ok"))
     return records
+
+
+@pytest.mark.parametrize("failing", ["environment", "train", None])
+def test_the_stages_threshold_is_the_first_of_the_table_and_a_function_of_the_records(
+    failing: str | None,
+) -> None:
+    records = after_a_failure(failing) if failing else good_stages()
+    table = evaluate_thresholds(with_changes(stages=records), LIMITS, BUDGET)
+    assert stages_threshold(records) == table[0]
+    assert stages_threshold(list(reversed(records))) == table[0]
 
 
 def test_all_stages_ok_is_a_pass_of_value_zero() -> None:

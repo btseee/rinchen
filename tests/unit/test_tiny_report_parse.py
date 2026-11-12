@@ -308,9 +308,87 @@ def test_the_overall_verdict_must_follow_from_the_stages_and_the_thresholds() ->
 
 
 def test_a_failed_stage_with_every_threshold_passing_cannot_be_called_a_pass() -> None:
+    # The `stages` threshold counts the failed stage, so a document that passes every threshold
+    # while one stage failed is refused where it lies, at that threshold.
     document = golden_document()
     document["stages"][0].update(state="fail", reason=fail_exit(4))
+    assert refusal_of(document).startswith("report.thresholds[0]: ")
+
+
+def test_a_failed_stage_with_its_threshold_failing_cannot_be_called_a_pass() -> None:
+    document = golden_document()
+    failing = json.loads(to_bytes(build(stopped_after(9, failing=True))))
+    document["stages"] = failing["stages"]
+    document["thresholds"][0] = failing["thresholds"][0]
     assert refusal_of(document).startswith("report.verdict: ")
+
+
+def wall_time_document(value: float, verdict: str) -> dict[str, Any]:
+    document = with_value(golden_document(), ("thresholds", 7, "value"), value)
+    return with_value(document, ("thresholds", 7, "verdict"), verdict)
+
+
+@pytest.mark.parametrize(
+    ("value", "verdict"),
+    [(112.16, "pass"), (0, "pass"), (1200, "pass"), (5000.0, "fail")],
+)
+def test_a_wall_time_threshold_that_holds_a_duration_is_refused(
+    value: float, verdict: str
+) -> None:
+    message = refusal_of(wall_time_document(value, verdict))
+    assert message.startswith("report.thresholds[7]: ")
+    assert "holds no value" in message
+
+
+def test_a_wall_time_threshold_without_a_value_is_read_with_either_verdict() -> None:
+    assert parse_report(to_bytes(build(elapsed=5000.0))).thresholds[7].verdict == "fail"
+    assert parse_report(golden_bytes()).thresholds[7].verdict == "pass"
+
+
+def test_a_stage_skipped_for_an_earlier_failure_that_never_happened_is_refused() -> (
+    None
+):
+    document = golden_document()
+    document["stages"][12].update(
+        state="skipped", reason=SKIP_EARLIER_FAILED, detail={}
+    )
+    message = refusal_of(document)
+    assert message.startswith("report.thresholds[0]: ")
+
+
+def test_a_run_that_stopped_without_a_failure_is_read_back_as_the_faults_it_is() -> (
+    None
+):
+    # `serve` is the first stage that was dropped; the two after it say "an earlier stage failed"
+    # and are explained by it, so the run has one fault.
+    report = build(stopped_after(12))
+    parsed = parse_report(to_bytes(report))
+    assert parsed == report
+    assert (parsed.thresholds[0].verdict, parsed.thresholds[0].value) == ("fail", 1)
+    assert parsed.thresholds[0].detail == (
+        "skipped with no failure before it to explain it: serve"
+    )
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"value": 2},
+        {"detail": "no stage failed and every skip has a reason of the closed list"},
+        {"detail": "a stage failed"},
+        # Consistent with its own value, so that only the records can show it is not the threshold.
+        {"bound": ">= 5"},
+        {"bound": "<= 0.5"},
+        {"bound": "<= 5", "verdict": "pass"},
+        {"bound": ">= 0", "verdict": "pass"},
+    ],
+)
+def test_the_stages_threshold_must_be_the_one_the_stage_records_give(
+    changes: dict[str, Any],
+) -> None:
+    document = json.loads(to_bytes(build(stopped_after(9, failing=True))))
+    document["thresholds"][0].update(changes)
+    assert refusal_of(document).startswith("report.thresholds[0]: ")
 
 
 # ---- numbers, texts and bytes ------------------------------------------------------------------------

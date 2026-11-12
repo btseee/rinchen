@@ -171,7 +171,10 @@ def _stage_faults(stages: Sequence[StageRecord]) -> tuple[list[str], list[str]]:
     )
 
 
-def _stages(stages: Sequence[StageRecord]) -> ThresholdResult:
+def stages_threshold(stages: Sequence[StageRecord]) -> ThresholdResult:
+    """The `stages` threshold over the stage records alone: the number of stages at fault (see
+    `_stage_faults`), those with no record or two, and the records of a stage that does not exist;
+    it needs no figure, so a report can check the one it holds against its own stages."""
     counts = Counter(record.id for record in stages)
     unknown = sum(count for stage, count in counts.items() if stage not in STAGE_IDS)
     failed, unexplained = _stage_faults(stages)
@@ -289,7 +292,7 @@ def evaluate_thresholds(
     """The eight thresholds of the table, in order, over `inputs`, with the bounds of `thresholds`
     and the wall-time bound `budget_seconds`; none raises, and each missing value is a `fail`."""
     return (
-        _stages(inputs.stages),
+        stages_threshold(inputs.stages),
         _train_chrf(inputs.memorised_chrf, thresholds.train_chrf_min),
         _from_table(
             "parity_exact",
