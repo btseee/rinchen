@@ -80,7 +80,8 @@ def test_the_export_group_lists_convert_and_verify() -> None:
 def test_help_names_every_option_and_marks_exactly_the_four_required_ones(
     command: tuple[str, str],
 ) -> None:
-    result = invoke([*command, "--help"])
+    # Wide: at 80 columns the type column typer 0.29 prints cuts `--no-document-level`.
+    result = invoke([*command, "--help"], env={"COLUMNS": "200"})
 
     assert result.exit_code == 0
     for option in (

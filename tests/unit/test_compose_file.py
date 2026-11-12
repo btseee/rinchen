@@ -332,9 +332,10 @@ def test_the_command_parses_with_the_options_of_rinchen_serve(
     context = parse_serve_arguments(service["command"])
     given = {name: value for name, value in context.params.items() if value is not None}
 
+    # typer 0.29 converts the values while it parses: the paths arrive as `Path`s.
     assert given == {
-        "model": "/models/tiny",
-        "config_file": "/app/configs/serve/tiny.yaml",
+        "model": Path("/models/tiny"),
+        "config_file": Path("/app/configs/serve/tiny.yaml"),
         "host": "0.0.0.0",
         "port": 8000,
     }

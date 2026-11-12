@@ -82,9 +82,9 @@ DEFAULT_NAME = "rinchen-07148803f29a"
 STATED_DIRECTIONS = ("eng_Latn-khk_Cyrl", "khk_Cyrl-eng_Latn")
 
 
-def invoke(args: Sequence[str]) -> Result:
-    """Run `rinchen` with `args` in this process."""
-    return runner.invoke(app, list(args))
+def invoke(args: Sequence[str], *, env: dict[str, str] | None = None) -> Result:
+    """Run `rinchen` with `args` in this process (`env` is added to the environment)."""
+    return runner.invoke(app, list(args), env=env)
 
 
 def run_ok(args: Sequence[str]) -> Result:
