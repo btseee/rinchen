@@ -21,6 +21,7 @@ from typing import Any, Final
 import pytest
 import yaml
 
+from rinchen.acquire.registry import LocalSourceEntry, fetch_source, load_registry
 from rinchen.config.tiny import FixturesConfig, TinyConfig
 from rinchen.corpus.readers import scan_corpus
 from rinchen.errors import ConfigError, DataError
@@ -289,6 +290,99 @@ def test_a_registry_of_the_right_names_in_another_directory_fails(
 
     assert (result.record.state, result.record.reason) == ("fail", FAIL_INPUT)
     assert not out_dir.exists()
+
+
+def fixtures_directory_with_alias(tmp_path: Path) -> tuple[Path, TinyConfig]:
+    """A copy of the fixtures directory that also holds `alias.tsv`, a link to `noise.tsv`, and the
+    configuration that names it; the registry is left for the test to write."""
+    config = shipped_config()
+    copied = tmp_path / "fixtures"
+    copied.mkdir()
+    for name in FIXTURE_FILES:
+        (copied / name).write_bytes((config.fixtures.directory / name).read_bytes())
+    (copied / "alias.tsv").symlink_to("noise.tsv")
+    moved = changed_config(
+        fixtures=FixturesConfig(directory=copied, sha256=config.fixtures.sha256)
+    )
+    return copied, moved
+
+
+def test_an_entry_that_is_a_link_to_a_fixture_under_another_name_fails_and_nothing_is_copied(
+    tmp_path: Path,
+) -> None:
+    copied, config = fixtures_directory_with_alias(tmp_path)
+    urls = fixture_urls(f"local://{copied}/")
+    urls[FIXTURE_FILES.index("noise.tsv")] = f"local://{copied}/alias.tsv"
+    registry = write_registry(tmp_path / "registry.yaml", urls)
+    out_dir = tmp_path / "out"
+
+    result = run_fetch(
+        make_context(out_dir, config=config.model_copy(update={"registry": registry}))
+    )
+
+    assert (result.record.state, result.record.reason) == ("fail", FAIL_INPUT)
+    assert result.facts == {"files": 0, "bytes": 0}
+    assert not out_dir.exists()
+
+
+def test_a_fixture_that_is_itself_a_link_to_a_file_of_another_name_fails_and_nothing_is_copied(
+    tmp_path: Path,
+) -> None:
+    copied, config = fixtures_directory_with_alias(tmp_path)
+    (copied / "noise.tsv").rename(copied / "noise_original.tsv")
+    (copied / "noise.tsv").symlink_to("noise_original.tsv")
+    registry = write_registry(
+        tmp_path / "registry.yaml", fixture_urls(f"local://{copied}/")
+    )
+    out_dir = tmp_path / "out"
+
+    result = run_fetch(
+        make_context(out_dir, config=config.model_copy(update={"registry": registry}))
+    )
+
+    assert (result.record.state, result.record.reason) == ("fail", FAIL_INPUT)
+    assert not out_dir.exists()
+
+
+def test_the_name_the_check_expects_for_a_copy_is_the_name_fetch_source_gives_it(
+    tmp_path: Path,
+) -> None:
+    for entry in load_registry(shipped_config().registry):
+        assert isinstance(entry, LocalSourceEntry)
+        copy = fetch_source(entry, tmp_path / entry.id)
+        assert data_stages._copy_name(entry) == copy.name
+
+
+def test_an_address_with_a_slash_at_its_end_is_named_by_its_last_segment_as_fetch_source_does(
+    tmp_path: Path,
+) -> None:
+    urls = [url + "/" for url in fixture_urls()]
+    registry = write_registry(tmp_path / "registry.yaml", urls)
+
+    result = run_fetch(
+        make_context(tmp_path / "out", config=changed_config(registry=registry))
+    )
+
+    assert result.record.state == "ok"
+    assert names_in(tmp_path / "out" / "01_fetch" / "files") == sorted(FIXTURE_FILES)
+
+
+def test_the_same_registry_with_the_name_of_the_fixture_is_fetched(
+    tmp_path: Path,
+) -> None:
+    copied, config = fixtures_directory_with_alias(tmp_path)
+    registry = write_registry(
+        tmp_path / "registry.yaml", fixture_urls(f"local://{copied}/")
+    )
+
+    result = run_fetch(
+        make_context(
+            tmp_path / "out", config=config.model_copy(update={"registry": registry})
+        )
+    )
+
+    assert result.record.state == "ok"
+    assert names_in(tmp_path / "out" / "01_fetch" / "files") == sorted(FIXTURE_FILES)
 
 
 def test_an_entry_that_climbs_out_of_the_directory_fails(tmp_path: Path) -> None:

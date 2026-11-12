@@ -143,21 +143,28 @@ def run_environment(ctx: StageContext, lock_bytes: bytes) -> StageResult:
 # ---- fetch -------------------------------------------------------------------------------------
 
 
+def _copy_name(entry: LocalSourceEntry) -> str:
+    """The name `fetch_source` gives the copy of a local entry: the last segment of its URL."""
+    return entry.url.rstrip("/").split("/")[-1] or entry.id
+
+
 def _registry_is_the_fixtures(entries: list[Any], directory: Path) -> bool:
     """Whether the registry lists each of the seven fixtures once, as a local entry for a file of
     the fixtures directory itself: no network kind, no file of another directory, no path that
-    climbs out or reaches the directory through a link."""
-    sources = []
+    climbs out of it and no file that is a link under another name, so that the name the copy is
+    given is the name of the fixture it is checked against."""
+    home = directory.resolve()
+    names = []
     for entry in entries:
         if not isinstance(entry, LocalSourceEntry) or not entry.url.startswith(
             LOCAL_SCHEME
         ):
             return False
-        sources.append((CHECKOUT / entry.url[len(LOCAL_SCHEME) :]).resolve())
-    home = directory.resolve()
-    return all(s.parent == home for s in sources) and sorted(
-        s.name for s in sources
-    ) == sorted(FIXTURE_FILES)
+        source = (CHECKOUT / entry.url[len(LOCAL_SCHEME) :]).resolve()
+        if source.parent != home or source.name != _copy_name(entry):
+            return False
+        names.append(source.name)
+    return sorted(names) == sorted(FIXTURE_FILES)
 
 
 def run_fetch(ctx: StageContext) -> StageResult:
