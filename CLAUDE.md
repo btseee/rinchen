@@ -1,6 +1,8 @@
 # CLAUDE.md
 
-Read `STATE.md` first for current phase status.
+Read the Wiki page State first for current phase status:
+https://github.com/btseee/rinchen/wiki/State (the Wiki is a git repository:
+https://github.com/btseee/rinchen.wiki.git).
 
 ## Hard constraints
 
@@ -11,7 +13,7 @@ ALWAYS:
 - Use position_encoding_type: SinusoidalInterleaved in every Eole model.
 - Record every resolved package version and checkpoint hash in manifests/.
 - Write tests before code; numeric acceptance thresholds are gates.
-- Keep state in files (STATE.md, DECISIONS.md, manifests/), not in chat memory.
+- Keep state in files: the Wiki pages State and Decisions (the Wiki is a git repository, https://github.com/btseee/rinchen.wiki.git; update it in the same change as the code) and manifests/, not in chat memory.
 
 NEVER:
 - Use Python 3.12/3.13 or any fallback env, container, or conda env with another Python.
@@ -30,18 +32,22 @@ NEVER:
 - `uv run ruff format --check .`
 - `uv run mypy src`
 - `uv run rinchen doctor` (or `just doctor`)
-- `uv run rinchen eval robustness --suite FILE (--model DIR | --hypotheses FILE) --out-dir DIR` (D12: measures numbers, placeholders, names, glossary terms, script purity and a traditional-script source; no threshold, exit 0 whenever it measured; `docs/runbooks/12_robustness.md`)
+- `uv run rinchen eval robustness --suite FILE (--model DIR | --hypotheses FILE) --out-dir DIR` (D12: measures numbers, placeholders, names, glossary terms, script purity and a traditional-script source; no threshold, exit 0 whenever it measured; https://github.com/btseee/rinchen/wiki/Runbook-12-Robustness)
 - `uv run rinchen eval suite fetch|build|inspect` (D13: `fetch --benchmark B --split S --out-dir DIR (--revision HEX | --unpinned)` is the ONLY network step and was never run; `build --benchmark B|human --from PATH --out-dir DIR` turns local files into a suite file and refuses `khk_Mong` by name; `inspect --suite FILE`)
-- `uv run rinchen eval run --suite FILE --out-dir DIR (--model DIR | --generator NAME | --hypotheses FILE)` and `uv run rinchen eval report --run DIR ... --suite FILE ... --out-dir DIR [--baseline SYSTEM]` (D13: BLEU, chrF and chrF++ with 95 % bootstrap intervals, paired comparisons, `report.json` and `report.md`; they measure and exit 0 whenever they measured; `docs/runbooks/13_release.md`)
+- `uv run rinchen eval run --suite FILE --out-dir DIR (--model DIR | --generator NAME | --hypotheses FILE)` and `uv run rinchen eval report --run DIR ... --suite FILE ... --out-dir DIR [--baseline SYSTEM]` (D13: BLEU, chrF and chrF++ with 95 % bootstrap intervals, paired comparisons, `report.json` and `report.md`; they measure and exit 0 whenever they measured; https://github.com/btseee/rinchen/wiki/Runbook-13-Release)
 - `uv run rinchen release stage --export DIR --report-dir DIR --system NAME --repo-id ORG/NAME --out-dir DIR` and `uv run rinchen release hub --stage DIR --repo-id ORG/NAME --out-dir DIR [--upload] [--public]` (D13: the staging directory with the model card; `hub` is a DRY RUN unless `--upload`, which needs `HF_TOKEN` in the environment, creates the repository private and was never run)
-- `uv run --frozen --no-sync rinchen maintain check --out-dir DIR [--cadence nightly|weekly] [--no-drift] [--no-reruns] [--rerun ID] [--fail-on-drift] [--export DIR --checkpoint DIR --corpus FILE]` (D14: the doctor's CPU checks, `uv lock --check`, the installed packages against `uv.lock`, the dependency drift table from `uv lock --upgrade --dry-run` (the ONLY step that queries an index: never run it for a test or a measurement) and the parity reruns; writes `maintain_report.json`, `maintain_report.md` and `manifest.json`, only reads the project, exit 0 for ok or drift and 4 for fail; the upgrade procedure and the rollback are `docs/runbooks/14_maintenance.md`)
-- `uv run --frozen --no-sync rinchen tiny run [--profile tiny] [--out-dir DIR] [--config FILE] [--qe-fake | --no-qe-fake] [--threads N] [--budget-seconds N] [--dry-run]` (D15, the recipe `just tiny`: fifteen stages from the committed fixtures `tests/fixtures/parallel/` to `artifacts/tiny/{report.json,report.md,manifest.json}` on the CPU with no network and no GPU; eight thresholds, exit 0 for pass and 4 for fail with everything written, 2 for a bad option or input or `--profile full` (refused: no full pipeline file), 3 for a changed fixture, a bad lock or a foreign manifest, 130/143/129 for signals; `--dry-run` lists the commands and writes nothing; a miss is answered with more `train.steps`, never a lower bound (the loader refuses a bound below the master plan's); `docs/runbooks/15_tiny_pipeline.md`)
+- `uv run --frozen --no-sync rinchen maintain check --out-dir DIR [--cadence nightly|weekly] [--no-drift] [--no-reruns] [--rerun ID] [--fail-on-drift] [--export DIR --checkpoint DIR --corpus FILE]` (D14: the doctor's CPU checks, `uv lock --check`, the installed packages against `uv.lock`, the dependency drift table from `uv lock --upgrade --dry-run` (the ONLY step that queries an index: never run it for a test or a measurement) and the parity reruns; writes `maintain_report.json`, `maintain_report.md` and `manifest.json`, only reads the project, exit 0 for ok or drift and 4 for fail; the upgrade procedure and the rollback are https://github.com/btseee/rinchen/wiki/Runbook-14-Maintenance)
+- `uv run --frozen --no-sync rinchen tiny run [--profile tiny] [--out-dir DIR] [--config FILE] [--qe-fake | --no-qe-fake] [--threads N] [--budget-seconds N] [--dry-run]` (D15, the recipe `just tiny`: fifteen stages from the committed fixtures `tests/fixtures/parallel/` to `artifacts/tiny/{report.json,report.md,manifest.json}` on the CPU with no network and no GPU; eight thresholds, exit 0 for pass and 4 for fail with everything written, 2 for a bad option or input or `--profile full` (refused: no full pipeline file), 3 for a changed fixture, a bad lock or a foreign manifest, 130/143/129 for signals; `--dry-run` lists the commands and writes nothing; a miss is answered with more `train.steps`, never a lower bound (the loader refuses a bound below the master plan's); https://github.com/btseee/rinchen/wiki/Runbook-15-Tiny-Pipeline)
+- `just wiki-check WIKI_DIR` (`uv run --frozen --no-sync python scripts/check_wiki.py WIKI_DIR --verify-ids-from configs/maintain/maintain.yaml`: checks a clone of the Wiki for the content rules, dangling internal links, ASCII, line ends, code fences, page names and the Verification-Log rows the maintenance config names; exit 0 clean, 1 problems, 2 not a directory)
 
 ## Repo layout
 
 ```
-CLAUDE.md STATE.md DECISIONS.md pyproject.toml uv.lock justfile
-.pre-commit-config.yaml
+CLAUDE.md README.md ACCESSIBILITY.md LICENSE pyproject.toml uv.lock justfile
+.pre-commit-config.yaml .gitignore images/logo.png
+.github/workflows/{ci,release,nightly}.yml (ci.yml has the jobs gate and tiny)
+.github/{CODE_OF_CONDUCT,CONTRIBUTING,SECURITY,PULL_REQUEST_TEMPLATE}.md (community files)
+.github/ISSUE_TEMPLATE/{config,bug_report,feature_request,documentation,accessibility}.yml (issue forms)
 configs/base.yaml configs/profiles/{tiny,full}.yaml configs/{spm,eole,serve}/
 configs/languages.yaml configs/spm/{tiny_1k,student_64k,teacher_128k}.yaml
 configs/data/sources.yaml configs/data/sources.tiny.yaml configs/data/filters.yaml
@@ -53,18 +59,11 @@ configs/eole/student_{server,edge,tiny}.yaml configs/serve/{tiny,server,edge}.ya
 configs/eval/{metrics,suites}.yaml configs/maintain/maintain.yaml configs/tiny/tiny.yaml
 configs/eole/tiny.yaml configs/data/sources.tiny_parallel.yaml (the D15 profile, its Eole base config and its local registry; no configs/tiny/full.yaml)
 docker/{Dockerfile.cpu,compose.serve.yaml} .dockerignore
-docs/STACK.md docs/VERIFY.md
-docs/runbooks/00_environment.md docs/runbooks/01_acquisition.md
-docs/runbooks/02_human_testsets.md docs/runbooks/03_tokenizer.md
-docs/runbooks/04_filtering_mining.md docs/runbooks/05_script_converter.md
-docs/runbooks/06_synthetic.md docs/runbooks/07_ablations.md docs/runbooks/08_teacher.md
-docs/runbooks/09_document_level.md docs/runbooks/10_distillation.md
-docs/runbooks/11_serving.md docs/runbooks/12_robustness.md docs/runbooks/13_release.md
-docs/runbooks/14_maintenance.md docs/runbooks/15_tiny_pipeline.md
-docs/research/  docs/superpowers/{specs,plans}/
 src/rinchen/{config,manifest,utils,cli,text,lang,split,spm,corpus,filter,mine,script_conv,synth,metrics,eval,serve,export,maintain,tiny}/
+src/rinchen/__main__.py src/rinchen/py.typed src/rinchen/cli/{main,doctor,data,spm,annotate}.py
+src/rinchen/config/{loader,schema,settings,languages,spm}.py src/rinchen/manifest/{model,stage,store}.py
 src/rinchen/acquire/{http,opus,hf,warc,commoncrawl,registry}.py
-src/rinchen/annotate/{db,export,agreement,app,routes,models}.py
+src/rinchen/annotate/{db,export,agreement,app,routes,models}.py src/rinchen/annotate/{templates/,static/htmx.min.js} (package data)
 src/rinchen/spm/{symbols,corpus,train,check}.py src/rinchen/split/rules.py
 src/rinchen/text/{normalize,numerals}.py src/rinchen/lang/scripts.py
 src/rinchen/corpus/{schema,readers,writers}.py src/rinchen/config/filters.py
@@ -85,7 +84,7 @@ src/rinchen/infer/{doc_chunker,source_tokens,script_mask,engine_types,engine,tra
 src/rinchen/serve/{schemas,metrics,batcher,engine,_http,_translate,app}.py src/rinchen/config/serve.py
 src/rinchen/eval/{robust_numbers,robust_placeholders,robust_spans,robust_script,robust_mong,robust_suite,robust_suite_rules}.py
 src/rinchen/eval/{robust_hypotheses,robust_outcomes,robust_sections,robustness,robust_report}.py
-src/rinchen/metrics/{registry,segment_stats}.py src/rinchen/config/eval_{metrics,suites}.py
+src/rinchen/metrics/{registry,segment_stats,bleu_chrf}.py src/rinchen/config/eval_{metrics,suites}.py
 src/rinchen/eval/{bootstrap,significance,suite_rules,suites,suite_sources,outputs,systems,runner}.py
 src/rinchen/eval/{segment_scores,scoring,result,run_record,field_rules,robustness_input,targets}.py
 src/rinchen/eval/{report,report_runs,report_view,report_format,report_markdown,report_markdown_cells}.py
@@ -108,7 +107,7 @@ src/rinchen/tiny/{states,context,fixtures,corpus,fakes,data_stages,commands,comm
 src/rinchen/tiny/{suites,suite_matching,serve_stage,eval_stages,eval_readers,evaluate_facts,thresholds,pipeline,dry_run,graceful_runner}.py
 src/rinchen/tiny/{report,report_blocks,report_markdown,report_schema,report_shapes}.py
 src/rinchen/config/tiny.py src/rinchen/cli/{tiny,tiny_inputs,tiny_output}.py src/rinchen/eval/fixture_suites.py (write-only)
-src/rinchen/utils/{logged_process,integers}.py
+src/rinchen/utils/{logged_process,integers,logging,part_file,sampling,seed}.py
 src/rinchen/errors.py src/rinchen/__init__.py
 tests/ scripts/ plans/ reports/ manifests/
 manifests/ucd_standardized_variants.json
@@ -130,16 +129,21 @@ tests/support/ (planted corpus and alignments, fake embedders, tiny LID model,
   tiny_oracle, tiny_pipeline_runs, tiny_profiles, tiny_report_build, tiny_report_inputs, tiny_report_random,
   tiny_report_reference, tiny_report_scans, tiny_report_walk, tiny_scans, tiny_stage_inputs, tiny_threshold_inputs,
   tiny_gate, tiny_gate_processes, tiny_gate_runs, tiny_gate_controls, tiny_gate_hygiene,
-  ci_workflow, ci_workflow_edits, ci_workflow_breaks)
+  ci_workflow, ci_workflow_edits, ci_workflow_breaks, pseudo_text, sized_spm, community_files)
 scripts/build_spm_fixture.py (regenerates tests/fixtures/spm/tiny_corpus)
 scripts/build_script_conv_fixtures.py (reference TSV -> lexicon, golden words, tiny fixture)
 scripts/build_parallel_fixtures.py (regenerates tests/fixtures/parallel; a changed byte is a re-measurement, not an update)
+scripts/check_wiki.py (checks a clone of the Wiki; `just wiki-check WIKI_DIR`)
+scripts/{probe_env,build_sample_warc_fixture}.py scripts/build_pyonmttok/ (the Phase 0 probe, the WARC fixture, the pyonmttok build)
 data/{raw,clean,mined,synth,test}/ (gitignored content, tracked dirs)
 artifacts/ (gitignored; `just tiny` writes artifacts/tiny)
 vendor/wheels/ (committed binary wheels with no cp314 upstream release)
-vendor/fasttext-wheel-shim/ (pure-Python shim package, see DECISIONS.md)
-.github/workflows/{ci,release,nightly}.yml (ci.yml has the jobs gate and tiny)
+vendor/fasttext-wheel-shim/ (pure-Python shim package, see the Wiki page Decisions)
 ```
+
+The documents (runbooks, specs, plans, research, the stack, the verification
+log, the state and the decisions) live on the Wiki,
+https://github.com/btseee/rinchen/wiki, not in the repository.
 
 Note: `data/`, `align/`, and `convert/` under `src/rinchen/` from the old
 Phase 0-14 plan have no home in the new D0-D15 repo layout and were removed;
@@ -150,200 +154,26 @@ corpus construction, cleaning, or alignment, which are later milestones.
 
 ## Current phase
 
-Master plan switched 2026-10-29 to milestones D0-D15 (see below). D0, D1,
-and D2 are all done, all STOP gates fully met including green CI runs on
-`origin/main` (2026-11-02). D3 (Normalization & SentencePiece) is done: its
-STOP gate was met locally (2026-11-06), but only `tiny_1k` was ever trained
-(`student_64k`/`teacher_128k` are schema-validated only). D4 (Filtering &
-mining) is done: its STOP gate was met locally (2026-11-07) and branch
-`d4-filtering-mining` was fast-forwarded into `main` (unpushed); every threshold
-is an unvalidated prior because no real data exists, and the D3 gates assigned to
-D4 (abbreviation induction, o-like substitute counts, the traditional-script
-control-character audit) stay open. `main` is unpushed and no CI run covers D3,
-D4 or D5. D5 (Cyrillic/traditional converter) is done locally: branch
-`d5-script-converter` (cut from `main` at `4eac98f`) was fast-forwarded into `main`
-(unpushed); its STOP gate (the tiny converter exported and served through
-`ScriptConverter`) is met on the tiny fixture. It is
-a scaffold, not a quality converter: the rule baseline spells 237 of 1,022
-held-out dictionary words exactly, the tiny model memorises a 500-word fixture,
-the full profile was never trained, and the gates that need real script text or a
-Mongolian reader (the control-character audit, the render check, the review of the
-lexicon and the fallback) stay open. D6 (Synthetic data) is done locally on branch
-`d6-synthetic-data` (cut from `main` at `0d534a3`), not merged and not pushed, and no CI run
-covers it: its STOP gate (a tiny synth run through the CLI with a fake generator) is met on
-planted data. No generator, server, model or GPU ever ran (every client was tested against
-fakes), no real monolingual corpus exists, and the gates that need a real generator, real data
-or a Mongolian reader stay open. D7 (Multilingual ablations) is done locally on branch
-`d7-multilingual-ablations`, stacked on `d6-synthetic-data` (cut from it at `9973319`), not merged
-and not pushed, and no CI run covers it: its STOP gate (a tiny ablation of 2 variants trains and is
-evaluated through the real `rinchen train ablate` on the CPU) is met on toy templated data that
-saturates at chrF 96 to 99 and ranks nothing. No real corpus, no GPU run and no measured proxy
-config exist (`configs/eole/multilingual_proxy.yaml` and `ablation_priors.yaml` are schema-validated
-priors only); the gates that need them stay open. D8 (Teacher training) is done locally on branch
-`d8-teacher-training`, stacked on `d7-multilingual-ablations` (cut from it at `b1a8a47`), not merged and
-not pushed, and no CI run covers it: its STOP gate (a tiny teacher trains 200 CPU steps without NaN, the
-loss falls by at least 30 %, it resumes after a damaged checkpoint, completes and is averaged, through
-the real `rinchen train launch` and `average` and the real Eole) is met on toy templated data. It is
-machinery, not a teacher: no GPU was used (the one on this machine was not authorised), no real corpus
-exists, and `configs/eole/teacher.yaml` is a table of unmeasured priors; everything on a GPU (bf16,
-NCCL, multi-GPU, the 13 GB checkpoint write) and the quality of the teacher shape stay open. The
-whole-branch review of D8 ran: ready with fixes, no Critical finding, two Important ones (the process group of a
-crashed Eole leader was not killed, so the rank processes of a multi-GPU run could train on unlocked; the TensorBoard
-events landed outside the run directory) and seven Minor ones; the fix wave (two commits, gate 7187 passed, 1 skipped,
-10 deselected) fixed the two Important ones, a guard against a resumed checkpoint of another architecture and the
-wording of an unreadable-file message, and left four findings open on purpose (`DECISIONS.md`); a scoped re-review of
-the fix wave approved it with minors, and the one that needed code is fixed. D9 (Document-level) is done locally
-on branch `d9-document-level`, stacked on `d8-teacher-training` (cut from it at `993f32c`), not merged and not
-pushed, and no CI run covers it: its STOP gate (a tiny doc model, made by continuing the averaged tiny teacher on
-windows of 2 to 4 sentences joined with `<sep>` through the real `rinchen train docify` and `launch --continue-from`
-and the real Eole, decodes `<sep>`-aligned output for at least 90 % of held-out dev windows of each size, and the
-chunker returns one translation per input sentence for every toy test document) is met on toy templated documents:
-alignment .982/.978/.941 for the sizes 2, 3 and 4 after 2,500 continuation steps (1,000 steps, the spike's figure, did
-not reach 0.9 on the non-overlapping windows `docify` cuts; the threshold was not lowered). It is machinery, not a
-document model: no GPU was used (the one on this machine was not authorised), no real document corpus exists, and
-`configs/eole/teacher_doc.yaml` is a table of unmeasured priors; the mix with sentence-level data, the window sizes
-and the real continuation schedule are unmeasured, and everything on a GPU stays open. D9 found that Eole's
-vocabulary is the file of tokens the data showed (so `<doc>` and `<sep>` were `<unk>` to a teacher that never saw
-them) and added the vocabulary invariant: every vocabulary now holds every reserved symbol, which moved every D7 and
-D8 tiny-run number (the old values are kept as history in the runbooks). A combined review of the code ran: ready with
-fixes, one Critical (a document keyed without its corpus), five Important and twelve Minor findings; its fix wave
-(six `D9: fix ...` commits and `D9: review minors`, gate 8214 passed, 1 skipped, 10 deselected) fixed them and left
-six findings open on purpose (`docs/runbooks/09_document_level.md`, "Known limits"); a scoped re-review of that fix
-wave approved it with minors (no Critical or Important finding) and a second fix wave (`D9: re-review minors`, gate
-8252 passed, 1 skipped, 10 deselected) fixed an unstated vocabulary size that Eole's default would cut (`launch` now
-refuses it and names the value to state), `docify` on a split that makes no windows or on rows read without it, and
-the wording of the `average` guard; three limits stay documented (the `average` guard sees three lexical parents only,
-documents are keyed per `corpus` label and not per file, the `launch` pre-flight needs the SentencePiece model
-readable from the working directory when a size is stated). D10 (Distillation & students) is done locally on branch
-`d10-distillation`, stacked on `d9-document-level` (cut from it at `7d0c166`; code tip `233ba33`), not merged and not pushed,
-and no CI run covers it: its STOP gate (through the real `rinchen distill` commands, `rinchen train launch` and the real Eole
-and CTranslate2 on the CPU, a tiny teacher of 2,000 steps is exported, its KD corpus of the toy training sources is generated,
-a tiny student of 2 encoder and 1 decoder layers trains from random initialisation on that text mixed 1:1 with the originals,
-and its own CTranslate2 export decodes what Eole decodes) is met on toy templated data: teacher chrF 98.20, student 98.58,
-3,599 KD rows, CTranslate2 equal to Eole on 200 of 200 sentences, no threshold lowered. It is machinery, not a distillation
-result: the toy ranks nothing (three seeds of the student span 1.9 chrF), no GPU was used (the one on this machine was not
-authorised), no real corpus or teacher exists, and `configs/eole/student_server.yaml` and `student_edge.yaml` are tables of
-unmeasured priors; everything on a GPU (float16, int8, the export of a 1.1 B-parameter teacher, the real students' training) and
-the quality of any real KD stay open. D10 moved D5's converter call to `rinchen.export.eole_ct2`, exports a checkpoint of ours
-with a record and a manifest, reads the tag placement back from the checkpoint's saved config and refuses a statement that
-disagrees, and found that CTranslate2 is silent about an unknown tag, a cut hypothesis and a cut source (all guarded), that
-selecting by MBR over the toy teacher's n-best lowered the agreement with the references (top-1 is the default), and that Eole
-drops 5.2 % of the examples when KD rows are mixed in untagged and 0 % with the `<ft>` tag. A combined review of the code ran:
-ready with fixes, no Critical finding and two Important ones (the tag placement of an export was never checked; a KD hypothesis
-with an unknown or reserved piece passed the selection); its fix wave (`D10: fix ...` x 4 and `D10: review minors`, gate 9706
-passed, 1 skipped, 10 deselected) fixed both and left open on purpose the limits that `docs/runbooks/10_distillation.md` lists
-under "Known limits"; a scoped re-review of the fix wave approved it with minors (no Critical or Important finding) and a
-small wave of its own (`D10: re-review minors`, gate 9750 passed, 1 skipped, 10 deselected) fixed three of them (a message that named a private path that no
-longer exists, a saved config quoted unbounded and unescaped in a message, and a tag placement that nothing could check going
-unreported: `export` and `evaluate` now print whether it was checked or only stated) and documented the rest (the hidden
-directory a hard-killed export leaves, exports made before the check, shards made before `cc917e2`).
-D11 (Export, quantization, serving, CLI, package) is done locally on branch `d11-export-serving`, stacked on
-`d10-distillation` (cut from it at `b672aa8`; code tip `039d1d7`), not merged and not pushed, and no CI run covers it: its STOP
-gate ("`docker compose up` serves a tiny model") is met IN PARTS and the container part is UNMEASURED. Through the real `rinchen`
-commands and the real Eole and CTranslate2 on the CPU the tiny teachers are exported to float32, int8 and int8_float16 (a record
-`rinchen.json` replaces D10's `export.json`), strict parity passes (200 of 200 exact, mean |delta| 7.19e-7 per token for the
-source-tag teacher and 1.37e-6 for the target-tag one, against 1e-3; the 1e-3 bound is a float32 bound, int8 gave 1.14e-3), the
-int8 chrF drop is -0.06 (the gate allows 1.0), script masking leaves 0 forbidden letters in 500 outputs (96 leak without it),
-`rinchen.Translator` and `rinchen translate` agree with the engine, and `rinchen serve` (the compose command, run natively)
-answers 64 concurrent requests, all 200, p95 far below 2 s, counts them on `/metrics` and drains on SIGTERM (exit 143); no
-threshold was lowered. It is machinery, not a model: the toy saturates at chrF 98.2 and ranks nothing, no GPU was used (the one on
-this machine was not authorised; `auto` is refused everywhere, `--device cuda` is never run), no real model or corpus exists,
-`configs/serve/server.yaml` and `edge.yaml` are tables of unmeasured priors, and no image was pulled, built or run (the Dockerfile
-and the compose file are checked statically and the compose command natively). D11 found that `compute_type="auto"` quantises
-every export to int8 on a CPU, that Eole's score needs `length_penalty: none` and leaves out a forced target prefix that
-`score_batch` counts, that uvicorn exits by the re-raised signal and starts the lifespan before it binds (readiness and the drain
-are a refused connection on the wire), and that a document model writes `<sep>` after a lone sentence. A combined review by two
-reviewers ran: ready with fixes, no Critical finding and seven Important ones (a document export lost every sentence decoded
-alone; a reserved symbol in a request text silently changed the language; `torch` was dropped from the tool versions; a stop could
-take twice the shutdown timeout; `n_best` was judged against the wrong beam; a mistyped `RINCHEN_SERVE_*` variable was ignored;
-readiness is not observable over HTTP); its fix wave (nine commits, gate 11768 passed, 1 skipped, 10 deselected) fixed them and
-left open on purpose the limits that `docs/runbooks/11_serving.md` lists under "Known limits". A scoped re-review of the fix
-wave found that it needed one small fix (no Critical finding, one Important, eight Minor): the suppression list of a lone sentence of a document
-model still held `<sep>` in the script modes `always` and `retry`'s second pass, so the model ran on and invented text (`always` chrF 81.8
-against 88.2 unmasked on the gate's plain rows; 88.5 after the fix); a final wave of three commits (gate 11778 passed, 1 skipped, 10 deselected) fixed it and five of the minors
-and documented three (Kubernetes service links under the refused `RINCHEN_SERVE_` prefix, half of the stop budget for requests in flight,
-a 40-character echo of an unknown key).
-D12 (Robustness) is done locally on branch `d12-robustness`, stacked on `d11-export-serving` (cut from it at `23dc962`; code tip
-`ae4e816`), not merged and not pushed, and no CI run covers it: its STOP gate ("robustness block populated in tiny report") is met on the
-toy. Through the real `rinchen eval robustness` binary and the real Eole, CTranslate2 and SentencePiece on the CPU a tiny model trained for
-the purpose (6,000 steps, 187 s, byte-identical across trainings on this machine) is scored over a generated suite and `report.json` holds all
-six values at or above the floors (numbers 892 of 960 = 0.9292 against 0.90, placeholders 599 of 600, entities 447 of 480, terms 1044 of 1044,
-script purity 1.0, `mn_Mong` source retention 0.9976 against 0.95), while the controls collapse (hypotheses moved by 7 rows: numbers 3 of 960;
-the D11 teacher: 0 of 960 numbers and 0 of 600 placeholders; a glossary the model never writes: 0 of 1,044; placeholder indices 10 and up: 0 of
-28; script mask `off`: 101 of 900 rows under the purity floor); no floor was lowered. It is an instrument, not a mechanism: D12 builds no
-placeholder masking, no terminology engine and no `terminology` request field (this amends D11's T22; nobody owns them or the training data
-that would make a model use them), and the toy ranks nothing; no GPU was used (the one on this machine was not authorised; `auto` is refused,
-`--device cuda` is never run), no real corpus, glossary or model exists, and the conventions table, the 4-letter case suffix, the currency symbols
-and the 0.98 floor are priors. D12 found that a model trained on a digit-free corpus cannot read or write a digit while the engine says `ok`, that
-a model copies a placeholder only for the indices it was trained on (0 to 9 copied, 10 and up 0 of 28), that the engine refuses the inline
-terminology markers, and that the numbers metric needs a unit-aware matching and every value its coverage. A combined review by one reviewer ran:
-ready with fixes, no Critical finding and four Important ones (identical text failed the numbers metric when one value appeared twice with
-different units; the denominators of the values were invisible; `term_acc` is agreement with a glossary, not adherence; the per-row outcomes
-could not reproduce the retention); its fix wave (five commits, gate 13543 passed, 1 skipped, 10 deselected, in five parallel parts) fixed three,
-repaired a load race in one D8 test and left open on purpose the limits that `docs/runbooks/12_robustness.md` lists under "Known limits". The
-scoped re-review of the fix wave approved it with minors (no Critical, no Important); its final wave (three commits, gate 13,583 passed, 1 skipped, 10 deselected) gave a
-currency symbol to the number it touches (`$5 $7` against `$7 $5` is exact, `5 $7` against `7 $5` is not), made the surface-exact detail see the layout
-of a date (a copy-through echo is surface-exact on 568 of 960 again) and fixed five minors; the per-row `value_cyrl` supports a ratio-of-mean-sentence-chrF
-PROXY of the retention, not the corpus statistic, and D13's report must embed `robustness_coverage` beside the six-key block.
-D13 (Final eval and release tooling) is done locally on branch `d13-release`, stacked on `d12-robustness` (cut from it at `1a378d0`; code tip
-`413bc94`), not merged and not pushed, and no CI run covers it: its STOP gate ("tiny report.md + model card generated; dry-run hub upload (mock)") is met on the
-toy. Through the real `rinchen` binary and the real Eole, CTranslate2, SentencePiece and sacrebleu on the CPU, with no network and no token, the toy export of D12
-(`model.bin` `e28d1566...a6`) and the D11 teacher translate a FLORES-like fixture suite built from the toy; `rinchen eval run`, `eval report`, `release stage` and
-`release hub` (the dry run) write the results, the report, the model card and the nine-file upload plan: chrF++ 97.03, 99.05, 98.97 and 98.38 for the export
-against 36.50, 46.09, 29.30 and 31.67 for the teacher (floors 95.0 and 60.0), the paired difference +60.528, +52.965, +69.668 and +66.707 with p 0.001998,
-identical systems delta 0 with p exactly 1.0, a 5 % perturbation -3.274 to -4.030 with p 0.001998, three reruns byte-equal across hash seeds and locale, and the
-stage and the plan refusing a stray file, a changed byte, a symlink, a token-like line and an absolute path; no floor was lowered. It is an instrument and a release
-tool, not a verdict on a model: D13 measures, builds no mechanism and no neural scorer (COMET and MetricX enter only through a seam of score files; B1 to B4 stay open),
-the toy ranks nothing, no GPU was used (the one on this machine was not authorised; `auto` is refused, `--device cuda` is never run) and no network was used (`rinchen
-eval suite fetch` and `rinchen release hub --upload` were never run; the Hub, FLORES+, NTREX, NLLB, MADLAD, Hy-MT2 and GitHub Actions are unmeasured). D13 found that
-sacrebleu's per-segment statistics are integers and a corpus score is the score of their sums, that four of its tokenizers download a model on first use (the design
-spike's first run did: a disclosed slip), that its paired bootstrap calls a system against itself significant (so D13 has its own exact one), that the engine answers an
-untrained pair with `ok` in the wrong language, that D6's `CT2Translator` is silent about a vocabulary without its family's language tokens, and that
-`create_repo(exist_ok=True)` ignores `private` for an existing repository. A combined review by one reviewer ran: ready with fixes, no Critical finding and five
-Important ones (the report believed a re-digested result file; the card's evidence came from the whole report; flagged output failures and the dataset and revision were
-invisible in `report.md`; private-by-default did not hold for an existing repository); its fix wave (six commits, gate 17,666 passed, 1 skipped, 10 deselected, against
-13,583 at the end of D12) fixed them and eleven Minor findings and left open on purpose the limits that `docs/runbooks/13_release.md` lists under "Known limits". A scoped
-re-review of the fix wave (one independent reader) ran and approved it with minors: no Critical, no Important and seven Minor findings (a re-digested result could still plant a neural metric or, through the dataset of a suite, a
-heading; the devtest guard did not see the eval commands or an aliased dynamic import; two refusals did not say what to do; `--public` over a private repository said nothing; the card printed `n/a ()`; two sentences of the
-uploaded text named internal milestones); its final wave (seven commits, `2df73c1..413bc94`, 72 mutants, gate 17,852 passed, 1 skipped, 10 deselected) fixed all seven and left open that a re-digested
-result can still plant a free-text reason and D12's robustness block values, which the report cannot recompute; no reader has read the final wave.
-D14 (Maintenance loop) is done locally on branch `d14-maintenance`, stacked on `d13-release` (cut from it at `0f3f6ba`; code tip `52b9b3b`), not merged and not pushed, and no CI run
-covers it: its STOP gate ("nightly workflow green on tiny") is met ONLY as "the workflow's own command, read from `nightly.yml`, runs green natively on the CPU through a uv shim that never forwards
-the upgrade dry run"; GitHub Actions is UNMEASURED. Through the real `rinchen` binary and the real Eole, CTranslate2 and pytest on the CPU with the GPU hidden, `uv run --frozen --no-sync rinchen maintain
-check --out-dir maintain-out --cadence "$CADENCE"` (`CADENCE=nightly`, through `sh` with a `uv` shim first on `PATH`) exits 0 in about 150 s (doctor 13.2 s, the two nightly reruns 136.2 s) and writes a
-report, a Markdown summary and a manifest: the lock 187 entries and 186 names, 186 installed packages and none differing, the drift table of a HAND-WRITTEN sample (7 entries, 4 blocked by pin rules),
-numerics 1,110 passed (floor 1,100) and `parity_tiny` 13 passed, 188 `tool_versions` keys, the two documents byte-equal across hash seeds and free of paths, timestamps and the environment, `uv.lock`
-and `pyproject.toml` untouched, and the controls (a failing, shrunken or overrunning rerun, a bad uv output, a held package, the refusals, the interrupts) fail as they should; no floor was lowered.
-It is a CHECK and a schedule, not a verdict on any stack or model: it reports and never changes anything (nothing writes `uv.lock` or `pyproject.toml`, nothing upgrades, nothing asks a device question;
-an upgrade is an operator's procedure on a branch, `docs/runbooks/14_maintenance.md`), the reruns run on the toy and rank nothing, no GPU was used (the one on this machine was not authorised; the doctor's
-GPU check is never called) and no test or measurement reached a package index (the gate answers the dry run from a sample through a shim; one mutation run of Task 7 ran the real online dry run once in a
-copy of the tree by a slip, disclosed). `configs/maintain/maintain.yaml` (10 pin rules, 6 reruns) is a table of unvalidated priors. D14 found that uv's offline dry run fails for any change here, so the lines
-for an update, an add and a remove were never measured (a second-hand report of one real run is recorded as such and is not a fixture), that the dry run is blind to the 12 of 38 direct dependencies pinned
-with `==` (Eole, CTranslate2, sacrebleu, SentencePiece, torch ...), that a plain `uv run` locks and syncs first (so the workflow uses `--frozen --no-sync`), that the nightly job keeps no log, and that the
-floors have margins of 10 (`numerics`) and 0 (the other four reruns). A combined review by one independent reader ran: ready with fixes, no Critical and no Important finding and eleven Minor ones (the dry-run log
-judged from its first 64 KiB; a configured doctor skip that could silence a failure; a guard against self-selection by name only; a nightly manifest saying `<sha>-dirty`; an `--out-dir` that could be any
-project subdirectory; a false reason for the reruns `--rerun` leaves out; children inheriting tokens; the in-process doctor seeing the caller's device; and four more); its fix wave (14 commits,
-`83d09f5..ada92a1`, gate 20,443 passed, 1 skipped, 10 deselected against 19,818 before it and 17,852 at the end of D13, 119 mutants) fixed them and two minors deferred from Task 3 (uv's three elapsed
-spellings, UNMEASURED beyond `1ms`; `the JUnit report could not be read`), and left open on purpose the limits that `docs/runbooks/14_maintenance.md` lists under "Known limits". A scoped re-review of
-the fix wave (one independent reader) approved it with minors: no Critical, no Important, three Minor findings and three Nits; the controller fixed two of the minors in `52b9b3b` (the full gate was NOT run
-again after it and no reader has read it) and left open that the doctor's own `--help` children inherit the whole environment, the upper-case suffix rule for secrets and the guard by name. The open gates: everything GPU, the real PyPI state and the lines of a real change, GitHub Actions and its minutes budget, every real export, and the D3 to D13 gates.
-D15 (Tiny end-to-end pipeline) is done locally on branch `d15-tiny-pipeline`, stacked on `d14-maintenance` (cut from it at `412bf84`; code tip `08848c1`, after the 16 `D15: fix ...` commits of the review; `5dab820` ended the build), not merged and not pushed, and no CI run covers it: its STOP gate ("CI runs `just tiny` green on 3.14") is met ONLY as "the body of the `tiny` recipe, read from the `justfile` and run through `sh` with a uv shim first on `PATH`, runs
-green natively on the CPU"; GitHub Actions is UNMEASURED. Through the real `rinchen` binary and the real Eole, CTranslate2, SentencePiece and sacrebleu on the CPU with the GPU hidden and no network, `rinchen tiny run --profile tiny` takes seven committed fixture files (67,104 bytes, each pinned by SHA-256) through fifteen stages and writes `report.json` (schema `rinchen.tiny/1`), `report.md` and `manifest.json` in 113.1 s alone
-(121.0 s beside another pipeline; spike 120 to 158 s, 120.0 s under `taskset -c 0-3`; 370 s ARITHMETIC for a 4-core runner at D14's factor of 3, UNMEASURED): all EIGHT thresholds pass (`train_chrf` 99.3585 against 50.0 at 1,500 steps, not the master plan's 400, which gives 16.83 and fails; float32 parity 70 of 70 exact, mean abs delta 1.62e-06 against 1e-3; `int8_chrf_drop` 0.0; `script_purity` 1.0; `placeholder_acc` 1.0, 238 of 238; `wall_time` pass), every control fails as designed (400 steps,
-a flipped byte of an export or a fixture, placeholder indices never trained, a wrong script, a budget of 5 s, the three signals, the refusals) and a rerun in another directory under another hash seed, locale and time zone writes equal `report.json` bytes and equal model digests (the SentencePiece file differs: it embeds its paths); no floor was lowered. It is MACHINERY, not a verdict on any model: the fixtures are templated sentences, the model memorises a grammar of 37 nouns, the stand-ins of `--qe-fake` rank nothing, no GPU was used (the one on this machine
-was not authorised), no network was used, no real corpus, generator, LID, LaBSE, QE or neural scorer exists, and `just accept` stays a stub (the definition of done is a table in STATE.md and in the runbook). D15 added `rinchen tiny run` and the library `rinchen.tiny` (27 modules), the closed configuration `rinchen.config.tiny` with `configs/tiny/tiny.yaml`, the fixtures and their generator, the `tiny` recipe and the `tiny` job of `ci.yml`, one write-only module in D13's eval package (`eval.fixture_suites`) and a gate of four integration modules. It found that 400 steps misses the bound, that greedy
-decoding is what makes the robustness block exact, that D14's runner left `eole train` running after an interrupt (fixed in D15's own `GracefulRunner`; its limits are in the runbook) and that the real `report.md` printed the parity delta as `0.00`. The full gate gave 24,758 passed, 1 skipped, 10 deselected after Task 9 (24,759 collected against 20,451 at the end of D14) and 24,759 passed after the records (one more case of the content scan, for the new runbook).
-The combined review of the D15 code (two independent readers, `412bf84..8386aed`) found both "ready with fixes", no Critical finding, two Important ones (`report.md` printed a failing value as one that meets its bound, with two decimals: `train_chrf` 49.996 as `50.00 | fail`, `placeholder_acc` 237 of 238 as `1.00 | fail`, `parity_delta` 1.62e-06 as `0.00`; the `synth` stage was `ok` when the fake server answered nothing) and twelve Minor ones (a stage could be skipped for any closed reason, an `ok` stage dropped parts silently, the strict reader accepted what the writer cannot write, the interrupt control tolerated orphans for 10 s, any `--config` could lower the floors, the gate never checked the `uv` shim, a stage's whole detail dropped silently, the stand-in encoder rejects the authentic row `mm-0031`, the converter's five lines are read from a log that also holds stderr, the registry check compared link targets, wording). Its fix wave (16 commits `8386aed..08848c1`, code and tests only, a failing test first, no document touched) fixed both Important ones and nine of the Minor ones in three parts: one figure rule beside every bound (the real `report.md` now prints `1.622e-06`), the `stages` threshold and the report reader hardened, the loader refusing a bound below the master plan's, the closed check `synth_output`, the interrupt control's leak check read at once (a grace of at most 1.5 s), the shim check, and the skip rule for parts (`states.OWN_SKIP_REASONS`); a scoped re-review of the first two parts approved them with minors (no Critical, no Important, three Minor), all fixed by the third part, which no independent reader has read. Full gate at `08848c1`: 25,243 passed, 1 skipped, 10 deselected (24,759 at `8386aed`); the real pipeline's `report.md` is 3,218 bytes now (3,228 before). Left open on purpose, in the runbook's "Known limits": a stage's detail dropped silently, the null block of `report_blocks`, the converter's log and unjudged accuracy, the cause of the `mm-0031` rejection (the encoder keeps U+1802 and U+1803 glued to a word: 759 of 760 authentic rows pass), no control that shows `wall_time` failing, a lowered but self-consistent bound that still parses, the 1.5 s grace (UNMEASURED beyond a load average of 15) and one UNEXPLAINED flake of a D14 control under load. The `GracefulRunner` decision stays OPEN for the owner. The open gates: everything GPU, GitHub Actions and the minutes budget, the 4-core time, a real corpus, generator and scorers, `just accept`, and the D3 to D14 gates.
-Merged and pushed (2026-11-12, at the owner's request): `main` was fast-forwarded from `0d534a3` to the D15 tip and pushed to `origin/main`, so D6 to D15 are on `main` (there is no merge commit: the stack was linear; the ten branch refs stay local and were not pushed); the "not merged and not pushed" of the paragraphs of D6 to D15 above is the state when each was written. GitHub Actions had never run for D3 to D15: the first run is the one that push starts, and its result is UNMEASURED here.
-Next up: nothing of D15's own review is pending. D15 is the last milestone of the master plan; the `GracefulRunner` decision (D15's subclass, or the root fix in D14's `SubprocessRunner`) is the owner's, as are reading the first CI run, every GPU run and the real data and scorers. See `STATE.md`, `docs/runbooks/15_tiny_pipeline.md` and `docs/runbooks/14_maintenance.md`.
+Rinchen is pre-release: no real model, no real corpus and no released artifact
+exist. The machinery of every milestone, D0 to D15, is built and on `main`, and
+was measured on toy data only (templated fixture sentences: every number ranks
+nothing); no GPU was used anywhere. The first GitHub Actions run of the `tiny`
+job (run 43244678285) passed: pipeline step about 3 min 19 s, `wall_time`
+191.646 s. Open gates: everything GPU, a real corpus, generator and scorers, the
+4-core time, `just accept`, and the D3 to D14 gates. Details: the Wiki pages
+State (https://github.com/btseee/rinchen/wiki/State), Roadmap
+(https://github.com/btseee/rinchen/wiki/Roadmap) and Project-Status-History
+(https://github.com/btseee/rinchen/wiki/Project-Status-History).
 
 ## Evidence and full plan
 
 The current master plan — milestones D0-D15, repo layout, hard constraints,
-build-ourselves specs — lives in
-`docs/research/2026-10-29-rinchen-dev-agent-prompt.md`. The prior Phase 0-14
-plan, `docs/research/2026-10-28-python314-stack-and-prompt.md`, is superseded
-but kept as the evidence source for decisions already recorded in
-`DECISIONS.md` (the package wheel matrix, the pyonmttok/eole finding's
-origin). This file only carries the hard constraints and pointers; consult
-the master plan before pinning or changing any dependency.
+build-ourselves specs — lives on the Wiki page Research-Master-Plan-D0-D15
+(https://github.com/btseee/rinchen/wiki/Research-Master-Plan-D0-D15). The prior
+Phase 0-14 plan, the Wiki page Research-Python-314-Stack-and-Prompt
+(https://github.com/btseee/rinchen/wiki/Research-Python-314-Stack-and-Prompt),
+is superseded but kept as the evidence source for decisions already recorded on
+the Wiki page Decisions (https://github.com/btseee/rinchen/wiki/Decisions; the
+package wheel matrix, the pyonmttok/eole finding's origin). This file only
+carries the hard constraints and pointers; consult the master plan before
+pinning or changing any dependency.
