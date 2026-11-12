@@ -30,6 +30,8 @@ CODE_OF_CONDUCT: Final = ".github/CODE_OF_CONDUCT.md"
 CONTRIBUTING: Final = ".github/CONTRIBUTING.md"
 SECURITY: Final = ".github/SECURITY.md"
 PULL_REQUEST_TEMPLATE: Final = ".github/PULL_REQUEST_TEMPLATE.md"
+ACCESSIBILITY: Final = "ACCESSIBILITY.md"
+README: Final = "README.md"
 ISSUE_CONFIG: Final = ".github/ISSUE_TEMPLATE/config.yml"
 # The issue forms and the labels each one puts on an issue. The labels `bug`, `enhancement` and
 # `documentation` are GitHub's defaults; `accessibility` is for the owner to create.

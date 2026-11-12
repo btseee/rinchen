@@ -93,6 +93,12 @@ Never:
 
 The GPU is optional and the CPU is the default. The gate and the tiny pipeline need no GPU, and commands that take a device, such as `rinchen translate` and `rinchen serve`, use the CPU unless you ask for another.
 
+## Accessibility
+
+Documentation, messages and output are for everyone, including people who use assistive technology. Write plain language, keep headings in order, give links text that says where they go, give images a text alternative, and do not carry meaning by color alone.
+
+The [accessibility statement](../ACCESSIBILITY.md) lists what the project does and the limits it knows about, and says how to report a barrier.
+
 ## Documentation
 
 The long-form documentation lives on the [project Wiki](https://github.com/btseee/rinchen/wiki). Its pages are being moved there, so the Wiki home is the place to start.

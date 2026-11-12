@@ -28,6 +28,7 @@
     <li><a href="#development">Development</a></li>
     <li><a href="#roadmap">Roadmap</a></li>
     <li><a href="#contributing">Contributing</a></li>
+    <li><a href="#community">Community</a></li>
     <li><a href="#license">License</a></li>
   </ol>
 </details>
@@ -327,6 +328,16 @@ Contributions are welcome.
 7. Push the branch and open a pull request.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+## Community
+
+- [Code of conduct](.github/CODE_OF_CONDUCT.md): how we treat each other.
+- [Contributing guide](.github/CONTRIBUTING.md): setup, tests, commits and pull requests.
+- [Security policy](.github/SECURITY.md): how to report a vulnerability in private.
+- [Accessibility statement](ACCESSIBILITY.md): what the project does, its limits, and how to report a barrier.
+- [Project Wiki](https://github.com/btseee/rinchen/wiki): the long-form documentation.
+
+To report a bug, ask for a feature, or report a documentation or accessibility problem, open an issue and choose a form.
 
 ## License
 

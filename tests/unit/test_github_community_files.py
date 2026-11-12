@@ -26,8 +26,10 @@ import yaml
 
 from rinchen.config.serve import ServeConfig
 from rinchen.maintain.commands import child_environment
+from rinchen.tiny.report_shapes import text_problem
 from tests.support import community_files
 from tests.support.community_files import (
+    ACCESSIBILITY,
     ADVISORY_URL,
     CODE_OF_CONDUCT,
     CONTRIBUTING,
@@ -39,6 +41,7 @@ from tests.support.community_files import (
     MAX_WORDS_IN_A_PARAGRAPH,
     OWNER_ADDRESS,
     PULL_REQUEST_TEMPLATE,
+    README,
     ROOT,
     SECURITY,
     URL,
@@ -58,6 +61,7 @@ from tests.support.community_files import (
     section,
     slug,
     squeezed,
+    version_controlled_files,
 )
 from tests.unit.test_d13_content_rules import NEEDLE_CODE_POINTS
 
@@ -66,10 +70,19 @@ MARKDOWN_FILES: Final = (
     CONTRIBUTING,
     SECURITY,
     PULL_REQUEST_TEMPLATE,
+    ACCESSIBILITY,
 )
 NEW_FILES: Final = (*MARKDOWN_FILES, ISSUE_CONFIG, *ISSUE_FORMS)
 # The files that name the address of the owner, and the only ones that may.
-HOLDERS_OF_THE_ADDRESS: Final = (CODE_OF_CONDUCT, SECURITY)
+HOLDERS_OF_THE_ADDRESS: Final = (CODE_OF_CONDUCT, SECURITY, ACCESSIBILITY)
+# The last heading of the README today is named by its code points, so that this file holds no word of
+# the content rules; the Community section has to come before it, if the README still has it.
+README_LAST_HEADING: Final = "".join(map(chr, (76, 105, 99, 101, 110, 115, 101)))
+GOLDEN_REPORTS: Final = (
+    "tests/fixtures/tiny/golden_report.md",
+    "tests/fixtures/eval/golden_report.md",
+    "tests/fixtures/maintain/golden_report.md",
+)
 
 
 # ---- every file ----------------------------------------------------------------------------------------
@@ -263,6 +276,7 @@ def test_the_contributing_guide_has_its_sections() -> None:
         "Pull requests",
         "Project rules",
         "Documentation",
+        "Accessibility",
     ):
         assert wanted in titles, wanted
 
@@ -368,10 +382,11 @@ def test_the_documentation_section_links_the_wiki_home() -> None:
     assert WIKI_URL in [target for _, target in links(documentation)]
 
 
-def test_the_contributing_guide_points_at_the_conduct_and_security_files() -> None:
+def test_the_contributing_guide_points_at_the_other_community_files() -> None:
     targets = [target for _, target in links(read_text(CONTRIBUTING))]
 
     assert "CODE_OF_CONDUCT.md" in targets and "SECURITY.md" in targets
+    assert "../ACCESSIBILITY.md" in targets
 
 
 # ---- the security policy ----------------------------------------------------------------------------------
@@ -492,8 +507,11 @@ def test_no_module_of_the_library_looks_for_a_token_file() -> None:
         for name in names
         if name in path.read_text(encoding="utf-8")
     ]
+    policy = read_text(SECURITY)
 
     assert found == []
+    assert "never opens a token file" in policy
+    assert [name for name in names if name in policy] == []
 
 
 def test_a_child_process_of_the_pipeline_gets_no_token_and_stays_offline() -> None:
@@ -547,3 +565,238 @@ def test_the_pull_request_template_asks_for_the_checks_the_project_relies_on() -
         "accessibility",
     ):
         assert wanted in checklist, wanted
+
+
+# ---- the accessibility statement --------------------------------------------------------------------------
+
+FORM_LINK: Final = (
+    "https://github.com/btseee/rinchen/issues/new?template=accessibility.yml"
+)
+OVERCLAIMS: Final = (
+    "conforms to",
+    "is compliant",
+    "fully accessible",
+    "meets wcag",
+    "fully conformant",
+    "certified",
+)
+
+
+def test_the_statement_has_its_sections() -> None:
+    titles = [title for _, title in headings(read_text(ACCESSIBILITY))]
+
+    for wanted in (
+        "Our commitment",
+        "Scope",
+        "What the project does",
+        "Known limitations",
+        "Standards",
+        "Writing with accessibility in mind",
+        "Reporting a barrier",
+        "Severity",
+        "What to expect",
+        "Ownership and feedback",
+    ):
+        assert wanted in titles, wanted
+
+
+def test_the_statement_aims_at_wcag_2_2_aa_and_claims_no_conformance() -> None:
+    text = read_text(ACCESSIBILITY)
+    standards = section(text, "Standards")
+
+    assert "WCAG" in standards and "2.2" in standards and "Level AA" in standards
+    assert "do not claim" in standards
+    assert [phrase for phrase in OVERCLAIMS if phrase in text.lower()] == []
+
+
+def test_the_statement_says_which_texts_it_covers_and_which_it_does_not() -> None:
+    scope = section(read_text(ACCESSIBILITY), "Scope")
+
+    for wanted in (
+        "Wiki",
+        "README",
+        "--help",
+        "report.md",
+        "issue forms",
+        "pull request template",
+        "error messages",
+        "rinchen serve",
+    ):
+        assert wanted in scope, wanted
+
+
+def test_the_statement_names_the_limits_that_the_repository_shows() -> None:
+    limits = section(read_text(ACCESSIBILITY), "Known limitations")
+
+    for wanted in (
+        "has not been evaluated",
+        "screen reader",
+        "traditional Mongolian script",
+        "vertically",
+        "font",
+        "mn_Mong",
+        "--help",
+        "back to top",
+        "ten columns",
+        "English",
+    ):
+        assert wanted in limits, wanted
+
+
+def test_the_statement_says_how_to_report_and_what_to_expect() -> None:
+    text = read_text(ACCESSIBILITY)
+    reporting = section(text, "Reporting a barrier")
+    expect = section(text, "What to expect")
+
+    assert FORM_LINK in [target for _, target in links(reporting)]
+    assert OWNER_ADDRESS in reporting
+    assert "do not have to" in reporting
+    assert "7 days" in expect and "14 days" in expect
+    for level in ("Critical", "Serious", "Moderate", "Minor"):
+        assert level in section(text, "Severity"), level
+
+
+def test_a_link_to_an_issue_form_names_a_form_that_exists() -> None:
+    named = {
+        match
+        for path in MARKDOWN_FILES
+        for match in re.findall(
+            r"issues/new\?template=([A-Za-z0-9_.-]+)", read_text(path)
+        )
+    }
+
+    assert "accessibility.yml" in named
+    for name in named:
+        assert (ROOT / ".github" / "ISSUE_TEMPLATE" / name).is_file(), name
+
+
+def test_the_readme_gives_its_logo_a_text_alternative() -> None:
+    logos = re.findall(r'<img[^>]*alt="([^"]+)"', read_text(README))
+
+    assert logos, "the statement says the logo has a text alternative"
+
+
+def test_the_logo_is_the_only_image_of_the_repository() -> None:
+    suffixes = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".mp4", ".webm"}
+    images_held = [
+        path.relative_to(ROOT).as_posix()
+        for path in version_controlled_files()
+        if path.suffix.lower() in suffixes
+    ]
+
+    assert images_held == ["images/logo.png"]
+
+
+def test_the_reports_are_ascii_tables_with_header_rows_and_the_widest_has_ten_columns() -> (
+    None
+):
+    widest = 0
+    for path in GOLDEN_REPORTS:
+        lines = read_text(path).splitlines()
+        assert non_ascii_lines((ROOT / path).read_bytes()) == [], path
+        separators = [
+            n for n, line in enumerate(lines) if re.fullmatch(r"\|( -+ \|)+", line)
+        ]
+        assert separators, path
+        for number in separators:
+            assert number > 0 and lines[number - 1].startswith("| "), (path, number)
+            widest = max(widest, lines[number].count("|") - 1)
+
+    assert widest == 10
+
+
+def test_the_tiny_report_refuses_a_text_that_is_not_printable_ascii() -> None:
+    assert text_problem("caf" + chr(233)) == "is not printable ASCII"
+    assert text_problem("plain words") is None
+
+
+def test_the_commands_write_plain_lines_with_no_color_or_drawing_of_their_own() -> None:
+    markers = (
+        r"\bsecho\(",
+        r"typer\.style\(",
+        r"\bfg=",
+        r"^\s*(from|import) rich\b",
+        r"\bprogressbar\b|\btqdm\b",
+    )
+    sources = sorted((ROOT / "src" / "rinchen").rglob("*.py"))
+    found = [
+        (path.name, marker)
+        for path in sources
+        for marker in markers
+        if re.search(marker, path.read_text(encoding="utf-8"), re.MULTILINE)
+    ]
+    commands = sorted((ROOT / "src" / "rinchen" / "cli").glob("*.py"))
+
+    assert len(commands) > 30
+    assert found == []
+    assert [p.name for p in commands if non_ascii_lines(p.read_bytes())] == []
+    escapes = [
+        p.name for p in commands if re.search(r"\\x1b|\\033", p.read_text("utf-8"))
+    ]
+    assert escapes == []
+
+
+def test_the_doctor_marks_a_check_with_a_word_and_not_with_a_color() -> None:
+    source = read_text("src/rinchen/cli/doctor.py")
+
+    assert '{"pass": "OK", "fail": "FAIL", "skip": "SKIP"}' in source
+    assert 'f"[{marker}] {result.check_id}: {result.message}"' in source
+
+
+def test_the_service_answers_every_error_in_one_shape_with_a_code_and_a_message() -> (
+    None
+):
+    tree = ast.parse(read_text("src/rinchen/serve/schemas.py"))
+    classes = {n.name: n for n in tree.body if isinstance(n, ast.ClassDef)}
+
+    def attributes(name: str) -> set[str]:
+        return {
+            node.target.id
+            for node in classes[name].body
+            if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
+        }
+
+    assert attributes("ErrorBody") == {"code", "message"}
+    assert attributes("ErrorResponse") == {"error"}
+
+
+# ---- the README -----------------------------------------------------------------------------------------
+
+
+def test_the_readme_has_a_community_section_listed_in_its_contents() -> None:
+    text = read_text(README)
+    level_two = [title for level, title in headings(text) if level == 2]
+
+    assert "Community" in level_two
+    assert '<li><a href="#community">Community</a></li>' in text
+    assert slug("Community") == "community"
+    if README_LAST_HEADING in level_two:
+        assert level_two.index("Community") < level_two.index(README_LAST_HEADING)
+
+
+def test_the_community_section_links_the_five_places_with_descriptive_text() -> None:
+    community = section(read_text(README), "Community")
+    found = links(community)
+
+    assert {target for _, target in found} == {
+        ".github/CODE_OF_CONDUCT.md",
+        ".github/CONTRIBUTING.md",
+        ".github/SECURITY.md",
+        "ACCESSIBILITY.md",
+        WIKI_URL,
+    }
+    for label, target in found:
+        assert label.strip().lower() not in VAGUE_LINK_TEXTS, label
+        if not target.startswith("https://"):
+            assert (ROOT / target).is_file(), target
+
+
+def test_the_community_section_is_short_plain_ascii_and_free_of_excluded_words() -> (
+    None
+):
+    community = section(read_text(README), "Community")
+
+    assert len([line for line in community.splitlines() if line.strip()]) <= 12
+    assert non_ascii_lines(community.encode("utf-8")) == []
+    assert excluded_words(community) == []
+    assert OWNER_ADDRESS not in community
