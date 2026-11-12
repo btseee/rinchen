@@ -546,7 +546,10 @@ def forbidden_gpu_findings(path: Path) -> list[str]:
             isinstance(node, ast.alias) and node.name.split(".")[-1] == _GPU_COUNT_NAME
         ):
             found.append(f"import of {node.name}")
-        elif isinstance(node, ast.Constant) and isinstance(node.value, str):
-            if _GPU_TOOL_STRING in node.value or _GPU_COUNT_NAME in node.value:
-                found.append(f"line {node.lineno}: a string naming a device query")
+        elif (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and (_GPU_TOOL_STRING in node.value or _GPU_COUNT_NAME in node.value)
+        ):
+            found.append(f"line {node.lineno}: a string naming a device query")
     return found

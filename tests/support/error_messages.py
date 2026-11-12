@@ -108,14 +108,17 @@ def _expressions(argument: ast.expr) -> list[str]:
             if _is_literal(node.left):
                 found.append(ast.unparse(node.right))
                 bare = False
-        elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
-            if _is_literal(node.left) or _is_literal(node.right):
-                found += [
-                    ast.unparse(side)
-                    for side in (node.left, node.right)
-                    if not _is_literal(side) and not isinstance(side, ast.BinOp)
-                ]
-                bare = False
+        elif (
+            isinstance(node, ast.BinOp)
+            and isinstance(node.op, ast.Add)
+            and (_is_literal(node.left) or _is_literal(node.right))
+        ):
+            found += [
+                ast.unparse(side)
+                for side in (node.left, node.right)
+                if not _is_literal(side) and not isinstance(side, ast.BinOp)
+            ]
+            bare = False
     if bare:
         found.append(ast.unparse(argument))
     return found

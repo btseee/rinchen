@@ -227,9 +227,10 @@ def profile_branches(source: str) -> list[int]:
         elif isinstance(node, ast.match_case):
             if _pattern_names_a_profile(node.pattern):
                 lines.append(node.pattern.lineno)
-        elif isinstance(node, ast.Dict):
-            if any(key is not None and _is_profile_name(key) for key in node.keys):
-                lines.append(node.lineno)
+        elif isinstance(node, ast.Dict) and any(
+            key is not None and _is_profile_name(key) for key in node.keys
+        ):
+            lines.append(node.lineno)
     return sorted(lines)
 
 
