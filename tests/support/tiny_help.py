@@ -20,7 +20,8 @@ import re
 import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Final
+from pathlib import Path
+from typing import Any, Final, get_args, get_type_hints
 
 import typer.main
 from typer.testing import CliRunner
@@ -36,7 +37,12 @@ _OPTION_LINE: Final = re.compile(
 )
 _USAGE_LINE: Final = re.compile(r"^ Usage: rinchen (.*)$")
 _TYPE_START: Final = re.compile(r"^(<|\d+\.\.\d+)")
+# Typer prints a type for a flag too; a flag is the one kind of option that takes no value.
+_FLAG_TYPE: Final = "<bool>"
+# A path, and a repeated path.
+_PATH_TYPES: Final = ("<path>", "<list[Path]>")
 HELP: Final = "--help"
+_HELP_COLUMNS: Final = "200"
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,8 +59,11 @@ class CommandTable:
 
 
 def help_text(words: Sequence[str]) -> str:
-    """The `--help` of `rinchen <words>`; the exit code must be 0."""
-    result = CliRunner().invoke(app, [*words, HELP], env={"NO_COLOR": "1"})
+    """The `--help` of `rinchen <words>`; the exit code must be 0. The terminal is wide: at 80
+    columns the type column Typer prints for every option cuts a long negative flag's name."""
+    result = CliRunner().invoke(
+        app, [*words, HELP], env={"NO_COLOR": "1", "COLUMNS": _HELP_COLUMNS}
+    )
     assert result.exit_code == 0, (
         f"--help of {' '.join(words)} exited {result.exit_code}"
     )
@@ -78,8 +87,9 @@ def help_table(*words: str) -> CommandTable:
         rest = rest.strip().strip(BORDER).strip()
         option = Option(
             required=marker == "*",
-            takes_value=_TYPE_START.match(rest) is not None,
-            path_valued=rest.startswith("<path>"),
+            takes_value=_TYPE_START.match(rest) is not None
+            and not rest.startswith(_FLAG_TYPE),
+            path_valued=rest.startswith(_PATH_TYPES),
         )
         for name in (first, second):
             if name is not None and name != HELP:
@@ -102,7 +112,9 @@ def click_table(*words: str) -> tuple[CommandTable, frozenset[str]]:
     options: dict[str, Option] = {}
     repeatable: set[str] = set()
     positionals = 0
-    for param in _command(words).params:
+    command = _command(words)
+    hints = get_type_hints(command.callback)
+    for param in command.params:
         if param.param_type_name == "argument":
             positionals += 1
             continue
@@ -110,7 +122,7 @@ def click_table(*words: str) -> tuple[CommandTable, frozenset[str]]:
         option = Option(
             required=param.required,
             takes_value=not param.is_flag,
-            path_valued=param.type.name == "path",
+            path_valued=param.name in hints and _names_a_path(hints[param.name]),
         )
         for name in [*param.opts, *param.secondary_opts]:
             if name != HELP:
@@ -118,6 +130,12 @@ def click_table(*words: str) -> tuple[CommandTable, frozenset[str]]:
                 if param.multiple:
                     repeatable.add(name)
     return CommandTable(options, positionals), frozenset(repeatable)
+
+
+def _names_a_path(hint: Any) -> bool:
+    """Whether a parameter's annotation is a path, an optional path or a list of paths: read from
+    the command's own function, since Typer's parameter objects no longer expose a click type."""
+    return hint is Path or any(_names_a_path(inner) for inner in get_args(hint))
 
 
 def check_argument_list(argv: Sequence[str], words: Sequence[str]) -> list[str]:

@@ -22,6 +22,7 @@ import pytest
 
 from rinchen.tiny import commands
 from tests.support.tiny_help import (
+    Option,
     check_argument_list,
     click_table,
     help_table,
@@ -459,6 +460,27 @@ def test_the_help_reader_agrees_with_the_command_objects(
 
     assert from_text == from_objects
     assert from_text.options
+
+
+def test_the_help_reader_reads_flags_ranges_and_repeated_paths() -> None:
+    # Typer prints a type for every option, a flag's included (`<bool>`), and a repeated path
+    # as `<list[Path]>`: a flag takes no value, a range and a path do.
+    flag = Option(required=False, takes_value=False, path_valued=False)
+    tiny = help_table("tiny", "run")
+    report = help_table("eval", "report")
+
+    assert tiny.options["--dry-run"] == flag
+    assert tiny.options["--qe-fake"] == tiny.options["--no-qe-fake"] == flag
+    assert tiny.options["--threads"] == Option(
+        False, takes_value=True, path_valued=False
+    )
+    assert tiny.options["--out-dir"] == Option(
+        False, takes_value=True, path_valued=True
+    )
+    assert report.options["--run"] == Option(True, takes_value=True, path_valued=True)
+    assert report.options["--baseline"] == Option(
+        False, takes_value=True, path_valued=False
+    )
 
 
 SPM: Final = commands.spm_train(at("spm.yaml"))
