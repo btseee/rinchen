@@ -172,6 +172,16 @@ def is_running(pid: int) -> bool:
     return state != "Z"  # a zombie has exited; only its parent has not reaped it
 
 
+def kill_if_running(pid: int) -> None:
+    """SIGKILL a process of this test that still runs. One that exited since `is_running` looked at it is
+    gone, which is what the cleanup wants: it is not an error."""
+    if is_running(pid):
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
 def lock_is_held(lock: Path) -> bool:
     descriptor = os.open(lock, os.O_RDONLY)
     try:
@@ -384,11 +394,30 @@ def test_a_crashed_eole_leaves_no_rank_running_and_the_next_launch_is_accepted(
         second_survived = not wait_until_gone(second_rank)
     finally:
         for pid in ranks():
-            if is_running(pid):
-                os.kill(pid, signal.SIGKILL)
+            kill_if_running(pid)
 
     assert not first_survived, "the rank of the crashed Eole is still running"
     assert not lock_held
     assert len(ranks()) == 2
     assert not second_survived, "the rank of the second crashed Eole is still running"
     assert (world.run_dir / "launch" / "attempt-2.log").exists()
+
+
+def test_the_cleanup_of_a_rank_that_ended_after_it_was_looked_at_is_not_an_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The race of a check and then a kill: `is_running` saw the process, it exited before `os.kill`
+    # (a loaded machine makes the gap long enough: the first clean-checkout run of CI-like tests hit it).
+    # No real process is signalled: a pid that has ended may be given to another process.
+    signalled: list[int] = []
+
+    def ended(pid: int, number: int) -> None:
+        signalled.append(pid)
+        raise ProcessLookupError(pid)
+
+    monkeypatch.setitem(globals(), "is_running", lambda pid: True)
+    monkeypatch.setattr(os, "kill", ended)
+
+    kill_if_running(4242)
+
+    assert signalled == [4242]
