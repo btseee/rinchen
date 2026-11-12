@@ -5,14 +5,16 @@ description = "Open-source, Mongolian-centric machine translation trained from s
 requires-python = "==3.14.*"
 dependencies = [
     "torch==2.14.1",
-    "eole==0.6.4",
+    "eole==0.6.7",
+    # Only because Eole's CLI imports it without declaring it (datasets 5.2.0 no longer brings it).
+    "aiohttp",
     "pyonmttok==1.38.1",
-    "ctranslate2==4.8.4",
-    "transformers==5.21.0",
+    "ctranslate2==4.9.0",
+    "transformers==5.22.2",
     "tokenizers==0.23.3",
-    "sentencepiece==0.2.1",
+    "sentencepiece==0.2.2",
     "sacrebleu==2.6.0",
-    "kiwipiepy==0.24.0",
+    "kiwipiepy==0.24.1",
     "fasttext-new==0.1.0",
     "fasttext-wheel==0.9.2",
     "datasketch==2.0.0",
@@ -92,10 +94,6 @@ packages = ["src/rinchen"]
 
 [tool.pytest.ini_options]
 pythonpath = ["scripts"]
-filterwarnings = [
-    # sentencepiece's SWIG bindings emit these when imported on Python 3.14.
-    "ignore:builtin type Swig.* has no __module__ attribute:DeprecationWarning",
-]
 markers = [
     "network: tests that make real network calls",
     "subprocess: tests that spawn real subprocesses",
@@ -115,5 +113,5 @@ extend-exclude = ["docs/"]
 
 [[tool.mypy.overrides]]
 # None ships usable type information (no py.typed / stubs not installed).
-module = ["ctranslate2", "datasketch", "eole", "eole.*", "fasttext", "regex", "sentencepiece"]
+module = ["ctranslate2", "datasketch", "eole", "eole.*", "fasttext", "regex"]
 ignore_missing_imports = true
