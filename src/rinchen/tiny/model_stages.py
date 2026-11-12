@@ -196,18 +196,21 @@ def _synth(stage: StageCommands, seed: int) -> Mapping[str, Any]:
         "rows": rows,
         "chat_requests": answered,
     }
-    if not _made_every_row(counts["counts"], rows):
+    if not _made_every_row(counts["counts"], rows, len(ctx.fixtures.mono)):
         raise StageStopped(StageRecord("synth", "fail", SYNTH_CHECK), facts)
     return facts
 
 
-def _made_every_row(counts: Mapping[str, int], rows: int) -> bool:
-    """A server that answers nothing still lets `synth run` exit 0, with nothing selected and no row:
-    a run is complete when every source was selected and the corpus holds one row for each."""
+def _made_every_row(counts: Mapping[str, int], rows: int, fed: int) -> bool:
+    """A server that answers nothing still lets `synth run` exit 0, with nothing selected and no row, and a
+    run that read only part of its input would look whole: a run is complete when it read as many sources as
+    the `fed` rows of the monolingual corpus the stage wrote, selected every one of them and made one row
+    for each."""
     return (
         rows > 0
         and rows == counts["selected"]
         and counts["selected"] == counts["sources"]
+        and counts["sources"] == fed
     )
 
 
@@ -219,7 +222,8 @@ def run_synth(ctx: StageContext, seed: int) -> StageResult:
     The server is stopped, its socket closed and its thread joined however the stage ends, an
     exception of the runner included. The facts are the counts of the run (`counts.json`), the rows of
     its corpus and the requests the server answered. The stage fails the check `synth_output` (with
-    the facts) when a source was not selected or the corpus does not hold one row for each selected
-    source, or none: the command exits 0 for a server that answered nothing.
+    the facts) when the run read other sources than the rows of the fixture it was fed, a source was
+    not selected or the corpus does not hold one row for each selected source, or none: the command
+    exits 0 for a server that answered nothing.
     """
     return run_stage(ctx, "synth", lambda stage: _synth(stage, seed))

@@ -18,9 +18,10 @@ Gates (every floor a literal of `tests/support/tiny_gate.py` and never lowered):
         model) and the token-ratio note of `filter.length`, nothing else; the eight thresholds `pass`
         (`train_chrf` at least 50.0, `parity_exact` at least 0.95, `parity_delta` at most 1e-3,
         `int8_chrf_drop` at most 1.0, `script_purity` 1.0, `placeholder_acc` 1.0, `wall_time` at most 1,200
-        and the `stages` threshold); the `synth` block shows every source selected and one row for each and the
-        `train` block shows back-translated rows in the mix (`synth_problems`: no stage and no threshold reads
-        them, and a server that answers nothing still lets the synthetic command exit 0); the shim's log holds
+        and the `stages` threshold); the `synth` block shows every row of the monolingual fixture read as a
+        source, every source selected and one row for each, and the `train` block shows back-translated rows in
+        the mix (`synth_problems`: no stage and no threshold reads them, and a server that answers nothing
+        still lets the synthetic command exit 0); the shim's log holds
         one `run` call and no refusal
     R2  `report.md` is the rendering of `report.json` and both documents hold no absolute path, date or time,
         duration key, value of the environment, secret by its shape or text of a fixture
@@ -85,6 +86,7 @@ from tests.support.tiny_gate import (
     RecipeRun,
     absolute_paths,
     duration_keys,
+    fixture_mono_rows,
     fixture_text_hits,
     fixture_texts,
     leaked_values,
@@ -233,7 +235,7 @@ def test_the_report_passes_and_lists_the_fifteen_stages_in_order_all_ok(
 def test_the_synthetic_run_selected_every_source_and_the_training_mix_holds_its_rows(
     tiny_report: dict[str, Any], record_property: Any
 ) -> None:
-    assert synth_problems(tiny_report) == []
+    assert synth_problems(tiny_report, fixture_mono_rows(FIXTURES)) == []
 
     synth = tiny_report["blocks"]["synth"]
     record_property("synth_counts", synth["counts"])

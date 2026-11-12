@@ -69,6 +69,7 @@ __all__ = [
     "absolute_paths",
     "duration_keys",
     "finish",
+    "fixture_mono_rows",
     "fixture_text_hits",
     "fixture_texts",
     "guarded_environment",
@@ -462,14 +463,27 @@ def _whole_number(document: object, *keys: str) -> int | None:
     return document if type(document) is int else None
 
 
-def synth_problems(report: Mapping[str, Any]) -> list[str]:
+# The monolingual fixture the synthetic stage is fed (the file that `configs/tiny/tiny.yaml` pins by digest).
+_MONO_FIXTURE: Final = "mono_khk_Cyrl.tsv"
+
+
+def fixture_mono_rows(directory: Path) -> int:
+    """The rows of the monolingual fixture in `directory`: the non-blank lines of `mono_khk_Cyrl.tsv` after its
+    header, counted from the file and not through `rinchen.tiny.fixtures`, so that the number a run was fed
+    does not come from the code under test."""
+    lines = (directory / _MONO_FIXTURE).read_text(encoding="utf-8").splitlines()
+    return sum(1 for line in lines[1:] if line.strip())
+
+
+def synth_problems(report: Mapping[str, Any], fed: int) -> list[str]:
     """What is wrong with the back-translated rows of a report, as sentences; an empty list when nothing is.
 
-    The `synth` block must show every source selected (`counts.selected` equal to `counts.sources`) and a
-    corpus of one row for each (`rows` above zero and equal to `counts.selected`), and the `train` block must
-    show back-translated rows in the training mix (`bt_rows` above zero). A key that is missing, or a figure
-    that is no whole number, is a problem of its own and never a pass. A sentence holds figures and key
-    names, never a text of the report."""
+    `fed` is the number of rows of the monolingual fixture the run was given (`fixture_mono_rows`). The
+    `synth` block must show every one of them read as a source (`counts.sources` equal to `fed`), every source
+    selected (`counts.selected` equal to `counts.sources`) and a corpus of one row for each (`rows` above zero
+    and equal to `counts.selected`), and the `train` block must show back-translated rows in the training mix
+    (`bt_rows` above zero). A key that is missing, or a figure that is no whole number, is a problem of its
+    own and never a pass. A sentence holds figures and key names, never a text of the report."""
     places = {
         "blocks.synth.counts.selected": ("blocks", "synth", "counts", "selected"),
         "blocks.synth.counts.sources": ("blocks", "synth", "counts", "sources"),
@@ -483,6 +497,10 @@ def synth_problems(report: Mapping[str, Any]) -> list[str]:
         if value is None
     ]
     selected, sources, rows, bt_rows = figures.values()
+    if sources is not None and sources != fed:
+        problems.append(
+            f"the synthetic run read {sources} sources of the {fed} rows fed to it"
+        )
     if selected is not None and sources is not None and selected != sources:
         problems.append(f"the synthetic run selected {selected} of {sources} sources")
     if rows is not None and rows <= 0:

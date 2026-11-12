@@ -10,6 +10,7 @@ the stage is in the two guarded modules.
 
 from __future__ import annotations
 
+import dataclasses
 import http.client
 import json
 import socket
@@ -150,6 +151,11 @@ def leaving(*, selected: int, sources: int, rows: int) -> Callable[[Any], None]:
         (64, 64, 63),
         (64, 64, 65),
         (0, 0, 0),
+        # Everything selected and one row for each, but of fewer sources than the 64 rows the stage fed:
+        # a run that read only part of the monolingual file.
+        (10, 10, 10),
+        (63, 63, 63),
+        (65, 65, 65),
     ],
     ids=[
         "the server answered nothing",
@@ -157,6 +163,9 @@ def leaving(*, selected: int, sources: int, rows: int) -> Callable[[Any], None]:
         "a row fewer than selected",
         "a row more than selected",
         "no source and no row",
+        "the run read ten of the 64 sources",
+        "the run read 63 of the 64 sources",
+        "the run read a source more than it was fed",
     ],
 )
 def test_a_run_that_did_not_select_every_source_or_made_another_number_of_rows_fails_its_check(
@@ -174,6 +183,23 @@ def test_a_run_that_did_not_select_every_source_or_made_another_number_of_rows_f
     assert result.facts["rows"] == rows
     assert result.facts["counts"]["selected"] == selected
     assert result.facts["counts"]["sources"] == sources
+
+
+def test_the_sources_are_compared_with_the_rows_the_stage_fed_whatever_their_number(
+    out_dir: Path,
+) -> None:
+    # A stage fed ten rows is complete with ten sources, selected and made into one row each: the
+    # number it compares with is the one of the fixture it wrote, not a figure of the shipped one.
+    ctx, _ = ready_for(
+        out_dir, "synth", after={"synth run": leaving(selected=10, sources=10, rows=10)}
+    )
+    fixtures = shipped_fixtures()
+    fed = dataclasses.replace(fixtures, mono=fixtures.mono[:10])
+
+    result = stage_function("synth")(dataclasses.replace(ctx, fixtures=fed))
+
+    assert result.record.state == "ok"
+    assert result.facts["counts"]["sources"] == result.facts["rows"] == 10
 
 
 def test_the_check_is_the_closed_identifier_synth_output() -> None:
