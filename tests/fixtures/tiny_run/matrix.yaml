@@ -1,0 +1,12 @@
+name: tiny
+base: BASE_CONFIG
+axes:
+  tag_placement:
+  - src
+  temperature:
+  - 1.0
+  bt_ratio:
+  - 0.2
+seeds:
+- 1234
+dev_max_lines: 100

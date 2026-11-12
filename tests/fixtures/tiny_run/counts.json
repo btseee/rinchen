@@ -1,0 +1,23 @@
+{
+  "counts": {
+    "candidates": 64,
+    "dropped_copy": 0,
+    "dropped_empty": 0,
+    "dropped_purity": 0,
+    "dropped_qe": 0,
+    "no_candidates": 0,
+    "no_survivor": 0,
+    "selected": 64,
+    "sources": 64
+  },
+  "fingerprint": "6662bed7d43cb44cd051737718f8e5edc1fa04c7d1b73e8bc8e20e56f471b522",
+  "generator": "tiny_oracle",
+  "job": "bt_eng_khk",
+  "qe_status": "skipped: --no-qe",
+  "shard_stats": {
+    "generated": 2,
+    "planned": 2,
+    "regenerated_invalid": 0,
+    "reused": 0
+  }
+}

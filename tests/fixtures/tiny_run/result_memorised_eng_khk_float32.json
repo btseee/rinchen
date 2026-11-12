@@ -1,0 +1,75 @@
+{
+  "bleu_signature": "nrefs:1|case:mixed|eff:no|tok:13a|smooth:exp|version:2.6.0",
+  "bootstrap": {
+    "alpha": 0.05,
+    "interval": "percentile",
+    "resamples": 1000,
+    "rng": "splitmix64-counter/1",
+    "seed": 20261110,
+    "unit": "segment",
+    "units": 299
+  },
+  "chrf_pp_signature": "nrefs:1|case:mixed|eff:yes|nc:6|nw:2|space:no|version:2.6.0",
+  "chrf_signature": "nrefs:1|case:mixed|eff:yes|nc:6|nw:0|space:no|version:2.6.0",
+  "ci95": {
+    "bleu": [
+      99.24077062832784,
+      100.0
+    ],
+    "chrf": [
+      99.87595686055195,
+      100.0
+    ],
+    "chrf_pp": [
+      99.80627300623416,
+      100.0
+    ],
+    "comet22": null,
+    "metricx24": null,
+    "metricx24_qe": null
+  },
+  "direction": "eng_Latn-khk_Cyrl",
+  "manifest_sha": "07aa30138b59666c21fe485d3b1fea4d2996ed8f4b1ea83b9f02f376421dde08",
+  "metrics": {
+    "bleu": 99.75091642638047,
+    "chrf": 99.9593961645435,
+    "chrf_pp": 99.93605281692561,
+    "comet22": null,
+    "metricx24": null,
+    "metricx24_qe": null
+  },
+  "n_segments": 299,
+  "provenance": {
+    "outputs_sha256": "fa8a08491979e0fa1699230e802dd7e969cbe4c6127bcba20f94ebb8b12c5839",
+    "suite_sha256": "091df5b5ab1b496d46d9cd26d07f00fed45a2273a6eaf30e3ec050e799f4c25a",
+    "system": {
+      "kind": "rinchen",
+      "manifest_sha256": "07aa30138b59666c21fe485d3b1fea4d2996ed8f4b1ea83b9f02f376421dde08",
+      "model_sha256": "f48811a45287337cfc4434b90f5e32e8869459d40ea90f3bd845debef2720dcc",
+      "name": "tiny-f32",
+      "options": {
+        "beam_size": 1,
+        "device": "cpu",
+        "max_decoding_length": 256,
+        "script_mask": "retry",
+        "threads": 1
+      },
+      "outputs_sha256": null
+    }
+  },
+  "robustness": null,
+  "robustness_coverage": null,
+  "robustness_source": null,
+  "schema": "rinchen.eval/1",
+  "statuses": {
+    "ok": 299
+  },
+  "suite": "tiny-memorised-eng",
+  "system": "tiny-f32",
+  "trained": true,
+  "unmeasured": {
+    "comet22": "no segment scores were given: the COMET and MetricX scorers are not built",
+    "metricx24": "no segment scores were given: the COMET and MetricX scorers are not built",
+    "metricx24_qe": "no segment scores were given: the COMET and MetricX scorers are not built"
+  }
+}

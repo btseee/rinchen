@@ -14,19 +14,31 @@ same vector in every process.
 `ConceptQE` stands in for the MetricX scorer: `25 * max(0, 1 - cosine)` of the two sides, on MetricX's
 scale, where lower is better. Neither ranks a real system; they give the filter something that can
 tell a pair that says one thing from a pair that says two.
+
+`FakeChatServer` stands in for the OpenAI-compatible server of the synthetic-data stage. It is a
+standard-library HTTP server on the loopback address (the one socket the pipeline opens) that answers
+`POST /v1/chat/completions` with the oracle's English line for the text a request asks to translate, as
+many times over as the request asks for choices, and every other request with a 404. It lives for the
+length of a `with` block and is shut down, its socket closed and its thread joined, on every way out.
 """
 
 from __future__ import annotations
 
+import json
 import re
+import socketserver
+import threading
 import zlib
 from collections.abc import Mapping, Sequence
 from functools import cache
-from typing import Final
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from types import TracebackType
+from typing import Any, Final, Self
 
 import numpy as np
 from numpy.typing import NDArray
 
+from rinchen.errors import ConfigError
 from rinchen.mine.embed import Embedder
 from rinchen.script_conv.rules import transliterate
 
@@ -140,3 +152,233 @@ class ConceptQE:
             "ij,ij->i", self._encoder.embed(sources), self._encoder.embed(translations)
         )
         return [_QE_SCALE * max(0.0, 1.0 - float(value)) for value in cosine]
+
+
+LOOPBACK: Final = "127.0.0.1"
+_CHAT_PATH: Final = "/v1/chat/completions"
+_MAX_BODY: Final = 1 << 20
+_MAX_CHOICES: Final = 64
+# The default backlog of a socket server (5) drops connections when a client opens many at once.
+_BACKLOG: Final = 128
+# A client that sends fewer bytes than it announced is let go after this long.
+_CLIENT_SECONDS: Final = 10
+_POLL_SECONDS: Final = 0.05
+_THREAD_NAME: Final = "tiny-fake-chat-server"
+
+
+class _BadRequest(Exception):
+    """A request the server refuses with a 400; the message says what is wrong, never with what."""
+
+
+class _Tally:
+    """A count that the handler threads add to and the owner reads."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._value = 0
+
+    def add(self) -> None:
+        with self._lock:
+            self._value += 1
+
+    @property
+    def value(self) -> int:
+        with self._lock:
+            return self._value
+
+
+def _completion(answer: str, choices: int) -> dict[str, Any]:
+    """The body of a successful chat completion with `choices` identical choices."""
+    return {
+        "id": "chatcmpl-fake",
+        "object": "chat.completion",
+        "model": "fake-model",
+        "choices": [
+            {
+                "index": index,
+                "message": {"role": "assistant", "content": answer},
+                "finish_reason": "stop",
+            }
+            for index in range(choices)
+        ],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+    }
+
+
+def _chat_request(body: bytes) -> tuple[str, int]:
+    """The source text and the number of choices a chat request asks for: the text after the first blank
+    line of the first message, which is how the synthetic-data prompt lays out its source."""
+    try:
+        document = json.loads(body)
+    except ValueError as error:
+        raise _BadRequest("the body is not JSON") from error
+    if not isinstance(document, dict):
+        raise _BadRequest("the body is not a JSON object")
+    messages = document.get("messages")
+    first = messages[0] if isinstance(messages, list) and messages else None
+    content = first.get("content") if isinstance(first, dict) else None
+    if not isinstance(content, str):
+        raise _BadRequest("the first message has no text")
+    choices = document.get("n", 1)
+    if type(choices) is not int or not 1 <= choices <= _MAX_CHOICES:
+        raise _BadRequest("n is not a whole number from 1 to 64")
+    return content.partition("\n\n")[2], choices
+
+
+class _ChatServer(ThreadingHTTPServer):
+    """The HTTP server: the oracle and the count are what its handlers share."""
+
+    request_queue_size = _BACKLOG
+
+    def __init__(self, oracle: Mapping[str, str], tally: _Tally) -> None:
+        super().__init__((LOOPBACK, 0), _ChatHandler)
+        self.oracle = oracle
+        self.tally = tally
+
+    def server_bind(self) -> None:
+        """Bind, without the reverse lookup of the address that `HTTPServer` makes after it: no name
+        is resolved."""
+        socketserver.TCPServer.server_bind(self)
+        address = self.server_address
+        assert isinstance(address, tuple)
+        self.server_name = LOOPBACK
+        self.server_port = address[1]
+
+    def handle_error(self, request: Any, client_address: Any) -> None:
+        """A client that hangs up or sends garbage is not the stage's concern, and nothing it sent
+        is printed."""
+
+
+class _ChatHandler(BaseHTTPRequestHandler):
+    server: _ChatServer
+    timeout = _CLIENT_SECONDS
+
+    def log_message(self, format: str, *args: Any) -> None:
+        """Nothing is logged: a request holds the text of a fixture."""
+
+    def __getattr__(self, name: str) -> Any:
+        # Every method that is not POST, however odd, is answered 404 and not 501.
+        if name.startswith("do_"):
+            return self._not_found
+        raise AttributeError(name)
+
+    def _reply(self, status: int, document: Mapping[str, Any]) -> None:
+        data = json.dumps(document).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(data)
+
+    def _error(self, status: int, message: str) -> None:
+        self._reply(
+            status, {"error": {"message": message, "type": "fake_server_error"}}
+        )
+
+    def _not_found(self) -> None:
+        self._error(404, "not found")
+
+    def _body(self) -> bytes | None:
+        """The body of the request, or None after the refusal that was sent for it."""
+        try:
+            length = int(self.headers.get("Content-Length", ""))
+        except ValueError:
+            length = -1
+        if length < 0:
+            self._error(400, "a body with a length is needed")
+            return None
+        if length > _MAX_BODY:
+            self._error(413, "the body is too large")
+            return None
+        return self.rfile.read(length)
+
+    def do_POST(self) -> None:
+        if self.path != _CHAT_PATH:
+            self._not_found()
+            return
+        body = self._body()
+        if body is None:
+            return
+        try:
+            source, choices = _chat_request(body)
+        except _BadRequest as refusal:
+            self._error(400, str(refusal))
+            return
+        self.server.tally.add()
+        self._reply(200, _completion(self.server.oracle.get(source, ""), choices))
+
+
+class FakeChatServer:
+    """An OpenAI-compatible chat server over a table: `oracle` maps a source text to its answer.
+
+    Used as a context manager it binds `127.0.0.1` on a port the system picks, serves from a daemon
+    thread and, on leaving the block by any path, shuts down, closes the socket and joins the thread.
+    `base_url` is what a client's config names, `http://127.0.0.1:<port>/v1`. A text that is not in
+    the oracle is answered with an empty text.
+
+    Raises:
+        ConfigError: `host` is anything but the loopback address `127.0.0.1`.
+    """
+
+    def __init__(
+        self, oracle: Mapping[str, str] | None = None, *, host: str = LOOPBACK
+    ) -> None:
+        if host != LOOPBACK:
+            raise ConfigError(
+                "the fake chat server listens on the loopback address only"
+            )
+        self._oracle = dict(oracle or {})
+        self._tally = _Tally()
+        self._server: _ChatServer | None = None
+        self._thread: threading.Thread | None = None
+
+    @property
+    def base_url(self) -> str:
+        """`http://127.0.0.1:<port>/v1` of the running server.
+
+        Raises:
+            RuntimeError: the server is not running.
+        """
+        if self._server is None:
+            raise RuntimeError("the fake chat server is not running")
+        return f"http://{LOOPBACK}:{self._server.server_port}/v1"
+
+    @property
+    def requests_seen(self) -> int:
+        """How many chat requests were answered, all runs of this server together."""
+        return self._tally.value
+
+    def __enter__(self) -> Self:
+        if self._server is not None:
+            raise RuntimeError("the fake chat server is already running")
+        server = _ChatServer(self._oracle, self._tally)
+        thread = threading.Thread(
+            target=server.serve_forever,
+            kwargs={"poll_interval": _POLL_SECONDS},
+            name=_THREAD_NAME,
+            daemon=True,
+        )
+        try:
+            thread.start()
+        except BaseException:
+            server.server_close()
+            raise
+        self._server, self._thread = server, thread
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        server, thread = self._server, self._thread
+        self._server = self._thread = None
+        if server is None or thread is None:
+            return
+        try:
+            server.shutdown()
+        finally:
+            server.server_close()
+            thread.join()

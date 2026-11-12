@@ -1,0 +1,121 @@
+{
+  "bleu_signature": "nrefs:1|case:mixed|eff:no|tok:13a|smooth:exp|version:2.6.0",
+  "bootstrap": {
+    "alpha": 0.05,
+    "interval": "percentile",
+    "resamples": 1000,
+    "rng": "splitmix64-counter/1",
+    "seed": 20261110,
+    "unit": "segment",
+    "units": 30
+  },
+  "chrf_pp_signature": "nrefs:1|case:mixed|eff:yes|nc:6|nw:2|space:no|version:2.6.0",
+  "chrf_signature": "nrefs:1|case:mixed|eff:yes|nc:6|nw:0|space:no|version:2.6.0",
+  "ci95": {
+    "bleu": [
+      38.20372491058417,
+      68.80564222817681
+    ],
+    "chrf": [
+      62.38077833081137,
+      80.80410936787949
+    ],
+    "chrf_pp": [
+      61.5220789658198,
+      80.02495284789755
+    ],
+    "comet22": null,
+    "metricx24": null,
+    "metricx24_qe": null
+  },
+  "direction": "eng_Latn-khk_Cyrl",
+  "manifest_sha": "caf0e6528ee83f6b31e058622ec8eb51b81fd6a7ceef0837ab3b82fcfce43e2b",
+  "metrics": {
+    "bleu": 54.54807542354906,
+    "chrf": 71.99500932252622,
+    "chrf_pp": 71.0192171727142,
+    "comet22": null,
+    "metricx24": null,
+    "metricx24_qe": null
+  },
+  "n_segments": 30,
+  "provenance": {
+    "outputs_sha256": "a215f62eb07078b630f49809369eff77c264bc146af94d3c2de45b3946b7cace",
+    "suite_sha256": "e5a39b5239bc786e953303dd6feaa432e60fc0b9a0d1002f795ef580111273ab",
+    "system": {
+      "kind": "rinchen",
+      "manifest_sha256": "caf0e6528ee83f6b31e058622ec8eb51b81fd6a7ceef0837ab3b82fcfce43e2b",
+      "model_sha256": "8fa90a266950cfc3305a4e5f730f02f8ae04aaf9c60485834be591edbcff0aec",
+      "name": "tiny-int8",
+      "options": {
+        "beam_size": 1,
+        "device": "cpu",
+        "max_decoding_length": 256,
+        "script_mask": "retry",
+        "threads": 1
+      },
+      "outputs_sha256": null
+    }
+  },
+  "robustness": {
+    "entity_acc": 0.9791666666666666,
+    "mong_source_retention": 0.9935849111913797,
+    "numbers_acc": 1.0,
+    "placeholder_acc": 1.0,
+    "script_purity": 1.0,
+    "term_acc": 0.9991181657848325
+  },
+  "robustness_coverage": {
+    "entity_acc": {
+      "excluded": 0,
+      "scored": 240,
+      "total": 240
+    },
+    "mong_source_retention": {
+      "chrf_cyrl": 100.0,
+      "chrf_mong": 99.35849111913797,
+      "excluded": 0,
+      "scored": 48,
+      "total": 48
+    },
+    "numbers_acc": {
+      "excluded": 0,
+      "scored": 240,
+      "total": 240
+    },
+    "placeholder_acc": {
+      "excluded": 0,
+      "scored": 238,
+      "total": 238
+    },
+    "script_purity": {
+      "excluded": 0,
+      "scored": 600,
+      "total": 600
+    },
+    "term_acc": {
+      "excluded": 0,
+      "scored": 1134,
+      "total": 1134
+    }
+  },
+  "robustness_source": {
+    "binding": "model_digest",
+    "report_sha256": "1ebd16158fff3203b31d76394c1216afd1d0594b545d96d3edb2e9b69ff1200c",
+    "robustness_sha256": "778f436074f51de4bfbeb5aa76608c1e4368531e255c284358ea00a4f0600366",
+    "suite": "tiny-robust",
+    "suite_sha256": "d96d5a28a7d5c643c5ef7cdc75fd4a88cb9719fc96e9b56da936bb2c35e9a5eb"
+  },
+  "schema": "rinchen.eval/1",
+  "statuses": {
+    "ok": 30
+  },
+  "suite": "tiny-heldout-eng",
+  "system": "tiny-int8",
+  "trained": true,
+  "unmeasured": {
+    "comet22": "no segment scores were given: the COMET and MetricX scorers are not built",
+    "metricx24": "no segment scores were given: the COMET and MetricX scorers are not built",
+    "metricx24_qe": "no segment scores were given: the COMET and MetricX scorers are not built"
+  }
+}

@@ -1,0 +1,18 @@
+generators:
+  tiny_oracle:
+    kind: vllm
+    base_url: http://127.0.0.1:41309/v1
+    model: tiny-oracle
+    n: 1
+    temperature: 0.0
+    top_p: 1.0
+    concurrency: 4
+    timeout_s: 20
+    retries: 0
+jobs:
+  bt_eng_khk:
+    kind: bt
+    mono_lang: khk_Cyrl
+    other_lang: eng_Latn
+    generator: tiny_oracle
+    shard_size: 32

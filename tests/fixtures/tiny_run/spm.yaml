@@ -1,0 +1,7 @@
+character_coverage: 0.9999
+corpus_dir: SPM_TEXT_DIR
+input_sentence_size: 100000
+output_prefix: SPM_OUTPUT_PREFIX
+seed: 1234
+temperature: 0.3
+vocab_size: 640

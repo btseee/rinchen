@@ -1,0 +1,25 @@
+{
+  "checkpoint_weights_sha256": "4e06ce45faef7c4b80b487a26606a5ac5ea2b2b6f740f82aaede088c1e33bb0e",
+  "exact": 70,
+  "exact_share": 1.0,
+  "export_name": "rinchen-f48811a45287",
+  "gated": true,
+  "lines": {
+    "eng_Latn-khk_Cyrl": 15,
+    "khk_Cyrl-eng_Latn": 15,
+    "khk_Cyrl-rus_Cyrl": 15,
+    "mn_Mong-eng_Latn": 10,
+    "rus_Cyrl-khk_Cyrl": 15
+  },
+  "max_abs_delta": 2.1517276763916016e-05,
+  "max_lines": 50,
+  "max_mean_delta": 0.001,
+  "mean_abs_delta": 1.6221680949143363e-06,
+  "min_exact_share": 0.95,
+  "mismatches": [],
+  "model_sha256": "f48811a45287337cfc4434b90f5e32e8869459d40ea90f3bd845debef2720dcc",
+  "passes": true,
+  "placement": "src",
+  "quantization": "float32",
+  "sentences": 70
+}

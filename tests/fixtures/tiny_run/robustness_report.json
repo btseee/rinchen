@@ -1,0 +1,56 @@
+{
+  "coverage": {
+    "entity_acc": {
+      "excluded": 0,
+      "scored": 240,
+      "total": 240
+    },
+    "mong_source_retention": {
+      "chrf_cyrl": 100.0,
+      "chrf_mong": 99.35849111913797,
+      "excluded": 0,
+      "scored": 48,
+      "total": 48
+    },
+    "numbers_acc": {
+      "excluded": 0,
+      "scored": 240,
+      "total": 240
+    },
+    "placeholder_acc": {
+      "excluded": 0,
+      "scored": 238,
+      "total": 238
+    },
+    "script_purity": {
+      "excluded": 0,
+      "scored": 600,
+      "total": 600
+    },
+    "term_acc": {
+      "excluded": 0,
+      "scored": 1134,
+      "total": 1134
+    }
+  },
+  "robustness": {
+    "entity_acc": 0.9791666666666666,
+    "mong_source_retention": 0.9935849111913797,
+    "numbers_acc": 1.0,
+    "placeholder_acc": 1.0,
+    "script_purity": 1.0,
+    "term_acc": 0.9991181657848325
+  },
+  "robustness_file": "robustness.json",
+  "robustness_sha256": "778f436074f51de4bfbeb5aa76608c1e4368531e255c284358ea00a4f0600366",
+  "schema": "rinchen.report.robustness/1",
+  "suite": {
+    "name": "tiny-robust",
+    "sha256": "d96d5a28a7d5c643c5ef7cdc75fd4a88cb9719fc96e9b56da936bb2c35e9a5eb"
+  },
+  "system": {
+    "manifest_sha256": "caf0e6528ee83f6b31e058622ec8eb51b81fd6a7ceef0837ab3b82fcfce43e2b",
+    "model_sha256": "8fa90a266950cfc3305a4e5f730f02f8ae04aaf9c60485834be591edbcff0aec",
+    "name": "rinchen-8fa90a266950"
+  }
+}
