@@ -35,6 +35,7 @@ NEVER:
 - `uv run rinchen eval run --suite FILE --out-dir DIR (--model DIR | --generator NAME | --hypotheses FILE)` and `uv run rinchen eval report --run DIR ... --suite FILE ... --out-dir DIR [--baseline SYSTEM]` (D13: BLEU, chrF and chrF++ with 95 % bootstrap intervals, paired comparisons, `report.json` and `report.md`; they measure and exit 0 whenever they measured; `docs/runbooks/13_release.md`)
 - `uv run rinchen release stage --export DIR --report-dir DIR --system NAME --repo-id ORG/NAME --out-dir DIR` and `uv run rinchen release hub --stage DIR --repo-id ORG/NAME --out-dir DIR [--upload] [--public]` (D13: the staging directory with the model card; `hub` is a DRY RUN unless `--upload`, which needs `HF_TOKEN` in the environment, creates the repository private and was never run)
 - `uv run --frozen --no-sync rinchen maintain check --out-dir DIR [--cadence nightly|weekly] [--no-drift] [--no-reruns] [--rerun ID] [--fail-on-drift] [--export DIR --checkpoint DIR --corpus FILE]` (D14: the doctor's CPU checks, `uv lock --check`, the installed packages against `uv.lock`, the dependency drift table from `uv lock --upgrade --dry-run` (the ONLY step that queries an index: never run it for a test or a measurement) and the parity reruns; writes `maintain_report.json`, `maintain_report.md` and `manifest.json`, only reads the project, exit 0 for ok or drift and 4 for fail; the upgrade procedure and the rollback are `docs/runbooks/14_maintenance.md`)
+- `uv run --frozen --no-sync rinchen tiny run [--profile tiny] [--out-dir DIR] [--config FILE] [--qe-fake | --no-qe-fake] [--threads N] [--budget-seconds N] [--dry-run]` (D15, the recipe `just tiny`: fifteen stages from the committed fixtures `tests/fixtures/parallel/` to `artifacts/tiny/{report.json,report.md,manifest.json}` on the CPU with no network and no GPU; eight thresholds, exit 0 for pass and 4 for fail with everything written, 2 for a bad option or input or `--profile full` (refused: no full pipeline file), 3 for a changed fixture, a bad lock or a foreign manifest, 130/143/129 for signals; `--dry-run` lists the commands and writes nothing; a miss is answered with more `train.steps`, never a lower bound; `docs/runbooks/15_tiny_pipeline.md`)
 
 ## Repo layout
 
@@ -49,7 +50,8 @@ configs/eole/converter{,_tiny}.yaml configs/spm/converter_char.yaml
 configs/eole/{multilingual_tiny,ablation_tiny,multilingual_proxy,ablation_priors}.yaml
 configs/eole/{teacher,teacher_tiny}.yaml configs/eole/{teacher_doc,teacher_doc_tiny}.yaml
 configs/eole/student_{server,edge,tiny}.yaml configs/serve/{tiny,server,edge}.yaml
-configs/eval/{metrics,suites}.yaml configs/maintain/maintain.yaml
+configs/eval/{metrics,suites}.yaml configs/maintain/maintain.yaml configs/tiny/tiny.yaml
+configs/eole/tiny.yaml configs/data/sources.tiny_parallel.yaml (the D15 profile, its Eole base config and its local registry; no configs/tiny/full.yaml)
 docker/{Dockerfile.cpu,compose.serve.yaml} .dockerignore
 docs/STACK.md docs/VERIFY.md
 docs/runbooks/00_environment.md docs/runbooks/01_acquisition.md
@@ -58,9 +60,9 @@ docs/runbooks/04_filtering_mining.md docs/runbooks/05_script_converter.md
 docs/runbooks/06_synthetic.md docs/runbooks/07_ablations.md docs/runbooks/08_teacher.md
 docs/runbooks/09_document_level.md docs/runbooks/10_distillation.md
 docs/runbooks/11_serving.md docs/runbooks/12_robustness.md docs/runbooks/13_release.md
-docs/runbooks/14_maintenance.md
+docs/runbooks/14_maintenance.md docs/runbooks/15_tiny_pipeline.md
 docs/research/  docs/superpowers/{specs,plans}/
-src/rinchen/{config,manifest,utils,cli,text,lang,split,spm,corpus,filter,mine,script_conv,synth,metrics,eval,serve,export,maintain}/
+src/rinchen/{config,manifest,utils,cli,text,lang,split,spm,corpus,filter,mine,script_conv,synth,metrics,eval,serve,export,maintain,tiny}/
 src/rinchen/acquire/{http,opus,hf,warc,commoncrawl,registry}.py
 src/rinchen/annotate/{db,export,agreement,app,routes,models}.py
 src/rinchen/spm/{symbols,corpus,train,check}.py src/rinchen/split/rules.py
@@ -102,11 +104,15 @@ src/rinchen/cli/{eval_report,eval_report_inputs,eval_report_output}.py
 src/rinchen/cli/{release,release_stage,release_stage_inputs,release_stage_output,release_hub,release_hub_output}.py
 src/rinchen/maintain/{states,lock,environment,uv_output,drift,commands,reruns,report,report_markdown,check,check_types,check_steps,check_reruns}.py
 src/rinchen/config/maintain.py src/rinchen/cli/{maintain,maintain_inputs,maintain_doctor,maintain_output,maintain_signals}.py
+src/rinchen/tiny/{states,context,fixtures,corpus,fakes,data_stages,commands,command_readers,command_writers,step_runner,model_stages,model_stages_rest}.py
+src/rinchen/tiny/{suites,suite_matching,serve_stage,eval_stages,eval_readers,evaluate_facts,thresholds,pipeline,dry_run,graceful_runner}.py
+src/rinchen/tiny/{report,report_blocks,report_markdown,report_schema,report_shapes}.py
+src/rinchen/config/tiny.py src/rinchen/cli/{tiny,tiny_inputs,tiny_output}.py src/rinchen/eval/fixture_suites.py (write-only)
 src/rinchen/utils/{logged_process,integers}.py
 src/rinchen/errors.py src/rinchen/__init__.py
 tests/ scripts/ plans/ reports/ manifests/
 manifests/ucd_standardized_variants.json
-tests/{unit,property,golden,integration}/ tests/fixtures/{annot,golden,raw,spm,script_conv,robustness,eval,maintain}/
+tests/{unit,property,golden,integration}/ tests/fixtures/{annot,golden,raw,spm,script_conv,robustness,eval,maintain,parallel,tiny,tiny_run}/
 tests/support/ (planted corpus and alignments, fake embedders, tiny LID model,
   tiny_converter, stub_runtime, fake_process, script_reference, planted_synth,
   synth_cli, fake_llm_server, shard_files, corpus_rows, eole_train_config, tiny_parallel,
@@ -119,13 +125,20 @@ tests/support/ (planted corpus and alignments, fake embedders, tiny LID model,
   eval_golden, eval_fakes, eval_cli, eval_suite_cli, eval_suite_documents, eval_result_documents, eval_report,
   eval_report_cli, eval_report_golden, eval_toy, eval_gate, release_documents, release_fixture, hub_fakes, hub_stage,
   maintain_check, maintain_cli, maintain_fakes, maintain_gate, maintain_gate_hygiene, maintain_project, maintain_reports,
-  maintain_scans, uv_outputs, fake_uv, nightly_workflow, workflow_expression)
+  maintain_scans, uv_outputs, fake_uv, nightly_workflow, workflow_expression,
+  tiny_run, tiny_run_eval, tiny_children, tiny_cli, tiny_config_documents, tiny_fakes_reference, tiny_help,
+  tiny_oracle, tiny_pipeline_runs, tiny_profiles, tiny_report_build, tiny_report_inputs, tiny_report_random,
+  tiny_report_reference, tiny_report_scans, tiny_report_walk, tiny_scans, tiny_stage_inputs, tiny_threshold_inputs,
+  tiny_gate, tiny_gate_processes, tiny_gate_runs, tiny_gate_controls, tiny_gate_hygiene,
+  ci_workflow, ci_workflow_edits, ci_workflow_breaks)
 scripts/build_spm_fixture.py (regenerates tests/fixtures/spm/tiny_corpus)
 scripts/build_script_conv_fixtures.py (reference TSV -> lexicon, golden words, tiny fixture)
+scripts/build_parallel_fixtures.py (regenerates tests/fixtures/parallel; a changed byte is a re-measurement, not an update)
 data/{raw,clean,mined,synth,test}/ (gitignored content, tracked dirs)
+artifacts/ (gitignored; `just tiny` writes artifacts/tiny)
 vendor/wheels/ (committed binary wheels with no cp314 upstream release)
 vendor/fasttext-wheel-shim/ (pure-Python shim package, see DECISIONS.md)
-.github/workflows/{ci,release,nightly}.yml
+.github/workflows/{ci,release,nightly}.yml (ci.yml has the jobs gate and tiny)
 ```
 
 Note: `data/`, `align/`, and `convert/` under `src/rinchen/` from the old
@@ -314,7 +327,13 @@ project subdirectory; a false reason for the reruns `--rerun` leaves out; childr
 spellings, UNMEASURED beyond `1ms`; `the JUnit report could not be read`), and left open on purpose the limits that `docs/runbooks/14_maintenance.md` lists under "Known limits". A scoped re-review of
 the fix wave (one independent reader) approved it with minors: no Critical, no Important, three Minor findings and three Nits; the controller fixed two of the minors in `52b9b3b` (the full gate was NOT run
 again after it and no reader has read it) and left open that the doctor's own `--help` children inherit the whole environment, the upper-case suffix rule for secrets and the guard by name. The open gates: everything GPU, the real PyPI state and the lines of a real change, GitHub Actions and its minutes budget, every real export, and the D3 to D13 gates.
-Next up: D15 (the tiny end-to-end pipeline; D15 decides whether `just tiny` calls `maintain check --no-drift --no-reruns`). See `STATE.md`, `docs/runbooks/14_maintenance.md` and `docs/runbooks/13_release.md`.
+D15 (Tiny end-to-end pipeline) is done locally on branch `d15-tiny-pipeline`, stacked on `d14-maintenance` (cut from it at `412bf84`; code tip `5dab820`), not merged and not pushed, and no CI run covers it: its STOP gate ("CI runs `just tiny` green on 3.14") is met ONLY as "the body of the `tiny` recipe, read from the `justfile` and run through `sh` with a uv shim first on `PATH`, runs
+green natively on the CPU"; GitHub Actions is UNMEASURED. Through the real `rinchen` binary and the real Eole, CTranslate2, SentencePiece and sacrebleu on the CPU with the GPU hidden and no network, `rinchen tiny run --profile tiny` takes seven committed fixture files (67,104 bytes, each pinned by SHA-256) through fifteen stages and writes `report.json` (schema `rinchen.tiny/1`), `report.md` and `manifest.json` in 113.1 s alone
+(121.0 s beside another pipeline; spike 120 to 158 s, 120.0 s under `taskset -c 0-3`; 370 s ARITHMETIC for a 4-core runner at D14's factor of 3, UNMEASURED): all EIGHT thresholds pass (`train_chrf` 99.3585 against 50.0 at 1,500 steps, not the master plan's 400, which gives 16.83 and fails; float32 parity 70 of 70 exact, mean abs delta 1.62e-06 against 1e-3; `int8_chrf_drop` 0.0; `script_purity` 1.0; `placeholder_acc` 1.0, 238 of 238; `wall_time` pass), every control fails as designed (400 steps,
+a flipped byte of an export or a fixture, placeholder indices never trained, a wrong script, a budget of 5 s, the three signals, the refusals) and a rerun in another directory under another hash seed, locale and time zone writes equal `report.json` bytes and equal model digests (the SentencePiece file differs: it embeds its paths); no floor was lowered. It is MACHINERY, not a verdict on any model: the fixtures are templated sentences, the model memorises a grammar of 37 nouns, the stand-ins of `--qe-fake` rank nothing, no GPU was used (the one on this machine
+was not authorised), no network was used, no real corpus, generator, LID, LaBSE, QE or neural scorer exists, and `just accept` stays a stub (the definition of done is a table in STATE.md and in the runbook). D15 added `rinchen tiny run` and the library `rinchen.tiny` (27 modules), the closed configuration `rinchen.config.tiny` with `configs/tiny/tiny.yaml`, the fixtures and their generator, the `tiny` recipe and the `tiny` job of `ci.yml`, one write-only module in D13's eval package (`eval.fixture_suites`) and a gate of four integration modules. It found that 400 steps misses the bound, that greedy
+decoding is what makes the robustness block exact, that D14's runner left `eole train` running after an interrupt (fixed in D15's own `GracefulRunner`; its limits are in the runbook) and that the real `report.md` prints the parity delta as `0.00` (OPEN, not fixed). The full gate gave 24,758 passed, 1 skipped, 10 deselected after Task 9 (24,759 collected against 20,451 at the end of D14) and 24,759 passed after the records (one more case of the content scan, for the new runbook). The combined review of the D15 code has NOT run. The open gates: everything GPU, GitHub Actions and the minutes budget, the 4-core time, a real corpus, generator and scorers, `just accept`, and the D3 to D14 gates.
+Next up: the combined review of the D15 code (an independent reader over Tasks 1 to 9, `412bf84..5dab820`) and its fix wave, which must settle the `parity_delta` display, the null block that a malformed fact becomes and the runner decision; then a record of the review. D15 is the last milestone of the master plan: merging and pushing the stacked branches (D6 to D15, none merged into `main`, none pushed) is the owner's decision. See `STATE.md`, `docs/runbooks/15_tiny_pipeline.md` and `docs/runbooks/14_maintenance.md`.
 
 ## Evidence and full plan
 

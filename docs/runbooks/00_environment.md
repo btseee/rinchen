@@ -34,9 +34,14 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on `ubuntu-24.04`
 Ubuntu 26 mid-project)
 with CPython 3.14, syncs with `uv sync --frozen --group dev`, then runs
 `just gate` (ruff format check, ruff check, mypy, fast tests) and `just
-tiny` (currently a stub that always succeeds — real from D15 onward).
+doctor` in the job `gate`; the job `tiny` runs `just
+tiny` (no longer a stub that always succeeds — real from D15 onward, see below).
 GPU checks are not run in CI (no GPU runner); `D-TORCH-CUDA` reports
 `skip` there, which is expected and does not fail the gate.
+
+The job `tiny` (D15) has its own `ubuntu-24.04` runner and a 45-minute timeout: checkout, the same set-up, `uv sync --frozen --group dev`, then `just tiny` (the recipe `uv run --frozen --no-sync rinchen tiny run --profile tiny`: the tiny end-to-end pipeline, from the committed fixtures to `artifacts/tiny/report.json`, on the CPU with no network and no
+GPU; it took 113 s on a 20-core machine, **measured** by the gate; the 4-core time is 370 s, ARITHMETIC, UNMEASURED), an upload of `report.json` and `report.md` only (the artifact `tiny-report`) and the Markdown on the run page. The step `Tiny pipeline` of the nightly job runs the same recipe after the maintenance check, so the nightly now runs the real pipeline. The job and the step were checked statically and their
+commands ran natively; neither ever ran on GitHub. See `docs/runbooks/15_tiny_pipeline.md`.
 
 A second workflow, `.github/workflows/nightly.yml` (D14), runs `rinchen maintain check` every night and a heavier set of reruns on Sundays and on demand (`workflow_dispatch`, `cadence` `weekly`):
 the doctor's CPU checks, the lock against `pyproject.toml`, the installed packages against `uv.lock`, the dependency drift table and the parity reruns, with the report on the run page. It only
