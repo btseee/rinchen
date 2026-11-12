@@ -13,7 +13,10 @@ start children of their own, in sessions of their own); nothing else is ever sig
 The only programs these helpers start are `sh` (the recipe's body, with the `uv` shim of
 `tests/support/fake_uv.py` first on `PATH`) and `python -m rinchen` (the pipeline and, in the controls, the
 commands of `eval` and `export`); the `uv` the recipe finds is the shim, which forwards `run` as `uv run
---project <repository> --no-sync --frozen --offline` and refuses everything else.
+--project <repository> --no-sync --frozen --offline` and refuses everything else. A start that is given a
+shim directory is refused, before a process exists, unless the directory is absolute and holds an executable
+`uv` and the `uv` that the `PATH` of the child leads to is that file (`require_shim`): a missing shim would let
+the recipe fall through to the real `uv`.
 
 The honest limit: the gate cannot prove the absence of a socket in a child. What keeps it off the network
 is the shim, the offline switches and the empty device list; the one socket the pipeline opens is the
@@ -28,6 +31,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -75,6 +79,7 @@ __all__ = [
     "read_report",
     "recipe_command",
     "require_guards",
+    "require_shim",
     "run_recipe",
     "run_rinchen",
     "run_the_recipe",
@@ -107,6 +112,7 @@ MAX_WALL_TIME_SECONDS: Final = 1200
 
 JUSTFILE: Final = REPO_ROOT / "justfile"
 RECIPE: Final = "tiny"
+SHIM_NAME: Final = "uv"
 # One run of the recipe: 120 to 158 s at the spike; the bound is the budget and a margin for a slow runner.
 RECIPE_TIMEOUT_SECONDS: Final = 1500
 # One command of a control (`eval robustness`, `export parity`, a refusal): seconds, bounded generously.
@@ -170,6 +176,23 @@ def require_guards(environment: Mapping[str, str]) -> None:
     assert not secrets, f"{', '.join(secrets)} would reach the child"
 
 
+def require_shim(shim_dir: Path, path: str) -> None:
+    """Refuse (a failed assertion) unless `shim_dir` is absolute and holds an executable `uv` and the first
+    `uv` on `path`, the `PATH` the child will get, is that file. A directory without the shim would let the
+    recipe fall through to the real `uv`, which locks, syncs and asks an index."""
+    shim = shim_dir / SHIM_NAME
+    assert shim_dir.is_absolute(), (
+        f"{shim_dir} must be absolute: the child runs in another directory"
+    )
+    assert shim.is_file() and os.access(shim, os.X_OK), (
+        f"{shim} is not an executable file"
+    )
+    found = shutil.which(SHIM_NAME, path=path)
+    assert found is not None and Path(found).samefile(shim), (
+        f"the {SHIM_NAME} the child would find is not the shim in {shim_dir}"
+    )
+
+
 # ---- the recipe ------------------------------------------------------------------------------------
 
 
@@ -215,9 +238,12 @@ def start_guarded(
     shim_dir: Path | None = None,
 ) -> Started:
     """Start `argv` in `cwd`, in a session of its own with its input closed, with the guards. The caller
-    ends it with `finish`. This is the one place a command of the gate is started."""
+    ends it with `finish`. This is the one place a command of the gate is started. With `shim_dir` the
+    shim is checked first (`require_shim`), against the `PATH` the child is about to get."""
     environment = guarded_environment(env_extra=env_extra, shim_dir=shim_dir)
     require_guards(environment)
+    if shim_dir is not None:
+        require_shim(shim_dir, environment["PATH"])
     process = subprocess.Popen(
         [str(part) for part in argv],
         cwd=cwd,

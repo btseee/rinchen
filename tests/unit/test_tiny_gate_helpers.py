@@ -407,7 +407,7 @@ def test_the_started_child_knows_its_marker_and_its_process(tmp_path: Path) -> N
 def test_the_recipe_runs_through_sh_with_the_shim_first_on_the_path(
     tmp_path: Path,
 ) -> None:
-    shim = tmp_path / "bin"
+    shim = make_shim(tmp_path / "bin")
 
     invocation = run_recipe(
         "the recipe body", cwd=tmp_path, env_extra=None, shim_dir=shim
