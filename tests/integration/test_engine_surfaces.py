@@ -720,7 +720,12 @@ def test_a_window_cut_inside_its_last_segment_still_falls_back(
     """Counting the separators of a window cannot tell a cut that took the last piece or two of
     the last segment: it has one segment per sentence, and text. Only the missing end token
     does. Each window of two sentences is decoded with a cap two pieces below the length of its
-    own full translation, so that the model is cut a piece or two before its end."""
+    own full translation, so that the model is cut a piece or two before its end.
+
+    The length is measured without a script list, so the cut decode is made without one too
+    (`script_mask="off"`): under `retry` an impure cut output is decoded again with the list,
+    and that decode may end on its own before the cap (one of 334 windows of the model trained
+    with Eole 0.6.7 and SentencePiece 0.2.2, khk_Cyrl to rus_Cyrl), which is not a cut."""
     windows = windows_of_size(cases_of(d11_document_model.documents.test), 2)
     lengths = window_lengths(d11_document_model.export.directory, windows)
     by_length: dict[int, list[Case]] = {}
@@ -730,7 +735,10 @@ def test_a_window_cut_inside_its_last_segment_still_falls_back(
     checked = 0
     for length, group in sorted(by_length.items()):
         options = DecodeOptions(
-            beam_size=1, max_decoding_length=length - 2, max_source_pieces=WINDOW_PIECES
+            beam_size=1,
+            max_decoding_length=length - 2,
+            max_source_pieces=WINDOW_PIECES,
+            script_mask="off",
         )
         results = _translate_cases(document_engine, group, options)
         for result in results:

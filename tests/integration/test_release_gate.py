@@ -418,7 +418,9 @@ def test_a_report_with_the_robustness_block_gives_a_card_with_its_values_and_its
         assert f"{counts['scored']} of {counts['total']}" in row, key
     targets = {target["id"]: target for target in report["targets"]}
     assert targets["numbers"]["status"] == "not_met"
-    assert targets["placeholders"]["status"] == "not_met"
+    # Re-measured with Eole 0.6.7 and SentencePiece 0.2.2: the toy copies 600 of 600 placeholders
+    # (599 of 600 before), so the target of 1.0 is met.
+    assert targets["placeholders"]["status"] == "met"
     assert targets["beats_baseline"]["status"] == "unmeasured"
     assert not set(card_decimals(card)) - report_numbers(report)
     assert lines_with_a_needle(card) == []

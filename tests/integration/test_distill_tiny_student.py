@@ -286,7 +286,8 @@ def test_the_teacher_export_record_says_where_the_model_came_from(
     assert_model_record_facts(teacher_export, DIRECTIONS)
     assert (record["encoder_layers"], record["decoder_layers"]) == (2, 2)
     assert record["hidden_size"] == 64
-    assert record["vocabulary_entries"] == 344
+    # Re-measured with SentencePiece 0.2.2 (344 with 0.2.1): the pieces the toy data shows.
+    assert record["vocabulary_entries"] == 352
     assert checkpoint["kind"] == "averaged"
     assert checkpoint["step"] is None
     assert checkpoint["manifest_stage"] == "train_average"
@@ -498,7 +499,8 @@ def test_prepare_writes_twelve_corpora_and_a_manifest_of_stage_distill_prepare(
     assert facts["kd tag"] == "ft"
     assert prepared.manifest.stage == "distill_prepare"
     assert prepared.manifest.status["prepare"] == "ok"
-    assert prepared.manifest.metrics["kd.count.rows_kept"] == 3599
+    # Re-measured with Eole 0.6.7 and SentencePiece 0.2.2 (3,599 before): every KD row is kept.
+    assert prepared.manifest.metrics["kd.count.rows_kept"] == 3600
     assert prepared.manifest.metrics["count.dev.dev_in_train"] == 0
 
 
