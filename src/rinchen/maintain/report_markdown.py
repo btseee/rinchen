@@ -20,7 +20,7 @@ from typing import Any, Final
 from rinchen.maintain.report import Report, Step, overall_state
 
 MAX_DRIFT_ROWS: Final = 200
-RUNBOOK: Final = "docs/runbooks/14_maintenance.md"
+RUNBOOK: Final = "https://github.com/btseee/rinchen/wiki/Runbook-14-Maintenance"
 BLIND_SPOT: Final = (
     "The drift table is what uv could take within the constraints of pyproject.toml; "
     f"a package pinned with == never appears in it ({RUNBOOK})."

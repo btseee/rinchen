@@ -385,7 +385,11 @@ def test_a_profile_with_no_pipeline_file_is_exit_2_with_the_message_of_the_spec(
     assert result.exit_code == 2
     assert f"no pipeline configuration for the profile '{profile}'" in result.stderr
     assert f"(configs/tiny/{profile}.yaml)" in result.stderr
-    assert "docs/runbooks/15_tiny_pipeline.md" in result.stderr
+    assert (
+        "https://github.com/btseee/rinchen/wiki/Runbook-15-Tiny-Pipeline"
+        in result.stderr
+    )
+    assert "docs/" not in result.stderr
     assert not out.exists()
     assert recording.stages == []
     assert result.stdout == ""

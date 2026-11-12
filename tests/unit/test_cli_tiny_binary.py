@@ -88,7 +88,11 @@ def test_the_profile_full_is_refused_quickly_with_exit_2_and_nothing_is_written(
     assert elapsed < REFUSAL_SECONDS
     assert "no pipeline configuration for the profile 'full'" in result.stderr
     assert "(configs/tiny/full.yaml)" in result.stderr
-    assert "docs/runbooks/15_tiny_pipeline.md" in result.stderr
+    assert (
+        "https://github.com/btseee/rinchen/wiki/Runbook-15-Tiny-Pipeline"
+        in result.stderr
+    )
+    assert "docs/" not in result.stderr
     assert result.stdout == ""
     assert list(tmp_path.iterdir()) == []
 

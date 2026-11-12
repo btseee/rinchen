@@ -37,7 +37,7 @@ from rinchen.tiny.fixtures import FIXTURE_FILES, Fixtures, read_fixtures
 # Where the profile files (the seed) and the lock are; the tests point them at copies.
 PROFILES_DIRECTORY: Final = REPO_ROOT / "configs" / "profiles"
 LOCK_PATH: Final = REPO_ROOT / "uv.lock"
-RUNBOOK: Final = "docs/runbooks/15_tiny_pipeline.md"
+RUNBOOK: Final = "https://github.com/btseee/rinchen/wiki/Runbook-15-Tiny-Pipeline"
 
 
 class HashedInputs(NamedTuple):

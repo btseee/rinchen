@@ -28,8 +28,10 @@ pytestmark = pytest.mark.usefixtures("no_network")
 
 BLIND_SPOT = (
     "The drift table is what uv could take within the constraints of pyproject.toml; "
-    "a package pinned with == never appears in it (docs/runbooks/14_maintenance.md)."
+    "a package pinned with == never appears in it "
+    "(https://github.com/btseee/rinchen/wiki/Runbook-14-Maintenance)."
 )
+WHAT_TO_DO = "https://github.com/btseee/rinchen/wiki/Runbook-14-Maintenance#failure-"
 
 
 def lines_of(markdown: str) -> list[str]:
@@ -233,9 +235,9 @@ def test_every_failing_step_has_one_what_to_do_line() -> None:
 
     todo = [line for line in lines if "What to do" in line]
     assert todo == [
-        "- What to do (doctor): docs/runbooks/14_maintenance.md#failure-doctor",
-        "- What to do (lock_consistent): docs/runbooks/14_maintenance.md#failure-lock_consistent",
-        "- What to do (reruns): docs/runbooks/14_maintenance.md#failure-reruns",
+        f"- What to do (doctor): {WHAT_TO_DO}doctor",
+        f"- What to do (lock_consistent): {WHAT_TO_DO}lock_consistent",
+        f"- What to do (reruns): {WHAT_TO_DO}reruns",
     ]
     assert lines[lines.index("## Failures") + 1] == ""
 

@@ -729,6 +729,7 @@ def test_the_path_scan_sees_an_absolute_path_wherever_it_stands(text: str) -> No
     "text",
     [
         "docs/runbooks/14_maintenance.md#failure-drift",
+        "https://github.com/btseee/rinchen/wiki/Runbook-14-Maintenance#failure-drift",
         "n/a",
         "1/2",
         "a/b and/or c",

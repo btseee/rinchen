@@ -31,7 +31,7 @@ State: drift. 7 entries (5 update, 1 add, 1 remove; 3 drift, 4 blocked).
 | sortedcontainers | remove | 2.4.0 | - | drift | - |
 | tomli-w | add | - | 1.2.0 | drift | - |
 
-The drift table is what uv could take within the constraints of pyproject.toml; a package pinned with == never appears in it (docs/runbooks/14_maintenance.md).
+The drift table is what uv could take within the constraints of pyproject.toml; a package pinned with == never appears in it (https://github.com/btseee/rinchen/wiki/Runbook-14-Maintenance).
 
 ## Parity reruns
 
