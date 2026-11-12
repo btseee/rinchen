@@ -72,7 +72,7 @@ JOBS: Final = CI + "the jobs are not gate and tiny, in order"
 GATE_KEYS: Final = CI + "job gate holds keys other than runs-on and steps"
 GATE_STEPS_SENTENCE: Final = (
     CI
-    + "the steps of job gate are not the ones it had before the pipeline job, in order"
+    + "the steps of job gate are not the set-up, the sync, the gate and the doctor, in order"
 )
 TINY_KEYS: Final = (
     CI
@@ -111,7 +111,10 @@ TINY_TIMEOUT: Final = "    timeout-minutes: 45\n"
 TINY_PERMISSIONS: Final = "    permissions:\n      contents: read\n"
 PIPELINE_STEP: Final = "      - name: Tiny pipeline\n        run: just tiny\n\n"
 RUN_TINY: Final = "        run: just tiny\n"
-COVERAGE_STEP: Final = "      - name: Upload coverage\n"
+COVERAGE_STEP: Final = (
+    "      - name: Upload coverage\n        if: always()\n        uses: actions/upload-artifact@v7\n"
+    "        with:\n          name: coverage\n          path: coverage.xml\n          if-no-files-found: ignore\n\n"
+)
 DOCTOR_STEP: Final = (
     "      - name: Doctor (environment checks must all pass or skip, never fail)\n"
     "        run: just doctor\n\n"

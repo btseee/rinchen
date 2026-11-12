@@ -31,14 +31,6 @@ jobs:
       - name: Doctor (environment checks must all pass or skip, never fail)
         run: just doctor
 
-      - name: Upload coverage
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: coverage
-          path: coverage.xml
-          if-no-files-found: ignore
-
   # The tiny pipeline (just tiny) on the CPU, a job of its own so that a failing gate does not hide
   # its report and the other way round. It uploads artifacts/tiny/report.json and report.md only:
   # the rest of the run directory holds paths of the machine that ran it. Measured on the runner in
