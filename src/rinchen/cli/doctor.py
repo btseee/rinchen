@@ -87,7 +87,7 @@ def check_eole_cli() -> DoctorResult:
         return DoctorResult("D-EOLE-CLI", "fail", "; ".join(failures))
     note = (
         " (NOTE: 'eole model average' from the master plan does not exist in"
-        " installed eole 0.6.4's CLI -- top-level subcommands are"
+        " the installed eole's CLI -- top-level subcommands are"
         " {convert,build_vocab,predict,serve,train,tools}, no 'model' group;"
         " see docs/VERIFY.md)"
     )
