@@ -373,6 +373,10 @@ def test_no_detail_quotes_a_key_or_a_value_it_was_handed() -> None:
 
 # ---- the stages threshold ----------------------------------------------------------------------
 
+# The words of the one sentence about a whole-stage skip no failure before it explains: it is true
+# whether nothing failed before the stage or something did that does not explain the skip.
+UNEXPLAINED = "skipped for a reason that no failure before it explains"
+
 
 def replaced(
     records: list[StageRecord], stage: str, new: StageRecord
@@ -429,6 +433,7 @@ def test_the_stages_skipped_for_an_earlier_failure_are_not_faults_of_their_own(
     assert (result.verdict, result.value) == ("fail", 1)
     assert failing in result.detail
     assert "no failure before" not in result.detail
+    assert "skipped for a reason" not in result.detail
 
 
 @pytest.mark.parametrize("stage", STAGE_IDS)
@@ -440,8 +445,7 @@ def test_a_stage_skipped_for_an_earlier_failure_when_nothing_failed_is_a_fault(
     )
     result = stages_result(records)
     assert (result.verdict, result.value) == ("fail", 1)
-    assert stage in result.detail
-    assert "no failure before" in result.detail
+    assert result.detail == f"{UNEXPLAINED}: {stage}"
 
 
 @pytest.mark.parametrize("reason", SKIP_REASONS)
@@ -458,6 +462,44 @@ def test_a_whole_stage_skip_is_explained_by_a_failure_before_it_and_by_nothing_e
     assert result.value == (1 if explained else 1 + (failing is not None))
     assert result.verdict == "fail"
     assert ("serve" in result.detail) is (not explained)
+    assert (f"{UNEXPLAINED}: serve" in result.detail) is (not explained)
+    assert "to explain it" not in result.detail
+
+
+@pytest.mark.parametrize("reason", SKIP_REASONS[:-1])
+def test_a_skip_for_a_reason_of_a_part_after_a_failure_does_not_say_no_failure_came_before(
+    reason: str,
+) -> None:
+    # The probe of the re-review: `parity` failed, so a failure DID come before `serve`; what is
+    # true is that it does not explain a skip for the reason of a part of another stage.
+    records = replaced(
+        good_stages(), "parity", StageRecord("parity", "fail", fail_exit(4))
+    )
+    records = replaced(records, "serve", StageRecord("serve", "skipped", reason))
+    result = stages_result(records)
+    assert (result.verdict, result.value) == ("fail", 2)
+    assert result.detail == (
+        f"failed or skipped without a closed reason: parity; {UNEXPLAINED}: serve"
+    )
+
+
+def test_the_sentence_about_an_unexplained_skip_is_the_same_whether_or_not_a_failure_came_first() -> (
+    None
+):
+    skipped = StageRecord("serve", "skipped", SKIP_NO_LID)
+    alone = stages_result(replaced(good_stages(), "serve", skipped))
+    after = stages_result(
+        replaced(
+            replaced(
+                good_stages(), "parity", StageRecord("parity", "fail", fail_exit(4))
+            ),
+            "serve",
+            skipped,
+        )
+    )
+    assert alone.detail == f"{UNEXPLAINED}: serve"
+    assert after.detail.endswith(alone.detail)
+    assert after.detail.isascii()
 
 
 def test_a_skip_for_an_earlier_failure_is_not_explained_by_a_failure_after_it() -> None:

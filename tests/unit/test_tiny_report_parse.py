@@ -391,7 +391,7 @@ def test_a_run_that_stopped_without_a_failure_is_read_back_as_the_faults_it_is()
     assert parsed == report
     assert (parsed.thresholds[0].verdict, parsed.thresholds[0].value) == ("fail", 1)
     assert parsed.thresholds[0].detail == (
-        "skipped with no failure before it to explain it: serve"
+        "skipped for a reason that no failure before it explains: serve"
     )
 
 

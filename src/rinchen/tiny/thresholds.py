@@ -186,8 +186,10 @@ def stages_threshold(stages: Sequence[StageRecord]) -> ThresholdResult:
             f"failed or skipped without a closed reason: {', '.join(failed)}"
         )
     if unexplained:
+        # True with no failure before the stage and with one that does not explain the skip.
         segments.append(
-            f"skipped with no failure before it to explain it: {', '.join(unexplained)}"
+            "skipped for a reason that no failure before it explains: "
+            f"{', '.join(unexplained)}"
         )
     if missing:
         segments.append(f"no record: {', '.join(missing)}")
