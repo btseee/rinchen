@@ -1,0 +1,1059 @@
+{
+  "blocks": {
+    "converter": {
+      "cer": 0.0285,
+      "invalid_outputs": 0,
+      "n": 500,
+      "rule_fallbacks": 0,
+      "word_accuracy": 0.916
+    },
+    "filter": {
+      "authentic_flagged": 4,
+      "authentic_flagged_share": 0.005263157894736842,
+      "authentic_rows": 760,
+      "kept": 756,
+      "planted": {
+        "detectable": 10,
+        "expected": {
+          "duplicate": 2,
+          "labse": 2,
+          "len_ratio_char": 2,
+          "numbers": 2,
+          "script_tgt": 2
+        },
+        "found": {
+          "duplicate": 2,
+          "labse": 2,
+          "len_ratio_char": 2,
+          "numbers": 2,
+          "script_tgt": 2
+        },
+        "matched": 10,
+        "total": 10
+      },
+      "reasons": {
+        "duplicate": 4,
+        "labse": 3,
+        "len_ratio_char": 3,
+        "numbers": 2,
+        "script_tgt": 2
+      },
+      "rows": 770,
+      "train_rows": 1316
+    },
+    "heldout": [
+      {
+        "bleu": 54.54807542354906,
+        "chrf": 71.99500932252622,
+        "chrf_pp": 71.0192171727142,
+        "direction": "eng_Latn-khk_Cyrl",
+        "rows": 30,
+        "statuses": {
+          "ok": 30
+        },
+        "system": "int8"
+      },
+      {
+        "bleu": 48.13,
+        "chrf": 64.19,
+        "chrf_pp": 63.37,
+        "direction": "khk_Cyrl-eng_Latn",
+        "rows": 30,
+        "statuses": {
+          "ok": 30
+        },
+        "system": "int8"
+      },
+      {
+        "bleu": 43.66,
+        "chrf": 55.31,
+        "chrf_pp": 54.62,
+        "direction": "khk_Cyrl-rus_Cyrl",
+        "rows": 30,
+        "statuses": {
+          "ok": 30
+        },
+        "system": "int8"
+      },
+      {
+        "bleu": 46.78,
+        "chrf": 60.8,
+        "chrf_pp": 59.95,
+        "direction": "rus_Cyrl-khk_Cyrl",
+        "rows": 30,
+        "statuses": {
+          "ok": 30
+        },
+        "system": "int8"
+      }
+    ],
+    "int8": {
+      "agreement": {
+        "by_direction": {
+          "eng_Latn-khk_Cyrl": {
+            "equal": 299,
+            "rows": 299
+          },
+          "khk_Cyrl-eng_Latn": {
+            "equal": 296,
+            "rows": 299
+          },
+          "khk_Cyrl-rus_Cyrl": {
+            "equal": 300,
+            "rows": 300
+          },
+          "mn_Mong-eng_Latn": {
+            "equal": 47,
+            "rows": 48
+          },
+          "rus_Cyrl-khk_Cyrl": {
+            "equal": 300,
+            "rows": 300
+          }
+        },
+        "equal": 1242,
+        "rows": 1246,
+        "share": 0.9967897271268058
+      },
+      "chrf_drop": {
+        "largest": 0.0,
+        "least": -0.06519969157584171
+      },
+      "model_sha256": "8fa90a266950cfc3305a4e5f730f02f8ae04aaf9c60485834be591edbcff0aec"
+    },
+    "memorised": [
+      {
+        "bleu": 99.75091642638047,
+        "chrf": 99.9593961645435,
+        "chrf_pp": 99.93605281692561,
+        "direction": "eng_Latn-khk_Cyrl",
+        "rows": 299,
+        "statuses": {
+          "ok": 299
+        },
+        "system": "float32"
+      },
+      {
+        "bleu": 99.75091642638047,
+        "chrf": 99.9593961645435,
+        "chrf_pp": 99.93605281692561,
+        "direction": "eng_Latn-khk_Cyrl",
+        "rows": 299,
+        "statuses": {
+          "ok": 299
+        },
+        "system": "int8"
+      },
+      {
+        "bleu": 99.15375802916404,
+        "chrf": 99.64912545218539,
+        "chrf_pp": 99.59814399257519,
+        "direction": "khk_Cyrl-eng_Latn",
+        "rows": 299,
+        "statuses": {
+          "ok": 299
+        },
+        "system": "float32"
+      },
+      {
+        "bleu": 99.23724783486942,
+        "chrf": 99.70392773428999,
+        "chrf_pp": 99.65512281302222,
+        "direction": "khk_Cyrl-eng_Latn",
+        "rows": 299,
+        "statuses": {
+          "ok": 299
+        },
+        "system": "int8"
+      },
+      {
+        "bleu": 100.0,
+        "chrf": 100.0,
+        "chrf_pp": 100.0,
+        "direction": "khk_Cyrl-rus_Cyrl",
+        "rows": 300,
+        "statuses": {
+          "ok": 300
+        },
+        "system": "float32"
+      },
+      {
+        "bleu": 100.0,
+        "chrf": 100.0,
+        "chrf_pp": 100.0,
+        "direction": "khk_Cyrl-rus_Cyrl",
+        "rows": 300,
+        "statuses": {
+          "ok": 300
+        },
+        "system": "int8"
+      },
+      {
+        "bleu": 99.12979980302303,
+        "chrf": 99.29329142756212,
+        "chrf_pp": 99.3263860124633,
+        "direction": "mn_Mong-eng_Latn",
+        "rows": 48,
+        "statuses": {
+          "ok": 48
+        },
+        "system": "float32"
+      },
+      {
+        "bleu": 99.18240523627664,
+        "chrf": 99.35849111913797,
+        "chrf_pp": 99.35140057662511,
+        "direction": "mn_Mong-eng_Latn",
+        "rows": 48,
+        "statuses": {
+          "ok": 48
+        },
+        "system": "int8"
+      },
+      {
+        "bleu": 99.54269493208409,
+        "chrf": 99.84338362894934,
+        "chrf_pp": 99.81879282325151,
+        "direction": "rus_Cyrl-khk_Cyrl",
+        "rows": 300,
+        "statuses": {
+          "ok": 300
+        },
+        "system": "float32"
+      },
+      {
+        "bleu": 99.54269493208409,
+        "chrf": 99.84338362894934,
+        "chrf_pp": 99.81879282325151,
+        "direction": "rus_Cyrl-khk_Cyrl",
+        "rows": 300,
+        "statuses": {
+          "ok": 300
+        },
+        "system": "int8"
+      }
+    ],
+    "neural_seam": {
+      "metric": "metricx24_qe",
+      "rows": {
+        "eng_Latn-khk_Cyrl": 30,
+        "khk_Cyrl-eng_Latn": 30
+      },
+      "scores": {
+        "eng_Latn-khk_Cyrl": 3.875,
+        "khk_Cyrl-eng_Latn": 4.3125
+      },
+      "system": "tiny-int8-qe"
+    },
+    "parity": {
+      "checkpoint_weights_sha256": "4e06ce45faef7c4b80b487a26606a5ac5ea2b2b6f740f82aaede088c1e33bb0e",
+      "exact": 70,
+      "exact_share": 1.0,
+      "gated": true,
+      "max_abs_delta": 2.1517276763916016e-05,
+      "max_mean_delta": 0.001,
+      "mean_abs_delta": 1.6221680949143363e-06,
+      "min_exact_share": 0.95,
+      "model_sha256": "f48811a45287337cfc4434b90f5e32e8869459d40ea90f3bd845debef2720dcc",
+      "passes": true,
+      "placement": "src",
+      "quantization": "float32",
+      "sentences": 70
+    },
+    "robustness": {
+      "coverage": {
+        "entity_acc": {
+          "excluded": 0,
+          "scored": 240,
+          "total": 240
+        },
+        "mong_source_retention": {
+          "excluded": 0,
+          "scored": 48,
+          "total": 48
+        },
+        "numbers_acc": {
+          "excluded": 0,
+          "scored": 240,
+          "total": 240
+        },
+        "placeholder_acc": {
+          "excluded": 0,
+          "scored": 238,
+          "total": 238
+        },
+        "script_purity": {
+          "excluded": 0,
+          "scored": 600,
+          "total": 600
+        },
+        "term_acc": {
+          "excluded": 0,
+          "scored": 1134,
+          "total": 1134
+        }
+      },
+      "values": {
+        "entity_acc": 0.9791666666666666,
+        "mong_source_retention": 0.9935849111913797,
+        "numbers_acc": 1.0,
+        "placeholder_acc": 1.0,
+        "script_purity": 1.0,
+        "term_acc": 0.9991181657848325
+      }
+    },
+    "serve": {
+      "error_code": "bad_request",
+      "script_purity": [
+        1.0,
+        1.0
+      ],
+      "status_codes": [
+        200,
+        200,
+        200,
+        400,
+        200
+      ],
+      "statuses": [
+        "ok",
+        "ok"
+      ],
+      "translate_200_total": 1.0
+    },
+    "synth": {
+      "chat_requests": 64,
+      "counts": {
+        "candidates": 64,
+        "dropped_copy": 0,
+        "dropped_empty": 0,
+        "dropped_purity": 0,
+        "dropped_qe": 0,
+        "no_candidates": 0,
+        "no_survivor": 0,
+        "selected": 64,
+        "sources": 64
+      },
+      "generator": "tiny_oracle",
+      "job": "bt_eng_khk",
+      "qe_status": "skipped: --no-qe",
+      "rows": 64,
+      "shard_stats": {
+        "generated": 2,
+        "planned": 2,
+        "regenerated_invalid": 0,
+        "reused": 0
+      }
+    },
+    "train": {
+      "bt_rows": 59,
+      "rows_by_direction": {
+        "eng_Latn-khk_Cyrl": 358,
+        "khk_Cyrl-eng_Latn": 299,
+        "khk_Cyrl-rus_Cyrl": 300,
+        "mn_Mong-eng_Latn": 48,
+        "rus_Cyrl-khk_Cyrl": 300
+      },
+      "steps": 1500,
+      "variant": "t1_bt0.2_src_s1234",
+      "weights_sha256": "4e06ce45faef7c4b80b487a26606a5ac5ea2b2b6f740f82aaede088c1e33bb0e"
+    }
+  },
+  "inputs": {
+    "config_sha256": "1ddb031f9f22480bbe7e07937ae72b97ae46fd386db65c61bf284ff2bf98ac79",
+    "fixtures": {
+      "eng_Latn-khk_Cyrl.tsv": "7d1d15d7b7fc8e6ed5bc617990505519f37909ea0107f221728fdb38a962d229",
+      "entities.tsv": "6cb6bb4ec68a042ff3a721d20798853d633fc4d36d1d2ed5e36e772f755cef63",
+      "mn_Mong.tsv": "16000ecdd3c099179c5e243cfa2a9c6d89bba565091cf680e7ac3231f0ad0f34",
+      "mono_khk_Cyrl.tsv": "79f488e2ffe757dd34194b0ef056e41f29eb038c8b2d84dde57e23e7fa418952",
+      "noise.tsv": "fa16dba1968d182ff50fc7f61c62b86b16fd7112481196c17ae70dfacafe3248",
+      "nouns.tsv": "62fe9458a7d8592cb61ecedcaf2b1023b4a130fb357cb28b4e373d54fa2387be",
+      "rus_Cyrl-khk_Cyrl.tsv": "dce119b354e907812361dce126b3d1266bebe874fc594c89a6247d3a0a8f6bbe"
+    },
+    "lock_sha256": "559b3954277eab053057fb0de73f92dca8ba11dffe193707424df5584e317b16"
+  },
+  "profile": "tiny",
+  "qe_fake": true,
+  "schema": "rinchen.tiny/1",
+  "stages": [
+    {
+      "detail": {
+        "extra": 0,
+        "installed": 186,
+        "locked": 186,
+        "mismatched": 0,
+        "not_installed": 0
+      },
+      "id": "environment",
+      "parts": [],
+      "reason": null,
+      "state": "ok"
+    },
+    {
+      "detail": {
+        "bytes": 67104,
+        "files": 7
+      },
+      "id": "fetch",
+      "parts": [],
+      "reason": null,
+      "state": "ok"
+    },
+    {
+      "detail": {
+        "dropped": 0,
+        "rows": 770
+      },
+      "id": "corpus",
+      "parts": [],
+      "reason": null,
+      "state": "ok"
+    },
+    {
+      "detail": {
+        "authentic_flagged": 4,
+        "kept": 756,
+        "planted_detectable": 10,
+        "planted_matched": 10,
+        "rows": 770,
+        "token_ratio_check": "the token-ratio check needs a SentencePiece model, which does not exist yet",
+        "train_rows": 1316
+      },
+      "id": "filter",
+      "parts": [
+        {
+          "id": "script_ratio",
+          "reason": null,
+          "state": "ok"
+        },
+        {
+          "id": "numbers",
+          "reason": null,
+          "state": "ok"
+        },
+        {
+          "id": "length",
+          "reason": null,
+          "state": "ok"
+        },
+        {
+          "id": "lid",
+          "reason": "no language-identification model: GlotLID is a download",
+          "state": "skipped"
+        },
+        {
+          "id": "minhash",
+          "reason": null,
+          "state": "ok"
+        },
+        {
+          "id": "labse",
+          "reason": null,
+          "state": "ok"
+        },
+        {
+          "id": "qe",
+          "reason": null,
+          "state": "ok"
+        }
+      ],
+      "reason": null,
+      "state": "ok"
+    },
+    {
+      "detail": {
+        "languages": [
+          "eng_Latn",
+          "khk_Cyrl",
+          "mn_Mong",
+          "rus_Cyrl"
+        ],
+        "vocab_size": 640
+      },
+      "id": "spm",
+      "parts": [],
+      "reason": null,
+      "state": "ok"
+    },
+    {
+      "detail": {
+        "cer": 0.0285,
+        "invalid_outputs": 0,
+        "n": 500,
+        "rule_fallbacks": 0,
+        "word_accuracy": 0.916
+      },
+      "id": "converter",
+      "parts": [],
+      "reason": null,
+      "state": "ok"
+    },
+    {
+      "detail": {
+        "chat_requests": 64,
+        "counts": {
+          "candidates": 64,
+          "dropped_copy": 0,
+          "dropped_empty": 0,
+          "dropped_purity": 0,
+          "dropped_qe": 0,
+          "no_candidates": 0,
+          "no_survivor": 0,
+          "selected": 64,
+          "sources": 64
+        },
+        "generator": "tiny_oracle",
+        "job": "bt_eng_khk",
+        "qe_status": "skipped: --no-qe",
+        "rows": 64,
+        "shard_stats": {
+          "generated": 2,
+          "planned": 2,
+          "regenerated_invalid": 0,
+          "reused": 0
+        }
+      },
+      "id": "synth",
+      "parts": [],
+      "reason": null,
+      "state": "ok"
+    },
+    {
+      "detail": {
+        "variant": "t1_bt0.2_src_s1234"
+      },
+      "id": "prepare",
+      "parts": [],
+      "reason": null,
+      "state": "ok"
+    },
+    {
+      "detail": {
+        "bt_rows": 59,
+        "rows_by_direction": {
+          "eng_Latn-khk_Cyrl": 358,
+          "khk_Cyrl-eng_Latn": 299,
+          "khk_Cyrl-rus_Cyrl": 300,
+          "mn_Mong-eng_Latn": 48,
+          "rus_Cyrl-khk_Cyrl": 300
+        },
+        "steps": 1500,
+        "variant": "t1_bt0.2_src_s1234"
+      },
+      "id": "train",
+      "parts": [],
+      "reason": null,
+      "state": "ok"
+    },
+    {
+      "detail": {
+        "weights_sha256": "4e06ce45faef7c4b80b487a26606a5ac5ea2b2b6f740f82aaede088c1e33bb0e"
+      },
+      "id": "average",
+      "parts": [],
+      "reason": null,
+      "state": "ok"
+    },
+    {
+      "detail": {
+        "model_sha256": {
+          "float32": "f48811a45287337cfc4434b90f5e32e8869459d40ea90f3bd845debef2720dcc",
+          "int8": "8fa90a266950cfc3305a4e5f730f02f8ae04aaf9c60485834be591edbcff0aec"
+        }
+      },
+      "id": "export",
+      "parts": [],
+      "reason": null,
+      "state": "ok"
+    },
+    {
+      "detail": {
+        "checkpoint_weights_sha256": "4e06ce45faef7c4b80b487a26606a5ac5ea2b2b6f740f82aaede088c1e33bb0e",
+        "exact": 70,
+        "exact_share": 1.0,
+        "export_name": "rinchen-f48811a45287",
+        "gated": true,
+        "max_abs_delta": 2.1517276763916016e-05,
+        "max_lines": 50,
+        "max_mean_delta": 0.001,
+        "mean_abs_delta": 1.6221680949143363e-06,
+        "min_exact_share": 0.95,
+        "model_sha256": "f48811a45287337cfc4434b90f5e32e8869459d40ea90f3bd845debef2720dcc",
+        "passes": true,
+        "placement": "src",
+        "quantization": "float32",
+        "sentences": 70
+      },
+      "id": "parity",
+      "parts": [],
+      "reason": null,
+      "state": "ok"
+    },
+    {
+      "detail": {
+        "error_code": "bad_request",
+        "script_purity": [
+          1.0,
+          1.0
+        ],
+        "status_codes": [
+          200,
+          200,
+          200,
+          400,
+          200
+        ],
+        "statuses": [
+          "ok",
+          "ok"
+        ],
+        "translate_200_total": 1.0
+      },
+      "id": "serve",
+      "parts": [],
+      "reason": null,
+      "state": "ok"
+    },
+    {
+      "detail": {
+        "coverage": {
+          "entity_acc": {
+            "excluded": 0,
+            "scored": 240,
+            "total": 240
+          },
+          "mong_source_retention": {
+            "chrf_cyrl": 100.0,
+            "chrf_mong": 99.35849111913797,
+            "excluded": 0,
+            "scored": 48,
+            "total": 48
+          },
+          "numbers_acc": {
+            "excluded": 0,
+            "scored": 240,
+            "total": 240
+          },
+          "placeholder_acc": {
+            "excluded": 0,
+            "scored": 238,
+            "total": 238
+          },
+          "script_purity": {
+            "excluded": 0,
+            "scored": 600,
+            "total": 600
+          },
+          "term_acc": {
+            "excluded": 0,
+            "scored": 1134,
+            "total": 1134
+          }
+        },
+        "rows": {
+          "entities": 120,
+          "mong": 48,
+          "numbers": 240,
+          "placeholders": 238,
+          "script": 600,
+          "terms": 600
+        },
+        "values": {
+          "entity_acc": 0.9791666666666666,
+          "mong_source_retention": 0.9935849111913797,
+          "numbers_acc": 1.0,
+          "placeholder_acc": 1.0,
+          "script_purity": 1.0,
+          "term_acc": 0.9991181657848325
+        }
+      },
+      "id": "robustness",
+      "parts": [],
+      "reason": null,
+      "state": "ok"
+    },
+    {
+      "detail": {
+        "agreement": {
+          "by_direction": {
+            "eng_Latn-khk_Cyrl": {
+              "equal": 299,
+              "rows": 299
+            },
+            "khk_Cyrl-eng_Latn": {
+              "equal": 296,
+              "rows": 299
+            },
+            "khk_Cyrl-rus_Cyrl": {
+              "equal": 300,
+              "rows": 300
+            },
+            "mn_Mong-eng_Latn": {
+              "equal": 47,
+              "rows": 48
+            },
+            "rus_Cyrl-khk_Cyrl": {
+              "equal": 300,
+              "rows": 300
+            }
+          },
+          "equal": 1242,
+          "rows": 1246,
+          "share": 0.9967897271268058
+        },
+        "heldout": {
+          "eng_Latn-khk_Cyrl": {
+            "int8": {
+              "metrics": {
+                "bleu": 54.54807542354906,
+                "chrf": 71.99500932252622,
+                "chrf_pp": 71.0192171727142,
+                "comet22": null,
+                "metricx24": null,
+                "metricx24_qe": null
+              },
+              "rows": 30,
+              "statuses": {
+                "ok": 30
+              }
+            }
+          },
+          "khk_Cyrl-eng_Latn": {
+            "int8": {
+              "metrics": {
+                "bleu": 48.13,
+                "chrf": 64.19,
+                "chrf_pp": 63.37,
+                "comet22": null,
+                "metricx24": null,
+                "metricx24_qe": null
+              },
+              "rows": 30,
+              "statuses": {
+                "ok": 30
+              }
+            }
+          },
+          "khk_Cyrl-rus_Cyrl": {
+            "int8": {
+              "metrics": {
+                "bleu": 43.66,
+                "chrf": 55.31,
+                "chrf_pp": 54.62,
+                "comet22": null,
+                "metricx24": null,
+                "metricx24_qe": null
+              },
+              "rows": 30,
+              "statuses": {
+                "ok": 30
+              }
+            }
+          },
+          "rus_Cyrl-khk_Cyrl": {
+            "int8": {
+              "metrics": {
+                "bleu": 46.78,
+                "chrf": 60.8,
+                "chrf_pp": 59.95,
+                "comet22": null,
+                "metricx24": null,
+                "metricx24_qe": null
+              },
+              "rows": 30,
+              "statuses": {
+                "ok": 30
+              }
+            }
+          }
+        },
+        "int8_chrf_drop": {
+          "largest": 0.0,
+          "least": -0.06519969157584171
+        },
+        "memorised": {
+          "eng_Latn-khk_Cyrl": {
+            "float32": {
+              "metrics": {
+                "bleu": 99.75091642638047,
+                "chrf": 99.9593961645435,
+                "chrf_pp": 99.93605281692561,
+                "comet22": null,
+                "metricx24": null,
+                "metricx24_qe": null
+              },
+              "rows": 299,
+              "statuses": {
+                "ok": 299
+              }
+            },
+            "int8": {
+              "metrics": {
+                "bleu": 99.75091642638047,
+                "chrf": 99.9593961645435,
+                "chrf_pp": 99.93605281692561,
+                "comet22": null,
+                "metricx24": null,
+                "metricx24_qe": null
+              },
+              "rows": 299,
+              "statuses": {
+                "ok": 299
+              }
+            }
+          },
+          "khk_Cyrl-eng_Latn": {
+            "float32": {
+              "metrics": {
+                "bleu": 99.15375802916404,
+                "chrf": 99.64912545218539,
+                "chrf_pp": 99.59814399257519,
+                "comet22": null,
+                "metricx24": null,
+                "metricx24_qe": null
+              },
+              "rows": 299,
+              "statuses": {
+                "ok": 299
+              }
+            },
+            "int8": {
+              "metrics": {
+                "bleu": 99.23724783486942,
+                "chrf": 99.70392773428999,
+                "chrf_pp": 99.65512281302222,
+                "comet22": null,
+                "metricx24": null,
+                "metricx24_qe": null
+              },
+              "rows": 299,
+              "statuses": {
+                "ok": 299
+              }
+            }
+          },
+          "khk_Cyrl-rus_Cyrl": {
+            "float32": {
+              "metrics": {
+                "bleu": 100.0,
+                "chrf": 100.0,
+                "chrf_pp": 100.0,
+                "comet22": null,
+                "metricx24": null,
+                "metricx24_qe": null
+              },
+              "rows": 300,
+              "statuses": {
+                "ok": 300
+              }
+            },
+            "int8": {
+              "metrics": {
+                "bleu": 100.0,
+                "chrf": 100.0,
+                "chrf_pp": 100.0,
+                "comet22": null,
+                "metricx24": null,
+                "metricx24_qe": null
+              },
+              "rows": 300,
+              "statuses": {
+                "ok": 300
+              }
+            }
+          },
+          "mn_Mong-eng_Latn": {
+            "float32": {
+              "metrics": {
+                "bleu": 99.12979980302303,
+                "chrf": 99.29329142756212,
+                "chrf_pp": 99.3263860124633,
+                "comet22": null,
+                "metricx24": null,
+                "metricx24_qe": null
+              },
+              "rows": 48,
+              "statuses": {
+                "ok": 48
+              }
+            },
+            "int8": {
+              "metrics": {
+                "bleu": 99.18240523627664,
+                "chrf": 99.35849111913797,
+                "chrf_pp": 99.35140057662511,
+                "comet22": null,
+                "metricx24": null,
+                "metricx24_qe": null
+              },
+              "rows": 48,
+              "statuses": {
+                "ok": 48
+              }
+            }
+          },
+          "rus_Cyrl-khk_Cyrl": {
+            "float32": {
+              "metrics": {
+                "bleu": 99.54269493208409,
+                "chrf": 99.84338362894934,
+                "chrf_pp": 99.81879282325151,
+                "comet22": null,
+                "metricx24": null,
+                "metricx24_qe": null
+              },
+              "rows": 300,
+              "statuses": {
+                "ok": 300
+              }
+            },
+            "int8": {
+              "metrics": {
+                "bleu": 99.54269493208409,
+                "chrf": 99.84338362894934,
+                "chrf_pp": 99.81879282325151,
+                "comet22": null,
+                "metricx24": null,
+                "metricx24_qe": null
+              },
+              "rows": 300,
+              "statuses": {
+                "ok": 300
+              }
+            }
+          }
+        },
+        "memorised_chrf": {
+          "eng_Latn-khk_Cyrl": {
+            "float32": 99.9593961645435,
+            "int8": 99.9593961645435
+          },
+          "khk_Cyrl-eng_Latn": {
+            "float32": 99.64912545218539,
+            "int8": 99.70392773428999
+          },
+          "khk_Cyrl-rus_Cyrl": {
+            "float32": 100.0,
+            "int8": 100.0
+          },
+          "mn_Mong-eng_Latn": {
+            "float32": 99.29329142756212,
+            "int8": 99.35849111913797
+          },
+          "rus_Cyrl-khk_Cyrl": {
+            "float32": 99.84338362894934,
+            "int8": 99.84338362894934
+          }
+        },
+        "neural_seam": {
+          "metric": "metricx24_qe",
+          "rows": {
+            "eng_Latn-khk_Cyrl": 30,
+            "khk_Cyrl-eng_Latn": 30
+          },
+          "scores": {
+            "eng_Latn-khk_Cyrl": 3.875,
+            "khk_Cyrl-eng_Latn": 4.3125
+          },
+          "system": "tiny-int8-qe"
+        },
+        "report": {
+          "runs": 2,
+          "suites": 2
+        }
+      },
+      "id": "evaluate",
+      "parts": [
+        {
+          "id": "memorised",
+          "reason": null,
+          "state": "ok"
+        },
+        {
+          "id": "heldout",
+          "reason": null,
+          "state": "ok"
+        },
+        {
+          "id": "neural_seam",
+          "reason": null,
+          "state": "ok"
+        },
+        {
+          "id": "report",
+          "reason": null,
+          "state": "ok"
+        }
+      ],
+      "reason": null,
+      "state": "ok"
+    }
+  ],
+  "thresholds": [
+    {
+      "bound": "<= 0",
+      "detail": "no stage failed and every skip has a reason of the closed list",
+      "id": "stages",
+      "value": 0,
+      "verdict": "pass"
+    },
+    {
+      "bound": ">= 50.0",
+      "detail": "least of 5 directions, mn_Mong-eng_Latn, int8 export",
+      "id": "train_chrf",
+      "value": 99.35849111913797,
+      "verdict": "pass"
+    },
+    {
+      "bound": ">= 0.95",
+      "detail": "exact_share of the parity figures",
+      "id": "parity_exact",
+      "value": 1.0,
+      "verdict": "pass"
+    },
+    {
+      "bound": "<= 0.001",
+      "detail": "mean_abs_delta of the parity figures",
+      "id": "parity_delta",
+      "value": 1.6221680949143363e-06,
+      "verdict": "pass"
+    },
+    {
+      "bound": "<= 1.0",
+      "detail": "largest float32 minus int8 chrF over 5 directions, eng_Latn-khk_Cyrl",
+      "id": "int8_chrf_drop",
+      "value": 0.0,
+      "verdict": "pass"
+    },
+    {
+      "bound": ">= 1.0",
+      "detail": "script_purity of the robustness figures",
+      "id": "script_purity",
+      "value": 1.0,
+      "verdict": "pass"
+    },
+    {
+      "bound": ">= 1.0",
+      "detail": "placeholder_acc of the robustness figures",
+      "id": "placeholder_acc",
+      "value": 1.0,
+      "verdict": "pass"
+    },
+    {
+      "bound": "<= 1200",
+      "detail": "seconds from the first line of the run",
+      "id": "wall_time",
+      "value": null,
+      "verdict": "pass"
+    }
+  ],
+  "unmeasured": [
+    "any run on a GPU: no stage touched a device",
+    "a real corpus: the fixtures are templated sentences",
+    "a real generator behind the synthetic data stage",
+    "neural metric scorers: only the seam of score files ran, with planted scores",
+    "GitHub Actions: nothing ran there",
+    "the time on a 4-core CPU runner"
+  ],
+  "verdict": "pass"
+}
