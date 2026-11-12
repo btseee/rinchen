@@ -13,7 +13,7 @@ ALWAYS:
 - Use position_encoding_type: SinusoidalInterleaved in every Eole model.
 - Record every resolved package version and checkpoint hash in manifests/.
 - Write tests before code; numeric acceptance thresholds are gates.
-- Keep state in files: the Wiki pages State and Decisions (the Wiki is a git repository, https://github.com/btseee/rinchen.wiki.git; update it in the same change as the code) and manifests/, not in chat memory.
+- Keep state in files: the Wiki page State (https://github.com/btseee/rinchen.wiki.git is its git repository; update it in the same change as the code), the committed configs and manifests/, not in chat memory.
 
 NEVER:
 - Use Python 3.12/3.13 or any fallback env, container, or conda env with another Python.
@@ -38,7 +38,7 @@ NEVER:
 - `uv run rinchen release stage --export DIR --report-dir DIR --system NAME --repo-id ORG/NAME --out-dir DIR` and `uv run rinchen release hub --stage DIR --repo-id ORG/NAME --out-dir DIR [--upload] [--public]` (D13: the staging directory with the model card; `hub` is a DRY RUN unless `--upload`, which needs `HF_TOKEN` in the environment, creates the repository private and was never run)
 - `uv run --frozen --no-sync rinchen maintain check --out-dir DIR [--cadence nightly|weekly] [--no-drift] [--no-reruns] [--rerun ID] [--fail-on-drift] [--export DIR --checkpoint DIR --corpus FILE]` (D14: the doctor's CPU checks, `uv lock --check`, the installed packages against `uv.lock`, the dependency drift table from `uv lock --upgrade --dry-run` (the ONLY step that queries an index: never run it for a test or a measurement) and the parity reruns; writes `maintain_report.json`, `maintain_report.md` and `manifest.json`, only reads the project, exit 0 for ok or drift and 4 for fail; the upgrade procedure and the rollback are https://github.com/btseee/rinchen/wiki/Runbook-14-Maintenance)
 - `uv run --frozen --no-sync rinchen tiny run [--profile tiny] [--out-dir DIR] [--config FILE] [--qe-fake | --no-qe-fake] [--threads N] [--budget-seconds N] [--dry-run]` (D15, the recipe `just tiny`: fifteen stages from the committed fixtures `tests/fixtures/parallel/` to `artifacts/tiny/{report.json,report.md,manifest.json}` on the CPU with no network and no GPU; eight thresholds, exit 0 for pass and 4 for fail with everything written, 2 for a bad option or input or `--profile full` (refused: no full pipeline file), 3 for a changed fixture, a bad lock or a foreign manifest, 130/143/129 for signals; `--dry-run` lists the commands and writes nothing; a miss is answered with more `train.steps`, never a lower bound (the loader refuses a bound below the master plan's); https://github.com/btseee/rinchen/wiki/Runbook-15-Tiny-Pipeline)
-- `just wiki-check WIKI_DIR` (`uv run --frozen --no-sync python scripts/check_wiki.py WIKI_DIR --verify-ids-from configs/maintain/maintain.yaml`: checks a clone of the Wiki for the content rules, dangling internal links, ASCII, line ends, code fences, page names and the Verification-Log rows the maintenance config names; exit 0 clean, 1 problems, 2 not a directory)
+- `just wiki-check WIKI_DIR` (`uv run --frozen --no-sync python scripts/check_wiki.py WIKI_DIR --verify-ids-from configs/maintain/maintain.yaml`: checks a clone of the Wiki for the content rules (hits accepted only through `scripts/check_wiki_allowlist.txt`, empty now), dangling internal links, ASCII, line ends, code fences, page names and the Verification-Log rows the maintenance config names; exit 0 clean, 1 problems, 2 not a directory)
 
 ## Repo layout
 
@@ -133,16 +133,16 @@ tests/support/ (planted corpus and alignments, fake embedders, tiny LID model,
 scripts/build_spm_fixture.py (regenerates tests/fixtures/spm/tiny_corpus)
 scripts/build_script_conv_fixtures.py (reference TSV -> lexicon, golden words, tiny fixture)
 scripts/build_parallel_fixtures.py (regenerates tests/fixtures/parallel; a changed byte is a re-measurement, not an update)
-scripts/check_wiki.py (checks a clone of the Wiki; `just wiki-check WIKI_DIR`)
+scripts/check_wiki.py scripts/check_wiki_allowlist.txt (checks a clone of the Wiki; `just wiki-check WIKI_DIR`)
 scripts/{probe_env,build_sample_warc_fixture}.py scripts/build_pyonmttok/ (the Phase 0 probe, the WARC fixture, the pyonmttok build)
 data/{raw,clean,mined,synth,test}/ (gitignored content, tracked dirs)
 artifacts/ (gitignored; `just tiny` writes artifacts/tiny)
 vendor/wheels/ (committed binary wheels with no cp314 upstream release)
-vendor/fasttext-wheel-shim/ (pure-Python shim package, see the Wiki page Decisions)
+vendor/fasttext-wheel-shim/ (pure-Python shim package)
 ```
 
-The documents (runbooks, specs, plans, research, the stack, the verification
-log, the state and the decisions) live on the Wiki,
+The documentation (the guide pages, one runbook per operator stage, the stack,
+the verification log and the state) lives on the Wiki,
 https://github.com/btseee/rinchen/wiki, not in the repository.
 
 Note: `data/`, `align/`, and `convert/` under `src/rinchen/` from the old
@@ -161,19 +161,15 @@ nothing); no GPU was used anywhere. The first GitHub Actions run of the `tiny`
 job (run 43244678285) passed: pipeline step about 3 min 19 s, `wall_time`
 191.646 s. Open gates: everything GPU, a real corpus, generator and scorers, the
 4-core time, `just accept`, and the D3 to D14 gates. Details: the Wiki pages
-State (https://github.com/btseee/rinchen/wiki/State), Roadmap
-(https://github.com/btseee/rinchen/wiki/Roadmap) and Project-Status-History
-(https://github.com/btseee/rinchen/wiki/Project-Status-History).
+State (https://github.com/btseee/rinchen/wiki/State) and Roadmap
+(https://github.com/btseee/rinchen/wiki/Roadmap).
 
-## Evidence and full plan
+## Plan and architecture
 
-The current master plan — milestones D0-D15, repo layout, hard constraints,
-build-ourselves specs — lives on the Wiki page Research-Master-Plan-D0-D15
-(https://github.com/btseee/rinchen/wiki/Research-Master-Plan-D0-D15). The prior
-Phase 0-14 plan, the Wiki page Research-Python-314-Stack-and-Prompt
-(https://github.com/btseee/rinchen/wiki/Research-Python-314-Stack-and-Prompt),
-is superseded but kept as the evidence source for decisions already recorded on
-the Wiki page Decisions (https://github.com/btseee/rinchen/wiki/Decisions; the
-package wheel matrix, the pyonmttok/eole finding's origin). This file only
-carries the hard constraints and pointers; consult the master plan before
-pinning or changing any dependency.
+The milestones, their STOP gates and the open gates are on the Wiki page
+Roadmap (https://github.com/btseee/rinchen/wiki/Roadmap); the package map, the
+data flow and the design rules are on the Wiki page Architecture
+(https://github.com/btseee/rinchen/wiki/Architecture), and the resolved package
+versions on the Wiki page Stack (https://github.com/btseee/rinchen/wiki/Stack).
+This file only carries the hard constraints and pointers; read those pages
+before pinning or changing any dependency.

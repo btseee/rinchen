@@ -387,7 +387,7 @@ def test_a_row_a_decision_names_must_be_on_the_verification_log(tmp_path: Path) 
 
 def test_a_file_that_names_no_row_is_a_problem(tmp_path: Path) -> None:
     config = tmp_path / "maintain.yaml"
-    config.write_text('decision: "Wiki page Decisions: a pin"\n', encoding="utf-8")
+    config.write_text('decision: "a pin that names no row"\n', encoding="utf-8")
 
     problems = check_wiki(build(tmp_path, GOOD), verify_ids_from=[config])
 

@@ -181,9 +181,10 @@ The documentation lives on the [project Wiki](https://github.com/btseee/rinchen/
 | [Glossary](https://github.com/btseee/rinchen/wiki/Glossary) | the terms of the code and the documents |
 | [Roadmap](https://github.com/btseee/rinchen/wiki/Roadmap) | the milestones and the open gates |
 | [Contributing](https://github.com/btseee/rinchen/wiki/Contributing) | the development loop and the conventions |
-| [State](https://github.com/btseee/rinchen/wiki/State) and [Decisions](https://github.com/btseee/rinchen/wiki/Decisions) | the project state and every recorded decision |
+| [State](https://github.com/btseee/rinchen/wiki/State) | the current state of the project and the open gates |
+| [Stack](https://github.com/btseee/rinchen/wiki/Stack) and [Verification Log](https://github.com/btseee/rinchen/wiki/Verification-Log) | the package versions and the upstream facts checked against them |
 
-The runbooks, specs, plans and research notes of each milestone are on the Wiki too, as records.
+The Wiki also has one runbook per operator stage, from [Runbook 00: environment](https://github.com/btseee/rinchen/wiki/Runbook-00-Environment) to [Runbook 15: tiny pipeline](https://github.com/btseee/rinchen/wiki/Runbook-15-Tiny-Pipeline).
 
 ## Project layout
 
@@ -207,7 +208,7 @@ just gate
 
 It runs `ruff format --check .`, `ruff check .`, `mypy src` and `pytest -m "not network" -q`. CI also runs `just tiny`.
 
-The project's rules are short: CPython 3.14 only, tests before code, numeric thresholds are gates, every model is trained from random initialisation, and the state and decisions are kept on the Wiki and in `manifests/`. The [contributing guide](.github/CONTRIBUTING.md) and the Wiki page [Contributing](https://github.com/btseee/rinchen/wiki/Contributing) give the setup, the conventions and how to open a pull request.
+The project's rules are short: CPython 3.14 only, tests before code, numeric thresholds are gates, every model is trained from random initialisation, and the state is kept on the Wiki page State, in the committed configs and in `manifests/`. The [contributing guide](.github/CONTRIBUTING.md) and the Wiki page [Contributing](https://github.com/btseee/rinchen/wiki/Contributing) give the setup, the conventions and how to open a pull request.
 
 ## Community
 
